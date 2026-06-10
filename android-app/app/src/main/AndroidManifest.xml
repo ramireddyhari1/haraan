@@ -10,6 +10,7 @@
         android:roundIcon="@drawable/haraan_copy"
         android:supportsRtl="true"
         android:windowSoftInputMode="adjustResize"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Thanna">
         <activity
             android:name=".MainActivity"

@@ -4,6 +4,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -30,6 +37,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +59,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SportsFootball
 import androidx.compose.material.icons.filled.SportsTennis
+import androidx.compose.material.icons.filled.SportsBasketball
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -58,6 +69,13 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.requiredHeightIn
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -69,18 +87,26 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.IconButton
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -96,6 +122,7 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -108,6 +135,7 @@ import com.example.thanna.theme.ThannaTheme
 import android.widget.Toast
 import android.app.Activity
 import androidx.core.view.WindowCompat
+import com.example.thanna.ui.components.SectionHeader
 
 private val Maroon = Color(0xFF7A1D2A)
 private val DeepMaroon = Color(0xFF4D1019)
@@ -182,12 +210,15 @@ fun MainScreen(
       }
     )
   } else {
-    LoginScreen(
-      onSkip = {
+    com.example.thanna.ui.LoginRoute(
+      onSkipClick = {
+        com.example.thanna.data.TokenStore.saveToken(context, "skipped_guest")
         cachedToken = "skipped_guest"
       },
-      modifier = modifier,
-      viewModel = viewModel
+      onLoginSuccess = { token ->
+        cachedToken = token
+      },
+      modifier = Modifier.fillMaxSize()
     )
   }
 }
@@ -315,595 +346,7 @@ private fun MatchCard(match: MatchRow) {
   }
 }
 
-@Composable
-internal fun LoginScreen(
-  onSkip: () -> Unit,
-  modifier: Modifier = Modifier,
-  viewModel: MainScreenViewModel = viewModel { MainScreenViewModel(DefaultDataRepository()) },
-) {
-  val loginState by viewModel.loginUiState.collectAsStateWithLifecycle()
-  val context = LocalContext.current
-
-  LaunchedEffect(loginState.token) {
-    val token = loginState.token
-    if (!token.isNullOrBlank()) {
-      com.example.thanna.data.TokenStore.saveToken(context, token)
-    }
-  }
-
-  // ── Pure white canvas ──
-  Box(
-    modifier = modifier
-      .fillMaxSize()
-      .background(Color.White),
-  ) {
-    // Subtle top-right accent glow (MI Blue)
-    Box(
-      modifier = Modifier
-        .size(320.dp)
-        .offset(x = 140.dp, y = (-60).dp)
-        .background(
-          Brush.radialGradient(
-            colors = listOf(
-              MIBlue.copy(alpha = 0.07f),
-              Color.Transparent
-            ),
-            radius = 500f
-          )
-        )
-    )
-    // Subtle bottom-left accent glow (Green)
-    Box(
-      modifier = Modifier
-        .size(280.dp)
-        .align(Alignment.BottomStart)
-        .offset(x = (-80).dp, y = 60.dp)
-        .background(
-          Brush.radialGradient(
-            colors = listOf(
-              MIGreen.copy(alpha = 0.05f),
-              Color.Transparent
-            ),
-            radius = 450f
-          )
-        )
-    )
-
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .statusBarsPadding()
-        .navigationBarsPadding()
-    ) {
-      // ── Top Bar: Skip button ──
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(top = 12.dp, end = 20.dp)
-      ) {
-        Box(
-          modifier = Modifier
-            .align(Alignment.CenterEnd)
-            .clip(RoundedCornerShape(UnifiedCornerRadius))
-            .background(MIBlue.copy(alpha = 0.06f))
-            .clickable { onSkip() }
-            .padding(horizontal = 18.dp, vertical = 8.dp)
-        ) {
-          Text(
-            text = "Skip",
-            color = MIBlue,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 14.sp
-          )
-        }
-      }
-
-      Spacer(modifier = Modifier.height(20.dp))
-
-      // ── Brand Section ──
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-      ) {
-        // Logo
-        Image(
-          painter = painterResource(id = com.example.thanna.R.drawable.haraan),
-          contentDescription = "Haraan Logo",
-          contentScale = ContentScale.Fit,
-          modifier = Modifier
-            .width(160.dp)
-            .height(44.dp)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Illustration with soft circular backdrop
-        Box(contentAlignment = Alignment.Center) {
-          // Soft circle halo behind illustration
-          Box(
-            modifier = Modifier
-              .size(170.dp)
-              .background(
-                brush = Brush.radialGradient(
-                  colors = listOf(
-                    MIBlue.copy(alpha = 0.08f),
-                    MIGreen.copy(alpha = 0.04f),
-                    Color.Transparent
-                  )
-                ),
-                shape = RoundedCornerShape(999.dp)
-              )
-          )
-          Image(
-            painter = painterResource(id = com.example.thanna.R.drawable.going_out_illustration),
-            contentDescription = "Going Out Illustration",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-              .size(140.dp)
-              .clip(RoundedCornerShape(UnifiedCornerRadius))
-          )
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Headline
-        Text(
-          text = "For all your\ngoing out plans",
-          color = Color.Black,
-          fontSize = 26.sp,
-          textAlign = TextAlign.Center,
-          fontWeight = FontWeight.Black,
-          lineHeight = 34.sp,
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Two vibrant feature badges
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.Center,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          // Events badge (MI Blue)
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(UnifiedCornerRadius))
-              .background(MIBlue.copy(alpha = 0.08f))
-              .padding(horizontal = 14.dp, vertical = 6.dp)
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier
-                  .size(8.dp)
-                  .background(MIBlue, RoundedCornerShape(999.dp))
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "Events",
-                color = MIBlue,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-              )
-            }
-          }
-
-          Spacer(modifier = Modifier.width(10.dp))
-
-          // GameHub badge (Green)
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(UnifiedCornerRadius))
-              .background(MIGreen.copy(alpha = 0.08f))
-              .padding(horizontal = 14.dp, vertical = 6.dp)
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier
-                  .size(8.dp)
-                  .background(MIGreen, RoundedCornerShape(999.dp))
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "GameHub",
-                color = Color(0xFF059669),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-              )
-            }
-          }
-        }
-      }
-
-      Spacer(modifier = Modifier.height(28.dp))
-
-      // ── Login Form Card ──
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-      ) {
-        // Divider with label
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFFE2E8F0)))
-          Text(
-            text = "  LOG IN OR SIGN UP  ",
-            color = TextMuted,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-          )
-          Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFFE2E8F0)))
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Inner form card
-        Card(
-          modifier = Modifier.fillMaxWidth(),
-          shape = RoundedCornerShape(UnifiedCornerRadius),
-          colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-          border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-          elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        ) {
-          val isOtpStep = loginState.stage == LoginStage.VerifyOtp || loginState.stage == LoginStage.Success
-
-          Column(modifier = Modifier.padding(20.dp)) {
-            // Phone input
-            PhoneInputField(
-              phone = loginState.phone,
-              onPhoneChange = viewModel::onPhoneChanged,
-              modifier = Modifier.fillMaxWidth()
-            )
-
-            if (isOtpStep) {
-              Spacer(modifier = Modifier.height(14.dp))
-              AuthField(
-                value = loginState.otp,
-                onValueChange = viewModel::onOtpChanged,
-                label = "Enter 6-digit OTP",
-                modifier = Modifier.fillMaxWidth()
-              )
-            }
-
-            // Error feedback
-            if (!loginState.errorMessage.isNullOrEmpty()) {
-              Spacer(modifier = Modifier.height(12.dp))
-              Text(
-                text = loginState.errorMessage!!,
-                color = Color(0xFFDC2626),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                textAlign = TextAlign.Start
-              )
-            }
-
-            // Success feedback
-            if (!loginState.successMessage.isNullOrEmpty()) {
-              Spacer(modifier = Modifier.height(12.dp))
-              Text(
-                text = loginState.successMessage!!,
-                color = Color(0xFF16A34A),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                textAlign = TextAlign.Start
-              )
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // CTA button
-            ContinueButton(
-              enabled = loginState.phone.filter { it.isDigit() }.length >= 10 && !loginState.isLoading,
-              text = if (loginState.isLoading) "Please wait..." else if (isOtpStep) "Verify OTP" else "Continue",
-              onClick = { if (isOtpStep) viewModel.verifyOtp() else viewModel.requestOtp() }
-            )
-          }
-        }
-
-        // Persist JWT when login succeeds
-        val tokenSaved = remember { mutableStateOf(false) }
-        if (loginState.stage == LoginStage.Success && !loginState.token.isNullOrBlank() && !tokenSaved.value) {
-          com.example.thanna.data.TokenStore.saveToken(context, loginState.token!!)
-          tokenSaved.value = true
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // OR divider
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFFE2E8F0)))
-          Text(
-            text = "  OR  ",
-            color = TextMuted,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
-          )
-          Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFFE2E8F0)))
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Social login button
-        SocialButton(
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp),
-          text = "Login with Haraan",
-          textColor = Color(0xFF0F172A),
-          borderColor = Color(0xFFCBD5E1),
-          iconResId = com.example.thanna.R.drawable.haraan,
-          useGoogleG = false,
-          containerColor = Color.White,
-        )
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Terms
-        Text(
-          text = "By continuing, you agree to our Terms of Services & Privacy Policy",
-          color = TextMuted,
-          fontSize = 11.sp,
-          textAlign = TextAlign.Center,
-          lineHeight = 16.sp,
-          modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-      }
-    }
-  }
-}
-
-@Composable
-private fun CountryCodeChip(code: String) {
-  Card(
-    shape = RoundedCornerShape(999.dp),
-    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
-    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
-  ) {
-    Row(
-      modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text(text = "🇮🇳", fontSize = 16.sp)
-      Spacer(modifier = Modifier.width(6.dp))
-      Text(text = code, color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 15.sp)
-    }
-  }
-}
-
-@Composable
-private fun ContinueButton(enabled: Boolean, text: String, onClick: () -> Unit) {
-  Box(
-    modifier = Modifier
-      .fillMaxWidth()
-      .height(56.dp)
-      .clip(RoundedCornerShape(UnifiedCornerRadius))
-      .background(
-        Brush.horizontalGradient(
-          colors = if (enabled) listOf(MIBlue, MIGreen) else listOf(Color(0xFFE2E8F0), Color(0xFFE2E8F0))
-        )
-      )
-      .clickable(enabled = enabled) { onClick() },
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(
-      text = text,
-      color = if (enabled) AccentWhite else Color(0xFF94A3B8),
-      fontSize = 16.sp,
-      fontWeight = FontWeight.Bold
-    )
-  }
-}
-
-@Composable
-private fun PhoneInputField(
-  phone: String,
-  onPhoneChange: (String) -> Unit,
-  modifier: Modifier = Modifier
-) {
-  var focused by remember { mutableStateOf(false) }
-  
-  Row(
-    modifier = modifier
-      .fillMaxWidth()
-      .height(56.dp)
-      .background(Color.White, RoundedCornerShape(UnifiedCornerRadius))
-      .border(
-        BorderStroke(
-          width = if (focused) 2.dp else 1.dp,
-          color = if (focused) MIBlue else Color(0xFFCBD5E1)
-        ),
-        shape = RoundedCornerShape(UnifiedCornerRadius)
-      )
-      .padding(horizontal = 18.dp),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Text(text = "🇮🇳", fontSize = 16.sp)
-    Spacer(modifier = Modifier.width(8.dp))
-    Text(
-      text = "+91",
-      color = Color(0xFF0F172A),
-      fontWeight = FontWeight.Bold,
-      fontSize = 15.sp
-    )
-    
-    Spacer(modifier = Modifier.width(12.dp))
-    Box(
-      modifier = Modifier
-        .width(1.dp)
-        .height(20.dp)
-        .background(Color(0xFFE2E8F0))
-    )
-    Spacer(modifier = Modifier.width(12.dp))
-    
-    androidx.compose.foundation.text.BasicTextField(
-      value = phone,
-      onValueChange = onPhoneChange,
-      modifier = Modifier
-        .weight(1f)
-        .onFocusChanged { focusState ->
-          focused = focusState.isFocused
-        },
-      singleLine = true,
-      textStyle = androidx.compose.ui.text.TextStyle(
-        color = Color(0xFF0F172A),
-        fontSize = 15.sp,
-        fontWeight = FontWeight.Medium
-      ),
-      keyboardOptions = KeyboardOptions(
-        keyboardType = KeyboardType.Phone
-      ),
-      cursorBrush = SolidColor(MIBlue),
-      decorationBox = { innerTextField ->
-        Box(contentAlignment = Alignment.CenterStart) {
-          if (phone.isEmpty()) {
-            Text(
-              text = "10-digit mobile number",
-              color = Color(0xFF94A3B8),
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Normal
-            )
-          }
-          innerTextField()
-        }
-      }
-    )
-  }
-}
-
-@Composable
-private fun AuthField(
-  value: String,
-  onValueChange: (String) -> Unit,
-  label: String,
-  modifier: Modifier = Modifier,
-) {
-  var focused by remember { mutableStateOf(false) }
-  
-  Row(
-    modifier = modifier
-      .fillMaxWidth()
-      .height(56.dp)
-      .background(Color.White, RoundedCornerShape(UnifiedCornerRadius))
-      .border(
-        BorderStroke(
-          width = if (focused) 2.dp else 1.dp,
-          color = if (focused) MIBlue else Color(0xFFCBD5E1)
-        ),
-        shape = RoundedCornerShape(UnifiedCornerRadius)
-      )
-      .padding(horizontal = 18.dp),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    androidx.compose.foundation.text.BasicTextField(
-      value = value,
-      onValueChange = onValueChange,
-      modifier = Modifier
-        .fillMaxWidth()
-        .onFocusChanged { focusState ->
-          focused = focusState.isFocused
-        },
-      singleLine = true,
-      textStyle = androidx.compose.ui.text.TextStyle(
-        color = Color(0xFF0F172A),
-        fontSize = 15.sp,
-        fontWeight = FontWeight.Medium
-      ),
-      keyboardOptions = KeyboardOptions(
-        keyboardType = KeyboardType.Number
-      ),
-      cursorBrush = SolidColor(MIBlue),
-      decorationBox = { innerTextField ->
-        Box(contentAlignment = Alignment.CenterStart) {
-          if (value.isEmpty()) {
-            Text(
-              text = label,
-              color = Color(0xFF94A3B8),
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Normal
-            )
-          }
-          innerTextField()
-        }
-      }
-    )
-  }
-}
-
-@Composable
-private fun SocialButton(
-  modifier: Modifier = Modifier,
-  text: String,
-  textColor: Color,
-  borderColor: Color,
-  iconTint: Color = Color.Unspecified,
-  iconText: String? = null,
-  iconResId: Int? = null,
-  useGoogleG: Boolean = false,
-  containerColor: Color = Color.White.copy(alpha = 0.08f),
-) {
-  Card(
-    modifier = modifier
-      .clip(RoundedCornerShape(UnifiedCornerRadius))
-      .clickable { /* Handle click */ },
-    shape = RoundedCornerShape(UnifiedCornerRadius),
-    colors = CardDefaults.cardColors(containerColor = containerColor),
-    border = BorderStroke(1.dp, borderColor),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-  ) {
-    Box(
-      modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-      contentAlignment = Alignment.Center
-    ) {
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-      ) {
-        if (useGoogleG) {
-          Box(
-            modifier = Modifier
-              .size(28.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(MIBlue),
-            contentAlignment = Alignment.Center
-          ) {
-            Text(text = "G", color = AccentWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-          }
-        } else if (iconResId != null) {
-          Image(
-            painter = painterResource(id = iconResId),
-            contentDescription = "Social Icon",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-              .height(20.dp)
-              .width(76.dp)
-          )
-        } else if (iconText != null) {
-          Box(
-            modifier = Modifier
-              .size(28.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(iconTint),
-            contentAlignment = Alignment.Center
-          ) {
-            Text(text = iconText, color = AccentWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-          }
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(text = text, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-      }
-    }
-  }
-}
+// LoginScreen and its local helper methods have been migrated to com.example.thanna.ui package.
 
 @Composable
 private fun CustomBottomNav(
@@ -939,12 +382,12 @@ private fun CustomBottomNav(
         val selected = index == selectedTab
         val accentColor = if (index == 0) {
           if (activeSubTab == "Events") {
-            Color(0xFFFFC83B) // Gold for Events subtab in dark mode
+            Color(0xFF0288D1) // Premium sky blue for Events subtab
           } else {
             MIGreen
           }
         } else {
-          if (isDark) Color(0xFFFFC83B) else MIBlue
+          if (isDark) Color(0xFF0288D1) else MIBlue
         }
         val bubbleColor = if (selected) accentColor.copy(alpha = 0.08f) else Color.Transparent
         val textColor = if (selected) accentColor else (if (isDark) Color.Gray else Color(0xFF94A3B8))
@@ -992,6 +435,7 @@ internal fun MainAppContainer(
   onItemClick: (NavKey) -> Unit,
   onLogout: () -> Unit
 ) {
+  val localContext = LocalContext.current
   var selectedTab by remember { mutableStateOf(0) }
   var searchQuery by remember { mutableStateOf("") }
   var showLogoutDialog by remember { mutableStateOf(false) }
@@ -1036,20 +480,21 @@ internal fun MainAppContainer(
       .fillMaxSize()
       .background(containerBackground)
   ) {
-    if (isEventsTab) {
-      // Atmospheric background light halos (soft vibrant glows)
-      androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-        drawCircle(
-          color = MIBlue.copy(alpha = 0.05f),
-          radius = 300.dp.toPx(),
-          center = androidx.compose.ui.geometry.Offset(x = size.width * 0.8f, y = size.height * 0.15f)
-        )
-        drawCircle(
-          color = MIGreen.copy(alpha = 0.04f),
-          radius = 250.dp.toPx(),
-          center = androidx.compose.ui.geometry.Offset(x = size.width * 0.1f, y = size.height * 0.4f)
-        )
-      }
+    if (isEventsTab && !showActionBoardDetail) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(280.dp)
+          .background(
+            Brush.verticalGradient(
+              colors = listOf(
+                Color(0xFF7DD3FC).copy(alpha = 0.45f),
+                Color(0xFF38BDF8).copy(alpha = 0.15f),
+                Color.Transparent
+              )
+            )
+          )
+      )
     }
     if (showActionBoardDetail) {
       DistrictActionBoardScreen(
@@ -1057,25 +502,32 @@ internal fun MainAppContainer(
         onMatchClick = { matchId -> onItemClick(com.example.thanna.MatchDetails(matchId)) }
       )
     } else {
+      val isGameHubTab = (selectedTab == 0 && activeSubTab == "GameHub")
       Column(modifier = Modifier.fillMaxSize()) {
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .background(
-            if (isEventsTab) {
-              SolidColor(Color.Transparent)
-            } else {
-              Brush.horizontalGradient(
-                colors = listOf(
-                  Color(0xFFF8FAFC),
-                  Color(0xFFEFF6FF),
-                  Color(0xFFF5F3FF)
-                )
+        if (!isGameHubTab) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(
+                if (isEventsTab) {
+                  Brush.verticalGradient(
+                    colors = listOf(
+                      Color(0xFFE0F2FE), // Light sky blue top
+                      Color.White        // Blends into white content area
+                    )
+                  )
+                } else {
+                  Brush.horizontalGradient(
+                    colors = listOf(
+                      Color(0xFFF8FAFC),
+                      Color(0xFFEFF6FF),
+                      Color(0xFFF5F3FF)
+                    )
+                  )
+                }
               )
-            }
-          )
-      ) {
-        if (isEventsTab) {
+          ) {
+            if (isEventsTab) {
           // Clean Minimal Header
           Column(
             modifier = Modifier
@@ -1376,70 +828,12 @@ internal fun MainAppContainer(
         // Switch button for Events and GameHub
         if (selectedTab == 0 && !isSearchExpanded) {
           Spacer(modifier = Modifier.height(8.dp)) // Added breathing space
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-              .background(
-                Color(0xFFF1F5F9), // Light gray slate background
-                RoundedCornerShape(UnifiedCornerRadius)
-              )
-              .border(BorderStroke(1.dp, Color(0xFFE2E8F0)), RoundedCornerShape(UnifiedCornerRadius))
-              .padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-          ) {
-            // Events Switch Option
-            Box(
-              modifier = Modifier
-                .weight(1f)
-                .height(42.dp)
-                .clip(RoundedCornerShape(UnifiedCornerRadius))
-                .background(
-                  if (activeSubTab == "Events") {
-                    Color.White
-                  } else Color.Transparent
-                )
-                .clickable { activeSubTab = "Events" },
-              contentAlignment = Alignment.Center
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                  text = "Events",
-                  color = if (activeSubTab == "Events") Color(0xFF0F172A) else Color(0xFF64748B),
-                  fontWeight = if (activeSubTab == "Events") FontWeight.SemiBold else FontWeight.Medium,
-                  fontSize = 13.sp,
-                  letterSpacing = 0.2.sp
-                )
-              }
-            }
-
-            // GameHub Switch Option
-            Box(
-              modifier = Modifier
-                .weight(1f)
-                .height(42.dp)
-                .clip(RoundedCornerShape(UnifiedCornerRadius))
-                .background(
-                  if (activeSubTab == "GameHub") {
-                    Color.White
-                  } else Color.Transparent
-                )
-                .clickable { activeSubTab = "GameHub" },
-              contentAlignment = Alignment.Center
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                  text = "GameHub",
-                  color = if (activeSubTab == "GameHub") Color(0xFF0F172A) else Color(0xFF64748B),
-                  fontWeight = if (activeSubTab == "GameHub") FontWeight.SemiBold else FontWeight.Medium,
-                  fontSize = 13.sp,
-                  letterSpacing = 0.2.sp
-                )
-              }
-            }
-          }
+          PremiumSegmentedSwitch(
+            selectedTab = activeSubTab,
+            onTabSelected = { activeSubTab = it }
+          )
         }
+      }
       }
 
       // Screen switcher
@@ -1470,6 +864,10 @@ internal fun MainAppContainer(
             } else {
               GameHubTabScreen(
                 searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                onProfileClick = { showLogoutDialog = true },
+                activeSubTab = activeSubTab,
+                onTabSelected = { activeSubTab = it },
                 onActionBoardClick = { showActionBoardDetail = true }
               )
             }
@@ -1477,16 +875,9 @@ internal fun MainAppContainer(
           1 -> LeaderboardTabScreen()
         }
       }
-
-      // Floating bottom navigation
-      CustomBottomNav(
-        selectedTab = selectedTab,
-        activeSubTab = activeSubTab,
-        onTabSelected = { selectedTab = it }
-      )
-      }
     }
   }
+}
 }
 
 
@@ -1496,76 +887,90 @@ private fun EventsTabScreen(
   searchQuery: String,
   onEventClick: (EventItem) -> Unit
 ) {
-  var selectedCategory by remember { mutableStateOf("Events") }
+  var selectedCategory by remember { mutableStateOf("All") }
+  val localContext = LocalContext.current
   
   val bannerEvents = listOf(
     BannerItem(
-      "1",
-      "An Epic Evening A Global Debut",
-      "one8 GLOBAL PREMIERE",
-      "21st June 2026",
-      "Know more >",
-      "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=600&q=80"
+      "9",
+      "Karthik Live In Hyderabad",
+      "Quake Arena, Kondapur, Hyderabad",
+      "Sat, 13 Jun • 7:00 PM",
+      "₹2,999 onwards",
+      "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1777470598/ikf8alfkn0vutbb1ugxz.jpg"
     ),
     BannerItem(
-      "2",
-      "Sunidhi Chauhan Live in Concert",
-      "Mumbai Football Ground",
-      "Sat, 28 Jun • 6:30 PM",
-      "Book Tickets",
-      "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&q=80"
+      "10",
+      "Amaal Mallik Live at Quake Arena",
+      "Quake | Kondapur, Hyderabad",
+      "Fri, 12 Jun • 7:00 PM",
+      "₹599 onwards",
+      "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1778825095/gvfqqsvogxamj88yijun.jpg"
     ),
     BannerItem(
-      "3",
-      "Dua Lipa Live in BKC",
-      "MMRDA Grounds, Mumbai",
-      "Fri, 10 Jul • 7:00 PM",
-      "Book Tickets",
-      "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=600&q=80"
+      "11",
+      "Saturday Soiree ft. Merakee Live",
+      "Raasta | Hitech City, Hyderabad",
+      "Sat, 13 Jun • 9:30 PM",
+      "₹1,000 onwards",
+      "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KTEMTANYJC4WW9B7XGPZKQM3.png"
+    ),
+    BannerItem(
+      "12",
+      "Tribute to Arijit Singh (Edition 2) Ft. Root 35",
+      "Hard Rock Cafe | GVK One Mall, Banjara Hills",
+      "Sat, 27 Jun • 9:00 PM",
+      "₹249 onwards",
+      "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KS7X3SFGYW02JHNBXEYYB7KJ.jpg"
     )
   )
 
   val spotlightItems = listOf(
     SpotlightItem(
       "1",
-      "Blast",
-      "An action-packed blockbuster featuring stellar performances.",
+      "Dune: Part Three",
+      "Denis Villeneuve's highly anticipated sci-fi continuation.",
       "Now in theatres",
       "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&q=80"
     ),
     SpotlightItem(
       "2",
-      "Obsession",
-      "The word-of-mouth sensation horror fans are discovering",
+      "Spider-Man: Beyond the Spider-Verse",
+      "Miles Morales returns in the epic conclusion to the trilogy.",
+      "Now in theatres",
+      "https://images.unsplash.com/photo-1635805737707-575885ab0820?w=500&q=80"
+    ),
+    SpotlightItem(
+      "3",
+      "The Batman Part II",
+      "Matt Reeves' dark thriller continuation in Gotham City.",
       "Now in theatres",
       "https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=500&q=80"
     ),
     SpotlightItem(
-      "3",
-      "Kattalan",
-      "A thrilling suspense drama that keeps you on the edge of your seat.",
-      "Now in theatres",
-      "https://images.unsplash.com/photo-1505686994434-e3cc5abf1330?w=500&q=80"
-    ),
-    SpotlightItem(
       "4",
-      "District L",
-      "An immersive futuristic sci-fi adventure exploring new worlds.",
+      "Interstellar (70mm Re-release)",
+      "Experience Christopher Nolan's space masterpiece again on the big screen.",
       "Now in theatres",
-      "https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=500&q=80"
+      "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=500&q=80"
     )
   )
   
   val eventsData = listOf(
-    EventItem("1", "Arijit Singh Live", "Sat, 14 Jun, 6:00 PM", "DY Patil Stadium", "₹999 onwards", "Concerts", "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=500&q=80"),
-    EventItem("2", "Premium Standup Comedy", "Sun, 15 Jun, 8:00 PM", "Habitat Mumbai", "₹499 onwards", "Comedy", "https://images.unsplash.com/photo-1527224857830-43a7acc85260?w=500&q=80"),
-    EventItem("3", "Electronic Music Festival", "Fri, 20 Jun, 9:00 PM", "Nesco Center", "₹1499 onwards", "Nightlife", "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80"),
-    EventItem("4", "Pottery & Clay Workshop", "Sat, 21 Jun, 11:00 AM", "Art Circle Bandra", "₹799 onwards", "Workshops", "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=500&q=80"),
-    EventItem("5", "Mumbai Food & Vibe Festival", "Sun, 22 Jun, 12:00 PM", "Jio Gardens", "₹200 onwards", "Festivals", "https://images.unsplash.com/photo-1472653431158-6364773b2a56?w=500&q=80"),
+    EventItem("9", "Karthik Live In Hyderabad", "Sat, 13 Jun, 7:00 PM", "Quake Arena, Kondapur", "₹2999 onwards", "Concerts", "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1777470598/ikf8alfkn0vutbb1ugxz.jpg", isFillingFast = true),
+    EventItem("10", "Amaal Mallik Live at Quake Arena", "Fri, 12 Jun, 7:00 PM", "Quake Arena, Kondapur", "₹599 onwards", "Concerts", "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1778825095/gvfqqsvogxamj88yijun.jpg", isFillingFast = true),
+    EventItem("11", "Saturday Soiree ft. Merakee Live", "Sat, 13 Jun, 9:30 PM", "Raasta, Hitech City", "₹1000 onwards", "Concerts", "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KTEMTANYJC4WW9B7XGPZKQM3.png", isFillingFast = true),
+    EventItem("12", "Tribute to Arijit Singh (Ed. 2) Ft. Root 35", "Sat, 27 Jun, 9:00 PM", "Hard Rock Cafe, Banjara Hills", "₹249 onwards", "Concerts", "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KS7X3SFGYW02JHNBXEYYB7KJ.jpg", isFillingFast = true),
   )
   
   val filteredEvents = eventsData.filter {
-    (searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.venue.contains(searchQuery, ignoreCase = true))
+    val matchesSearch = searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.venue.contains(searchQuery, ignoreCase = true)
+    val matchesCategory = when (selectedCategory) {
+      "Concerts" -> it.category == "Concerts"
+      "Standup" -> it.category == "Comedy"
+      else -> true
+    }
+    matchesSearch && matchesCategory
   }
 
   androidx.compose.foundation.lazy.LazyColumn(
@@ -1574,226 +979,219 @@ private fun EventsTabScreen(
       .background(Color(0xFFF6F8FB)),
     verticalArrangement = Arrangement.spacedBy(20.dp)
   ) {
-    // Abstract Background Shapes Layer (Cinematic backdrop)
-    item {
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(1.dp)
-      ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-          drawCircle(
-            color = Color(0xFF2563EB).copy(alpha = 0.08f),
-            radius = 200.dp.toPx(),
-            center = androidx.compose.ui.geometry.Offset(x = size.width * 0.1f, y = -100f)
-          )
-          drawCircle(
-            color = Color(0xFF00C853).copy(alpha = 0.06f),
-            radius = 150.dp.toPx(),
-            center = androidx.compose.ui.geometry.Offset(x = size.width * 0.9f, y = -80f)
-          )
-        }
-      }
-    }
+    // Abstract background shapes removed as requested
 
-    // Premium Hero Banner Carousel (HorizontalPager)
-    item {
-      val pagerState = rememberPagerState(pageCount = { bannerEvents.size })
-      
-      Column(modifier = Modifier.fillMaxWidth()) {
-        HorizontalPager(
-          state = pagerState,
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(280.dp),
-          contentPadding = PaddingValues(horizontal = 20.dp),
-          pageSpacing = 16.dp
-        ) { page ->
-          val banner = bannerEvents[page]
-          Box(
+    if (selectedCategory == "All") {
+      // "For you" section with Infinite 3D Loop Pager
+      item {
+        SectionHeader(
+          title = "For you"
+        )
+      }
+
+      item {
+        InfiniteLoopBookPager(events = filteredEvents, onEventClick = onEventClick)
+      }
+    } else {
+      // Premium Hero Banner Carousel (HorizontalPager)
+      item {
+        val pagerState = rememberPagerState(pageCount = { bannerEvents.size })
+        
+        Column(modifier = Modifier.fillMaxWidth()) {
+          HorizontalPager(
+            state = pagerState,
             modifier = Modifier
               .fillMaxWidth()
-              .height(280.dp)
-          ) {
-            // Cinematic Blurred Background Circles
-            Canvas(
+              .height(280.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            pageSpacing = 16.dp
+          ) { page ->
+            val banner = bannerEvents[page]
+            Box(
               modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
-                .align(Alignment.TopCenter)
+                .height(280.dp)
             ) {
-              drawCircle(
-                color = Color(0xFF2563EB).copy(alpha = 0.12f),
-                radius = 180.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(x = size.width * 0.2f, y = size.height * 0.8f)
-              )
-              drawCircle(
-                color = Color(0xFF00C853).copy(alpha = 0.08f),
-                radius = 140.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(x = size.width * 0.8f, y = size.height * 0.4f)
-              )
-            }
-
-            // Main Glassmorphic Card
-            Card(
-              modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp)
-                .align(Alignment.TopCenter),
-              shape = RoundedCornerShape(34.dp),
-              colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.9f)),
-              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
-              elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
-            ) {
-              Box(modifier = Modifier.fillMaxSize()) {
-                // Background with soft gradient
-                Box(
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                      brush = Brush.verticalGradient(
-                        colors = listOf(
-                          Color.White,
-                          Color(0xFFF6F8FB)
-                        )
-                      )
-                    )
+              // Cinematic Blurred Background Circles
+              Canvas(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(260.dp)
+                  .align(Alignment.TopCenter)
+              ) {
+                drawCircle(
+                  color = Color(0xFF2563EB).copy(alpha = 0.12f),
+                  radius = 180.dp.toPx(),
+                  center = androidx.compose.ui.geometry.Offset(x = size.width * 0.2f, y = size.height * 0.8f)
                 )
+                drawCircle(
+                  color = Color(0xFF00C853).copy(alpha = 0.08f),
+                  radius = 140.dp.toPx(),
+                  center = androidx.compose.ui.geometry.Offset(x = size.width * 0.8f, y = size.height * 0.4f)
+                )
+              }
 
-                // Content Row: Left Info + Right Image
-                Row(
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                  horizontalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                  // Left Panel: Event Info with Glassmorphic Background
-                  Column(
-                    modifier = Modifier
-                      .weight(0.6f)
-                      .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                  ) {
-                    // Event Category Badge
-                    Box(
-                      modifier = Modifier
-                        .background(
-                          Color.White.copy(alpha = 0.3f),
-                          RoundedCornerShape(12.dp)
-                        )
-                        .border(
-                          1.dp,
-                          Color.White.copy(alpha = 0.5f),
-                          RoundedCornerShape(12.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                      Text(
-                        text = banner.meta.substring(0, minOf(15, banner.meta.length)),
-                        color = LightAccentBlue,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                      )
-                    }
-
-                    // Event Title
-                    Text(
-                      text = banner.title,
-                      color = LightPrimaryText,
-                      fontWeight = FontWeight.Bold,
-                      fontSize = 22.sp,
-                      lineHeight = 28.sp,
-                      maxLines = 3
-                    )
-
-                    // Event Details
-                    Row(
-                      modifier = Modifier.fillMaxWidth(),
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                      Icon(
-                        imageVector = Icons.Default.DateRange,
-                        contentDescription = null,
-                        tint = LightAccentBlue,
-                        modifier = Modifier.size(16.dp)
-                      )
-                      Text(
-                        text = banner.price,
-                        color = LightSecondaryText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                      )
-                    }
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    // CTA Button
-                    Button(
-                      onClick = { /* TODO */ },
-                      modifier = Modifier
-                        .height(44.dp)
-                        .fillMaxWidth(),
-                      shape = RoundedCornerShape(22.dp),
-                      colors = ButtonDefaults.buttonColors(
-                        containerColor = LightAccentBlue,
-                        contentColor = Color.White
-                      )
-                    ) {
-                      Text(
-                        text = "Book Now",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        letterSpacing = 0.3.sp
-                      )
-                    }
-                  }
-
-                  // Right Panel: Event Image
+              // Main Glassmorphic Card
+              Card(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(260.dp)
+                  .align(Alignment.TopCenter),
+                shape = RoundedCornerShape(34.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.9f)),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
+              ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                  // Background with soft gradient
                   Box(
                     modifier = Modifier
-                      .weight(0.4f)
-                      .fillMaxHeight()
-                      .clip(RoundedCornerShape(24.dp))
-                      .background(Color(0xFFF1F5F9))
+                      .fillMaxSize()
+                      .background(
+                        brush = Brush.verticalGradient(
+                          colors = listOf(
+                            Color.White,
+                            Color(0xFFF6F8FB)
+                          )
+                        )
+                      )
+                  )
+
+                  // Content Row: Left Info + Right Image
+                  Row(
+                    modifier = Modifier
+                      .fillMaxSize()
+                      .padding(24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp)
                   ) {
-                    AsyncImage(
-                      model = banner.imageUrl,
-                      contentDescription = banner.title,
-                      contentScale = ContentScale.Crop,
-                      modifier = Modifier.fillMaxSize()
-                    )
+                    // Left Panel: Event Info with Glassmorphic Background
+                    Column(
+                      modifier = Modifier
+                        .weight(0.6f)
+                        .fillMaxHeight(),
+                      verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                      // Event Category Badge
+                      Box(
+                        modifier = Modifier
+                          .background(
+                            Color.White.copy(alpha = 0.3f),
+                            RoundedCornerShape(12.dp)
+                          )
+                          .border(
+                            1.dp,
+                            Color.White.copy(alpha = 0.5f),
+                            RoundedCornerShape(12.dp)
+                          )
+                          .padding(horizontal = 12.dp, vertical = 6.dp)
+                      ) {
+                        Text(
+                          text = banner.meta.substring(0, minOf(15, banner.meta.length)),
+                          color = LightAccentBlue,
+                          fontSize = 11.sp,
+                          fontWeight = FontWeight.SemiBold
+                        )
+                      }
+
+                      // Event Title
+                      Text(
+                        text = banner.title,
+                        color = LightPrimaryText,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp,
+                        lineHeight = 28.sp,
+                        maxLines = 3
+                      )
+
+                      // Event Details
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.DateRange,
+                          contentDescription = null,
+                          tint = LightAccentBlue,
+                          modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                          text = banner.price,
+                          color = LightSecondaryText,
+                          fontSize = 13.sp,
+                          fontWeight = FontWeight.Medium
+                        )
+                      }
+
+                      Spacer(modifier = Modifier.weight(1f))
+
+                      // CTA Button
+                      Button(
+                        onClick = { /* TODO */ },
+                        modifier = Modifier
+                          .height(44.dp)
+                          .fillMaxWidth(),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = ButtonDefaults.buttonColors(
+                          containerColor = LightAccentBlue,
+                          contentColor = Color.White
+                        )
+                      ) {
+                        Text(
+                          text = "Book Now",
+                          fontWeight = FontWeight.SemiBold,
+                          fontSize = 14.sp,
+                          letterSpacing = 0.3.sp
+                        )
+                      }
+                    }
+
+                    // Right Panel: Event Image
+                    Box(
+                      modifier = Modifier
+                        .weight(0.4f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xFFF1F5F9))
+                    ) {
+                      AsyncImage(
+                        model = banner.imageUrl,
+                        contentDescription = banner.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                      )
+                    }
                   }
                 }
               }
             }
           }
-        }
-        
-        // Premium Pager Dots
-        Row(
-          horizontalArrangement = Arrangement.Center,
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 16.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          repeat(bannerEvents.size) { index ->
-            val selected = pagerState.currentPage == index
-            Box(
-              modifier = Modifier
-                .padding(horizontal = 4.dp)
-                .width(if (selected) 24.dp else 8.dp)
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(if (selected) LightAccentBlue else Color(0xFFE2E8F0))
-            )
+
+          // Premium Pager Dots
+          Row(
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            repeat(bannerEvents.size) { index ->
+              val selected = pagerState.currentPage == index
+              Box(
+                modifier = Modifier
+                  .padding(horizontal = 4.dp)
+                  .width(if (selected) 24.dp else 8.dp)
+                  .height(8.dp)
+                  .clip(RoundedCornerShape(4.dp))
+                  .background(if (selected) LightAccentBlue else Color(0xFFE2E8F0))
+              )
+            }
           }
         }
       }
     }
 
-    // Category Buttons Row (Dining, Movies, Events)
+    // Category Buttons Row (Concerts, Standup, All)
     item {
       Row(
         modifier = Modifier
@@ -1803,295 +1201,54 @@ private fun EventsTabScreen(
         horizontalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         CustomCategoryCard(
-          title = "Dining",
-          icon = Icons.Default.Restaurant,
+          title = "Concerts",
+          painter = painterResource(id = com.example.thanna.R.drawable.ic_live_music),
           iconColor = Color(0xFFFF5B7F),
           glowColor = Color(0xFFFF5B7F),
-          selected = selectedCategory == "Dining",
-          onClick = { selectedCategory = "Dining" },
+          selected = selectedCategory == "Concerts",
+          onClick = { selectedCategory = "Concerts" },
           modifier = Modifier.weight(1f)
         )
         CustomCategoryCard(
-          title = "Movies",
-          icon = Icons.Default.Movie,
+          title = "Standup",
+          painter = painterResource(id = com.example.thanna.R.drawable.ic_standup_comedy),
           iconColor = Color(0xFF3F7FFF),
           glowColor = Color(0xFF3F7FFF),
-          selected = selectedCategory == "Movies",
-          onClick = { selectedCategory = "Movies" },
+          selected = selectedCategory == "Standup",
+          onClick = { selectedCategory = "Standup" },
           modifier = Modifier.weight(1f)
         )
         CustomCategoryCard(
-          title = "Events",
-          icon = Icons.Default.Mic,
+          title = "All",
+          painter = painterResource(id = com.example.thanna.R.drawable.ic_select_all),
           iconColor = Color(0xFFFFC83B),
           glowColor = Color(0xFFFFC83B),
-          selected = selectedCategory == "Events",
-          onClick = { selectedCategory = "Events" },
+          selected = selectedCategory == "All",
+          onClick = { selectedCategory = "All" },
           modifier = Modifier.weight(1f)
         )
       }
     }
 
-    if (selectedCategory == "Events") {
-      // "In the spotlight" title
+    if (true) {
+
+
+      // "Trending" Section (Small Horizontal Cards)
       item {
-        Text(
-          text = "In the spotlight",
-          color = Color(0xFF0F172A),
-          fontWeight = FontWeight.Bold,
-          fontSize = 18.sp,
-          modifier = Modifier.padding(horizontal = 12.dp).padding(top = 8.dp)
+        SectionHeader(
+          title = "Trending"
         )
       }
-
-      // Horizontal spotlight list
       item {
-        val virtualPageCount = 10000
-        val initialPage = (virtualPageCount / 2) - ((virtualPageCount / 2) % spotlightItems.size)
-        val spotlightState = rememberPagerState(
-          initialPage = initialPage,
-          pageCount = { virtualPageCount }
-        )
-        
-        // Auto scroll loop
-        LaunchedEffect(spotlightState) {
-          while (true) {
-            kotlinx.coroutines.delay(3000) // auto scroll every 3 seconds
-            if (!spotlightState.isScrollInProgress) {
-              val nextPage = spotlightState.currentPage + 1
-              spotlightState.animateScrollToPage(nextPage)
-            }
-          }
-        }
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-          HorizontalPager(
-            state = spotlightState,
-            contentPadding = PaddingValues(horizontal = 70.dp),
-            pageSpacing = 16.dp,
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(400.dp)
-          ) { virtualPage ->
-            val pageIndex = virtualPage % spotlightItems.size
-            val item = spotlightItems[pageIndex]
-            
-            // Calculate float page offset from the current page
-            val pageOffset = kotlin.math.abs((spotlightState.currentPage - virtualPage) + spotlightState.currentPageOffsetFraction)
-            
-            // Scale and alpha factor calculations for adjacent pages
-            val scale = 0.85f + 0.15f * (1f - pageOffset.coerceIn(0f, 1f))
-            val posterAlpha = 0.6f + 0.4f * (1f - pageOffset.coerceIn(0f, 1f))
-            val textAlpha = (1f - pageOffset * 2.5f).coerceIn(0f, 1f)
-
-            Column(
-              modifier = Modifier
-                .fillMaxWidth(),
-              horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-              Box(
-                modifier = Modifier
-                  .width(220.dp)
-                  .aspectRatio(1f / 1.414f)
-                  .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    alpha = posterAlpha
-                  }
-                  .clip(RoundedCornerShape(UnifiedCornerRadius))
-                  .background(Color(0xFF1E1E20))
-              ) {
-                AsyncImage(
-                  model = item.imageUrl,
-                  contentDescription = item.title,
-                  contentScale = ContentScale.Crop,
-                  modifier = Modifier.fillMaxSize()
-                )
-                
-                // Top-left badge: "Now in theatres"
-                Box(
-                  modifier = Modifier
-                    .padding(12.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(UnifiedCornerRadius))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                    .align(Alignment.TopStart)
-                ) {
-                  Text(
-                    text = item.badge,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                }
-                
-                // Top-right bookmark button
-                Box(
-                  modifier = Modifier
-                    .padding(12.dp)
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(UnifiedCornerRadius))
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .clickable { /* Toggle bookmark */ }
-                    .align(Alignment.TopEnd),
-                  contentAlignment = Alignment.Center
-                ) {
-                  androidx.compose.material3.Icon(
-                    imageVector = Icons.Default.BookmarkBorder,
-                    contentDescription = "Save",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                  )
-                }
-              }
-              
-              Spacer(modifier = Modifier.height(10.dp))
-              
-              // Content (Centered title and description) - faded for inactive items
-              Column(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(horizontal = 4.dp)
-                  .graphicsLayer {
-                    alpha = textAlpha
-                  },
-                horizontalAlignment = Alignment.CenterHorizontally
-              ) {
-                Text(
-                  text = item.title,
-                  color = Color(0xFF0F172A),
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 16.sp,
-                  textAlign = TextAlign.Center,
-                  modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                  text = item.description,
-                  color = Color.Gray,
-                  fontSize = 12.sp,
-                  maxLines = 2,
-                  textAlign = TextAlign.Center,
-                  modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
-                )
-              }
-            }
-          }
-          
-          // Pager indicators (White for selected, DarkGray for unselected)
-          Row(
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(top = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            repeat(spotlightItems.size) { index ->
-              val selected = (spotlightState.currentPage % spotlightItems.size) == index
-              Box(
-                modifier = Modifier
-                  .padding(horizontal = 3.dp)
-                  .width(if (selected) 16.dp else 6.dp)
-                  .height(6.dp)
-                  .clip(RoundedCornerShape(3.dp))
-                  .background(if (selected) Color(0xFF0F172A) else Color(0xFFE2E8F0))
-              )
-            }
-          }
-        }
-      }
-
-      // "Offers for you" title
-      item {
-        Text(
-          text = "Offers for you",
-          color = Color(0xFF0F172A),
-          fontWeight = FontWeight.Bold,
-          fontSize = 18.sp,
-          modifier = Modifier.padding(horizontal = 12.dp).padding(top = 8.dp)
-        )
-      }
-
-      // Offers card
-      item {
-        Card(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .height(130.dp),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-          colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-        ) {
-          Box(
-            modifier = Modifier
-              .fillMaxSize()
-              .background(
-                Brush.horizontalGradient(
-                  colors = listOf(
-                    Color(0xFF800020), // Dark Burgundy
-                    Color(0xFF4A0E17)  // Deeper crimson/burgundy
-                  )
-                )
-              )
-              .padding(16.dp)
-          ) {
-            Column(
-              modifier = Modifier.fillMaxHeight(),
-              verticalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "HSBC",
-                  color = Color.White,
-                  fontWeight = FontWeight.ExtraBold,
-                  fontSize = 18.sp
-                )
-                Text(
-                  text = "CREDIT CARDS",
-                  color = Color.White.copy(alpha = 0.7f),
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 10.sp
-                )
-              }
-              
-              Column {
-                Text(
-                  text = "Save up to ₹250 on bookings",
-                  color = Color.White,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 15.sp
-                )
-                Text(
-                  text = "Using HSBC credit cards. Valid till 30 Jun.",
-                  color = Color.White.copy(alpha = 0.7f),
-                  fontSize = 11.sp
-                )
-              }
-            }
-          }
-        }
+        TrendingRowSection(events = filteredEvents, onEventClick = onEventClick)
       }
 
       // Handpicked / Title section
       item {
-        Column(modifier = Modifier.padding(horizontal = 12.dp).padding(vertical = 4.dp)) {
-          Text(
-            text = "Handpicked experiences",
-            color = Color.Gray,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp,
-            letterSpacing = 1.sp
-          )
-          Text(
-            text = "Trending events in Mumbai",
-            color = Color(0xFF0F172A), // Dark slate for light mode
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 18.sp,
-            modifier = Modifier.padding(top = 2.dp)
-          )
-        }
+        SectionHeader(
+          title = "Trending events in Mumbai",
+          subtitle = "Handpicked experiences"
+        )
       }
 
       // Events listings
@@ -2131,31 +1288,6 @@ private fun EventsTabScreen(
           }
         }
       }
-    } else {
-      // Placeholder for Dining or Movies tabs
-      item {
-        Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 80.dp),
-          contentAlignment = Alignment.Center
-        ) {
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-              text = "No $selectedCategory found matching filters.",
-              color = Color.Gray,
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              text = "Explore the Events tab for trending experiences.",
-              color = Color.DarkGray,
-              fontSize = 13.sp
-            )
-          }
-        }
-      }
     }
     
     item {
@@ -2184,7 +1316,7 @@ private data class SpotlightItem(
 @Composable
 private fun CustomCategoryCard(
   title: String,
-  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  painter: androidx.compose.ui.graphics.painter.Painter,
   iconColor: Color,
   glowColor: Color,
   selected: Boolean,
@@ -2197,18 +1329,34 @@ private fun CustomCategoryCard(
       .clickable { onClick() },
     shape = RoundedCornerShape(UnifiedCornerRadius),
     colors = CardDefaults.cardColors(
-      containerColor = if (selected) Color.White else Color(0xFFF1F5F9) // Light gray for unselected
+      containerColor = if (selected) Color.Transparent else Color(0xFFF1F5F9) // Set transparent for gradient overlay
     ),
     border = BorderStroke(
-      width = if (selected) 2.dp else 1.dp,
-      color = if (selected) MIBlue else Color(0xFFE2E8F0)
+      width = if (selected) 1.5.dp else 1.dp,
+      color = if (selected) Color(0xFF56B4E9).copy(alpha = 0.6f) else Color(0xFFE2E8F0)
     ),
-    elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 4.dp else 0.dp)
+    elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 3.dp else 0.dp)
   ) {
-    Box(
-      modifier = Modifier
+    val boxModifier = if (selected) {
+      Modifier
         .fillMaxSize()
-        .padding(8.dp),
+        .background(
+          Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFF56B4E9).copy(alpha = 0.85f), // Premium Sky Blue
+              Color.White                            // Fading into pure white
+            )
+          )
+        )
+        .padding(8.dp)
+    } else {
+      Modifier
+        .fillMaxSize()
+        .padding(8.dp)
+    }
+
+    Box(
+      modifier = boxModifier,
       contentAlignment = Alignment.Center
     ) {
       Column(
@@ -2218,18 +1366,18 @@ private fun CustomCategoryCard(
         // Simple minimal backdrop behind icon (No glow)
         Box(
           modifier = Modifier
-            .size(44.dp)
+            .size(50.dp)
             .background(
-              if (selected) MIBlue.copy(alpha = 0.1f) else Color.Transparent,
+              if (selected) Color.White.copy(alpha = 0.5f) else Color.Transparent,
               RoundedCornerShape(UnifiedCornerRadius)
             ),
           contentAlignment = Alignment.Center
         ) {
           androidx.compose.material3.Icon(
-            imageVector = icon,
+            painter = painter,
             contentDescription = title,
-            tint = if (selected) MIBlue else Color(0xFF64748B),
-            modifier = Modifier.size(26.dp)
+            tint = Color.Unspecified,
+            modifier = Modifier.size(38.dp)
           )
         }
         
@@ -2247,6 +1395,7 @@ private fun CustomCategoryCard(
   }
 }
 
+@Immutable
 private data class EventItem(
   val id: String,
   val title: String,
@@ -2254,7 +1403,8 @@ private data class EventItem(
   val venue: String,
   val price: String,
   val category: String,
-  val imageUrl: String
+  val imageUrl: String,
+  val isFillingFast: Boolean = false
 )
 
 @Composable
@@ -2266,15 +1416,20 @@ private fun EventListCard(
   Column(
     modifier = modifier
       .fillMaxWidth()
-      .clickable { onClick() }
+      .clip(RoundedCornerShape(16.dp))
+      .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = ripple(color = Color(0xFF1A202C).copy(alpha = 0.08f)),
+        onClick = onClick
+      )
   ) {
+    // Image Section
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .aspectRatio(0.75f) // 3:4 aspect ratio
-        .clip(RoundedCornerShape(UnifiedCornerRadius))
-        .background(Color(0xFFF1F5F9)) // Light gray slate
-        .border(BorderStroke(1.dp, Color(0xFFE2E8F0)), RoundedCornerShape(UnifiedCornerRadius))
+        .aspectRatio(0.9f) // Tight, intentional modern image box
+        .clip(RoundedCornerShape(16.dp))
+        .background(Color(0xFFF7F7F9))
     ) {
       AsyncImage(
         model = event.imageUrl,
@@ -2282,474 +1437,478 @@ private fun EventListCard(
         contentScale = ContentScale.Crop,
         modifier = Modifier.fillMaxSize()
       )
+
+      // High-End Frosted Dark Badge (Sleek, minimalist, premium app execution)
+      if (event.isFillingFast) {
+        Box(
+          modifier = Modifier
+            .padding(10.dp)
+            .background(
+              color = Color.Black.copy(alpha = 0.75f), // Dark premium overlay
+              shape = RoundedCornerShape(6.dp) // Subtle curve matches high-end tech layouts
+            )
+            .border(
+              width = 0.5.dp, 
+              color = Color.White.copy(alpha = 0.15f), 
+              shape = RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .align(Alignment.TopStart)
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Text(
+              text = "⚡",
+              fontSize = 10.sp,
+              color = Color(0xFFF6AD55) // Clean premium amber tint
+            )
+            Text(
+              text = "FILLING FAST",
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              letterSpacing = 0.5.sp
+            )
+          }
+        }
+      }
     }
-    
+
+    // Compressed Content Layer - Eliminates large layout gaps
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 4.dp, vertical = 6.dp)
+        .padding(top = 8.dp, start = 2.dp, end = 2.dp) // Tightened entry gap
     ) {
+      // 1. Date
       Text(
-        text = event.date,
-        color = Color.Gray,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp
+        text = event.date.uppercase(),
+        fontSize = 10.5.sp,
+        fontWeight = FontWeight.Bold,
+        color = LightAccentBlue, // Highlight with blue
+        letterSpacing = 0.4.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
       )
-      
+
+      // Extremely tight spacing to lock text groups together
+      Spacer(modifier = Modifier.height(2.dp))
+
+      // 2. Title - Dynamic wrap content to completely eliminate artificial blank spaces under 1-line titles
       Text(
         text = event.title,
-        color = Color(0xFF0F172A),
+        fontSize = 14.5.sp,
         fontWeight = FontWeight.Bold,
-        fontSize = 13.sp,
+        color = Color(0xFF1A202C), // Ink Black
+        lineHeight = 18.sp,
         maxLines = 2,
-        lineHeight = 16.sp,
-        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth()
       )
-      
+
+      Spacer(modifier = Modifier.height(2.dp))
+
+      // 3. Venue
       Text(
         text = event.venue,
-        color = Color.Gray,
-        fontSize = 11.sp,
-        maxLines = 1
+        fontSize = 12.5.sp,
+        fontWeight = FontWeight.Normal,
+        color = Color(0xFF4A5568),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
       )
-      
-      Text(
-        text = event.price,
-        color = Color(0xFF0F172A), // Dark slate for price in light mode
-        fontWeight = FontWeight.Bold,
-        fontSize = 12.sp,
-        modifier = Modifier.padding(top = 2.dp)
-      )
+
+      Spacer(modifier = Modifier.height(3.dp))
+
+      // 4. Price Layout
+      Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+      ) {
+        val priceDisplay = if (event.price.endsWith(" onwards")) {
+          event.price.substringBefore(" onwards")
+        } else {
+          event.price
+        }
+        val hasOnwards = event.price.endsWith(" onwards")
+
+        Text(
+          text = priceDisplay,
+          fontSize = 14.sp,
+          fontWeight = FontWeight.ExtraBold,
+          color = LightAccentBlue, // Highlight with blue
+          letterSpacing = (-0.2).sp
+        )
+        if (hasOnwards) {
+          Text(
+            text = "onwards",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Normal,
+            color = LightAccentBlue.copy(alpha = 0.8f), // Highlight with blue
+            modifier = Modifier.padding(bottom = 0.5.dp) // Precision alignment to currency baseline
+          )
+        }
+      }
     }
   }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun EventDetailScreen(
   event: EventDetail,
   onBack: () -> Unit
 ) {
   val context = LocalContext.current
+  val scrollState = rememberScrollState()
   var isSaved by remember { mutableStateOf(false) }
-  val detailPoints = listOf(
-    "Instant ticket confirmation",
-    "Mobile entry and secure checkout",
-    "Curated venue experience"
-  )
-  val inclusions = listOf(
-    "Live performance access",
-    "Dedicated seating / standing zone",
-    "Entry support on event day"
-  )
-  val eventFacts = listOf(
-    "Venue" to event.venue,
-    "Date" to event.date,
-    "Category" to event.category,
-    "Price" to event.price,
-  )
-  val aboutText = when (event.category.lowercase()) {
-    "concerts" -> "A high-energy live concert experience with premium sound, easy entry, and a crowd-ready atmosphere built for fans who want the full show-night feel."
-    "comedy" -> "A polished night of stand-up with comfortable seating, smooth entry, and a relaxed venue setup designed for easy laughs and a great view."
-    "nightlife" -> "A vibrant evening event with immersive lighting, strong production value, and a venue flow that keeps the experience moving from arrival to encore."
-    "festivals" -> "A large-format festival experience with multiple highlights, lively venue energy, and a seamless event flow built for discovery and celebration."
-    "workshops" -> "A hands-on experience with structured sessions, guided participation, and a comfortable venue environment that keeps the focus on learning and creating."
-    else -> "A premium event experience designed around smooth entry, clear venue information, and a booking flow that feels easy from start to finish."
-  }
 
-  Box(
-    modifier = Modifier
-      .fillMaxSize()
-      .background(
-        Brush.verticalGradient(
-          colors = listOf(
-            Color(0xFFF8FAFC),
-            Color.White,
-            Color(0xFFF1F5F9)
-          )
-        )
-      )
-  ) {
-    androidx.compose.foundation.lazy.LazyColumn(
-      modifier = Modifier.fillMaxSize(),
-      contentPadding = PaddingValues(bottom = 104.dp)
-    ) {
-      item {
-        Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(390.dp)
-        ) {
-          AsyncImage(
-            model = event.imageUrl,
-            contentDescription = event.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-          )
+  val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+  val screenHeight = configuration.screenHeightDp.dp
+  val posterHeight = screenHeight * 0.6f
 
-          Box(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .statusBarsPadding()
-              .padding(top = 12.dp, end = 16.dp)
-              .clip(RoundedCornerShape(999.dp))
-              .background(Color.White.copy(alpha = 0.14f))
-              .padding(horizontal = 12.dp, vertical = 8.dp)
-          ) {
-            Text(
-              text = "Live on ${event.date}",
-              color = Color.White,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.SemiBold
-            )
-          }
-
-          Box(
-            modifier = Modifier
-              .fillMaxSize()
-              .background(
-                Brush.verticalGradient(
-                  colors = listOf(
-                    Color.Transparent,
-                    Color(0xAA0F172A)
-                  )
-                )
-              )
-          )
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .statusBarsPadding()
-              .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            androidx.compose.material3.IconButton(onClick = onBack) {
-              androidx.compose.material3.Icon(
-                imageVector = Icons.Default.ArrowBack,
-                contentDescription = "Back",
-                tint = Color.White
-              )
-            }
-
-            androidx.compose.material3.IconButton(onClick = {
-              isSaved = !isSaved
-            }) {
-              androidx.compose.material3.Icon(
-                imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                contentDescription = if (isSaved) "Remove save" else "Save event",
-                tint = Color.White
-              )
-            }
-
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.White.copy(alpha = 0.16f))
-                .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) {
-              Text(
-                text = event.category,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-              )
-            }
-          }
-
-          Column(
-            modifier = Modifier
-              .align(Alignment.BottomStart)
-              .padding(16.dp)
-          ) {
-            Text(
-              text = event.title,
-              color = Color.White,
-              fontSize = 30.sp,
-              fontWeight = FontWeight.Bold,
-              lineHeight = 34.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              text = "${event.date}  •  ${event.venue}",
-              color = Color.White.copy(alpha = 0.9f),
-              fontSize = 13.sp,
-              fontWeight = FontWeight.Medium
-            )
-          }
+  Box(modifier = Modifier.fillMaxSize().background(Color(0xFFF9F9F9))) {
+    
+    // --- 1. BACKGROUND / POSTER ZONE (60% Screen Layout Base) ---
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(posterHeight + 50.dp)
+        .graphicsLayer {
+          // Parallax movement at 50% scroll speed
+          translationY = -scrollState.value * 0.5f
+          // Smooth fade out as card scrolls to the top
+          alpha = (1f - (scrollState.value / (posterHeight.toPx())).coerceIn(0f, 1f))
         }
-      }
-
-      item {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-          verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+      AsyncImage(
+        model = event.imageUrl,
+        contentDescription = event.title,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize()
+      )
+      
+      // Poster Scrolling Indicators & Gallery Button Placements
+      Row(
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 16.dp) // Offset clear of the card overlap
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Page Indicator Dots
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          Box(modifier = Modifier.size(8.dp).background(Color.White, CircleShape))
+          Box(modifier = Modifier.size(8.dp).background(Color.White.copy(alpha = 0.5f), CircleShape))
+        }
+        
+        // Gallery Action Target Button
+        Button(
+          onClick = { Toast.makeText(context, "Gallery view connection coming soon.", Toast.LENGTH_SHORT).show() },
+          colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.6f)),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+          shape = RoundedCornerShape(20.dp)
         ) {
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-          ) {
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Column {
-                Text(
-                  text = "Starting from",
-                  color = Color(0xFF64748B),
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.Medium
-                )
-                Text(
-                  text = event.price,
-                  color = Color(0xFF0F172A),
-                  fontSize = 22.sp,
-                  fontWeight = FontWeight.Bold
-                )
-              }
-
-              Column(horizontalAlignment = Alignment.End) {
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(MIBlue.copy(alpha = 0.08f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                  Text(
-                    text = if (isSaved) "Saved" else "Live event",
-                    color = MIBlue,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                  )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                  text = if (isSaved) "You can revisit this event later." else "Tap save to keep it on your list.",
-                  color = Color(0xFF64748B),
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Medium
-                )
-              }
-            }
-          }
-
-          Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DetailInfoChip(label = "Date", value = event.date, modifier = Modifier.weight(1f))
-            DetailInfoChip(label = "Venue", value = event.venue, modifier = Modifier.weight(1f))
-          }
-
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              Text(
-                text = "Event snapshot",
-                color = Color(0xFF0F172A),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-              )
-              eventFacts.forEach { (label, value) ->
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.Top
-                ) {
-                  Text(
-                    text = label,
-                    color = Color(0xFF64748B),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                  )
-                  Spacer(modifier = Modifier.width(12.dp))
-                  Text(
-                    text = value,
-                    color = Color(0xFF0F172A),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.End
-                  )
-                }
-              }
-            }
-          }
-
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              Text(
-                text = "About this event",
-                color = Color(0xFF0F172A),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-              )
-              Text(
-                text = aboutText,
-                color = Color(0xFF475569),
-                fontSize = 13.sp,
-                lineHeight = 18.sp
-              )
-            }
-          }
-
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              Text(
-                text = "Highlights",
-                color = Color(0xFF0F172A),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-              )
-              detailPoints.forEach { point ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Box(
-                    modifier = Modifier
-                      .size(6.dp)
-                      .clip(androidx.compose.foundation.shape.CircleShape)
-                      .background(MIGreen)
-                  )
-                  Spacer(modifier = Modifier.width(10.dp))
-                  Text(
-                    text = point,
-                    color = Color(0xFF334155),
-                    fontSize = 13.sp
-                  )
-                }
-              }
-            }
-          }
-
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              Text(
-                text = "What you get",
-                color = Color(0xFF0F172A),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-              )
-              inclusions.forEach { item ->
-                Text(
-                  text = "• $item",
-                  color = Color(0xFF475569),
-                  fontSize = 13.sp
-                )
-              }
-            }
-          }
-
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(UnifiedCornerRadius),
-            colors = CardDefaults.cardColors(containerColor = MIBlue.copy(alpha = 0.06f)),
-            border = BorderStroke(1.dp, MIBlue.copy(alpha = 0.16f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              Text(
-                text = "Need help deciding?",
-                color = Color(0xFF0F172A),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
-              )
-              Text(
-                text = "This page is ready for booking handoff. The next step can open seat selection, payment, or a checkout sheet when you connect it.",
-                color = Color(0xFF475569),
-                fontSize = 12.sp,
-                lineHeight = 17.sp
-              )
-            }
-          }
+          Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("Gallery", fontSize = 12.sp, color = Color.White)
         }
       }
     }
 
-    Card(
+    // --- 2. MAIN EVENT CARD CONTENT CONTAINER ---
+    // Overlaps smoothly with the base poster layer using dynamic scrolling content padding
+    Column(
       modifier = Modifier
-        .align(Alignment.BottomCenter)
-        .navigationBarsPadding()
-        .padding(16.dp)
-        .fillMaxWidth(),
-      shape = RoundedCornerShape(24.dp),
-      colors = CardDefaults.cardColors(containerColor = Color.White),
-      border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-      elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+        .fillMaxSize()
+        .verticalScroll(scrollState)
     ) {
-      Row(
+      // Dynamic spacer forcing details block to begin at the 60% mark
+      Spacer(modifier = Modifier.height(posterHeight))
+
+      // Scrollable Info Details Block Card
+      Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+          .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+          .background(Color.White)
+          .padding(top = 8.dp, bottom = 100.dp) // Extra bottom padding blocks overlap from bottom action bar
       ) {
-        Column(modifier = Modifier.weight(1f)) {
+        
+        // Blur Background Header indicator
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .background(Color.Gray.copy(alpha = 0.05f))
+            .padding(horizontal = 16.dp),
+          contentAlignment = Alignment.CenterStart
+        ) {
           Text(
-            text = "From ${event.price}",
-            color = Color(0xFF0F172A),
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold
-          )
-          Text(
-            text = "Secure checkout and instant confirmation",
-            color = Color(0xFF64748B),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
+            text = "${event.category} • Music Experience", 
+            fontSize = 11.sp, 
+            color = Color.Gray
           )
         }
 
-        androidx.compose.material3.Button(
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+          Spacer(modifier = Modifier.height(16.dp))
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          // Main Header Event Title Typography Text Frame
+          Text(
+            text = event.title,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF1A1A1A)
+          )
+
+          Spacer(modifier = Modifier.height(6.dp))
+          
+          // Date Timestamp Label Element
+          Text(
+            text = event.date,
+            fontSize = 14.sp,
+            color = LightAccentBlue, // Stylized semantic highlight
+            fontWeight = FontWeight.SemiBold
+          )
+
+          Spacer(modifier = Modifier.height(16.dp))
+          Divider(color = Color(0xFFEEEEEE))
+          Spacer(modifier = Modifier.height(16.dp))
+
+          // Location Intermediary Quick-Link Callout
+          InteractiveRowItem(
+            painter = painterResource(id = com.example.thanna.R.drawable.ic_pin),
+            title = event.venue,
+            subtitle = "Click to view full map directions"
+          )
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          // Schedule & Time-Stamp Program Breakdown Reference Row
+          InteractiveRowItem(
+            painter = painterResource(id = com.example.thanna.R.drawable.ic_schedule),
+            title = "Schedule & Timeline",
+            subtitle = "Doors Open: 6:00 PM • Main Act: 8:00 PM"
+          )
+
+          Spacer(modifier = Modifier.height(20.dp))
+
+          // Info Question boxes layout
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+          ) {
+            InfoQuestionBox(
+              title = "Why this event?", 
+              desc = "Exclusive open-air live acoustic setups.",
+              modifier = Modifier.weight(1f)
+            )
+            InfoQuestionBox(
+              title = "Vibe Check", 
+              desc = "Energetic mass crowds, neon themes.",
+              modifier = Modifier.weight(1f)
+            )
+          }
+
+          Spacer(modifier = Modifier.height(24.dp))
+
+          // Performer Showcase Row
+          Text(
+            text = "Who's taking the stage",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF222222)
+          )
+          
+          Spacer(modifier = Modifier.height(12.dp))
+          
+          // Performer List Display Matrix
+          LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(end = 16.dp)
+          ) {
+            items(performersList) { PerformerCard(it) }
+          }
+
+          Spacer(modifier = Modifier.height(24.dp))
+
+          // Overview and Guidelines Info
+          Text(
+            text = "About the event",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF222222)
+          )
+          
+          Spacer(modifier = Modifier.height(8.dp))
+          
+          val aboutText = when (event.category.lowercase()) {
+            "concerts" -> "A high-energy live concert experience with premium sound, easy entry, and a crowd-ready atmosphere built for fans who want the full show-night feel."
+            "comedy" -> "A polished night of stand-up with comfortable seating, smooth entry, and a relaxed venue setup designed for easy laughs and a great view."
+            "nightlife" -> "A vibrant evening event with immersive lighting, strong production value, and a venue flow that keeps the experience moving from arrival to encore."
+            "festivals" -> "A large-format festival experience with multiple highlights, lively venue energy, and a seamless event flow built for discovery and celebration."
+            "workshops" -> "A hands-on experience with structured sessions, guided participation, and a comfortable venue environment that keeps the focus on learning and creating."
+            else -> "A premium event experience designed around smooth entry, clear venue information, and a booking flow that feels easy from start to finish."
+          }
+
+          Text(
+            text = aboutText,
+            fontSize = 14.sp,
+            color = Color(0xFF666666),
+            lineHeight = 20.sp,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+          )
+          
+          TextButton(
+            onClick = { Toast.makeText(context, "Expanded details available soon.", Toast.LENGTH_SHORT).show() },
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.align(Alignment.Start)
+          ) {
+            Text("Read more", color = Color(0xFF007AFF), fontWeight = FontWeight.SemiBold)
+          }
+
+          Spacer(modifier = Modifier.height(16.dp))
+          Divider(color = Color(0xFFEEEEEE))
+          Spacer(modifier = Modifier.height(20.dp))
+
+          // Informational Meta Guidelines section block
+          Text(
+            text = "Must Know",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF222222)
+          )
+          
+          Spacer(modifier = Modifier.height(12.dp))
+
+          // Custom Data points matching labeled symbols
+          GuidelineRowItem(
+            painter = painterResource(id = com.example.thanna.R.drawable.ic_language), 
+            text = "Event will be in Telugu, English & Hindi"
+          )
+          GuidelineRowItem(
+            painter = painterResource(id = com.example.thanna.R.drawable.ic_age), 
+            text = "Ticket needed for all ages above 5 years"
+          )
+          GuidelineRowItem(
+            painter = painterResource(id = com.example.thanna.R.drawable.ic_online_ticket), 
+            text = "Entry allowed for valid digital pass holders only"
+          )
+          GuidelineRowItem(
+            painter = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Default.Info), 
+            text = "Open to all public profiles",
+            tint = Color(0xFF555555)
+          )
+        }
+      }
+    }
+
+    // --- 3. TOP NAVIGATION OVERLAY ACTION BAR (Rendered on top of everything) ---
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .statusBarsPadding()
+        .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      // Back Button
+      IconButton(
+        onClick = onBack,
+        modifier = Modifier.background(Color.White.copy(alpha = 0.9f), CircleShape)
+      ) {
+        Icon(
+          painter = painterResource(id = com.example.thanna.R.drawable.ic_back),
+          contentDescription = "Back Button",
+          tint = Color.Unspecified,
+          modifier = Modifier.size(24.dp)
+        )
+      }
+      
+      // Action Buttons Right Side (Save & Share)
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        IconButton(
+          onClick = { isSaved = !isSaved },
+          modifier = Modifier.background(Color.White.copy(alpha = 0.9f), CircleShape)
+        ) {
+          Icon(
+            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+            contentDescription = "Save Button",
+            tint = if (isSaved) Color(0xFF0F62FE) else Color.Black
+          )
+        }
+        IconButton(
           onClick = {
-            Toast.makeText(context, "Booking flow can be connected next.", Toast.LENGTH_SHORT).show()
+            val sendIntent = android.content.Intent().apply {
+              action = android.content.Intent.ACTION_SEND
+              putExtra(android.content.Intent.EXTRA_TEXT, "Check out this event: ${event.title}")
+              type = "text/plain"
+            }
+            context.startActivity(android.content.Intent.createChooser(sendIntent, null))
           },
-          modifier = Modifier.height(52.dp),
-          shape = RoundedCornerShape(16.dp)
+          modifier = Modifier.background(Color.White.copy(alpha = 0.9f), CircleShape)
+        ) {
+          Icon(
+            painter = painterResource(id = com.example.thanna.R.drawable.ic_share),
+            contentDescription = "Share Button",
+            tint = Color.Unspecified,
+            modifier = Modifier.size(24.dp)
+          )
+        }
+      }
+    }
+
+    // --- STICKY FIXATION FOOTER BAR: Absolute overlay base layout position ---
+    Surface(
+      modifier = Modifier
+        .align(Alignment.BottomCenter)
+        .fillMaxWidth(),
+      tonalElevation = 8.dp,
+      shadowElevation = 16.dp,
+      color = Color.White
+    ) {
+      Row(
+        modifier = Modifier
+          .navigationBarsPadding()
+          .padding(horizontal = 20.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Price Tag Display System Frame
+        Column {
+          Text("Price", fontSize = 12.sp, color = Color.Gray)
+          Text(event.price, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111111))
+        }
+
+        // Action Conversion Button Frame
+        Button(
+          onClick = { Toast.makeText(context, "Booking flow can be connected next.", Toast.LENGTH_SHORT).show() },
+          colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+          shape = RoundedCornerShape(12.dp),
+          contentPadding = PaddingValues(horizontal = 28.dp, vertical = 14.dp),
+          modifier = Modifier.background(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Color(0xFF1E3A8A), // Dark blue
+                Color(0xFF2563EB)  // Accent blue
+              )
+            ),
+            shape = RoundedCornerShape(12.dp)
+          )
         ) {
           Text(
-            text = "Book Tickets",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold
+            text = "Book tickets",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
           )
         }
       }
@@ -2758,55 +1917,141 @@ fun EventDetailScreen(
 }
 
 @Composable
-private fun DetailInfoChip(
-  label: String,
-  value: String,
-  modifier: Modifier = Modifier
-) {
-  Card(
-    modifier = modifier,
-    shape = RoundedCornerShape(UnifiedCornerRadius),
-    colors = CardDefaults.cardColors(containerColor = Color.White),
-    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+private fun CategoryChip(label: String) {
+  Surface(
+    color = Color(0xFFF0F0F0),
+    shape = RoundedCornerShape(6.dp),
+    modifier = Modifier.padding(vertical = 2.dp)
   ) {
-    Column(
-      modifier = Modifier.padding(14.dp),
-      verticalArrangement = Arrangement.spacedBy(4.dp)
+    Text(
+      text = label,
+      fontSize = 12.sp,
+      color = Color(0xFF444444),
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+      fontWeight = FontWeight.Medium
+    )
+  }
+}
+
+@Composable
+private fun InteractiveRowItem(painter: androidx.compose.ui.graphics.painter.Painter, title: String, subtitle: String) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Box(
+      modifier = Modifier
+        .size(40.dp)
+        .background(Color(0xFFE3F2FD), RoundedCornerShape(8.dp)),
+      contentAlignment = Alignment.Center
     ) {
-      Text(
-        text = label,
-        color = Color(0xFF64748B),
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium
-      )
-      Text(
-        text = value,
-        color = Color(0xFF0F172A),
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        lineHeight = 16.sp
-      )
+      Icon(painter = painter, contentDescription = null, tint = LightAccentBlue, modifier = Modifier.size(20.dp))
+    }
+    Spacer(modifier = Modifier.width(14.dp))
+    Column(modifier = Modifier.weight(1f)) {
+      Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF333333))
+      Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+    }
+    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "View Details icon arrow", tint = Color.LightGray, modifier = Modifier.size(20.dp))
+  }
+}
+
+@Composable
+private fun InfoQuestionBox(title: String, desc: String, modifier: Modifier = Modifier) {
+  Column(
+    modifier = modifier
+      .background(Color(0xFFF7F7F9), RoundedCornerShape(12.dp))
+      .padding(14.dp)
+  ) {
+    Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111111))
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(desc, fontSize = 12.sp, color = Color(0xFF555555), lineHeight = 16.sp)
+  }
+}
+
+@Composable
+private fun PerformerCard(performer: Performer) {
+  Box(
+    modifier = Modifier
+      .width(140.dp)
+      .height(190.dp)
+      .clip(RoundedCornerShape(14.dp))
+      .background(Color.DarkGray)
+  ) {
+    // Image item placeholder frame base layer
+    Box(modifier = Modifier.fillMaxSize().background(Color.Gray))
+
+    // Text data footer alignment card overlay item
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .align(Alignment.BottomCenter)
+        .background(Color.Black.copy(alpha = 0.7f))
+        .padding(8.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column {
+          Text(performer.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+          Text(performer.type, color = Color.LightGray, fontSize = 11.sp)
+        }
+        Icon(
+          Icons.Default.BookmarkBorder, 
+          contentDescription = "Save Performer icon state", 
+          tint = Color.White,
+          modifier = Modifier.size(16.dp)
+        )
+      }
     }
   }
 }
+
+@Composable
+private fun GuidelineRowItem(
+  painter: androidx.compose.ui.graphics.painter.Painter,
+  text: String,
+  tint: Color = Color.Unspecified
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Icon(painter = painter, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+    Spacer(modifier = Modifier.width(12.dp))
+    Text(text, fontSize = 13.sp, color = Color(0xFF444444))
+  }
+}
+
+// Data models initialization structures
+private data class Performer(val name: String, val type: String)
+
+private val performersList = listOf(
+  Performer("Main Artist", "Singer"),
+  Performer("Supporting Act", "Band"),
+  Performer("Opening DJ", "Musician")
+)
 
 @Composable
 private fun GameHubTabScreen(
   searchQuery: String,
+  onSearchQueryChange: (String) -> Unit,
+  onProfileClick: () -> Unit,
+  activeSubTab: String,
+  onTabSelected: (String) -> Unit,
   onActionBoardClick: () -> Unit
 ) {
   var selectedSport by remember { mutableStateOf("All") }
   
-  val sports = listOf("All", "Cricket", "Football", "Badminton", "Swimming", "Tennis", "Basketball")
+  val sports = listOf("All", "Cricket", "Football", "Badminton", "Basketball")
   
   val venuesData = listOf(
     VenueItem("1", "Stryker Turf Center", "Andheri West", "4.8", "Cricket", 1200),
     VenueItem("2", "Kick Sports Arena", "Powai", "4.6", "Football", 1500),
     VenueItem("3", "Badminton Club Pro", "Bandra", "4.9", "Badminton", 600),
-    VenueItem("4", "Aqua Olympic Pool", "Juhu", "4.5", "Swimming", 400),
-    VenueItem("5", "Deuce Tennis Academy", "Colaba", "4.7", "Tennis", 800),
-    VenueItem("6", "Hoop City Court", "Ghatkopar", "4.6", "Basketball", 1000),
+    VenueItem("4", "Hoop City Court", "Ghatkopar", "4.6", "Basketball", 1000),
   )
 
   val filteredVenues = venuesData.filter {
@@ -2817,103 +2062,349 @@ private fun GameHubTabScreen(
   androidx.compose.foundation.lazy.LazyColumn(
     modifier = Modifier
       .fillMaxSize()
-      .padding(horizontal = 16.dp),
+      .background(Color(0xFFF8FAFC)),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
+    // 1. Dark Green Header Section (edge-to-edge)
     item {
-      Spacer(modifier = Modifier.height(8.dp))
-      Card(
+      Column(
         modifier = Modifier
           .fillMaxWidth()
-          .height(90.dp)
-          .clickable { onActionBoardClick() },
-        shape = RoundedCornerShape(UnifiedCornerRadius),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFEEFBF3)),
-        border = BorderStroke(1.dp, Color(0xFFD1F2DE))
+          .background(
+            color = Color(0xFF144D3D),
+            shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
+          )
+          .statusBarsPadding()
+          .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp)
       ) {
+        // Tab switcher
+        GameHubSegmentedSwitch(
+          selectedTab = activeSubTab,
+          onTabSelected = onTabSelected,
+          modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // Location & Profile row
         Row(
-          modifier = Modifier
-            .fillMaxSize()
-            .padding(14.dp),
+          modifier = Modifier.fillMaxWidth(),
           verticalAlignment = Alignment.CenterVertically
         ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(999.dp)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = "Location",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+              )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text(
+                text = "Your Location",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 11.sp
+              )
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                  text = "Vaddeswaram, AP",
+                  color = Color.White,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                  imageVector = Icons.Default.KeyboardArrowDown,
+                  contentDescription = "Select Location",
+                  tint = Color.White,
+                  modifier = Modifier.size(16.dp)
+                )
+              }
+            }
+          }
+
+          // Notification Icon
           Box(
             modifier = Modifier
-              .size(48.dp)
-              .clip(RoundedCornerShape(UnifiedCornerRadius))
-              .background(MIGreen.copy(alpha = 0.15f)),
+              .size(38.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color.White.copy(alpha = 0.15f))
+              .clickable { /* Notification */ },
             contentAlignment = Alignment.Center
           ) {
-            androidx.compose.material3.Icon(
-              imageVector = Icons.Default.Star,
-              contentDescription = "Live Match",
-              tint = MIGreen,
-              modifier = Modifier.size(24.dp)
+            Icon(
+              imageVector = Icons.Default.Notifications,
+              contentDescription = "Notifications",
+              tint = Color.White,
+              modifier = Modifier.size(18.dp)
+            )
+            Box(
+              modifier = Modifier
+                .size(6.dp)
+                .background(Color(0xFFEF4444), RoundedCornerShape(999.dp))
+                .align(Alignment.TopEnd)
+                .offset(x = (-8).dp, y = 8.dp)
             )
           }
-          Spacer(modifier = Modifier.width(12.dp))
-          Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+
+          Spacer(modifier = Modifier.width(10.dp))
+
+          // Profile avatar
+          Box(
+            modifier = Modifier
+              .size(38.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color.White.copy(alpha = 0.15f))
+              .clickable { onProfileClick() },
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.Person,
+              contentDescription = "Profile",
+              tint = Color.White,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Search Bar
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .background(Color.White, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = "Search",
+            tint = Color.Gray,
+            modifier = Modifier.size(20.dp)
+          )
+          Spacer(modifier = Modifier.width(10.dp))
+          androidx.compose.foundation.text.BasicTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+              color = Color(0xFF0F172A),
+              fontSize = 14.sp
+            ),
+            cursorBrush = SolidColor(Color(0xFF0F172A)),
+            decorationBox = { innerTextField ->
+              if (searchQuery.isEmpty()) {
+                Text(
+                  text = "Search for arenas, sports...",
+                  color = Color.Gray,
+                  fontSize = 14.sp
+                )
+              }
+              innerTextField()
+            }
+          )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Explore Promo Banner Card
+        Card(
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(20.dp),
+          colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.08f)),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Column(
+              modifier = Modifier.weight(1f)
+            ) {
               Text(
-                text = "ActionBoard",
-                color = Color(0xFF0F172A),
+                text = "YOUR SOLUTION,\nONE TAP AWAY!",
+                color = Color.White,
                 fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
+                fontSize = 18.sp,
+                lineHeight = 22.sp
               )
-              Spacer(modifier = Modifier.width(8.dp))
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(
+                text = "Seamless, Fast & Reliable\nBookings at Your Fingertip",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                lineHeight = 14.sp
+              )
+              Spacer(modifier = Modifier.height(14.dp))
               Box(
                 modifier = Modifier
-                  .background(Color(0xFFDC2626), RoundedCornerShape(4.dp))
-                  .padding(horizontal = 6.dp, vertical = 2.dp)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(Color.White)
+                  .clickable { onActionBoardClick() }
+                  .padding(horizontal = 14.dp, vertical = 8.dp)
               ) {
                 Text(
-                  text = "LIVE MATCH",
-                  color = Color.White,
-                  fontSize = 8.sp,
+                  text = "Explore",
+                  color = Color(0xFF144D3D),
+                  fontSize = 12.sp,
                   fontWeight = FontWeight.Bold
                 )
               }
             }
-            Text(
-              text = "Join active open play cricket/turf sessions",
-              color = Color(0xFF64748B),
-              fontSize = 12.sp
+
+            Image(
+              painter = painterResource(id = com.example.thanna.R.drawable.sports_booking_banner),
+              contentDescription = "Explore sports",
+              modifier = Modifier
+                .size(110.dp)
+                .clip(RoundedCornerShape(12.dp)),
+              contentScale = ContentScale.Crop
             )
           }
         }
       }
     }
 
-    item {
-      androidx.compose.foundation.lazy.LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
-      ) {
-        items(sports.size) { i ->
-          val sport = sports[i]
-          val selected = sport == selectedSport
-          
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(999.dp))
-              .background(if (selected) MIGreen else Color(0xFFF1F5F9))
-              .clickable { selectedSport = sport }
-              .padding(horizontal = 16.dp, vertical = 8.dp)
-          ) {
-            Text(
-              text = sport,
-              color = if (selected) Color.White else Color(0xFF64748B),
-              fontSize = 13.sp,
-              fontWeight = FontWeight.Bold
-            )
-          }
-        }
-      }
-    }
-
+    // 2. Sport Categories Header
     item {
       Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "Sport Categories",
+          color = Color(0xFF0F172A),
+          fontWeight = FontWeight.Bold,
+          fontSize = 16.sp
+        )
+        Text(
+          text = "View all",
+          color = Color(0xFF144D3D),
+          fontWeight = FontWeight.Bold,
+          fontSize = 13.sp
+        )
+      }
+    }
+
+    // 3. Sport Categories 2x2 Grid
+    item {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp)
+      ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+          CategoryCard(
+            title = "Cricket",
+            icon = Icons.Default.SportsCricket,
+            isSelected = selectedSport == "Cricket",
+            onClick = { selectedSport = if (selectedSport == "Cricket") "All" else "Cricket" },
+            modifier = Modifier.weight(1f)
+          )
+          Spacer(modifier = Modifier.width(12.dp))
+          CategoryCard(
+            title = "Football",
+            icon = Icons.Default.SportsFootball,
+            isSelected = selectedSport == "Football",
+            onClick = { selectedSport = if (selectedSport == "Football") "All" else "Football" },
+            modifier = Modifier.weight(1f)
+          )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+          CategoryCard(
+            title = "Badminton",
+            icon = Icons.Default.SportsTennis,
+            isSelected = selectedSport == "Badminton",
+            onClick = { selectedSport = if (selectedSport == "Badminton") "All" else "Badminton" },
+            modifier = Modifier.weight(1f)
+          )
+          Spacer(modifier = Modifier.width(12.dp))
+          CategoryCard(
+            title = "Basketball",
+            icon = Icons.Default.SportsBasketball,
+            isSelected = selectedSport == "Basketball",
+            onClick = { selectedSport = if (selectedSport == "Basketball") "All" else "Basketball" },
+            modifier = Modifier.weight(1f)
+          )
+        }
+      }
+    }
+
+    // 4. Popular Arenas Header
+    item {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(start = 16.dp, end = 16.dp, top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "Popular Arenas",
+          color = Color(0xFF0F172A),
+          fontWeight = FontWeight.Bold,
+          fontSize = 16.sp
+        )
+        Text(
+          text = "View all",
+          color = Color(0xFF144D3D),
+          fontWeight = FontWeight.Bold,
+          fontSize = 13.sp
+        )
+      }
+    }
+
+    // 5. Popular Arenas Horizontal Scroll
+    item {
+      if (filteredVenues.isEmpty()) {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 20.dp),
+          contentAlignment = Alignment.Center
+        ) {
+          Text(text = "No arenas found matching filters.", color = Color(0xFF64748B))
+        }
+      } else {
+        androidx.compose.foundation.lazy.LazyRow(
+          contentPadding = PaddingValues(horizontal = 16.dp),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          items(filteredVenues.size) { i ->
+            PopularArenaCard(
+              venue = filteredVenues[i],
+              onClick = { /* Detail action */ }
+            )
+          }
+        }
+      }
+    }
+
+    // 6. Featured Arenas Header
+    item {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(start = 16.dp, end = 16.dp, top = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
@@ -2921,37 +2412,254 @@ private fun GameHubTabScreen(
           text = "Featured Arenas",
           color = Color(0xFF0F172A),
           fontWeight = FontWeight.Bold,
-          fontSize = 18.sp
+          fontSize = 16.sp
         )
         Text(
           text = "View all",
-          color = MIGreen,
+          color = Color(0xFF144D3D),
           fontWeight = FontWeight.Bold,
           fontSize = 13.sp
         )
       }
     }
 
+    // 7. Featured Arenas Vertical List
     if (filteredVenues.isEmpty()) {
       item {
         Box(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 40.dp),
+            .padding(vertical = 20.dp),
           contentAlignment = Alignment.Center
         ) {
-          Text(text = "No venues found matching filters.", color = Color(0xFF64748B))
+          Text(text = "No arenas found matching filters.", color = Color(0xFF64748B))
         }
       }
     } else {
       items(filteredVenues.size) { i ->
-        val venue = filteredVenues[i]
-        VenueListCard(venue)
+        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+          VenueListCard(filteredVenues[i])
+        }
       }
     }
-    
+
     item {
       Spacer(modifier = Modifier.height(16.dp))
+    }
+  }
+}
+
+@Composable
+private fun CategoryCard(
+  title: String,
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  isSelected: Boolean,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Card(
+    modifier = modifier
+      .height(64.dp)
+      .clickable { onClick() },
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = if (isSelected) Color(0xFF144D3D).copy(alpha = 0.08f) else Color.White
+    ),
+    border = BorderStroke(
+      width = 1.dp,
+      color = if (isSelected) Color(0xFF144D3D) else Color(0xFFE2E8F0)
+    )
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+          modifier = Modifier
+            .size(36.dp)
+            .background(
+              color = if (isSelected) Color(0xFF144D3D).copy(alpha = 0.15f) else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(10.dp)
+            ),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(
+            imageVector = icon,
+            contentDescription = title,
+            tint = if (isSelected) Color(0xFF144D3D) else Color(0xFF64748B),
+            modifier = Modifier.size(18.dp)
+          )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+          text = title,
+          color = Color(0xFF0F172A),
+          fontWeight = FontWeight.Bold,
+          fontSize = 13.sp
+        )
+      }
+      Icon(
+        imageVector = Icons.Default.KeyboardArrowRight,
+        contentDescription = "Go",
+        tint = Color(0xFF94A3B8),
+        modifier = Modifier.size(16.dp)
+      )
+    }
+  }
+}
+
+@Composable
+private fun GameHubSegmentedSwitch(
+  selectedTab: String,
+  onTabSelected: (String) -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
+  val containerBg = Color.White.copy(alpha = 0.15f)
+  val activeBg = Color.White
+  
+  BoxWithConstraints(
+    modifier = modifier
+      .fillMaxWidth()
+      .height(44.dp)
+      .background(containerBg, RoundedCornerShape(22.dp))
+      .padding(3.dp)
+  ) {
+    val containerWidth = maxWidth
+    val tabWidth = containerWidth / tabs.size
+    val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
+    
+    val indicatorOffset by animateDpAsState(
+      targetValue = tabWidth * selectedIndex,
+      animationSpec = spring(dampingRatio = 0.82f, stiffness = 400f),
+      label = "SwitchSliderOffset"
+    )
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+      Box(
+        modifier = Modifier
+          .offset(x = indicatorOffset)
+          .width(tabWidth)
+          .fillMaxHeight()
+          .background(activeBg, RoundedCornerShape(19.dp))
+      )
+      
+      Row(modifier = Modifier.fillMaxSize()) {
+        tabs.forEach { (key, label) ->
+          val isSelected = selectedTab == key
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .fillMaxHeight()
+              .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null
+              ) { onTabSelected(key) },
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = label,
+              color = if (isSelected) Color(0xFF144D3D) else Color.White.copy(alpha = 0.75f),
+              fontSize = 13.sp,
+              fontWeight = FontWeight.Bold
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun PopularArenaCard(
+  venue: VenueItem,
+  onClick: () -> Unit
+) {
+  Card(
+    modifier = Modifier
+      .width(220.dp)
+      .clickable { onClick() },
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+  ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(110.dp)
+          .background(
+            Brush.linearGradient(
+              colors = listOf(Color(0xFFEEFBF3), Color(0xFFD1F2DE))
+            )
+          ),
+        contentAlignment = Alignment.Center
+      ) {
+        Box(
+          modifier = Modifier
+            .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+          Text(
+            text = venue.category,
+            color = Color(0xFF144D3D),
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp
+          )
+        }
+      }
+      
+      Column(modifier = Modifier.padding(12.dp)) {
+        Text(
+          text = venue.title,
+          color = Color(0xFF0F172A),
+          fontWeight = FontWeight.Bold,
+          fontSize = 13.sp,
+          maxLines = 1
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.LocationOn,
+            contentDescription = null,
+            tint = Color.Gray,
+            modifier = Modifier.size(12.dp)
+          )
+          Spacer(modifier = Modifier.width(2.dp))
+          Text(
+            text = venue.location,
+            color = Color.Gray,
+            fontSize = 11.sp
+          )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "₹${venue.price}/hr",
+            color = Color(0xFF144D3D),
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+          )
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "★", color = Color(0xFFFFB000), fontSize = 12.sp)
+            Spacer(modifier = Modifier.width(2.dp))
+            Text(
+              text = venue.rating,
+              color = Color(0xFF0F172A),
+              fontWeight = FontWeight.Bold,
+              fontSize = 11.sp
+            )
+          }
+        }
+      }
     }
   }
 }
@@ -3223,13 +2931,31 @@ private fun LeaderboardPlayerCard(player: LeaderboardItem) {
 @Preview(showBackground = true)
 @Composable
 fun MainScreenPreview() {
-  ThannaTheme { LoginScreen(onSkip = {}) }
+  ThannaTheme {
+    com.example.thanna.ui.LoginScreen(
+      uiState = com.example.thanna.ui.LoginUiState(),
+      onPhoneNumberChange = {},
+      onOtpChange = {},
+      onContinueClick = {},
+      onVerifyOtpClick = {},
+      onBackToPhoneClick = {}
+    )
+  }
 }
 
 @Preview(showBackground = true, widthDp = 340)
 @Composable
 fun MainScreenPortraitPreview() {
-  ThannaTheme { LoginScreen(onSkip = {}) }
+  ThannaTheme {
+    com.example.thanna.ui.LoginScreen(
+      uiState = com.example.thanna.ui.LoginUiState(),
+      onPhoneNumberChange = {},
+      onOtpChange = {},
+      onContinueClick = {},
+      onVerifyOtpClick = {},
+      onBackToPhoneClick = {}
+    )
+  }
 }
 
 @Composable
@@ -4099,4 +3825,381 @@ private fun DistrictStatsTabPanel() {
 }
 
 private data class StatCardRow(val label: String, val value: String, val accentColor: Color)
+
+@Composable
+private fun InfiniteLoopBookPager(
+  events: List<EventItem>,
+  onEventClick: (EventItem) -> Unit
+) {
+  if (events.isEmpty()) return
+
+  // Fake infinite loop setup
+  val virtualPageCount = Int.MAX_VALUE
+  val initialPage = virtualPageCount / 2 - (virtualPageCount / 2 % events.size)
+  val pagerState = rememberPagerState(
+    initialPage = initialPage,
+    pageCount = { virtualPageCount }
+  )
+
+  // Auto-scroll loop
+  LaunchedEffect(pagerState) {
+    while (true) {
+      kotlinx.coroutines.delay(3000)
+      if (!pagerState.isScrollInProgress) {
+        val nextPage = pagerState.currentPage + 1
+        pagerState.animateScrollToPage(nextPage)
+      }
+    }
+  }
+
+  HorizontalPager(
+    state = pagerState,
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(460.dp),
+    // Crucial padding structure: exposes a small peek on the left, but leaves 
+    // a larger buffer on the right to show the upcoming card stack cleanly.
+    contentPadding = PaddingValues(start = 32.dp, end = 48.dp),
+    pageSpacing = 0.dp
+  ) { page ->
+    val actualIndex = page % events.size
+    val event = events[actualIndex]
+
+    // Calculate exact relative scroll position (-1.0 to 1.0)
+    val pageOffset = (
+      (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+    )
+
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .graphicsLayer {
+          if (pageOffset < 0) {
+            // Target: Upcoming cards on the right edge.
+            // Pull them back to the left dynamically to build a tightly packed stack.
+            translationX = pageOffset * size.width * 0.85f
+            
+            // Scale down sequentially based on distance from focal point
+            val scale = 0.88f + (1.0f - 0.88f) * (1f - kotlin.math.abs(pageOffset)).coerceIn(0f, 1f)
+            scaleX = scale
+            scaleY = scale
+          } else {
+            // Target: Cards swiped away towards the left side.
+            // Let them slide off natively without dragging them back.
+            translationX = 0f
+            scaleX = 1f
+            scaleY = 1f
+          }
+        }
+        // Delivers clean overlapping rendering logic (Front card stays on top)
+        .zIndex(if (kotlin.math.abs(pageOffset) < 0.5f) 2f else 1f)
+        .padding(vertical = 8.dp, horizontal = 6.dp)
+        .clip(RoundedCornerShape(28.dp))
+        .background(Color.Black)
+        .clickable { onEventClick(event) }
+    ) {
+      // 1. Full Bleed Background Image
+      AsyncImage(
+        model = event.imageUrl,
+        contentDescription = event.title,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize()
+      )
+
+      // 2. Minimalist Category Tag (Top-Left)
+      androidx.compose.material3.Surface(
+        color = Color.Black.copy(alpha = 0.4f),
+        shape = CircleShape,
+        modifier = Modifier
+          .padding(16.dp)
+          .align(Alignment.TopStart)
+      ) {
+        Text(
+          text = event.category,
+          color = Color.White,
+          style = MaterialTheme.typography.labelMedium.copy(
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.5.sp
+          ),
+          modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+        )
+      }
+
+      // 3. The Glassmorphic Bottom Panel
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(150.dp) // Covers the lower portion beautifully
+          .align(Alignment.BottomCenter)
+          .padding(12.dp) // Inset padding makes it look like a floating glass capsule
+          .clip(RoundedCornerShape(20.dp))
+          // The secret to glassmorphism: Blur layer + Translucent tint layer
+          .blur(16.dp) 
+          .background(
+            Brush.verticalGradient(
+              colors = listOf(
+                Color.White.copy(alpha = 0.08f),
+                Color.White.copy(alpha = 0.15f)
+              )
+            )
+          )
+      )
+
+      // 4. Foreground Content Layer (Sits exactly over the glass panel for crisp text)
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(150.dp)
+          .align(Alignment.BottomCenter)
+          .padding(24.dp), // Aligned inside the glass panel bounds
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Left Column: Metadata and Text details
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.Center
+        ) {
+          // Date Status Line
+          Text(
+            text = event.date.replace(", ", "  •  ").uppercase(),
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontWeight = FontWeight.Bold,
+              letterSpacing = 0.8.sp
+            )
+          )
+          
+          Spacer(modifier = Modifier.height(6.dp))
+
+          // Title
+          Text(
+            text = event.title,
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium.copy(
+              fontWeight = FontWeight.SemiBold,
+              lineHeight = 22.sp
+            ),
+            maxLines = 2
+          )
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          // Venue and Pricing Grouped Cleanly
+          Text(
+            text = "${event.venue}  •  ${event.price}",
+            color = Color.White.copy(alpha = 0.65f),
+            style = MaterialTheme.typography.bodySmall.copy(
+              fontWeight = FontWeight.Medium
+            )
+          )
+        }
+
+        // Right Column: A singular, elegant circular button instead of chaotic scattered ones
+        androidx.compose.material3.Surface(
+          onClick = { onEventClick(event) },
+          shape = CircleShape,
+          color = Color.White,
+          modifier = Modifier
+            .padding(start = 12.dp)
+            .size(46.dp),
+          shadowElevation = 2.dp
+        ) {
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
+          ) {
+            Icon(
+              imageVector = Icons.Default.PlayArrow, // Clean, high-contrast action icon
+              contentDescription = "Watch Promo",
+              tint = Color.Black,
+              modifier = Modifier.size(20.dp)
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun TrendingRowSection(
+  events: List<EventItem>,
+  onEventClick: (EventItem) -> Unit
+) {
+  LazyRow(
+    contentPadding = PaddingValues(start = 36.dp, end = 24.dp),
+    horizontalArrangement = Arrangement.spacedBy(32.dp),
+    modifier = Modifier.fillMaxWidth()
+  ) {
+    itemsIndexed(events) { index, event ->
+      Box(
+        modifier = Modifier
+          .width(140.dp)
+          .height(160.dp)
+          .clickable { onEventClick(event) },
+        contentAlignment = Alignment.BottomStart
+      ) {
+        // --- THE POSTER CARD ---
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(),
+          shape = RoundedCornerShape(24.dp),
+          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+          colors = CardDefaults.cardColors(containerColor = Color.Black)
+        ) {
+          Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+              model = event.imageUrl,
+              contentDescription = event.title,
+              modifier = Modifier.fillMaxSize(),
+              contentScale = ContentScale.Crop
+            )
+
+            // Scrim overlay for subtitle readability
+            Box(
+              modifier = Modifier
+                .fillMaxSize()
+                .background(
+                  Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)),
+                    startY = 80f
+                  )
+                )
+            )
+
+            Text(
+              text = event.title,
+              color = Color.White,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              lineHeight = 15.sp,
+              maxLines = 2,
+              modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 24.dp, end = 8.dp, bottom = 12.dp) // Keeps text safe from number overlap
+            )
+          }
+        }
+
+        // --- THE BLUE-TO-WHITE GRADIENT OVERLAY NUMBER ---
+        Text(
+          text = (index + 1).toString(),
+          style = androidx.compose.ui.text.TextStyle(
+            fontSize = 95.sp,
+            fontWeight = FontWeight.Black,
+            brush = Brush.verticalGradient(
+              colors = listOf(
+                Color(0xFF56B4E9), // Bright premium sky blue at the top
+                Color(0xFFFFFFFF)  // Fades down cleanly into pure white at the baseline
+              )
+            )
+          ),
+          modifier = Modifier
+            .align(Alignment.BottomStart)
+            .offset(x = (-24).dp, y = 14.dp) // Perfect center-gap bleed alignment
+            .zIndex(5f) // Keeps it layered firmly over adjacent layout containers
+        )
+      }
+    }
+  }
+}
+
+@Composable
+fun PremiumSegmentedSwitch(
+    selectedTab: String,
+    onTabSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
+    
+    // --- COLOR PALETTE ALIGNED WITH YOUR SCREENSHOT ---
+    val containerBg = Color(0xFFF1F5F9)       // Clean, soft capsule background
+    val strokeColor = Color(0xFFE2E8F0)       // Thin outer bounding border
+    val activeText = Color.White               // Crisp white text for readability on the blue gradient
+    val inactiveText = Color(0xFF64748B)       // Muted slate gray for unselected states
+
+    // The beautiful luminous blue gradient
+    val activeGradient = Brush.verticalGradient(
+        colors = listOf(
+            Color(0xFF38BDF8), // Top luminous blue-sky tint
+            Color(0xFF0284C7)  // Bottom deeper premium blue
+        )
+    )
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .height(50.dp) // Perfect ergonomic height matching your app header proportions
+            .background(containerBg, RoundedCornerShape(25.dp))
+            .border(1.dp, strokeColor, RoundedCornerShape(25.dp))
+            .padding(3.dp) // Creates a crisp, precise inset margin for the active pill
+    ) {
+        val containerWidth = maxWidth
+        val tabWidth = containerWidth / tabs.size
+        val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
+
+        // Fluid spring physics animation makes the pill slide organically
+        val indicatorOffset by animateDpAsState(
+            targetValue = tabWidth * selectedIndex,
+            animationSpec = spring(
+                dampingRatio = 0.82f, // Adds a premium, high-end microscopic bounce
+                stiffness = 400f      // Snappy response time
+            ),
+            label = "PillSliderOffset"
+        )
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            
+            // --- ANIMATED SLIDING ACCENT PILL ---
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorOffset)
+                    .width(tabWidth)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(activeGradient)
+                    // Soft drop shadow makes the active choice pop forward visually
+                    .shadow(1.dp, RoundedCornerShape(22.dp)) 
+            )
+
+            // --- INTERACTIVE LABELS LAYER ---
+            Row(modifier = Modifier.fillMaxSize()) {
+                tabs.forEach { (key, title) ->
+                    val isSelected = selectedTab == key
+
+                    // Seamlessly crossfade the text colors
+                    val textColor by animateColorAsState(
+                        targetValue = if (isSelected) activeText else inactiveText,
+                        animationSpec = tween(durationMillis = 180),
+                        label = "LabelColorTransition"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(22.dp))
+                            // Strips away default platform ripples for a high-end customized feel
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onTabSelected(key) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = title,
+                            color = textColor,
+                            fontSize = 15.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            letterSpacing = 0.1.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
