@@ -301,6 +301,22 @@
         </div>
     </div>
 
+    {{-- Real-time content updates (Reverb). No-op unless BROADCAST_CONNECTION=reverb. --}}
+    @php($reverb = config('broadcasting.connections.reverb'))
+    <script>
+        window.HaraanRealtime = {
+            enabled: {{ config('broadcasting.default') === 'reverb' ? 'true' : 'false' }},
+            key: @json($reverb['key'] ?? null),
+            host: @json($reverb['options']['host'] ?? null),
+            port: {{ (int) ($reverb['options']['port'] ?? 443) }},
+            scheme: @json($reverb['options']['scheme'] ?? 'https'),
+        };
+    </script>
+    @if(config('broadcasting.default') === 'reverb')
+        <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
+        <script src="{{ asset('js/realtime.js') }}?v={{ time() }}"></script>
+    @endif
+
     <script src="{{ asset('js/site.js') }}?v={{ time() }}"></script>
     @if(session('show_login'))
         <script>
