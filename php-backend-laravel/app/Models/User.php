@@ -5,7 +5,13 @@ declare(strict_types=1);
 namespace App\Models;
 
 use Database\Factories\UserFactory;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -29,12 +35,60 @@ use Spatie\Permission\Traits\HasRoles;
  * @property-read \Illuminate\Database\Eloquent\Collection<Event>   $events
  * @property-read \Illuminate\Database\Eloquent\Collection<Booking> $bookings
  */
-class User extends Authenticatable
+class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory;
     use Notifiable;
     use HasRoles;
+
+    /** Super-admins see every workspace. */
+    private const SUPER_ROLES = ['ADMIN', 'COADMIN'];
+
+    /** Department roles → the workspaces they may manage. */
+    private const DEPT_ROLES = ['FINANCE', 'MARKETING', 'OPS', 'PARTNER'];
+
+    /** Which roles may manage each workspace key. */
+    private const WORKSPACE_ROLES = [
+        'finance' => ['FINANCE'],
+        'marketing' => ['MARKETING'],
+        'gamehub' => ['OPS', 'PARTNER'],
+        'events' => ['OPS'],
+        'admin' => [], // super-admin only (People / System)
+    ];
+
+    /** True if this user holds the given role under either role scheme. */
+    public function hasRoleEither(array $roles): bool
+    {
+        if ($roles === []) {
+            return false;
+        }
+        $legacy = in_array(strtoupper((string) ($this->role ?? '')), array_map('strtoupper', $roles), true);
+        $spatie = method_exists($this, 'hasAnyRole') && $this->hasAnyRole($roles);
+
+        return $legacy || $spatie;
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->hasRoleEither(self::SUPER_ROLES);
+    }
+
+    /** Can this user manage a given workspace? Super-admins can manage all. */
+    public function canManage(string $workspace): bool
+    {
+        return $this->isSuperAdmin()
+            || $this->hasRoleEither(self::WORKSPACE_ROLES[$workspace] ?? []);
+    }
+
+    /**
+     * Gate the Filament admin panel: super-admins or any department role get in;
+     * the per-workspace clusters then decide what each role actually sees.
+     */
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return $this->isSuperAdmin() || $this->hasRoleEither(self::DEPT_ROLES);
+    }
 
     protected $fillable = [
         'player_id',
@@ -44,6 +98,7 @@ class User extends Authenticatable
         'phone',
         'avatar',
         'role',
+        'organization_id',
         'status',
         'partner_type',
         'event_host_id',
@@ -54,6 +109,13 @@ class User extends Authenticatable
         'state',
         'batting_style',
         'bowling_style',
+        'gender',
+        'date_of_birth',
+        'birth_place',
+        'height',
+        'nationality',
+        'primary_sport',
+        'sport_attributes',
         'career_runs',
         'career_balls',
         'career_matches',
@@ -63,7 +125,48 @@ class User extends Authenticatable
         'rank_district',
         'rank_state',
         'rank_country',
+        'ranked_xp',
+        'casual_xp',
+        'trust_score',
+        'is_organizer',
     ];
+
+    /**
+     * Whether this user has a complete ActionBoard player profile — the
+     * prerequisite for any ranked action (create/confirm/verify a match).
+     */
+    /**
+     * Required sport_attributes keys per primary sport. Adding a sport is data-only — no
+     * migration — because the attributes live in the `sport_attributes` JSON bag.
+     */
+    public const SPORT_REQUIRED_ATTRS = [
+        'Cricket'    => ['role', 'batting', 'bowling'],
+        'Football'   => ['position', 'foot'],
+        'Badminton'  => ['format', 'hand'],
+        'Basketball' => ['position', 'hand'],
+    ];
+
+    public function isActionboardProfileComplete(): bool
+    {
+        if ($this->is_guest) {
+            return false;
+        }
+
+        foreach (['name', 'state', 'district', 'primary_sport'] as $field) {
+            if (empty($this->{$field})) {
+                return false;
+            }
+        }
+
+        $attrs = $this->sport_attributes ?? [];
+        foreach (self::SPORT_REQUIRED_ATTRS[$this->primary_sport] ?? [] as $key) {
+            if (empty($attrs[$key])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     public static function generatePlayerId($state, $district, $userId): string
     {
@@ -140,6 +243,8 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'app_authentication_secret',
+        'app_authentication_recovery_codes',
     ];
 
     /** @return array<string, string> */
@@ -148,7 +253,42 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password'          => 'hashed',
+            'date_of_birth'     => 'date',
+            'sport_attributes'  => 'array',
+            'app_authentication_secret' => 'encrypted',
+            'app_authentication_recovery_codes' => 'encrypted:array',
         ];
+    }
+
+    // -------------------------------------------------------------------------
+    //  Two-factor (app authenticator / TOTP) — Filament MFA
+    // -------------------------------------------------------------------------
+
+    public function getAppAuthenticationSecret(): ?string
+    {
+        return $this->app_authentication_secret;
+    }
+
+    public function saveAppAuthenticationSecret(?string $secret): void
+    {
+        $this->app_authentication_secret = $secret;
+        $this->save();
+    }
+
+    public function getAppAuthenticationHolderName(): string
+    {
+        return $this->email ?? $this->name ?? 'Haraan';
+    }
+
+    public function getAppAuthenticationRecoveryCodes(): ?array
+    {
+        return $this->app_authentication_recovery_codes;
+    }
+
+    public function saveAppAuthenticationRecoveryCodes(?array $codes): void
+    {
+        $this->app_authentication_recovery_codes = $codes;
+        $this->save();
     }
 
     // -------------------------------------------------------------------------
@@ -167,14 +307,54 @@ class User extends Authenticatable
         return $this->hasMany(Booking::class);
     }
 
-    /** Organization units this user belongs to. */
-    public function organizations()
+    /** Organization units this user belongs to (pivot: designation, is_primary). */
+    public function organizations(): BelongsToMany
     {
         return $this->belongsToMany(
-            \App\Models\OrganizationUnit::class,
+            OrganizationUnit::class,
             'user_organization_map',
             'user_id',
             'organization_id'
-        );
+        )->withPivot(['designation', 'is_primary'])->withTimestamps();
+    }
+
+    /** This user's home/primary organization unit (the future tenant key). */
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(OrganizationUnit::class, 'organization_id');
+    }
+
+    /**
+     * Organization ids this admin is scoped to within the control panel, or null
+     * if unrestricted. Lockout-proof by design:
+     *   - super_admin             → null (sees everything)
+     *   - no org assigned at all   → null (preserves pre-tenancy behavior)
+     *   - has org(s)               → that org subtree (home org + pivot orgs, each
+     *                                expanded to descendants)
+     * This only drives Filament resource queries — it never touches the mobile API.
+     *
+     * @return array<int>|null
+     */
+    public function scopedOrganizationIds(): ?array
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        $roots = collect([$this->organization_id])
+            ->merge($this->organizations->pluck('id'))
+            ->filter()
+            ->unique();
+
+        if ($roots->isEmpty()) {
+            return null;
+        }
+
+        return OrganizationUnit::whereIn('id', $roots->all())
+            ->get()
+            ->flatMap->descendantAndSelfIds()
+            ->unique()
+            ->values()
+            ->all();
     }
 }

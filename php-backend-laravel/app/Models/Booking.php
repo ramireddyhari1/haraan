@@ -37,6 +37,7 @@ final class Booking extends Model
         'discount',
         'user_id',
         'event_id',
+        'organization_id',
     ];
 
     /** @return array<string, string> */
@@ -64,5 +65,11 @@ final class Booking extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(OrganizationUnit::class, 'organization_id');
     }
 }

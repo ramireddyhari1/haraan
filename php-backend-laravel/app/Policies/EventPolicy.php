@@ -4,41 +4,72 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use Illuminate\Foundation\Auth\User as AuthUser;
 use App\Models\Event;
-use App\Models\User;
+use Illuminate\Auth\Access\HandlesAuthorization;
 
-final class EventPolicy
+class EventPolicy
 {
-    public function viewAny(User $user): bool
+    use HandlesAuthorization;
+    
+    public function viewAny(AuthUser $authUser): bool
     {
-        return $user->can('events.view') || $user->can('events.edit') || $this->isLegacyAdmin($user);
+        return $authUser->can('ViewAny:Event');
     }
 
-    public function create(User $user): bool
+    public function view(AuthUser $authUser, Event $event): bool
     {
-        return $user->can('events.create') || $this->isLegacyAdmin($user);
+        return $authUser->can('View:Event');
     }
 
-    public function update(User $user, Event $event): bool
+    public function create(AuthUser $authUser): bool
     {
-        if ($user->can('events.edit') || $this->isLegacyAdmin($user)) {
-            return true;
-        }
-
-        return (int) $event->partner_id === (int) $user->id && $user->can('events.edit.own');
+        return $authUser->can('Create:Event');
     }
 
-    public function delete(User $user, Event $event): bool
+    public function update(AuthUser $authUser, Event $event): bool
     {
-        if ($user->can('events.delete') || $this->isLegacyAdmin($user)) {
-            return true;
-        }
-
-        return (int) $event->partner_id === (int) $user->id && $user->can('events.delete.own');
+        return $authUser->can('Update:Event');
     }
 
-    private function isLegacyAdmin(User $user): bool
+    public function delete(AuthUser $authUser, Event $event): bool
     {
-        return in_array(strtoupper((string) $user->role), ['ADMIN', 'COADMIN'], true);
+        return $authUser->can('Delete:Event');
     }
+
+    public function deleteAny(AuthUser $authUser): bool
+    {
+        return $authUser->can('DeleteAny:Event');
+    }
+
+    public function restore(AuthUser $authUser, Event $event): bool
+    {
+        return $authUser->can('Restore:Event');
+    }
+
+    public function forceDelete(AuthUser $authUser, Event $event): bool
+    {
+        return $authUser->can('ForceDelete:Event');
+    }
+
+    public function forceDeleteAny(AuthUser $authUser): bool
+    {
+        return $authUser->can('ForceDeleteAny:Event');
+    }
+
+    public function restoreAny(AuthUser $authUser): bool
+    {
+        return $authUser->can('RestoreAny:Event');
+    }
+
+    public function replicate(AuthUser $authUser, Event $event): bool
+    {
+        return $authUser->can('Replicate:Event');
+    }
+
+    public function reorder(AuthUser $authUser): bool
+    {
+        return $authUser->can('Reorder:Event');
+    }
+
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BroadcastsContentChanges;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,7 +39,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 final class Event extends Model
 {
+    use BroadcastsContentChanges;
     use HasFactory;
+
+    /** Clients refetch event lists when an event changes. */
+    protected string $contentDomain = 'events';
 
     protected $fillable = [
         'title',
@@ -57,6 +62,7 @@ final class Event extends Model
         'images',
         'status',
         'partner_id',
+        'organization_id',
         'seat_rows',
         'seats_per_row',
         'seat_selection',
@@ -85,6 +91,12 @@ final class Event extends Model
     public function partner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'partner_id');
+    }
+
+    /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(OrganizationUnit::class, 'organization_id');
     }
 
     /** All bookings placed for this event. */
