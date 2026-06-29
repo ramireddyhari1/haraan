@@ -13,6 +13,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        // 127.0.0.1 + `adb reverse tcp:8000 tcp:8000` reaches the host's Laravel server
+        // over USB from BOTH the emulator and a physical device (10.0.2.2 was emulator-only).
+        buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:8000\"")
     }
 
     buildTypes {
@@ -28,7 +31,7 @@ android {
     buildFeatures {
       compose = true
       aidl = false
-      buildConfig = false
+      buildConfig = true
       shaders = false
     }
 
@@ -86,4 +89,6 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
   // Security crypto for EncryptedSharedPreferences
   implementation("androidx.security:security-crypto:1.1.0")
+  // WebSocket client for realtime content updates (Reverb / Pusher protocol)
+  implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

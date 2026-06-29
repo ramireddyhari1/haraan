@@ -35,8 +35,25 @@ final class ConfigController extends Controller
         return response()->json([
             'features' => $features,
             'theme' => $this->theme(),
+            'realtime' => $this->realtime(),
             'server_time' => now()->toIso8601String(),
         ]);
+    }
+
+    /** Where/whether the client should open a realtime (Reverb) connection. */
+    private function realtime(): array
+    {
+        $enabled = config('broadcasting.default') === 'reverb';
+        $reverb = config('broadcasting.connections.reverb');
+
+        return [
+            'enabled' => $enabled,
+            'key' => $enabled ? ($reverb['key'] ?? null) : null,
+            'host' => $reverb['options']['host'] ?? null,
+            'port' => (int) ($reverb['options']['port'] ?? 443),
+            'scheme' => $reverb['options']['scheme'] ?? 'https',
+            'channel' => 'content',
+        ];
     }
 
     /** Branding settings, with the logo path resolved to a public URL. */

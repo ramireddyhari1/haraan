@@ -19,10 +19,21 @@ data class AppTheme(
     val supportWhatsapp: String? = null,
 )
 
-/** Resolved remote config: feature flags + theme. */
+/** Where/whether to open a realtime (Reverb) connection. */
+data class RealtimeConfig(
+    val enabled: Boolean = false,
+    val key: String? = null,
+    val host: String? = null,
+    val port: Int = 443,
+    val scheme: String = "https",
+    val channel: String = "content",
+)
+
+/** Resolved remote config: feature flags + theme + realtime endpoint. */
 data class RemoteConfig(
     val features: Map<String, Boolean> = emptyMap(),
     val theme: AppTheme = AppTheme(),
+    val realtime: RealtimeConfig = RealtimeConfig(),
 )
 
 /**
@@ -57,6 +68,9 @@ class RemoteConfigRepository(private val baseUrl: String = ApiConfig.BASE_URL) {
             val t = root.optJSONObject("theme") ?: JSONObject()
             fun str(k: String) = t.optString(k).takeIf { it.isNotBlank() && it != "null" }
 
+            val rt = root.optJSONObject("realtime") ?: JSONObject()
+            fun rtStr(k: String) = rt.optString(k).takeIf { it.isNotBlank() && it != "null" }
+
             RemoteConfig(
                 features = features,
                 theme = AppTheme(
@@ -66,6 +80,14 @@ class RemoteConfigRepository(private val baseUrl: String = ApiConfig.BASE_URL) {
                     accentColor = str("accent_color"),
                     logo = str("logo"),
                     supportWhatsapp = str("support_whatsapp"),
+                ),
+                realtime = RealtimeConfig(
+                    enabled = rt.optBoolean("enabled", false),
+                    key = rtStr("key"),
+                    host = rtStr("host"),
+                    port = rt.optInt("port", 443),
+                    scheme = rt.optString("scheme", "https"),
+                    channel = rt.optString("channel", "content"),
                 ),
             )
         } catch (_: Exception) {
