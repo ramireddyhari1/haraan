@@ -64,6 +64,43 @@
                 })
                 .catch(function () { /* ignore */ });
         });
+
+        // 3) Default UX: a non-disruptive "refresh" nudge, unless the page has
+        //    opted out (<body data-realtime-toast="off">) — e.g. because it
+        //    handles updates itself via the DOM event / tagged widgets.
+        if (document.body.getAttribute('data-realtime-toast') !== 'off') {
+            showToast();
+        }
+    }
+
+    function showToast() {
+        if (document.getElementById('haraan-rt-toast')) return; // already shown
+
+        var bar = document.createElement('div');
+        bar.id = 'haraan-rt-toast';
+        bar.setAttribute('role', 'status');
+        bar.style.cssText = [
+            'position:fixed', 'left:50%', 'bottom:24px', 'transform:translateX(-50%)',
+            'z-index:9999', 'display:flex', 'align-items:center', 'gap:12px',
+            'padding:10px 16px', 'border-radius:9999px',
+            'background:#111827', 'color:#fff', 'font:500 14px/1.2 system-ui,sans-serif',
+            'box-shadow:0 6px 24px rgba(0,0,0,.25)',
+        ].join(';');
+
+        var label = document.createElement('span');
+        label.textContent = 'New updates available';
+
+        var btn = document.createElement('button');
+        btn.textContent = 'Refresh';
+        btn.style.cssText = [
+            'border:0', 'cursor:pointer', 'padding:6px 14px', 'border-radius:9999px',
+            'background:#16a34a', 'color:#fff', 'font:600 14px/1 system-ui,sans-serif',
+        ].join(';');
+        btn.addEventListener('click', function () { window.location.reload(); });
+
+        bar.appendChild(label);
+        bar.appendChild(btn);
+        document.body.appendChild(bar);
     }
 
     channel.bind('content.updated', function (data) {
