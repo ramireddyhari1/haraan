@@ -1,0 +1,77 @@
+package com.example.thanna.data.network
+
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+
+/** Standard Laravel `{ "data": ... }` envelope used by the public read endpoints. */
+@JsonClass(generateAdapter = true)
+data class DataEnvelope<T>(val data: T?)
+
+// ---- Venues (GET /api/venues, GET /api/venues/{id}) ----
+
+@JsonClass(generateAdapter = true)
+data class VenueCardDto(
+    val id: Long,
+    val name: String,
+    val category: String?,
+    val location: String?,
+    val distance: String?,
+    val price: Int = 0,
+    val rating: String?,
+    @Json(name = "is_bookable") val isBookable: Boolean = true,
+    @Json(name = "is_featured") val isFeatured: Boolean = false,
+    val image: String?,
+    val tagline: String?,
+)
+
+@JsonClass(generateAdapter = true)
+data class VenueDetailDto(
+    val id: Long,
+    val name: String,
+    val category: String?,
+    val location: String?,
+    val distance: String?,
+    val price: Int = 0,
+    val rating: String?,
+    @Json(name = "is_bookable") val isBookable: Boolean = true,
+    @Json(name = "is_featured") val isFeatured: Boolean = false,
+    val image: String?,
+    val tagline: String?,
+    val about: String?,
+    val amenities: List<String> = emptyList(),
+    val images: List<String> = emptyList(),
+    val slots: List<VenueSlotDto> = emptyList(),
+    val reviews: List<VenueReviewDto> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class VenueSlotDto(
+    val day: String?,
+    val time: String?,
+    val available: Boolean = true,
+    @Json(name = "filling_fast") val fillingFast: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class VenueReviewDto(
+    val name: String?,
+    val rating: Int = 5,
+    val text: String?,
+    val avatar: String?,
+    val ago: String?,
+)
+
+// ---- Home content (GET /api/ads) ----
+
+@JsonClass(generateAdapter = true)
+data class AdDto(
+    val id: Long,
+    val sponsor: String?,
+    val title: String?,
+    val subtitle: String?,
+    val image: String?,
+    val logo: String?,
+    @Json(name = "cta_text") val ctaText: String?,
+    @Json(name = "cta_url") val ctaUrl: String?,
+    val placement: String?,
+)

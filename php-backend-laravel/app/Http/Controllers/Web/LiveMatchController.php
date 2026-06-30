@@ -222,6 +222,9 @@ class LiveMatchController extends Controller
 
         if (in_array(strtolower($validated['status']), ['completed', 'finished'])) {
             \App\Services\PlayerStatsService::freezeMatchStats($match);
+            // Hand off into ActionBoard verification: auto-verify Haraan turf
+            // matches, else open the captain-confirmation window.
+            \App\Services\VenueVerificationService::onMatchCompleted($match);
         }
 
         if ($request->wantsJson()) {

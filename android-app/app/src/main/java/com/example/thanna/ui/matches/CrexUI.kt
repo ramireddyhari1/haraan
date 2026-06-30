@@ -18,122 +18,473 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.nativeCanvas
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.delay
 
 // ─────────────────────────────────────────────
 //  DESIGN TOKENS
 // ─────────────────────────────────────────────
 object CrexColors {
-    val Background      = Color(0xFF0A0E14) // bg-main
-    val Surface         = Color(0xFF1C2229) // bg-card
-    val SurfaceElevated = Color(0xFF1C2229) 
-    val Border          = Color(0x1AFFFFFF) // outline-subtle
-    val AccentGreen     = Color(0xFF38BDF8) // accent-blue (mapped from green)
-    val AccentYellow    = Color(0xFFFACC15) // accent-gold
-    val AccentRed       = Color(0xFFF87171) // accent-coral
-    val AccentBlue      = Color(0xFF38BDF8) // accent-blue
-    val TextPrimary     = Color(0xFFFFFFFF) // text-primary
-    val TextSecondary   = Color(0xFFA0A5AD) // text-secondary
-    val TextMuted       = Color(0xFF76777D)
-    val LivePulse       = Color(0xFFF87171) // accent-coral
-    val SixBall         = Color(0xFFFACC15) // accent-gold
-    val FourBall        = Color(0xFF38BDF8) // accent-blue
-    val WicketBall      = Color(0xFFF87171) // accent-coral
-    val DotBall         = Color(0xFF37474F)
-    val NormalBall      = Color(0xFF546E7A)
+    val Background      = Color(0xFFF4F7FB) // Custom premium slate-tinted background (was 0xFF0A0E14)
+    val Surface         = Color(0xFFFFFFFF) // Pure white cards (was 0xFF1C2229)
+    val SurfaceElevated = Color(0xFFFFFFFF) 
+    val Border          = Color(0xFFE2E8F0) // Clean divider borders (was 0x1AFFFFFF)
+    val AccentGreen     = Color(0xFF00C853) // Haraan Green/Mint
+    val AccentYellow    = Color(0xFFF59E0B) // Gold/Amber
+    val AccentRed       = Color(0xFFEF4444) // Red/Coral
+    val AccentBlue      = Color(0xFF2563EB) // Brand blue
+    val TextPrimary     = Color(0xFF0F172A) // Midnight slate (was 0xFFFFFFFF)
+    val TextSecondary   = Color(0xFF475569) // Cool grey (was 0xFFA0A5AD)
+    val TextMuted       = Color(0xFF94A3B8) // Slate 400 (was 0xFF76777D)
+    val LivePulse       = Color(0xFFEF4444)
+    val SixBall         = Color(0xFFF59E0B)
+    val FourBall        = Color(0xFF2563EB)
+    val WicketBall      = Color(0xFFEF4444)
+    val DotBall         = Color(0xFFE2E8F0)
+    val NormalBall      = Color(0xFFCBD5E1)
+}
+
+@Composable
+fun TeamLogo(team: String, logoUrl: String, modifier: Modifier = Modifier) {
+    // logoUrl may be an uploaded image URL, a default emblem key (action1..4), or blank.
+    val emblemRes = com.example.thanna.ui.matches.create.emblemDrawableFor(logoUrl)
+    // Frame uploaded photos / emblems in a white roundel with a defined ring, so a logo with
+    // a light background reads as a distinct crest against the card instead of blending in.
+    if (logoUrl.startsWith("http", ignoreCase = true)) {
+        Box(
+            modifier = modifier
+                .clip(CircleShape)
+                .background(Color.White)
+                .border(1.dp, Color(0xFFCBD5E1), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            coil.compose.AsyncImage(
+                model = logoUrl,
+                contentDescription = team,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+        }
+        return
+    }
+    if (emblemRes != null) {
+        Box(
+            modifier = modifier
+                .clip(CircleShape)
+                .background(Color.White)
+                .border(1.dp, Color(0xFFCBD5E1), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(emblemRes),
+                contentDescription = team,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+        }
+        return
+    }
+    val (bgColor, textColor) = when (team.uppercase()) {
+        "GT"  -> Color(0xFF1B3F9E) to Color.White
+        "RCB" -> Color(0xFF8B0000) to Color(0xFFFFD700)
+        "RR"  -> Color(0xFF862D86) to Color(0xFFFFC0CB)
+        "MI"  -> Color(0xFF005DA0) to Color(0xFFFFD700)
+        "CSK" -> Color(0xFFF5A623) to Color(0xFF003E7E)
+        "SRH" -> Color(0xFFEF5C1B) to Color.White
+        "KKR" -> Color(0xFF3B1F6B) to Color(0xFFFFD700)
+        "DC"  -> Color(0xFF004C97) to Color(0xFFEF1C21)
+        "PBKS"-> Color(0xFFCC0001) to Color(0xFFFDB913)
+        "PAK" -> Color(0xFF115740) to Color.White
+        "AUS" -> Color(0xFF00843D) to Color(0xFFFFCD00)
+        "IND" -> Color(0xFF003580) to Color(0xFFFF9933)
+        else  -> Color(0xFF1B3F9E) to Color.White
+    }
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(bgColor)
+            .border(1.dp, Color(0x22FFFFFF), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = team.take(3),
+            color = textColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+    }
+}
+
+/**
+ * Guard against impossible scores reaching the hero (demo runaways / bad backend rows).
+ * Clamps wickets to 0..10 so "504/30" can only ever render as "504/10".
+ */
+fun sanitizeScore(raw: String): String {
+    val slash = raw.indexOf('/')
+    if (slash < 0) return raw
+    val runs = raw.substring(0, slash).trim()
+    // Keep any trailing suffix (e.g. " (19.2)") that may follow the wickets.
+    val rest = raw.substring(slash + 1).trim()
+    val wktsStr = rest.takeWhile { it.isDigit() }
+    val wkts = wktsStr.toIntOrNull() ?: return raw
+    val suffix = rest.removePrefix(wktsStr)
+    return "$runs/${wkts.coerceAtMost(10)}$suffix"
+}
+
+/**
+ * Compact team code for the hero card, derived from whatever name the backend sends.
+ * Multi-word names → initials ("Royal Strikers" → "RS"). Single mashed names get split
+ * on common South-Indian place suffixes so e.g. "keerthipalle" → "KP", "payasampalle" →
+ * "PP". Anything already short (≤4 chars, all caps) is passed through untouched, so a
+ * code the server already shortened stays as-is.
+ */
+fun teamShortCode(raw: String): String {
+    val name = raw.trim()
+    if (name.isEmpty()) return "?"
+    if (name.length <= 4 && name == name.uppercase()) return name
+
+    val words = name.split(Regex("[\\s\\-_]+")).filter { it.isNotBlank() }
+    if (words.size >= 2) {
+        return words.take(4).joinToString("") { it.first().uppercaseChar().toString() }
+    }
+
+    val w = words.first().lowercase().filter { it.isLetterOrDigit() }
+    val suffixes = listOf(
+        "palle", "palli", "pally", "halli", "nagaram", "nagar", "puram", "palem",
+        "valasa", "cherla", "konda", "gudem", "peta", "pet", "wada", "vada",
+        "giri", "puri", "pur", "bad"
+    )
+    for (suf in suffixes) {
+        if (w.length > suf.length + 1 && w.endsWith(suf)) {
+            val stem = w.dropLast(suf.length)
+            return (stem.first().uppercaseChar().toString() + suf.first().uppercaseChar()).take(3)
+        }
+    }
+    return w.take(3).uppercase()
+}
+
+/** Real team crest from bundled assets (logos/{code}.png) on a white roundel; monogram fallback. */
+@Composable
+fun HeroCrest(monogram: String, modifier: Modifier = Modifier, iconRef: String = "") {
+    val context = LocalContext.current
+    // A team icon chosen at create time wins: a default emblem key (action1..4) maps to a
+    // bundled image; an uploaded logo arrives as an http URL.
+    val emblemRes = com.example.thanna.ui.matches.create.emblemDrawableFor(iconRef)
+    val code = monogram.lowercase().take(3)
+    val bitmap = remember(code) {
+        runCatching {
+            context.assets.open("logos/$code.png").use { BitmapFactory.decodeStream(it) }?.asImageBitmap()
+        }.getOrNull()
+    }
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color.White)
+            .border(1.5.dp, Color(0xFFCBD5E1), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            emblemRes != null -> androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(emblemRes),
+                contentDescription = monogram,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+            iconRef.startsWith("http", ignoreCase = true) -> coil.compose.AsyncImage(
+                model = iconRef,
+                contentDescription = monogram,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+            bitmap != null -> androidx.compose.foundation.Image(
+                bitmap = bitmap,
+                contentDescription = monogram,
+                modifier = Modifier.fillMaxSize().padding(7.dp),
+                contentScale = ContentScale.Fit
+            )
+            else -> Text(monogram.take(3), color = CrexColors.AccentBlue, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+
+@Composable
+private fun HeroTeamColumn(
+    modifier: Modifier,
+    monogram: String,
+    score: String,
+    overs: String,
+    runsColor: Color,
+    wktColor: Color,
+    alignEnd: Boolean,
+    iconRef: String = ""
+) {
+    val align = if (alignEnd) Alignment.End else Alignment.Start
+    // Always render a compact code in the hero — never the long raw team name.
+    val code = teamShortCode(monogram)
+    Column(modifier = modifier, horizontalAlignment = align) {
+        HeroCrest(code, Modifier.size(42.dp), iconRef = iconRef)
+        Spacer(Modifier.height(8.dp))
+        Text(code, color = Color(0xFF1E293B), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(2.dp))
+        val slash = score.indexOf('/')
+        val runs = if (slash >= 0) score.substring(0, slash) else score
+        val wkts = if (slash >= 0) score.substring(slash) else ""
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                runs, color = runsColor, fontSize = 34.sp,
+                fontFamily = com.example.thanna.theme.ArchivoDisplay,
+                letterSpacing = (-1).sp,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+            )
+            if (wkts.isNotEmpty()) {
+                Text(
+                    wkts, color = wktColor, fontSize = 18.sp,
+                    fontFamily = com.example.thanna.theme.ArchivoDisplay,
+                    modifier = Modifier.padding(bottom = 3.dp),
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(overs, color = Color(0xFF64748B), fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun HeroLastBall(state: MatchUiState) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 6.dp)
+    ) {
+        Text(
+            "LAST BALL",
+            color = Color(0xFF334155).copy(alpha = 0.5f),
+            fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        val lastBall = state.thisOver.lastOrNull() ?: "•"
+        val c = when (lastBall) {
+            "6" -> CrexColors.SixBall
+            "4" -> CrexColors.AccentGreen
+            "W" -> CrexColors.WicketBall
+            "•", "0" -> Color(0xFF0F172A).copy(alpha = 0.25f)
+            else -> Color(0xFF0F172A)
+        }
+        Box(contentAlignment = Alignment.Center) {
+            Text(lastBall, color = c.copy(alpha = 0.12f), fontSize = 56.sp, fontWeight = FontWeight.Black)
+            Text(lastBall, color = c, fontSize = 38.sp, fontWeight = FontWeight.Black)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier.size(30.dp).clip(CircleShape).background(Color(0xFF1E293B)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("VS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun HeroStat(label: String, value: String) {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = Color(0xFF64748B), fontWeight = FontWeight.Medium)) { append("$label ") }
+            withStyle(SpanStyle(color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)) { append(value) }
+        },
+        fontSize = 10.sp
+    )
 }
 
 // ─────────────────────────────────────────────
 //  1. LIVE SCORE CARD
 // ─────────────────────────────────────────────
 @Composable
-fun LiveScoreCard(modifier: Modifier = Modifier) {
+fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
+    val breathe = rememberInfiniteTransition(label = "breathe")
+    val glow by breathe.animateFloat(
+        initialValue = 0.15f, targetValue = 0.40f,
+        animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+        label = "glow"
+    )
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(CrexColors.Background)
-            .padding(top = 16.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom // Align bottom to push LBW check down
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Team logo
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("🇵🇰", fontSize = 24.sp)
-                }
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("PAK", color = CrexColors.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(CrexColors.AccentRed.copy(alpha = 0.2f))
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            Text("PP", color = CrexColors.AccentRed, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("137-7", color = CrexColors.AccentBlue, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        Text("32.0", color = CrexColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-                    }
-                }
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                // Not mapping volume_off icon right now, just skipping or adding a generic icon
-                Spacer(modifier = Modifier.height(28.dp)) // Increased space on top
-                Box(modifier = Modifier.drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, 0f), end = Offset(0f, size.height), strokeWidth = 1.dp.toPx()) }.padding(start = 16.dp)) {
-                    Text("LBW Check", color = CrexColors.AccentYellow, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, style = androidx.compose.ui.text.TextStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, letterSpacing = (-1).sp))
-                }
-            }
-        }
-        
-        // Run Rate Row
-        Box(
+      val band = 18.dp
+      Box(modifier = Modifier.fillMaxWidth()) {
+        // White label band behind the card — the host for the scrolling event ribbon
+        Spacer(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(RoundedCornerShape(26.dp))
+                .background(Color.White)
+                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(26.dp))
+        )
+        // Gradient hero card, inset by `band` so the white ring shows around it
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, 0f), end = Offset(size.width, 0f), strokeWidth = 1.dp.toPx()) }
-                .padding(top = 10.dp, bottom = 4.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(
-                        androidx.compose.ui.text.buildAnnotatedString {
-                            append("CRR: ")
-                            withStyle(SpanStyle(color = CrexColors.TextPrimary)) { append("4.28") }
-                        },
-                        color = CrexColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium
+                .padding(band)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFFD3EAF8), Color(0xFFAFD2EC))
                     )
-                    Text(
-                        androidx.compose.ui.text.buildAnnotatedString {
-                            append("RRR: ")
-                            withStyle(SpanStyle(color = CrexColors.TextPrimary)) { append("5.28") }
-                        },
-                        color = CrexColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium
+                )
+                .padding(horizontal = 18.dp, vertical = 14.dp)
+        ) {
+                // Meta line — real format/status, no placeholders.
+                Text(
+                    text = state.competition.ifBlank { if (state.isLive) "Live" else state.status.ifBlank { "Match" } },
+                    color = Color(0xFF334155).copy(alpha = 0.78f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Teams and Scores row — each side shows its own real score. `score` is the
+                // batting side; `opponentScore` is the other. Overs only show for the side
+                // that's actually batting.
+                val battingIsTeam2 = state.battingTeam == 2
+                val team1Score = sanitizeScore(if (battingIsTeam2) state.opponentScore else state.score)
+                val team2Score = sanitizeScore(if (battingIsTeam2) state.score else state.opponentScore)
+                val oversLabel = if (state.overs.isNotBlank()) "${state.overs} ov" else ""
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    HeroTeamColumn(
+                        modifier = Modifier.weight(1f),
+                        monogram = state.team1,
+                        score = team1Score,
+                        overs = if (battingIsTeam2) "" else oversLabel,
+                        runsColor = Color(0xFF0D47A1),
+                        wktColor = Color(0xFF0D47A1).copy(alpha = 0.42f),
+                        alignEnd = false,
+                        iconRef = state.team1Logo
+                    )
+
+                    HeroLastBall(state = state)
+
+                    HeroTeamColumn(
+                        modifier = Modifier.weight(1f),
+                        monogram = state.team2,
+                        score = team2Score,
+                        overs = if (battingIsTeam2) oversLabel else "",
+                        runsColor = Color(0xFF475569),
+                        wktColor = Color(0xFF94A3B8),
+                        alignEnd = true,
+                        iconRef = state.team2Logo
                     )
                 }
-                Text(
-                    androidx.compose.ui.text.buildAnnotatedString {
-                        append("Target: ")
-                        withStyle(SpanStyle(color = CrexColors.TextPrimary)) { append("232") }
-                    },
-                    color = CrexColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium
-                )
-            }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // CRR, RRR, Toss info row — only render stats we actually have.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (state.crr.isNotBlank()) HeroStat("CRR", state.crr)
+                        if (state.rrr.isNotEmpty()) HeroStat("RRR", state.rrr)
+                    }
+                    if (state.toss.isNotBlank()) HeroStat("TOSS", state.toss)
+                }
+
         }
+        ScoringRibbon(modifier = Modifier.matchParentSize(), state = state, band = band)
+      }
     }
+}
+
+/**
+ * Scrolling event word-mark that wraps the white band around the hero card, rotated per edge.
+ * FOUR/SIX render green, WICKET red; otherwise a calm grey "HARAAN LIVE".
+ */
+@Composable
+private fun ScoringRibbon(modifier: Modifier = Modifier, state: MatchUiState, band: Dp) {
+    // The ribbon shows the boundary/wicket word while the MOST RECENT ball is a 4/6/W,
+    // and reverts to the calm grey "HARAAN LIVE" on the next (non-boundary) ball.
+    val (word, argb) = when (state.thisOver.lastOrNull()) {
+        "6" -> "SIX" to android.graphics.Color.rgb(22, 163, 74)
+        "4" -> "FOUR" to android.graphics.Color.rgb(37, 99, 235)
+        "W" -> "WICKET" to android.graphics.Color.rgb(214, 40, 40)
+        else -> "HARAAN  LIVE" to android.graphics.Color.argb(135, 100, 116, 139)
+    }
+
+    // Calm continuous crawl…
+    val transition = rememberInfiniteTransition(label = "ribbon")
+    val basePhase by transition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
+        label = "phase"
+    )
+    // …plus a one-shot fast burst + haptic synced to each new ball outcome.
+    val boost = remember { Animatable(0f) }
+    val view = LocalView.current
+    var firstRun by remember { mutableStateOf(true) }
+    LaunchedEffect(state.thisOver) {
+        if (firstRun) { firstRun = false; return@LaunchedEffect }
+        when (state.thisOver.lastOrNull()) {
+            "4" -> { fireScoreHaptic(view, wicket = false); boost.animateTo(boost.value + 2.2f, tween(950, easing = FastOutSlowInEasing)) }
+            "6" -> { fireScoreHaptic(view, wicket = false); delay(80); fireScoreHaptic(view, wicket = false); boost.animateTo(boost.value + 3.0f, tween(1100, easing = FastOutSlowInEasing)) }
+            "W" -> { fireScoreHaptic(view, wicket = true); boost.animateTo(boost.value + 2.6f, tween(1000, easing = FastOutSlowInEasing)) }
+            else -> {}
+        }
+        // Keep the accumulated offset bounded (period = 1 segment) so it never drifts off-path.
+        boost.snapTo(boost.value.mod(1f))
+    }
+
+    Canvas(modifier = modifier) {
+        val center = band.toPx() / 2f
+        val radius = (26.dp.toPx() - center).coerceAtLeast(0f)
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = argb
+            textSize = 10.5.dp.toPx()
+            letterSpacing = 0.1f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT_BOLD, android.graphics.Typeface.BOLD)
+        }
+        val segment = "$word        "
+        val segWidth = paint.measureText(segment).coerceAtLeast(1f)
+        val perimeter = 2f * ((size.width - 2 * center) + (size.height - 2 * center))
+        val count = (perimeter / segWidth).toInt().coerceIn(2, 80) + 2
+        val text = segment.repeat(count)
+        val path = android.graphics.Path().apply {
+            addRoundRect(
+                center, center, size.width - center, size.height - center,
+                radius, radius, android.graphics.Path.Direction.CW
+            )
+        }
+        val fm = paint.fontMetrics
+        val vOffset = -(fm.ascent + fm.descent) / 2f  // centre the glyphs on the path line
+        // Wrap the offset into one segment period so the repeated text always fully covers the path.
+        val phase = (basePhase + boost.value).mod(1f)
+        drawContext.canvas.nativeCanvas.drawTextOnPath(text, path, -phase * segWidth, vOffset, paint)
+    }
+}
+
+/** Boundary = crisp confirm tick; wicket = sharp reject buzz. Falls back on pre-API-30. */
+private fun fireScoreHaptic(view: android.view.View, wicket: Boolean) {
+    val constant = if (android.os.Build.VERSION.SDK_INT >= 30) {
+        if (wicket) android.view.HapticFeedbackConstants.REJECT else android.view.HapticFeedbackConstants.CONFIRM
+    } else {
+        android.view.HapticFeedbackConstants.LONG_PRESS
+    }
+    view.performHapticFeedback(constant)
 }
 
 @Composable

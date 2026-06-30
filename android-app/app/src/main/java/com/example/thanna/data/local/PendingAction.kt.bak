@@ -1,0 +1,16 @@
+package com.example.thanna.data.local
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "pending_actions")
+data class PendingAction(
+    @PrimaryKey
+    val id: String,
+    val matchId: String,
+    val version: Long,
+    val actionType: String,
+    val payloadJson: String,
+    val status: String, // "QUEUED", "SENDING", "CONFIRMED", "FAILED"
+    val createdAt: Long
+)

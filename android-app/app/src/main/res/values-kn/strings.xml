@@ -1,0 +1,21 @@
+<resources>
+    <string name="action_score">ಸ್ಕೋರ್</string>
+    <string name="live">ಲೈವ್</string>
+    <string name="language">ಭಾಷೆ</string>
+    <string name="choose_language">ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ</string>
+
+    <string name="tab_info">ಮಾಹಿತಿ</string>
+    <string name="tab_commentary">ವೀಕ್ಷಕ ವಿವರಣೆ</string>
+    <string name="tab_live">ಲೈವ್</string>
+    <string name="tab_scorecard">ಸ್ಕೋರ್‌ಕಾರ್ಡ್</string>
+
+    <string name="out">ಔಟ್</string>
+    <string name="start_second_innings">2ನೇ ಇನ್ನಿಂಗ್ಸ್ ಆರಂಭಿಸಿ</string>
+    <string name="innings_start">ಇನ್ನಿಂಗ್ಸ್ ಆರಂಭ</string>
+    <string name="over_complete">ಓವರ್ ಮುಗಿದಿದೆ</string>
+    <string name="select_opening_bowler">ಆರಂಭಿಕ ಬೌಲರ್ ಆಯ್ಕೆಮಾಡಿ</string>
+    <string name="select_next_bowler">ಮುಂದಿನ ಬೌಲರ್ ಆಯ್ಕೆಮಾಡಿ</string>
+    <string name="wicket">ವಿಕೆಟ್</string>
+    <string name="select_new_batsman">ಹೊಸ ಬ್ಯಾಟ್ಸ್‌ಮನ್ ಆಯ್ಕೆಮಾಡಿ</string>
+    <string name="innings_complete_fmt">ಇನ್ನಿಂಗ್ಸ್ ಮುಗಿದಿದೆ · %1$d ಓವರ್‌ಗಳು</string>
+</resources>

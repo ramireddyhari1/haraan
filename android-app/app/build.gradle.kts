@@ -13,9 +13,10 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-        // 127.0.0.1 + `adb reverse tcp:8000 tcp:8000` reaches the host's Laravel server
-        // over USB from BOTH the emulator and a physical device (10.0.2.2 was emulator-only).
-        buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:8000\"")
+        // Points at the deployed EC2 server (nginx -> Laravel on port 80) so the app works
+        // on any device on any network without `adb reverse`. For local dev, switch back to
+        // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000`.
+        buildConfigField("String", "API_BASE_URL", "\"http://13.204.63.181\"")
     }
 
     buildTypes {

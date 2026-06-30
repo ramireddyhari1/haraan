@@ -1,0 +1,32 @@
+package com.example.thanna.ui.matches
+
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+
+// ─────────────────────────────────────────────
+//  MATCH MOTION — one motion language for the broadcast scorebug.
+//  Referencing these curves (instead of ad-hoc tween/spring literals scattered per
+//  component) is what makes the card's animation feel authored by a single hand — the
+//  quiet backbone that separates "lots of animation" from a "funded" motion system.
+//
+//  • Standard     — calm UI settle (values, colours, bars).
+//  • Emphasized   — the workhorse for things the eye should follow (the rolling score).
+//  • Celebration  — bouncy overshoot for 4 / 6 / W moments.
+//
+//  The springs are generic so the SAME curve drives a Float fade, an IntOffset slide,
+//  a Dp, etc. — guaranteeing co-ordinated motion across types.
+// ─────────────────────────────────────────────
+object MatchMotion {
+    fun <T> standard(): FiniteAnimationSpec<T> =
+        spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium)
+
+    fun <T> emphasized(): FiniteAnimationSpec<T> =
+        spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+
+    fun <T> celebration(): FiniteAnimationSpec<T> =
+        spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium)
+
+    const val DurStandard = 420
+    const val DurEntrance = 520
+}

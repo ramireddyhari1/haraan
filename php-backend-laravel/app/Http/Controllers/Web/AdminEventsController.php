@@ -41,7 +41,17 @@ final class AdminEventsController extends Controller
             $base->where('events.title', 'like', "%{$q}%");
         }
 
-        $events = $base->limit($limit)->get(['id', 'title', 'date', 'status', 'partner_id']);
+        $events = $base->withSum(['bookings as tickets_sold' => function ($query) {
+            $query->whereIn('status', ['PAID', 'CONFIRMED', 'paid', 'confirmed']);
+        }], 'quantity')->withSum(['bookings as revenue' => function ($query) {
+            $query->whereIn('status', ['PAID', 'CONFIRMED', 'paid', 'confirmed']);
+        }], 'total_amount')->limit($limit)->get();
+
+        $events->each(function ($event) {
+            $event->tickets_sold = (int) ($event->tickets_sold ?? 0);
+            $event->revenue = (float) ($event->revenue ?? 0.0);
+        });
+
         return response()->json(['data' => $events]);
     }
 

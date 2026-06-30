@@ -11,6 +11,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.example.thanna.ui.main.EventDetailScreen
 import com.example.thanna.ui.main.MainScreen
 import com.example.thanna.ui.matches.MatchDetailsScreen
+import com.example.thanna.ui.matches.ScoringScreen
 
 @Composable
 fun MainNavigation() {
@@ -31,7 +32,18 @@ fun MainNavigation() {
           )
         }
         entry<MatchDetails> { match ->
-          MatchDetailsScreen(matchId = match.id)
+          MatchDetailsScreen(
+            matchId = match.id,
+            joinCode = match.code,
+            onOpenScorer = { backStack.add(Scoring(match.id, match.code)) },
+            onBack = { backStack.removeLastOrNull() }
+          )
+        }
+        entry<Scoring> { s ->
+          ScoringScreen(matchId = s.id, code = s.code, onBack = { backStack.removeLastOrNull() })
+        }
+        entry<VenueDetail> { _ ->
+          // Venue detail screen placeholder — TODO: implement VenueDetailScreen
         }
       },
   )

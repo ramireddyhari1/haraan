@@ -82,34 +82,39 @@
                 <div class="brand">Book &amp; Vibe Admin</div>
             </div>
             <nav class="nav">
-                <div class="section-label">Core</div>
+                <div class="section-label">Event Operations</div>
                 <a class="{{ request()->routeIs('admin.dashboard') ? 'active' : '' }}" href="{{ route('admin.dashboard') }}">Dashboard</a>
-                <a class="{{ request()->routeIs('admin.partners') ? 'active' : '' }}" href="{{ route('admin.partners') }}">Partners</a>
-                <a class="{{ request()->routeIs('admin.users') ? 'active' : '' }}" href="{{ route('admin.users') }}">Users</a>
-
-                <div class="section-label">Events &amp; GameHub</div>
                 <a class="{{ request()->routeIs('admin.events') ? 'active' : '' }}" href="{{ route('admin.events') }}">Events</a>
-                <a class="{{ request()->routeIs('admin.events.create') ? 'active' : '' }}" href="{{ route('admin.events.create') }}">Create Event</a>
-                <a class="{{ request()->routeIs('admin.gamehub') ? 'active' : '' }}" href="{{ route('admin.gamehub') }}">GameHub</a>
                 <a class="{{ request()->routeIs('admin.bookings') ? 'active' : '' }}" href="{{ route('admin.bookings') }}">Bookings</a>
-                <a class="{{ request()->routeIs('admin.co-admins') ? 'active' : '' }}" href="{{ route('admin.co-admins') }}">Co-admins</a>
-                <a class="{{ request()->routeIs('admin.workers') ? 'active' : '' }}" href="{{ route('admin.workers') }}">Workers</a>
+                <a class="{{ request()->routeIs('admin.gamehub') ? 'active' : '' }}" href="{{ route('admin.gamehub') }}">GameHub</a>
+                <a class="{{ request()->routeIs('admin.scan') ? 'active' : '' }}" href="{{ route('admin.scan') }}">Scan QR Code</a>
+                <a class="{{ request()->routeIs('admin.audit') ? 'active' : '' }}" href="{{ route('admin.audit') }}">Audit Trail</a>
 
-                <div class="section-label">Operations</div>
-                <a class="{{ request()->routeIs('admin.scan') ? 'active' : '' }}" href="{{ route('admin.scan') }}">Scan QR</a>
-
-                <div class="section-label">Financials</div>
+                <div class="section-label">Finance</div>
                 <a class="{{ request()->routeIs('admin.payments') ? 'active' : '' }}" href="{{ route('admin.payments') }}">Payments</a>
-                <a class="{{ request()->routeIs('admin.withdraw') ? 'active' : '' }}" href="{{ route('admin.withdraw') }}">Withdraw</a>
+                <a class="{{ request()->routeIs('admin.withdraw') ? 'active' : '' }}" href="{{ route('admin.withdraw') }}">Withdrawals</a>
                 <a class="{{ request()->routeIs('admin.payouts') ? 'active' : '' }}" href="{{ route('admin.payouts') }}">Payout Requests</a>
 
-                <div class="section-label">System</div>
-                <a class="{{ request()->routeIs('admin.settings') ? 'active' : '' }}" href="{{ route('admin.settings') }}">Settings</a>
-                <a class="{{ request()->routeIs('admin.cities.edit') ? 'active' : '' }}" href="{{ route('admin.cities.edit') }}">Cities JSON</a>
-                <form method="post" action="{{ route('admin.logout') }}" style="display:inline">
-                    @csrf
-                    <button type="submit" style="background:none;border:0;padding:0;color:#334155;font-weight:700;cursor:pointer">Logout</button>
-                </form>
+                <div class="section-label">People</div>
+                <a class="{{ request()->routeIs('admin.users') ? 'active' : '' }}" href="{{ route('admin.users') }}">Users Directory</a>
+                <a class="{{ request()->routeIs('admin.partners') ? 'active' : '' }}" href="{{ route('admin.partners') }}">Partners (Hosts)</a>
+                <a class="{{ request()->routeIs('admin.co-admins') ? 'active' : '' }}" href="{{ route('admin.co-admins') }}">Co-admins</a>
+                <a class="{{ request()->routeIs('admin.workers') ? 'active' : '' }}" href="{{ route('admin.workers') }}">Workers (Staff)</a>
+
+                <div class="section-label">App Content</div>
+                <a class="{{ request()->routeIs('admin.login-posters') ? 'active' : '' }}" href="{{ route('admin.login-posters') }}">Login Posters</a>
+
+                <div class="section-label">Settings</div>
+                <a class="{{ request()->routeIs('admin.settings') ? 'active' : '' }}" href="{{ route('admin.settings') }}">General Settings</a>
+                <a class="{{ request()->routeIs('admin.roles') ? 'active' : '' }}" href="{{ route('admin.roles') }}">Roles &amp; Permissions</a>
+                <a class="{{ request()->routeIs('admin.cities.edit') ? 'active' : '' }}" href="{{ route('admin.cities.edit') }}">Cities Database</a>
+                
+                <div style="margin-top: 18px; padding-left: 12px;">
+                    <form method="post" action="{{ route('admin.logout') }}" style="display:inline">
+                        @csrf
+                        <button type="submit" style="background:none;border:0;padding:0;color:#8b1e3f;font-weight:700;cursor:pointer;font-size:13px;">Logout Session</button>
+                    </form>
+                </div>
             </nav>
         </aside>
 

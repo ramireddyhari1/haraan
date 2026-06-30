@@ -1,0 +1,87 @@
+package com.example.thanna.data
+
+import com.example.thanna.data.network.ApiClient
+import com.example.thanna.data.network.VenueApi
+import com.example.thanna.data.network.VenueCardDto
+import com.example.thanna.data.network.VenueDetailDto
+
+/** A venue card as served by GET /api/venues (managed in the Filament admin). */
+data class VenueApiCard(
+  val id: String,
+  val name: String,
+  val category: String,
+  val location: String,
+  val distance: String,
+  val price: Int,
+  val rating: String,
+  val tagline: String,
+  val image: String?,
+  val isBookable: Boolean,
+  val isFeatured: Boolean,
+)
+
+data class VenueApiSlot(val day: String, val time: String, val available: Boolean, val fillingFast: Boolean)
+data class VenueApiReview(val name: String, val rating: Int, val text: String, val avatar: String?, val ago: String?)
+
+/** Full venue detail from GET /api/venues/{id}. */
+data class VenueApiDetail(
+  val card: VenueApiCard,
+  val about: String?,
+  val amenities: List<String>,
+  val images: List<String>,
+  val slots: List<VenueApiSlot>,
+  val reviews: List<VenueApiReview>,
+)
+
+/**
+ * Reads venue content from the backend so the GameHub browse + venue detail
+ * screens are driven by the Filament "Haraan Control" admin instead of hardcoded
+ * data. Backed by the shared Retrofit/Moshi stack ([ApiClient]); failures fall
+ * back to empty/null so callers can show their sample data.
+ */
+class VenueRepository(
+  private val api: VenueApi = ApiClient.venueApi,
+) {
+  suspend fun getVenues(): List<VenueApiCard> =
+    runCatching { api.list().data.orEmpty().map { it.toCard() } }.getOrDefault(emptyList())
+
+  suspend fun getVenueDetail(id: String): VenueApiDetail? {
+    val numericId = id.toLongOrNull() ?: return null
+    return runCatching { api.detail(numericId).data?.toDetail() }.getOrNull()
+  }
+}
+
+private fun VenueCardDto.toCard(): VenueApiCard = VenueApiCard(
+  id = id.toString(),
+  name = name,
+  category = category ?: "Badminton",
+  location = location ?: "",
+  distance = distance ?: "",
+  price = price,
+  rating = rating ?: "4.5",
+  tagline = tagline ?: "",
+  image = image,
+  isBookable = isBookable,
+  isFeatured = isFeatured,
+)
+
+private fun VenueDetailDto.toDetail(): VenueApiDetail = VenueApiDetail(
+  card = VenueApiCard(
+    id = id.toString(),
+    name = name,
+    category = category ?: "Badminton",
+    location = location ?: "",
+    distance = distance ?: "",
+    price = price,
+    rating = rating ?: "4.5",
+    tagline = tagline ?: "",
+    image = image,
+    isBookable = isBookable,
+    isFeatured = isFeatured,
+  ),
+  about = about,
+  amenities = amenities,
+  images = images,
+  slots = slots.map { VenueApiSlot(it.day ?: "Today", it.time ?: "", it.available, it.fillingFast) },
+  reviews = reviews.map { VenueApiReview(it.name ?: "", it.rating, it.text ?: "", it.avatar, it.ago) },
+)

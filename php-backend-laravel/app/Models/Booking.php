@@ -38,6 +38,12 @@ final class Booking extends Model
         'user_id',
         'event_id',
         'organization_id',
+        // Venue-slot bookings (Phase B)
+        'booking_type',
+        'venue_id',
+        'venue_slot_id',
+        'slot_date',
+        'slot_label',
     ];
 
     /** @return array<string, string> */
@@ -48,6 +54,7 @@ final class Booking extends Model
             'total_amount' => 'float',
             'discount'     => 'float',
             'seat_numbers' => 'array',
+            'slot_date'    => 'date',
         ];
     }
 
@@ -61,10 +68,22 @@ final class Booking extends Model
         return $this->belongsTo(User::class);
     }
 
-    /** The event this booking is for. */
+    /** The event this booking is for (null for venue bookings). */
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    /** The venue this booking reserves a slot at (null for event bookings). */
+    public function venue(): BelongsTo
+    {
+        return $this->belongsTo(Venue::class);
+    }
+
+    /** The recurring slot template this booking reserves (nullable). */
+    public function venueSlot(): BelongsTo
+    {
+        return $this->belongsTo(VenueSlot::class);
     }
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */

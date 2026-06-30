@@ -1,16 +1,28 @@
 package com.example.thanna.ui
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
+import com.example.thanna.ui.animations.pressScale
+import coil.compose.AsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -23,10 +35,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
+import com.example.thanna.data.ApiConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,6 +75,19 @@ fun LoginRoute(
     )
 }
 
+// Palette — content lives on a white card; the card floats over a full-bleed,
+// slowly-zooming hero image with a soft scrim.
+private val Ink = Color(0xFF0A0E14)
+private val Accent = Color(0xFF2563EB)
+private val Text1 = Color(0xFF0F172A)
+private val Text2 = Color(0xFF475569)
+private val Text3 = Color(0xFF94A3B8)
+private val Stroke = Color(0xFFE2E8F0)
+private val FieldBg = Color(0xFFF8FAFC)
+private val BlueTint = Color(0xFFEFF4FF)
+private val FrostFill = Color.White.copy(alpha = 0.16f)
+private val FrostBorder = Color.White.copy(alpha = 0.30f)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LoginScreen(
@@ -69,341 +101,398 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     var isPhoneInputVisible by remember { mutableStateOf(false) }
+    val view = LocalView.current
 
-    // Smooth transition weights for the overall screen balance
-    // Maintain the 50/50 split when either the phone input is visible or in OTP stage
-    val isBottomPanelExpanded = isPhoneInputVisible || uiState.stage == LoginStage.VerifyOtp
-    val topWeight by animateFloatAsState(
-        targetValue = if (isBottomPanelExpanded) 0.65f else 0.68f,
-        animationSpec = tween(durationMillis = 350), label = "TopSpaceAnimation"
+    // Card entrance — a subtle rise + fade the first time the screen appears.
+    var cardVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { cardVisible = true }
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (cardVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = 450), label = "cardAlpha"
     )
-    val bottomWeight by animateFloatAsState(
-        targetValue = if (isBottomPanelExpanded) 0.35f else 0.32f,
-        animationSpec = tween(durationMillis = 350), label = "BottomSpaceAnimation"
-    )
-
-    val posters = listOf(
-        R.drawable.poster1,
-        R.drawable.poster2,
-        R.drawable.poster3
+    val cardShiftPx by animateFloatAsState(
+        targetValue = if (cardVisible) 0f else 64f,
+        animationSpec = tween(durationMillis = 450), label = "cardShift"
     )
 
-    Column(
+    // Ken-Burns — a slow continuous zoom so the hero breathes instead of sitting flat.
+    val kenBurns = rememberInfiniteTransition(label = "kenBurns")
+    val posterZoom by kenBurns.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "posterZoom"
+    )
+
+    // Poster images — fetched from admin API; falls back to local drawables if offline.
+    val localPosters = listOf(R.drawable.poster1, R.drawable.poster2, R.drawable.poster3)
+    val remotePosters by produceState<List<String>>(initialValue = emptyList()) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val json = java.net.URL("${ApiConfig.BASE_URL}/api/login-posters").readText()
+                val arr = JSONArray(json)
+                (0 until arr.length()).mapNotNull { i ->
+                    arr.getJSONObject(i).optString("image").takeIf { it.isNotBlank() }
+                }
+            }.getOrDefault(emptyList())
+        }
+    }
+    val hasRemote = remotePosters.isNotEmpty()
+    val posterCount = if (hasRemote) remotePosters.size else localPosters.size
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(Ink)
     ) {
-
-        // --- TOP SECTION: Poster Scrolling ---
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(topWeight)
-        ) {
-            // Using a large number for loop scrolling
-            val pageCount = Int.MAX_VALUE
-            val pagerState = rememberPagerState(
-                initialPage = (pageCount / 2) - ((pageCount / 2) % posters.size),
-                pageCount = { pageCount }
-            )
-
-            // Auto-scroll loop
-            LaunchedEffect(Unit) {
-                while (true) {
-                    yield()
-                    delay(3000) // 3 seconds interval
-                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                }
+        // 1. Full-bleed, slowly-zooming poster pager.
+        val pageCount = Int.MAX_VALUE
+        val pagerState = rememberPagerState(
+            initialPage = (pageCount / 2) - ((pageCount / 2) % posterCount.coerceAtLeast(1)),
+            pageCount = { pageCount }
+        )
+        LaunchedEffect(Unit) {
+            while (true) {
+                yield()
+                delay(3500)
+                pagerState.animateScrollToPage(pagerState.currentPage + 1)
             }
-
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                val actualPage = page % posters.size
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = posters[actualPage]),
-                        contentDescription = "Poster ${actualPage + 1}",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
-
-            // Skip Button at Top Right
-            Button(
-                onClick = onSkipClick,
-                modifier = Modifier
-                    .statusBarsPadding()
-                    .padding(16.dp)
-                    .align(Alignment.TopEnd)
-                    .height(36.dp),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White.copy(alpha = 0.5f),
-                    contentColor = Color(0xFF2563EB)
-                ),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
-            ) {
-                Text(
-                    text = "Skip",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
+        }
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            val actualPage = page % posterCount.coerceAtLeast(1)
+            val imgModifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { scaleX = posterZoom; scaleY = posterZoom }
+            if (hasRemote) {
+                AsyncImage(
+                    model = remotePosters[actualPage],
+                    contentDescription = "Poster ${actualPage + 1}",
+                    modifier = imgModifier,
+                    contentScale = ContentScale.Crop,
+                    placeholder = painterResource(id = localPosters[actualPage % localPosters.size]),
+                    error = painterResource(id = localPosters[actualPage % localPosters.size]),
                 )
-            }
-
-            // Indicators
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                repeat(posters.size) { iteration ->
-                    val isSelected = (pagerState.currentPage % posters.size) == iteration
-                    Box(
-                        modifier = Modifier
-                            .size(if (isSelected) 10.dp else 8.dp)
-                            .clip(CircleShape)
-                            .background(if (isSelected) Color(0xFFFFFFFF) else Color(0xFFCBD5E1).copy(alpha = 0.5f))
-                    )
-                }
+            } else {
+                Image(
+                    painter = painterResource(id = localPosters[actualPage]),
+                    contentDescription = "Poster ${actualPage + 1}",
+                    modifier = imgModifier,
+                    contentScale = ContentScale.Crop
+                )
             }
         }
 
-        // --- BOTTOM SECTION: Premium Login Card ---
-        Card(
+        // 2. Soft scrim — darkens the very top (for Skip) and the very bottom (so the
+        //    white card's edge blends into the image instead of cutting hard).
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(bottomWeight),
-            shape = RoundedCornerShape(32.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-                    .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                
-                Text(
-                    text = "Haraan", 
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF0F172A),
-                    modifier = Modifier.padding(bottom = 4.dp)
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Ink.copy(alpha = 0.30f),
+                        0.22f to Color.Transparent,
+                        0.70f to Color.Transparent,
+                        1.0f to Ink.copy(alpha = 0.55f),
+                    )
                 )
-                
-                Text(
-                    text = "Crafting Premium Experiences",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF334155),
-                    textAlign = TextAlign.Center
-                )
-                
-                Spacer(modifier = Modifier.height(6.dp))
-                
-                Text(
-                    text = if (uiState.stage == LoginStage.EnterPhone) {
-                        if (!isPhoneInputVisible) "Login or sign up to continue" else "Enter your mobile number to verify"
-                    } else {
-                        "Enter the 6-digit OTP code sent via WhatsApp"
-                    },
-                    fontSize = 14.sp,
-                    color = Color(0xFF64748B),
-                    textAlign = TextAlign.Center
-                )
+        )
 
-                if (uiState.stage == LoginStage.EnterPhone) {
-                    if (!isPhoneInputVisible) {
-                        Spacer(modifier = Modifier.weight(1f))
-                        
-                        Button(
-                            onClick = { isPhoneInputVisible = true },
+        // 3. Skip — frosted glass pill, top-right.
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(FrostFill)
+                .border(1.dp, FrostBorder, RoundedCornerShape(20.dp))
+                .clickable(onClick = onSkipClick)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Skip", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+
+        // 4. Page dots on the image + the white content card, anchored to the bottom.
+        //    Insets live on THIS column so the card sits just above the keyboard/nav
+        //    bar with no internal gap (applying imePadding inside the card reserves
+        //    keyboard-height padding inside it → a white void + clipped header).
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Dots only in the collapsed hero — hidden once the keyboard appears so the
+            // card has room and nothing clips.
+            if (uiState.stage == LoginStage.EnterPhone && !isPhoneInputVisible) {
+                Row(
+                    modifier = Modifier.padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    repeat(posterCount.coerceAtLeast(1)) { i ->
+                        val sel = (pagerState.currentPage % posterCount.coerceAtLeast(1)) == i
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                                .height(3.dp)
+                                .width(if (sel) 18.dp else 6.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(if (sel) Color.White else Color.White.copy(alpha = 0.4f))
+                        )
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+                    .graphicsLayer {
+                        alpha = cardAlpha
+                        translationY = cardShiftPx
+                    },
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 18.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Insets live INSIDE the white card, so the region reserved for the
+                        // keyboard / nav bar is white — never a strip of background image.
+                        // Union (not sum) avoids double-counting the nav bar.
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                        .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Full branding only in the collapsed hero — hidden once the keyboard
+                    // is up so the card stays compact and nothing clips at the top.
+                    val showBranding = uiState.stage == LoginStage.EnterPhone && !isPhoneInputVisible
+
+                    // Grab handle.
+                    Box(
+                        modifier = Modifier
+                            .padding(bottom = 16.dp)
+                            .size(width = 36.dp, height = 4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Stroke)
+                    )
+
+                    if (showBranding) {
+                        // Brand mark — blue H in a soft tinted tile.
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(BlueTint),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Continue with mobile number",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                            Image(
+                                painter = painterResource(id = R.drawable.haraan_copy),
+                                contentDescription = com.example.thanna.ui.theme.Brand.name,
+                                modifier = Modifier.size(30.dp),
+                                contentScale = ContentScale.Fit,
+                                colorFilter = ColorFilter.tint(com.example.thanna.ui.theme.Brand.accent)
                             )
                         }
-                        
-                        Spacer(modifier = Modifier.weight(1f))
-                        
-                    } else {
-                        Spacer(modifier = Modifier.height(32.dp)) 
-                        
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    Text(
+                        text = com.example.thanna.ui.theme.Brand.name,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Text1,
+                        letterSpacing = (-0.5).sp
+                    )
+
+                    if (showBranding) {
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            text = com.example.thanna.ui.theme.Brand.tagline.uppercase(),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Text3,
+                            letterSpacing = 1.5.sp,
+                            maxLines = 1,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Spacer(Modifier.height(18.dp))
+
+                    Text(
+                        text = if (uiState.stage == LoginStage.EnterPhone) {
+                            if (!isPhoneInputVisible) "Login or sign up to continue" else "Enter your mobile number to verify"
+                        } else {
+                            "Enter the 6-digit code sent via WhatsApp"
+                        },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Text2,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(22.dp))
+
+                    if (uiState.stage == LoginStage.EnterPhone) {
+                        if (!isPhoneInputVisible) {
+                            val ci = remember { MutableInteractionSource() }
+                            Button(
+                                onClick = {
+                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                    isPhoneInputVisible = true
+                                },
+                                interactionSource = ci,
+                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                            ) {
+                                Text(
+                                    "Continue with phone",
+                                    fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                                    maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedTextField(
-                                    value = "🇮🇳 +91",
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    modifier = Modifier.width(100.dp),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFFCBD5E1),
-                                        unfocusedBorderColor = Color(0xFFE2E8F0),
-                                        focusedContainerColor = Color(0xFFF8FAFC),
-                                        unfocusedContainerColor = Color(0xFFF8FAFC)
-                                    ),
-                                    textStyle = LocalTextStyle.current.copy(
-                                        textAlign = TextAlign.Center, 
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                )
-
+                                // Country selector — flag + code + chevron, matched height.
+                                Row(
+                                    modifier = Modifier
+                                        .height(56.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(FieldBg)
+                                        .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+                                        .padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("🇮🇳", fontSize = 16.sp)
+                                    Text("+91", color = Text1, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Text3, modifier = Modifier.size(18.dp))
+                                }
                                 OutlinedTextField(
                                     value = uiState.phoneNumber,
                                     onValueChange = onPhoneNumberChange,
-                                    placeholder = { Text("Enter mobile number", color = Color(0xFF94A3B8)) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(14.dp),
+                                    placeholder = { Text("Phone number", color = Text3) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(16.dp),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF2563EB),
-                                        unfocusedBorderColor = Color(0xFFCBD5E1)
+                                        focusedBorderColor = Accent,
+                                        unfocusedBorderColor = Stroke,
+                                        focusedContainerColor = FieldBg,
+                                        unfocusedContainerColor = FieldBg
                                     )
                                 )
                             }
 
-                            // Error feedback
                             if (!uiState.errorMessage.isNullOrEmpty()) {
-                                Text(
-                                    text = uiState.errorMessage,
-                                    color = Color(0xFFDC2626),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.Start
-                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
                             }
 
+                            Spacer(Modifier.height(14.dp))
+
+                            val pi = remember { MutableInteractionSource() }
                             Button(
-                                onClick = onContinueClick,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(54.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF2563EB),
-                                    disabledContainerColor = Color(0xFFE2E8F0)
-                                ),
+                                onClick = {
+                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                    onContinueClick()
+                                },
+                                interactionSource = pi,
+                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(pi),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
                                 enabled = uiState.canContinue
                             ) {
                                 Text(
-                                    text = if (uiState.isLoading) "Please wait..." else "Proceed",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (uiState.canContinue) Color.White else Color(0xFF94A3B8)
+                                    if (uiState.isLoading) "Please wait…" else "Proceed",
+                                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                    color = if (uiState.canContinue) Color.White else Text3
                                 )
                             }
                         }
-                        
-                        Spacer(modifier = Modifier.weight(1f)) 
-                    }
-                } else {
-                    // OTP Verification Stage
-                    Spacer(modifier = Modifier.height(32.dp))
-                    
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        OtpEntryRow(
-                            otp = uiState.otp,
-                            onOtpChange = onOtpChange,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                    } else {
+                        OtpEntryRow(otp = uiState.otp, onOtpChange = onOtpChange, modifier = Modifier.fillMaxWidth())
 
-                        // Error feedback
+                        // Dev builds have no WhatsApp bridge, so no real OTP is delivered.
+                        // Surface the master code and let a tap auto-fill it.
+                        if (com.example.thanna.BuildConfig.DEBUG) {
+                            Spacer(Modifier.height(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFFEF3C7))
+                                    .clickable { onOtpChange("000000") }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    "Dev · master code 000000 also works. Tap to fill it",
+                                    color = Color(0xFF92400E),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
                         if (!uiState.errorMessage.isNullOrEmpty()) {
-                            Text(
-                                text = uiState.errorMessage,
-                                color = Color(0xFFDC2626),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Start
-                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
                         }
-
-                        // Success feedback
                         if (!uiState.successMessage.isNullOrEmpty()) {
-                            Text(
-                                text = uiState.successMessage,
-                                color = Color(0xFF16A34A),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Start
-                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(uiState.successMessage, color = Color(0xFF16A34A), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
                         }
 
+                        Spacer(Modifier.height(14.dp))
+
+                        val vi = remember { MutableInteractionSource() }
                         Button(
-                            onClick = onVerifyOtpClick,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF2563EB),
-                                disabledContainerColor = Color(0xFFE2E8F0)
-                            ),
+                            onClick = {
+                                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                onVerifyOtpClick()
+                            },
+                            interactionSource = vi,
+                            modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(vi),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
                             enabled = uiState.isOtpValid && !uiState.isLoading
                         ) {
                             Text(
-                                text = if (uiState.isLoading) "Verifying..." else "Verify & Proceed",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (uiState.isOtpValid && !uiState.isLoading) Color.White else Color(0xFF94A3B8)
+                                if (uiState.isLoading) "Verifying…" else "Verify & Proceed",
+                                fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                color = if (uiState.isOtpValid && !uiState.isLoading) Color.White else Text3
                             )
                         }
 
-                        TextButton(
-                            onClick = onBackToPhoneClick,
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text(
-                                text = "Change mobile number",
-                                color = Color(0xFF2563EB),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        Spacer(Modifier.height(4.dp))
+                        TextButton(onClick = onBackToPhoneClick) {
+                            Text("Change number", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+                    Spacer(Modifier.height(16.dp))
 
-                Text(
-                    text = "By continuing, you agree to our Terms and conditions",
-                    fontSize = 11.sp,
-                    color = Color(0xFF94A3B8),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
+                    Text(
+                        text = buildAnnotatedString {
+                            append("By continuing, you agree to our ")
+                            withStyle(SpanStyle(color = Accent, fontWeight = FontWeight.SemiBold)) {
+                                append("Terms & Conditions")
+                            }
+                        },
+                        fontSize = 12.sp,
+                        color = Text3,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 17.sp
+                    )
+                }
             }
         }
     }
@@ -438,11 +527,11 @@ fun OtpEntryRow(
                         modifier = Modifier
                             .weight(1f)
                             .height(56.dp)
-                            .background(Color(0xFFF8FAFC), RoundedCornerShape(12.dp))
+                            .background(FieldBg, RoundedCornerShape(14.dp))
                             .border(
                                 width = if (isFocused) 2.dp else 1.dp,
-                                color = if (isFocused) Color(0xFF2563EB) else Color(0xFFCBD5E1),
-                                shape = RoundedCornerShape(12.dp)
+                                color = if (isFocused) Accent else Stroke,
+                                shape = RoundedCornerShape(14.dp)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -450,7 +539,7 @@ fun OtpEntryRow(
                             text = char,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = Text1
                         )
                     }
                 }

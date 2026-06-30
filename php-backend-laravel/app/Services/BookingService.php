@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Event;
 use App\Models\User;
+use App\Models\Venue;
+use App\Models\VenueSlot;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -44,18 +46,19 @@ final class BookingService
         $eventId  = (int) $data['eventId'];
         $quantity = (int) $data['quantity'];
 
-        $event = Event::query()->find($eventId);
-
-        if ($event === null) {
-            throw new NotFoundHttpException('Event not found');
-        }
-
-        if ($event->available_slots < $quantity) {
-            throw new ConflictHttpException('Not enough seats available');
-        }
-
         /** @var Booking $booking */
-        $booking = DB::transaction(static function () use ($user, $event, $quantity, $data): Booking {
+        $booking = DB::transaction(static function () use ($user, $eventId, $quantity, $data): Booking {
+            // Retrieve and lock the event row to prevent double-booking race conditions
+            $event = Event::query()->lockForUpdate()->find($eventId);
+
+            if ($event === null) {
+                throw new NotFoundHttpException('Event not found');
+            }
+
+            if ($event->available_slots < $quantity) {
+                throw new ConflictHttpException('Not enough seats available');
+            }
+
             $event->available_slots -= $quantity;
             $event->save();
 
@@ -68,6 +71,74 @@ final class BookingService
                 'discount'     => (float) ($data['discount'] ?? 0),
                 'user_id'      => $user->id,
                 'event_id'     => $event->id,
+            ]);
+        });
+
+        return $booking;
+    }
+
+
+    /**
+     * Create a confirmed venue-slot booking. Validates the venue is bookable, the slot
+     * (if given) belongs to the venue and is available, and that the same slot+date isn't
+     * already taken. Price is the venue's listed price.
+     *
+     * @throws NotFoundHttpException  When the venue or slot does not exist.
+     * @throws ConflictHttpException  When the venue isn't bookable or the slot is taken.
+     */
+    public function createVenueBooking(User $user, int $venueId, ?int $slotId, string $date): Booking
+    {
+        /** @var Booking $booking */
+        $booking = DB::transaction(static function () use ($user, $venueId, $slotId, $date): Booking {
+            $venue = Venue::query()->lockForUpdate()->find($venueId);
+
+            if ($venue === null || ! $venue->is_active) {
+                throw new NotFoundHttpException('Venue not found');
+            }
+
+            if (! $venue->is_bookable) {
+                throw new ConflictHttpException('This venue is not open for booking');
+            }
+
+            $label = null;
+
+            if ($slotId !== null) {
+                $slot = VenueSlot::query()->where('venue_id', $venueId)->find($slotId);
+
+                if ($slot === null) {
+                    throw new NotFoundHttpException('Slot not found');
+                }
+
+                if (! $slot->is_available) {
+                    throw new ConflictHttpException('That slot is not available');
+                }
+
+                $label = trim(($slot->day ?? '').' · '.($slot->time ?? ''), " ·\t");
+
+                $taken = Booking::query()
+                    ->where('booking_type', 'venue')
+                    ->where('venue_id', $venueId)
+                    ->where('venue_slot_id', $slotId)
+                    ->whereDate('slot_date', $date)
+                    ->where('status', 'CONFIRMED')
+                    ->exists();
+
+                if ($taken) {
+                    throw new ConflictHttpException('That slot is already booked for this date');
+                }
+            }
+
+            return Booking::query()->create([
+                'quantity'      => 1,
+                'total_amount'  => (float) ($venue->price ?? 0),
+                'status'        => 'CONFIRMED',
+                'booking_type'  => 'venue',
+                'user_id'       => $user->id,
+                'event_id'      => null,
+                'venue_id'      => $venue->id,
+                'venue_slot_id' => $slotId,
+                'slot_date'     => $date,
+                'slot_label'    => $label,
             ]);
         });
 

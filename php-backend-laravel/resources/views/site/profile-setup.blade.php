@@ -14,7 +14,7 @@
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between;">
                 <div>
                     <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Player ID Preview</span>
-                    <strong id="id_preview" style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 20px; font-weight: 900; color: #0d543c; letter-spacing: 0.5px;">HRN-SS-DDD-{{ str_pad((string)$user->id, 5, '0', STR_PAD_LEFT) }}</strong>
+                    <strong id="id_preview" style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 20px; font-weight: 900; color: #0d543c; letter-spacing: 0.5px;">HRN{{ str_pad((string)$user->id, 5, '0', STR_PAD_LEFT) }}</strong>
                 </div>
                 <div style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: #10b981; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
                     League Grade
@@ -153,7 +153,7 @@
         }
         
         const userId = '{{ str_pad((string)$user->id, 5, "0", STR_PAD_LEFT) }}';
-        document.getElementById('id_preview').innerText = `HRN-${statePart}-${distPart}-${userId}`;
+        document.getElementById('id_preview').innerText = `HRN${userId}`;
     }
 
     let claimTimeout = null;

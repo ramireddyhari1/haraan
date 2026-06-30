@@ -80,8 +80,9 @@ Route::middleware('erp.key')->group(function (): void {
     Route::get('/erp', fn () => view('portal.index'))->name('portal.index');
         Route::get('/erp/setup-admin', [\App\Http\Controllers\Web\AdminAuthController::class, 'setupAdmin'])->name('portal.setup_admin');
 
-    // Admin auth routes (public within ERP portal)
-    Route::get('admin/login', [\App\Http\Controllers\Web\AdminAuthController::class, 'showLogin'])->name('admin.login');
+    // Admin auth — consolidated onto the single Filament "Control" panel (/control).
+    // The legacy Blade login now redirects there so there is ONE admin front door.
+    Route::get('admin/login', fn () => redirect('/control'))->name('admin.login');
     Route::post('admin/login', [\App\Http\Controllers\Web\AdminAuthController::class, 'login'])->name('admin.login.submit');
     Route::post('admin/logout', [\App\Http\Controllers\Web\AdminAuthController::class, 'logout'])->name('admin.logout');
     // Password reset for admin
@@ -131,6 +132,13 @@ Route::middleware('erp.key')->group(function (): void {
         Route::get('/withdraw', 'withdraw')->name('withdraw');
         Route::get('/cities', [AdminCitiesController::class, 'edit'])->name('cities.edit');
         Route::post('/cities', [AdminCitiesController::class, 'update'])->name('cities.update');
+
+        // Login Posters
+        Route::get('/login-posters', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'index'])->name('login-posters');
+        Route::post('/login-posters', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'store'])->name('login-posters.store');
+        Route::post('/login-posters/{id}', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'update'])->name('login-posters.update');
+        Route::delete('/login-posters/{id}', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'destroy'])->name('login-posters.delete');
+        Route::post('/login-posters/{id}/toggle', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'toggleActive'])->name('login-posters.toggle');
         // Admin JSON endpoints for bookings, payments, coupons, users
         Route::get('/bookings/json', [\App\Http\Controllers\Web\AdminBookingsController::class, 'indexJson'])->name('bookings.json');
         Route::post('/bookings/{id}/status', [\App\Http\Controllers\Web\AdminBookingsController::class, 'updateStatus'])->name('bookings.update_status');

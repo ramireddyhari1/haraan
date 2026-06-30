@@ -31,7 +31,7 @@ final class BookingsController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        $query = Booking::query()->orderByDesc('created_at');
+        $query = Booking::query()->with(['event', 'venue'])->orderByDesc('created_at');
 
         if ($authUser->role !== 'ADMIN') {
             $query->where('user_id', $authUser->id);
@@ -70,6 +70,34 @@ final class BookingsController extends Controller
 
         return response()->json([
             'message' => 'Booking created',
+            'data'    => new BookingResource($booking),
+        ], 201);
+    }
+
+    /** POST /api/bookings/venue — reserve a venue slot for a date. */
+    public function storeVenue(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $data = $request->validate([
+            'venueId' => ['required', 'integer'],
+            'slotId'  => ['nullable', 'integer'],
+            'date'    => ['required', 'date'],
+        ]);
+
+        $booking = $this->bookings->createVenueBooking(
+            $authUser,
+            (int) $data['venueId'],
+            isset($data['slotId']) ? (int) $data['slotId'] : null,
+            (string) $data['date'],
+        );
+
+        return response()->json([
+            'message' => 'Venue booked',
             'data'    => new BookingResource($booking),
         ], 201);
     }

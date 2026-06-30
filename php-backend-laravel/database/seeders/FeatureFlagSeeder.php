@@ -45,6 +45,13 @@ class FeatureFlagSeeder extends Seeder
                 'rollout_percentage' => 100,
                 'min_app_version' => '1.4.0',
             ],
+            [
+                'key' => 'server_driven_home',
+                'name' => 'Server-driven home layout',
+                'description' => 'Render the GameHub home from the /control Home layout (block order/visibility) instead of the built-in order. Off = built-in fallback.',
+                'enabled' => false,
+                'rollout_percentage' => 100,
+            ],
         ];
 
         foreach ($flags as $flag) {

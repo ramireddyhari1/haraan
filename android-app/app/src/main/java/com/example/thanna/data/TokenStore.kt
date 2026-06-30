@@ -24,6 +24,22 @@ object TokenStore {
     }
   }
 
+  fun clearToken(context: Context) {
+    try {
+      val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+      val prefs = EncryptedSharedPreferences.create(
+        PREFS_FILE,
+        masterKeyAlias,
+        context,
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+      )
+      prefs.edit().remove(KEY_JWT).apply()
+    } catch (e: Exception) {
+      // swallow
+    }
+  }
+
   fun getToken(context: Context): String? {
     return try {
       val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)

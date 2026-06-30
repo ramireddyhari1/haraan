@@ -50,14 +50,19 @@ final class WhatsAppAuthController extends Controller
 
         Cache::put($this->cacheKey($verificationToken), [
             'phone' => $phone,
-            'otp' => Hash::make($otp),
+            // Keyed HMAC, not bcrypt: the OTP is a short-lived 6-digit code in server-side
+            // cache, so bcrypt's deliberate slowness (~300ms) just adds latency. HMAC keyed
+            // with APP_KEY is instant and still safe against cache inspection.
+            'otp' => $this->hashOtp($otp),
             'user_id' => $user->id,
         ], self::OTP_TTL_SECONDS);
 
         $message = "Your Haraan login code is: *{$otp}*\n\nThis code will expire in 5 minutes.";
         $sent = $this->whatsappService->sendMessage($phone, $message);
 
-        if (! $sent) {
+        // Local dev has no WhatsApp bridge, so a send failure must not block sign-up. The
+        // session stays valid and the master code 000000 (see verifyOtp) lets you log in.
+        if (! $sent && ! app()->environment('local')) {
             Cache::forget($this->cacheKey($verificationToken));
 
             return response()->json([
@@ -86,7 +91,11 @@ final class WhatsAppAuthController extends Controller
             return response()->json(['error' => 'Session expired. Please request a new OTP.'], 410);
         }
 
-        if (! Hash::check($validated['otp'], (string) $payload['otp'])) {
+        // Local dev master code so you can sign up without a WhatsApp bridge. Never active
+        // outside the local environment.
+        $localMaster = app()->environment('local') && $validated['otp'] === '000000';
+
+        if (! $localMaster && ! hash_equals((string) $payload['otp'], $this->hashOtp($validated['otp']))) {
             return response()->json(['error' => 'Invalid OTP. Please try again.'], 422);
         }
 
@@ -111,5 +120,11 @@ final class WhatsAppAuthController extends Controller
     private function cacheKey(string $verificationToken): string
     {
         return 'whatsapp-otp:' . $verificationToken;
+    }
+
+    /** Fast, keyed one-way hash for the cached OTP. Compare with hash_equals (constant time). */
+    private function hashOtp(string $otp): string
+    {
+        return hash_hmac('sha256', $otp, (string) config('app.key'));
     }
 }

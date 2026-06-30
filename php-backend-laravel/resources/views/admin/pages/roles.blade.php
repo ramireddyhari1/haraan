@@ -64,7 +64,7 @@ document.getElementById('create-role').addEventListener('click', async function(
 
 document.getElementById('create-perm').addEventListener('click', async function(){
     const name = document.getElementById('perm-name').value;
-    await fetch('{{ route('permissions.store') }}', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'}, body: JSON.stringify({name})});
+    await fetch('{{ route('admin.permissions.store') }}', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'}, body: JSON.stringify({name})});
     document.getElementById('perm-name').value = '';
     loadRoles();
 });

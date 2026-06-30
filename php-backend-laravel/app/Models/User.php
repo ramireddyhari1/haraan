@@ -200,7 +200,9 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         // 3. Unique player number
         $numPart = str_pad((string)$userId, 5, '0', STR_PAD_LEFT);
 
-        return "HRN-{$statePart}-{$distPart}-{$numPart}";
+        // Compact shareable handle: HRN + account number (e.g. HRN00002). State/district are
+        // surfaced separately in the app, so the id itself stays short and easy to read/share.
+        return 'HRN'.$numPart;
     }
 
     protected static function boot()

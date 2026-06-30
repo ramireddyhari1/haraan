@@ -1,0 +1,21 @@
+<resources>
+    <string name="action_score">ஸ்கோர்</string>
+    <string name="live">நேரலை</string>
+    <string name="language">மொழி</string>
+    <string name="choose_language">உங்கள் மொழியைத் தேர்ந்தெடுக்கவும்</string>
+
+    <string name="tab_info">தகவல்</string>
+    <string name="tab_commentary">வர்ணனை</string>
+    <string name="tab_live">நேரலை</string>
+    <string name="tab_scorecard">ஸ்கோர்கார்டு</string>
+
+    <string name="out">அவுட்</string>
+    <string name="start_second_innings">2வது இன்னிங்ஸைத் தொடங்கு</string>
+    <string name="innings_start">இன்னிங்ஸ் தொடக்கம்</string>
+    <string name="over_complete">ஓவர் முடிந்தது</string>
+    <string name="select_opening_bowler">தொடக்க பந்துவீச்சாளரைத் தேர்ந்தெடுக்கவும்</string>
+    <string name="select_next_bowler">அடுத்த பந்துவீச்சாளரைத் தேர்ந்தெடுக்கவும்</string>
+    <string name="wicket">விக்கெட்</string>
+    <string name="select_new_batsman">புதிய பேட்ஸ்மேனைத் தேர்ந்தெடுக்கவும்</string>
+    <string name="innings_complete_fmt">இன்னிங்ஸ் முடிந்தது · %1$d ஓவர்கள்</string>
+</resources>

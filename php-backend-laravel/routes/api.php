@@ -169,6 +169,7 @@ Route::middleware('auth.jwt.optional')->get('/districts/summary', [DistrictsCont
 
 Route::middleware('auth.jwt')->prefix('bookings')->group(function (): void {
     Route::get('/', [BookingsController::class, 'index']);
+    Route::post('/venue', [BookingsController::class, 'storeVenue']);
     Route::get('/{id}', [BookingsController::class, 'show']);
     Route::post('/', [BookingsController::class, 'store']);
     Route::patch('/{id}/cancel', [BookingsController::class, 'cancel']);

@@ -29,6 +29,21 @@ final class BookingResource extends JsonResource
             'discount'    => $this->discount,
             'userId'      => $this->user_id,
             'eventId'     => $this->event_id,
+            'type'        => $this->booking_type ?? 'event',
+            'event'       => $this->whenLoaded('event', fn () => $this->event ? [
+                'title' => $this->event->title,
+                'venue' => $this->event->venue,
+                'date'  => $this->event->date,
+            ] : null),
+            // Venue-slot booking fields (null for event bookings)
+            'venueId'     => $this->venue_id,
+            'slotDate'    => $this->slot_date?->toDateString(),
+            'slotLabel'   => $this->slot_label,
+            'venue'       => $this->whenLoaded('venue', fn () => $this->venue ? [
+                'name'     => $this->venue->name,
+                'location' => $this->venue->location,
+                'image'    => $this->venue->images[0] ?? null,
+            ] : null),
             'createdAt'   => $this->created_at,
         ];
     }

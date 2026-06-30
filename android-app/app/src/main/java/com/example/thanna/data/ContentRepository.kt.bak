@@ -1,0 +1,38 @@
+package com.example.thanna.data
+
+import com.example.thanna.data.network.AdDto
+import com.example.thanna.data.network.ApiClient
+import com.example.thanna.data.network.ContentApi
+
+/** A promo/ad creative as served by GET /api/ads (managed in the Filament admin). */
+data class AdApi(
+  val id: String,
+  val sponsor: String?,
+  val title: String,
+  val subtitle: String?,
+  val image: String?,
+  val ctaText: String?,
+  val ctaUrl: String?,
+)
+
+/**
+ * Reads home-feed content (ads, and curated For You / Trending items) from the
+ * backend so the Filament "Haraan Control" admin drives them. Backed by the
+ * shared Retrofit/Moshi stack ([ApiClient]).
+ */
+class ContentRepository(
+  private val api: ContentApi = ApiClient.contentApi,
+) {
+  suspend fun getAds(placement: String? = null): List<AdApi> =
+    runCatching { api.ads(placement).data.orEmpty().map { it.toAdApi() } }.getOrDefault(emptyList())
+}
+
+private fun AdDto.toAdApi(): AdApi = AdApi(
+  id = id.toString(),
+  sponsor = sponsor,
+  title = title ?: "",
+  subtitle = subtitle,
+  image = image,
+  ctaText = ctaText,
+  ctaUrl = ctaUrl,
+)

@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    // Self-hosted WhatsApp bridge (whatsapp-web.js). Read via config() — NOT env() — at
+    // runtime, so it survives `config:cache` (env() returns null once config is cached).
+    'whatsapp' => [
+        'bridge_enabled' => env('WHATSAPP_BRIDGE_ENABLED', false),
+        'bridge_url' => env('WHATSAPP_BRIDGE_URL', 'http://localhost:8090/api/send-message'),
+    ],
+
 ];

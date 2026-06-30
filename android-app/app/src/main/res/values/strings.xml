@@ -1,3 +1,26 @@
 <resources>
     <string name="app_name">Haraan</string>
+
+    <!-- Common -->
+    <string name="action_score">Score</string>
+    <string name="live">LIVE</string>
+    <string name="language">Language</string>
+    <string name="choose_language">Choose your language</string>
+
+    <!-- Match detail tabs -->
+    <string name="tab_info">Info</string>
+    <string name="tab_commentary">Commentary</string>
+    <string name="tab_live">Live</string>
+    <string name="tab_scorecard">Scorecard</string>
+
+    <!-- Scorer -->
+    <string name="out">OUT</string>
+    <string name="start_second_innings">Start 2nd Innings</string>
+    <string name="innings_start">INNINGS START</string>
+    <string name="over_complete">OVER COMPLETE</string>
+    <string name="select_opening_bowler">Select the opening bowler</string>
+    <string name="select_next_bowler">Select the next bowler</string>
+    <string name="wicket">WICKET</string>
+    <string name="select_new_batsman">Select the new batsman</string>
+    <string name="innings_complete_fmt">Innings complete · %1$d overs</string>
 </resources>

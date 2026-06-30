@@ -1,0 +1,20 @@
+package com.example.thanna.data.network
+
+import retrofit2.http.GET
+import retrofit2.http.Path
+import retrofit2.http.Query
+
+/** Venue browse + detail (public, read-only — managed in the Filament admin). */
+interface VenueApi {
+    @GET("api/venues")
+    suspend fun list(): DataEnvelope<List<VenueCardDto>>
+
+    @GET("api/venues/{id}")
+    suspend fun detail(@Path("id") id: Long): DataEnvelope<VenueDetailDto>
+}
+
+/** Home-feed content (ads / promos). */
+interface ContentApi {
+    @GET("api/ads")
+    suspend fun ads(@Query("placement") placement: String? = null): DataEnvelope<List<AdDto>>
+}

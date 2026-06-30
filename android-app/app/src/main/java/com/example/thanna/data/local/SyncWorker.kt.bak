@@ -1,0 +1,91 @@
+package com.example.thanna.data.local
+
+import android.content.Context
+import androidx.work.CoroutineWorker
+import androidx.work.WorkerParameters
+import com.example.thanna.data.MatchRepository
+import com.example.thanna.data.TokenStore
+import org.json.JSONObject
+import java.io.IOException
+
+class SyncWorker(
+    context: Context,
+    workerParams: WorkerParameters
+) : CoroutineWorker(context, workerParams) {
+
+    override suspend fun doWork(): Result {
+        val database = HaraanDatabase.getDatabase(applicationContext)
+        val actionDao = database.pendingActionDao()
+        val syncStateDao = database.syncStateDao()
+
+        val token = TokenStore.getToken(applicationContext) ?: return Result.retry()
+
+        val queuedActions = actionDao.getAllQueuedActions()
+        if (queuedActions.isEmpty()) {
+            return Result.success()
+        }
+
+        val matchRepository = MatchRepository()
+
+        for (action in queuedActions) {
+            // Update status to SENDING
+            actionDao.updateAction(action.copy(status = "SENDING"))
+
+            try {
+                val actionObj = JSONObject(action.payloadJson)
+                // Ensure actionType is present as type
+                if (!actionObj.has("type")) {
+                    actionObj.put("type", action.actionType)
+                }
+
+                val responseBody = matchRepository.sendScoreAction(token, action.matchId, actionObj)
+
+                if (responseBody != null) {
+                    // Update locally to CONFIRMED
+                    actionDao.updateAction(action.copy(status = "CONFIRMED"))
+                    
+                    // Retrieve or create sync state
+                    val currentState = syncStateDao.getSyncState(action.matchId)
+                    val nextVersion = action.version
+                    if (currentState != null) {
+                        syncStateDao.updateSyncState(
+                            currentState.copy(
+                                serverVersion = nextVersion,
+                                localVersion = maxOf(currentState.localVersion, nextVersion),
+                                isDirty = false
+                            )
+                        )
+                    } else {
+                        syncStateDao.insertSyncState(
+                            SyncState(
+                                matchId = action.matchId,
+                                localVersion = nextVersion,
+                                serverVersion = nextVersion,
+                                isDirty = false
+                            )
+                        )
+                    }
+
+                    // Delete the action from Room database once confirmed
+                    actionDao.deleteActionById(action.id)
+                } else {
+                    // Call failed without throwing, treat as temporary failure
+                    actionDao.updateAction(action.copy(status = "FAILED"))
+                    return Result.retry()
+                }
+            } catch (e: Exception) {
+                // If it is a network error, retry
+                if (e is IOException) {
+                    actionDao.updateAction(action.copy(status = "FAILED"))
+                    return Result.retry()
+                } else {
+                    // Fatal parsing/invalid argument error, mark as FAILED and don't retry this action
+                    actionDao.updateAction(action.copy(status = "FAILED"))
+                    return Result.failure()
+                }
+            }
+        }
+
+        return Result.success()
+    }
+}

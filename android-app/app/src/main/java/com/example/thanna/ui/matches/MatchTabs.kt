@@ -16,11 +16,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.thanna.R
 
-val tabsList = listOf("Fantasy", "Discussions", "Commentary", "Live", "Scorecard")
+// Kept for sizing/indexing (e.g. pager page count); the visible labels are localized.
+val tabsList = listOf("Info", "Commentary", "Live", "Scorecard")
+
+@Composable
+private fun tabLabel(index: Int): String = stringResource(
+    when (index) {
+        0 -> R.string.tab_info
+        1 -> R.string.tab_commentary
+        2 -> R.string.tab_live
+        else -> R.string.tab_scorecard
+    }
+)
 
 @Composable
 fun MatchTabs(
@@ -36,7 +49,8 @@ fun MatchTabs(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp)
     ) {
-        itemsIndexed(tabsList) { index, title ->
+        itemsIndexed(tabsList) { index, _ ->
+            val title = tabLabel(index)
             val isSelected = selectedTabIndex == index
             val textColor by animateColorAsState(
                 targetValue = if (isSelected) CrexColors.TextPrimary else CrexColors.TextSecondary,

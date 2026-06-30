@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BroadcastsContentChanges;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -9,6 +10,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LiveMatch extends Model
 {
+    // Every save (incl. per-ball score updates) emits content.updated {domain: matches}
+    // so the app's GameHub ActionBoard refreshes the live score in-place over Reverb.
+    use BroadcastsContentChanges;
+
+    protected string $contentDomain = 'matches';
+
     protected $guarded = [];
 
     /** Reach tiers. STATE is reserved for a later phase (column already exists). */
