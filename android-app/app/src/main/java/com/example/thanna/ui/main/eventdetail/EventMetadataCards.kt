@@ -1,6 +1,7 @@
 package com.example.thanna.ui.main.eventdetail
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,36 +25,44 @@ import com.example.thanna.ui.theme.HaraanRadius
 import com.example.thanna.ui.theme.HaraanSpacing
 import com.example.thanna.ui.theme.HaraanTypography
 
-data class MetadataItem(
+private data class MetadataItem(
     val icon: ImageVector,
     val primary: String,
-    val secondary: String
+    val secondary: String,
+    val onClick: (() -> Unit)? = null
 )
 
 @Composable
 fun EventMetadataCards(
     date: String,
     venue: String,
+    scheduleAvailable: Boolean = false,
+    onVenueClick: () -> Unit = {},
+    onScheduleClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    // Parse date string into components
     val parsed = remember(date) { parseDateForCards(date) }
+    val doorsTime = parsed.time.ifBlank { "On time" }
 
     val items = listOf(
         MetadataItem(
             icon = Icons.Default.CalendarMonth,
-            primary = parsed.dayOfWeek,
-            secondary = parsed.dateShort
+            primary = parsed.day,
+            secondary = parsed.month
         ),
         MetadataItem(
             icon = Icons.Default.LocationOn,
             primary = venue.substringBefore(",").trim(),
-            secondary = venue.substringAfter(",", "").trim().ifBlank { "Venue" }
+            secondary = "Directions",
+            onClick = onVenueClick
         ),
         MetadataItem(
             icon = Icons.Default.Schedule,
-            primary = parsed.time,
-            secondary = "Doors Open"
+            primary = doorsTime,
+            // When the host set a run-of-show, the card becomes a tappable entry
+            // point to the full schedule; otherwise it's a static doors label.
+            secondary = if (scheduleAvailable) "View schedule" else "Doors Open",
+            onClick = if (scheduleAvailable) onScheduleClick else null
         )
     )
 
@@ -64,74 +73,95 @@ fun EventMetadataCards(
         horizontalArrangement = Arrangement.spacedBy(HaraanSpacing.Small)
     ) {
         items.forEach { item ->
-            Surface(
-                color = HaraanColors.Background,
-                shape = RoundedCornerShape(HaraanRadius.Medium),
-                border = BorderStroke(1.dp, HaraanColors.BorderLight),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(
-                    modifier = Modifier.padding(vertical = HaraanSpacing.Compact, horizontal = HaraanSpacing.Small),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = item.icon,
-                        contentDescription = null,
-                        tint = HaraanColors.EventsBlue,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = item.primary,
-                        style = HaraanTypography.TitleMedium.copy(
-                            fontSize = 14.sp,
-                            color = HaraanColors.TextPrimary,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        textAlign = TextAlign.Center,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = item.secondary,
-                        style = HaraanTypography.BodyMedium.copy(
-                            fontSize = 12.sp,
-                            color = HaraanColors.TextMuted
-                        ),
-                        textAlign = TextAlign.Center,
-                        maxLines = 1
-                    )
-                }
+            val cardModifier = Modifier.weight(1f)
+            val shape = RoundedCornerShape(HaraanRadius.Medium)
+            val border = BorderStroke(1.dp, HaraanColors.BorderLight)
+
+            if (item.onClick != null) {
+                Surface(
+                    onClick = item.onClick,
+                    color = HaraanColors.Background,
+                    shape = shape,
+                    border = border,
+                    modifier = cardModifier
+                ) { MetadataContent(item) }
+            } else {
+                Surface(
+                    color = HaraanColors.Background,
+                    shape = shape,
+                    border = border,
+                    modifier = cardModifier
+                ) { MetadataContent(item) }
             }
         }
     }
 }
 
+@Composable
+private fun MetadataContent(item: MetadataItem) {
+    Column(
+        // Tighter than before — less vertical padding so the row reads compact.
+        modifier = Modifier.padding(vertical = 10.dp, horizontal = HaraanSpacing.Small),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(
+                    color = HaraanColors.EventsBlue.copy(alpha = 0.10f),
+                    shape = RoundedCornerShape(9.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = null,
+                tint = HaraanColors.EventsBlue,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Text(
+            text = item.primary,
+            style = HaraanTypography.TitleMedium.copy(
+                fontSize = 14.sp,
+                color = HaraanColors.TextPrimary,
+                fontWeight = FontWeight.Bold
+            ),
+            textAlign = TextAlign.Center,
+            maxLines = 1
+        )
+        Text(
+            text = item.secondary,
+            style = HaraanTypography.BodyMedium.copy(
+                fontSize = 11.sp,
+                color = if (item.onClick != null) HaraanColors.EventsBlue else HaraanColors.TextMuted,
+                fontWeight = if (item.onClick != null) FontWeight.SemiBold else FontWeight.Normal
+            ),
+            textAlign = TextAlign.Center,
+            maxLines = 1
+        )
+    }
+}
+
 private data class ParsedDate(
-    val dayOfWeek: String,
-    val dateShort: String,
+    val day: String,
+    val month: String,
     val time: String
 )
 
+/**
+ * Split a pre-formatted display date like "27 Jun • 21:00" into a day, month
+ * and time. Falls back gracefully for other shapes so no card shows "TBA".
+ */
 private fun parseDateForCards(dateStr: String): ParsedDate {
-    // Handle common formats like "Saturday, 26 June, 7:00 PM" or "SAT • 13 JUN • 7:00 PM"
-    val cleaned = dateStr.replace("•", ",").replace("  ", " ").trim()
-    val parts = cleaned.split(",").map { it.trim() }
+    val segments = dateStr.split("•", ",").map { it.trim() }.filter { it.isNotBlank() }
+    val datePart = segments.getOrNull(0).orEmpty()
+    val timePart = segments.getOrNull(1).orEmpty()
 
-    return when {
-        parts.size >= 3 -> ParsedDate(
-            dayOfWeek = parts[0].take(3).uppercase(),
-            dateShort = parts[1],
-            time = parts[2]
-        )
-        parts.size == 2 -> ParsedDate(
-            dayOfWeek = parts[0].take(3).uppercase(),
-            dateShort = parts[1],
-            time = "TBA"
-        )
-        else -> ParsedDate(
-            dayOfWeek = cleaned.take(3).uppercase(),
-            dateShort = cleaned,
-            time = "TBA"
-        )
-    }
+    val tokens = datePart.split(" ").filter { it.isNotBlank() }
+    val day = tokens.getOrNull(0)?.take(3) ?: datePart.take(3)
+    val month = tokens.drop(1).joinToString(" ").ifBlank { "Date" }
+
+    return ParsedDate(day = day, month = month, time = timePart)
 }

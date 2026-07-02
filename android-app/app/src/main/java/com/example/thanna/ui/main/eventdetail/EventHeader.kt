@@ -30,8 +30,7 @@ fun EventHeader(
             )
         )
 
-        // Date sits immediately under the title in the accent colour (District
-        // pattern) — no gap, so the header reads as one tight block.
+        // Rich date line under the title, accent-coloured (e.g. "Sun, 5 Jul, 8:00 PM").
         if (date.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(

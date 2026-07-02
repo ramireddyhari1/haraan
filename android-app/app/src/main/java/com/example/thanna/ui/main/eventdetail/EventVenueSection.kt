@@ -46,6 +46,13 @@ fun EventVenueSection(
     val address = venue.substringAfter(",", "").trim()
 
     Column(modifier = modifier.padding(horizontal = HaraanSpacing.Medium)) {
+        Text(
+            text = "Venue",
+            style = HaraanTypography.SectionTitle.copy(color = HaraanColors.TextPrimary)
+        )
+
+        Spacer(Modifier.height(HaraanSpacing.Small))
+
         Surface(
             color = HaraanColors.Background,
             shape = RoundedCornerShape(HaraanRadius.Medium),

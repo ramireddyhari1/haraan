@@ -11,8 +11,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.example.thanna.EventDetail
@@ -37,6 +40,17 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
     val ticketTypes = detail.ticketTypes
     val infoNotes = detail.infoNotes.ifEmpty { event.infoNotes }
     val eventIdInt = remember(event.id) { event.id.toIntOrNull() }
+
+    val context = LocalContext.current
+    var showSchedule by remember { mutableStateOf(false) }
+
+    // Schedule sheet — opened from the "Doors Open" card when a run-of-show exists.
+    if (showSchedule && detail.schedule.isNotEmpty()) {
+        EventScheduleSheet(
+            entries = detail.schedule,
+            onDismiss = { showSchedule = false }
+        )
+    }
 
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -111,9 +125,9 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                         )
                     )
                     .background(HaraanColors.Surface)
-                    .padding(top = HaraanSpacing.Large, bottom = 180.dp)
+                    .padding(top = HaraanSpacing.Medium, bottom = 180.dp)
             ) {
-                // Identity Row — category + real attending count
+                // Identity Row — category, rating, attending, featured
                 EventIdentityRow(
                     category = event.category,
                     bookedThisWeek = event.bookedThisWeek
@@ -121,21 +135,40 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Compact))
 
-                // Title + date — one tight block (date accented, directly under)
+                // Title + rich date line ("Sun, 5 Jul, 8:00 PM")
                 EventHeader(
                     title = event.title,
-                    date = event.date
+                    date = detail.fullDate.ifBlank { event.date }
                 )
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
 
-                // Location — compact tappable row with "Directions" (moved up to
-                // replace the three chunky metadata cards)
-                EventVenueSection(venue = event.venue)
+                // Trust Indicators
+                EventTrustIndicators()
+
+                Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
+
+                // Metadata Cards — date, tappable venue (→ maps), doors-open
+                // time (→ schedule sheet when the host defined one)
+                EventMetadataCards(
+                    date = event.date,
+                    venue = event.venue,
+                    scheduleAvailable = detail.schedule.isNotEmpty(),
+                    onVenueClick = {
+                        if (event.venue.isNotBlank()) {
+                            val uri = Uri.parse("geo:0,0?q=" + Uri.encode(event.venue))
+                            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            runCatching { context.startActivity(intent) }
+                        }
+                    },
+                    onScheduleClick = { showSchedule = true }
+                )
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
-                // About — prose overview, clamped with "Read more"
+                // About Section — prose overview only
                 EventAboutSection(
                     title = event.title,
                     venue = event.venue,
@@ -154,6 +187,17 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                     Spacer(modifier = Modifier.height(HaraanSpacing.Large))
                 }
 
+                // Who takes the stage — coverflow lineup (hides when empty)
+                if (detail.lineup.isNotEmpty()) {
+                    EventLineupSection(artists = detail.lineup)
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                }
+
+                // Venue — name, address & a working "Get directions" action
+                EventVenueSection(venue = event.venue)
+
+                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+
                 // Good to Know — admin-authored attribute grid (hides when empty)
                 if (detail.goodToKnow.isNotEmpty()) {
                     EventGoodToKnowCard(items = detail.goodToKnow)
@@ -164,19 +208,6 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                 EventImportantInfoCard(
                     infoNotes = infoNotes
                 )
-
-                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
-
-                // Ticket Availability — absorbs the urgency / demand signal
-                EventTicketAvailability(
-                    bookedThisWeek = event.bookedThisWeek
-                )
-
-                Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
-
-                // Trust cues — demoted from a mid-page band to a quiet strip just
-                // above the sticky Book bar, where reassurance actually converts.
-                EventTrustIndicators()
             }
         }
 

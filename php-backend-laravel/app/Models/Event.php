@@ -77,6 +77,8 @@ final class Event extends Model
         'entry_note',
         'info_notes',
         'good_to_know',
+        'schedule',
+        'lineup',
     ];
 
     /** @return array<string, string> */
@@ -97,6 +99,8 @@ final class Event extends Model
             'pet_friendly'   => 'boolean',
             'info_notes'     => 'array',
             'good_to_know'   => 'array',
+            'schedule'       => 'array',
+            'lineup'         => 'array',
         ];
     }
 

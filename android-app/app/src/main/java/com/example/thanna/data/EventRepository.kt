@@ -25,11 +25,28 @@ data class GoodToKnowItem(
     val value: String,
 )
 
+/** One row of an event's run-of-show (GET /api/events/{id} → schedule). */
+data class ScheduleEntry(
+    val time: String,
+    val title: String,
+    val note: String,
+)
+
+/** One performer in the "Who takes the stage" lineup carousel. */
+data class LineupArtist(
+    val name: String,
+    val subtitle: String,
+    val imageUrl: String,
+)
+
 /** Detail payload for one event: sellable tiers plus the admin-authored "know before you go" content. */
 data class EventDetailInfo(
     val ticketTypes: List<EventTicketType> = emptyList(),
     val infoNotes: List<String> = emptyList(),
     val goodToKnow: List<GoodToKnowItem> = emptyList(),
+    val schedule: List<ScheduleEntry> = emptyList(),
+    val lineup: List<LineupArtist> = emptyList(),
+    val fullDate: String = "",   // "Sun, 5 Jul, 8:00 PM" built from date + time
 )
 
 /** Browse-card shape for an event, sourced from the real API rather than sample data. */
@@ -125,7 +142,56 @@ class EventRepository(
             }
         }.orEmpty()
 
-        EventDetailInfo(ticketTypes = tickets, infoNotes = notes, goodToKnow = goodToKnow)
+        val schedule = d.optJSONArray("schedule")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val time = o.optString("time")
+                if (time.isBlank()) return@mapNotNull null
+                ScheduleEntry(
+                    time = time,
+                    title = o.optString("title"),
+                    note = o.optString("note"),
+                )
+            }
+        }.orEmpty()
+
+        val lineup = d.optJSONArray("lineup")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val name = o.optString("name")
+                if (name.isBlank()) return@mapNotNull null
+                LineupArtist(
+                    name = name,
+                    subtitle = o.optString("subtitle"),
+                    imageUrl = resolveImage(o.optString("image")),
+                )
+            }
+        }.orEmpty()
+
+        val fullDate = formatFullDate(d.optString("date"), d.optString("time"))
+
+        EventDetailInfo(
+            ticketTypes = tickets,
+            infoNotes = notes,
+            goodToKnow = goodToKnow,
+            schedule = schedule,
+            lineup = lineup,
+            fullDate = fullDate,
+        )
+    }
+
+    /**
+     * Build a rich header date like "Sun, 5 Jul, 8:00 PM" from the ISO date and
+     * the free-text time. SimpleDateFormat is safe on minSdk 24. Falls back to
+     * just the time (or blank) when the date can't be parsed.
+     */
+    private fun formatFullDate(isoDate: String, time: String): String {
+        val datePart = runCatching {
+            val parser = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH)
+            val d = parser.parse(isoDate.take(10)) ?: return@runCatching null
+            java.text.SimpleDateFormat("EEE, d MMM", java.util.Locale.ENGLISH).format(d)
+        }.getOrNull()
+        return listOfNotNull(datePart, time.takeIf { it.isNotBlank() }).joinToString(", ")
     }
 
     /** Sellable ticket tiers for one event. Empty when the event has none (flat-price event). */

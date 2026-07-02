@@ -46,6 +46,7 @@ class EventForm
                     self::basicsStep(),
                     self::whenWhereStep(),
                     self::goodToKnowStep(),
+                    self::lineupStep(),
                     self::ticketsStep(),
                     self::publishStep(),
                 ])
@@ -193,6 +194,64 @@ class EventForm
                     ->addActionLabel('Add a custom row')
                     ->defaultItems(0)
                     ->collapsible()
+                    ->columnSpanFull(),
+                Repeater::make('schedule')
+                    ->label('Schedule / Run of show')
+                    ->helperText('Shown when a user taps the "Doors Open" card.')
+                    ->schema([
+                        TextInput::make('time')
+                            ->required()
+                            ->placeholder('8:00 PM')
+                            ->helperText('Start time of this item'),
+                        TextInput::make('title')
+                            ->required()
+                            ->placeholder('Opening act'),
+                        TextInput::make('note')
+                            ->placeholder('Main Arena · 45 min set')
+                            ->columnSpanFull(),
+                    ])
+                    ->columns(2)
+                    ->addActionLabel('Add a schedule item')
+                    ->defaultItems(0)
+                    ->collapsible()
+                    ->itemLabel(fn (array $state): ?string => trim(($state['time'] ?? '').' — '.($state['title'] ?? ''), ' —') ?: null)
+                    ->columnSpanFull(),
+            ]);
+    }
+
+    /**
+     * "Who takes the stage" — the performer lineup rendered as a coverflow
+     * carousel on the app's event detail screen. Each card is an image + name +
+     * subtitle (role / genre / hit track). All optional.
+     */
+    private static function lineupStep(): Step
+    {
+        return Step::make('Lineup')
+            ->description('Who takes the stage')
+            ->icon('heroicon-o-microphone')
+            ->schema([
+                Repeater::make('lineup')
+                    ->label('Performers')
+                    ->helperText('Shown as a swipeable "Who takes the stage" carousel in the app.')
+                    ->schema([
+                        FileUpload::make('image')
+                            ->label('Photo')
+                            ->image()
+                            ->disk('public')
+                            ->directory('events/lineup')
+                            ->imageEditor()
+                            ->columnSpanFull(),
+                        TextInput::make('name')
+                            ->required()
+                            ->placeholder('e.g. Root 35'),
+                        TextInput::make('subtitle')
+                            ->placeholder('e.g. Headliner · Live band'),
+                    ])
+                    ->columns(2)
+                    ->addActionLabel('Add a performer')
+                    ->defaultItems(0)
+                    ->collapsible()
+                    ->itemLabel(fn (array $state): ?string => $state['name'] ?? null)
                     ->columnSpanFull(),
             ]);
     }

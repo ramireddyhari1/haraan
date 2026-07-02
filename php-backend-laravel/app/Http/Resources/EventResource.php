@@ -42,6 +42,22 @@ final class EventResource extends JsonResource
                 static fn ($n): bool => is_string($n) && trim($n) !== '',
             )),
             'goodToKnow'     => $this->resource->goodToKnowRows(),
+            'schedule'       => collect((array) ($this->schedule ?? []))
+                ->filter(fn ($r) => is_array($r) && trim((string) ($r['time'] ?? '')) !== '')
+                ->map(fn ($r) => [
+                    'time'  => trim((string) ($r['time'] ?? '')),
+                    'title' => trim((string) ($r['title'] ?? '')),
+                    'note'  => trim((string) ($r['note'] ?? '')),
+                ])
+                ->values(),
+            'lineup'         => collect((array) ($this->lineup ?? []))
+                ->filter(fn ($r) => is_array($r) && trim((string) ($r['name'] ?? '')) !== '')
+                ->map(fn ($r) => [
+                    'name'     => trim((string) ($r['name'] ?? '')),
+                    'subtitle' => trim((string) ($r['subtitle'] ?? '')),
+                    'image'    => trim((string) (is_array($r['image'] ?? null) ? ($r['image'][0] ?? '') : ($r['image'] ?? ''))),
+                ])
+                ->values(),
             'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes->map(fn ($t) => [
                 'id'        => $t->id,
                 'name'      => $t->name,
