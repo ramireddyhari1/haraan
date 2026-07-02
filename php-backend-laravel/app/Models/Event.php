@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int         $available_slots
  * @property array       $images
  * @property string      $status
+ * @property int         $views
  * @property int|null    $partner_id
  * @property int|null    $seat_rows
  * @property int|null    $seats_per_row
@@ -66,6 +67,16 @@ final class Event extends Model
         'seat_rows',
         'seats_per_row',
         'seat_selection',
+        'languages',
+        'age_limit',
+        'kid_friendly',
+        'pet_friendly',
+        'layout',
+        'seating_type',
+        'duration',
+        'entry_note',
+        'info_notes',
+        'good_to_know',
     ];
 
     /** @return array<string, string> */
@@ -76,10 +87,16 @@ final class Event extends Model
             'price'          => 'float',
             'total_slots'    => 'integer',
             'available_slots'=> 'integer',
+            'views'          => 'integer',
             'images'         => 'array',
             'seat_selection' => 'boolean',
             'seat_rows'      => 'integer',
             'seats_per_row'  => 'integer',
+            'languages'      => 'array',
+            'kid_friendly'   => 'boolean',
+            'pet_friendly'   => 'boolean',
+            'info_notes'     => 'array',
+            'good_to_know'   => 'array',
         ];
     }
 
@@ -99,9 +116,66 @@ final class Event extends Model
         return $this->belongsTo(OrganizationUnit::class, 'organization_id');
     }
 
+    // -------------------------------------------------------------------------
+    //  "Good to Know"
+    // -------------------------------------------------------------------------
+
+    /**
+     * Assemble the structured "Good to Know" rows from the first-class columns
+     * plus any admin-authored extras. Each row is {icon, label, value}; clients
+     * map `icon` (a stable key) to a vector/SVG. Empty attributes are skipped,
+     * so the section only shows what the host actually set. Shared by the API
+     * resource and the public site's event page.
+     *
+     * @return array<int, array{icon: string, label: string, value: string}>
+     */
+    public function goodToKnowRows(): array
+    {
+        $rows = [];
+
+        $add = static function (string $icon, string $label, ?string $value) use (&$rows): void {
+            $value = $value !== null ? trim($value) : '';
+            if ($value !== '') {
+                $rows[] = ['icon' => $icon, 'label' => $label, 'value' => $value];
+            }
+        };
+
+        $languages = array_values(array_filter(
+            (array) ($this->languages ?? []),
+            static fn ($l): bool => is_string($l) && trim($l) !== '',
+        ));
+        $add('language', 'Language', $languages === [] ? null : implode(', ', $languages));
+        $add('duration', 'Duration', $this->duration);
+        $add('age', 'Age limit', $this->age_limit);
+        $add('entry', 'Entry', $this->entry_note);
+        $add('layout', 'Layout', $this->layout);
+        $add('seating', 'Seating', $this->seating_type);
+
+        if ($this->kid_friendly !== null) {
+            $add('kids', 'Kids', $this->kid_friendly ? 'Kid friendly' : 'No kids');
+        }
+        if ($this->pet_friendly !== null) {
+            $add('pets', 'Pets', $this->pet_friendly ? 'Pet friendly' : 'No pets');
+        }
+
+        foreach ((array) ($this->good_to_know ?? []) as $extra) {
+            if (is_array($extra)) {
+                $add('info', (string) ($extra['label'] ?? ''), (string) ($extra['value'] ?? ''));
+            }
+        }
+
+        return $rows;
+    }
+
     /** All bookings placed for this event. */
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);
+    }
+
+    /** Priced ticket tiers offered for this event (ordered for display). */
+    public function ticketTypes(): HasMany
+    {
+        return $this->hasMany(TicketType::class)->orderBy('sort')->orderBy('id');
     }
 }

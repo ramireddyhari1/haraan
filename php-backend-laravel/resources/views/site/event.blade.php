@@ -460,9 +460,46 @@
             </div>
 
             {{-- Content Pane: Know Before You Go --}}
+            @php
+                $gtkRows = $event->goodToKnowRows();
+                $infoNotes = array_values(array_filter(
+                    (array) ($event->info_notes ?? []),
+                    fn ($n) => is_string($n) && trim($n) !== ''
+                ));
+                $hasAdminKnow = count($gtkRows) > 0 || count($infoNotes) > 0;
+            @endphp
             <div id="pane-know" class="dr-tab-pane" style="display: none; margin-top: 24px;">
+
+                {{-- Admin-authored "Good to Know" — attribute grid + T&C notes.
+                     Falls back to the generic cards below when the host set nothing. --}}
+                @if($hasAdminKnow)
+                    @if(count($gtkRows) > 0)
+                        <section style="margin-bottom: 28px;">
+                            <h3 class="dr-section-title" style="margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none; color: #121620;">Good to Know</h3>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+                                @foreach($gtkRows as $row)
+                                    <div style="border: 1px solid var(--dr-border); border-radius: 14px; background: #ffffff; padding: 16px 18px;">
+                                        <div style="font-size: 11px; font-weight: 800; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">{{ $row['label'] }}</div>
+                                        <div style="font-size: 15px; font-weight: 700; color: #121620; letter-spacing: -0.01em;">{{ $row['value'] }}</div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </section>
+                    @endif
+
+                    @if(count($infoNotes) > 0)
+                        <section style="margin-bottom: 32px;">
+                            <h3 class="dr-section-title" style="margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none; color: #121620;">Important Information</h3>
+                            <ul style="margin: 0; padding-left: 20px; color: var(--dr-text-mute); font-size: 14px; line-height: 1.9;">
+                                @foreach($infoNotes as $note)
+                                    <li>{{ $note }}</li>
+                                @endforeach
+                            </ul>
+                        </section>
+                    @endif
+                @else
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-bottom: 32px;">
-                    
+
                     {{-- Entry & Timing --}}
                     <div style="border: 1px solid var(--dr-border); padding: 24px; border-radius: 0px; background: #ffffff;">
                         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
@@ -500,6 +537,7 @@
                     </div>
 
                 </div>
+                @endif
             </div>
 
         </main>

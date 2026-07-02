@@ -17,7 +17,7 @@ final class PublicWebController extends Controller
     {
         $events = $this->eventFeed(6);
 
-        return view('site.home', ['title' => 'Book & Vibe - Home', 'events' => $events]);
+        return view('site.home', ['title' => 'Haraan - Home', 'events' => $events]);
     }
 
     public function events(): View
@@ -35,7 +35,13 @@ final class PublicWebController extends Controller
 
     public function eventDetail(string $id): View
     {
-        return view('site.event', ['title' => 'Event Details', 'id' => $id]);
+        $event = Event::query()->findOrFail($id);
+
+        return view('site.event', [
+            'title' => $event->title,
+            'event' => $event,
+            'id'    => $id,
+        ]);
     }
 
     public function gamehub(): View

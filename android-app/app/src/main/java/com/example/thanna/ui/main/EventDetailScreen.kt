@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.example.thanna.EventDetail
+import com.example.thanna.data.EventDetailInfo
+import com.example.thanna.data.EventRepository
 import com.example.thanna.ui.main.eventdetail.*
 import com.example.thanna.ui.theme.HaraanColors
 import com.example.thanna.ui.theme.HaraanRadius
@@ -25,6 +27,17 @@ import kotlinx.coroutines.delay
 @Composable
 fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
     val scrollState = rememberScrollState()
+
+    // Load full detail once: sellable ticket tiers for the booking bar plus the
+    // admin-authored "Good to Know" attributes and T&C notes. Blank for
+    // flat-price / mock events, in which case we fall back to the nav-key notes.
+    val detail by produceState(initialValue = EventDetailInfo(), event.id) {
+        value = runCatching { EventRepository().getEventDetail(event.id) }.getOrDefault(EventDetailInfo())
+    }
+    val ticketTypes = detail.ticketTypes
+    val infoNotes = detail.infoNotes.ifEmpty { event.infoNotes }
+    val eventIdInt = remember(event.id) { event.id.toIntOrNull() }
+
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
     val posterHeight = (configuration.screenHeightDp * 0.42f).dp
@@ -100,7 +113,7 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                     .background(HaraanColors.Surface)
                     .padding(top = HaraanSpacing.Large, bottom = 180.dp)
             ) {
-                // Identity Row — category, rating, attending, featured
+                // Identity Row — category + real attending count
                 EventIdentityRow(
                     category = event.category,
                     bookedThisWeek = event.bookedThisWeek
@@ -108,34 +121,28 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Compact))
 
-                // Title — stands alone, dominant
+                // Title + date — one tight block (date accented, directly under)
                 EventHeader(
-                    title = event.title
+                    title = event.title,
+                    date = event.date
                 )
 
-                Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
+                Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
 
-                // Trust Indicators
-                EventTrustIndicators()
+                // Location — compact tappable row with "Directions" (moved up to
+                // replace the three chunky metadata cards)
+                EventVenueSection(venue = event.venue)
 
-                Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
+                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
-                // Metadata Cards (Date, Venue, Time)
-                EventMetadataCards(
-                    date = event.date,
-                    venue = event.venue
-                )
-
-                Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
-
-                // About Section — prose overview only
+                // About — prose overview, clamped with "Read more"
                 EventAboutSection(
                     title = event.title,
                     venue = event.venue,
                     description = event.description
                 )
 
-                Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
+                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
                 // Organizer — who's running / selling the event (hides if unknown)
                 EventOrganizerSection(
@@ -144,25 +151,32 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                 )
 
                 if (event.organizer.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Large))
                 }
 
-                // Venue — name, address & a working "Get directions" action
-                EventVenueSection(venue = event.venue)
-
-                Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
+                // Good to Know — admin-authored attribute grid (hides when empty)
+                if (detail.goodToKnow.isNotEmpty()) {
+                    EventGoodToKnowCard(items = detail.goodToKnow)
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                }
 
                 // Important Info Card — single source for event notes
                 EventImportantInfoCard(
-                    infoNotes = event.infoNotes
+                    infoNotes = infoNotes
                 )
 
-                Spacer(modifier = Modifier.height(HaraanSpacing.XLarge))
+                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
                 // Ticket Availability — absorbs the urgency / demand signal
                 EventTicketAvailability(
                     bookedThisWeek = event.bookedThisWeek
                 )
+
+                Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
+
+                // Trust cues — demoted from a mid-page band to a quiet strip just
+                // above the sticky Book bar, where reassurance actually converts.
+                EventTrustIndicators()
             }
         }
 
@@ -177,6 +191,8 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
         EventStickyBookingBar(
             price = event.price,
             barRise = barRise,
+            eventId = eventIdInt,
+            ticketTypes = ticketTypes,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
     }

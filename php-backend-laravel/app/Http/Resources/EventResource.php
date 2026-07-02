@@ -37,6 +37,23 @@ final class EventResource extends JsonResource
             'status'         => $this->status,
             'partnerId'      => $this->partner_id,
             'createdAt'      => $this->created_at,
+            'infoNotes'      => array_values(array_filter(
+                (array) ($this->info_notes ?? []),
+                static fn ($n): bool => is_string($n) && trim($n) !== '',
+            )),
+            'goodToKnow'     => $this->resource->goodToKnowRows(),
+            'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes->map(fn ($t) => [
+                'id'        => $t->id,
+                'name'      => $t->name,
+                'kind'      => $t->kind,
+                'price'     => $t->price,
+                'admits'    => $t->admits,
+                'minPrice'  => $t->min_price,
+                'capacity'  => $t->capacity,
+                'sold'      => $t->sold,
+                'remaining' => $t->remaining(),
+                'onSale'    => $t->isOnSale(),
+            ])->values()),
         ];
     }
 }
