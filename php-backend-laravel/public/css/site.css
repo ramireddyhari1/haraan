@@ -92,6 +92,13 @@ a {
 	object-position: center 28%;
 }
 
+.brand__img {
+	display: block;
+	height: 34px;
+	width: auto;
+	object-fit: contain;
+}
+
 .brand__text {
 	display: grid;
 	line-height: 1.05;
@@ -236,6 +243,7 @@ a {
 .location-pill {
     display: inline-flex;
     align-items: center;
+    justify-self: start; /* don't stretch across the 1fr grid column (was making the whole gap clickable) */
     gap: 10px;
     padding: 6px 12px 6px 6px; /* slightly narrower */
     border: 1px solid rgba(0, 0, 0, 0.05);

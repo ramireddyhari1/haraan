@@ -78,10 +78,7 @@
     <header class="topbar {{ request()->is('events*') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">
-                <span class="brand__text">
-                    <strong>Book &amp; Vibe</strong>
-                    <small>Events and sports platform</small>
-                </span>
+                <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan" class="brand__img">
             </a>
 
             <a class="location-pill" href="#" id="locationToggle">
@@ -133,7 +130,6 @@
                 <a href="/" class="topnav__link {{ request()->is('/') ? 'is-active' : '' }}">Overview</a>
                 <a href="/events" class="topnav__link {{ request()->is('events*') ? 'is-active' : '' }}">Events</a>
                 <a href="/gamehub" class="topnav__link {{ request()->is('gamehub*') && !request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">GameHub</a>
-                <a href="/gamehub/leaderboard" class="topnav__link {{ request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">Leaderboard</a>
             </nav>
 
             <!-- Mobile off-canvas nav (mirrors topnav) -->

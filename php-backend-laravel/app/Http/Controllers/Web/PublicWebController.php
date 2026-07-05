@@ -8,8 +8,14 @@ use App\Http\Controllers\Controller;
 use App\Services\EventService;
 use Illuminate\Support\Collection;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use App\Models\Event;
 use App\Models\LiveMatch;
+use App\Models\User;
+use App\Models\Venue;
 
 final class PublicWebController extends Controller
 {
@@ -46,12 +52,28 @@ final class PublicWebController extends Controller
 
     public function gamehub(): View
     {
-        return view('site.gamehub', ['title' => 'GameHub']);
+        $venues = Venue::query()
+            ->where('is_active', true)
+            ->orderByDesc('is_featured')
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (Venue $v) => $this->decorateVenueCard($v));
+
+        return view('site.gamehub', ['title' => 'GameHub', 'venues' => $venues]);
     }
 
     public function gamehubDetail(string $id): View
     {
-        return view('site.gamehub-detail', ['title' => 'GameHub Detail', 'id' => $id]);
+        $venue = Venue::query()
+            ->where('is_active', true)
+            ->with(['reviews' => fn ($q) => $q->where('is_active', true)->latest()])
+            ->findOrFail($id);
+
+        return view('site.gamehub-detail', [
+            'title' => $venue->name,
+            'id'    => $id,
+            'venue' => $this->decorateVenueDetail($venue),
+        ]);
     }
 
     public function actionBoard(): View
@@ -191,6 +213,331 @@ final class PublicWebController extends Controller
             'type' => $type,
             'results' => $results,
         ]);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Leaderboard (batting / bowling career boards)                      */
+    /* ------------------------------------------------------------------ */
+
+    public function leaderboard(): View
+    {
+        $scope = request()->query('scope', 'country');
+        if (!in_array($scope, ['country', 'state', 'district'], true)) {
+            $scope = 'country';
+        }
+
+        $states = User::query()
+            ->where('is_guest', false)
+            ->whereNotNull('state')
+            ->where('state', '!=', '')
+            ->distinct()
+            ->orderBy('state')
+            ->pluck('state')
+            ->values()
+            ->all();
+
+        $districts = User::query()
+            ->where('is_guest', false)
+            ->whereNotNull('district')
+            ->where('district', '!=', '')
+            ->distinct()
+            ->orderBy('district')
+            ->pluck('district')
+            ->values()
+            ->all();
+
+        $selectedState    = request()->query('state', $states[0] ?? 'Andhra Pradesh');
+        $selectedDistrict = request()->query('district', $districts[0] ?? 'Kadapa');
+
+        $scopeFilter = function ($query) use ($scope, $selectedState, $selectedDistrict) {
+            $query->where('is_guest', false);
+            if ($scope === 'state') {
+                $query->where('state', $selectedState);
+            } elseif ($scope === 'district') {
+                $query->where('district', $selectedDistrict);
+            }
+            return $query;
+        };
+
+        $battingLeaderboard = $scopeFilter(User::query())
+            ->where('career_runs', '>', 0)
+            ->orderByDesc('career_runs')
+            ->limit(50)
+            ->get();
+
+        $bowlingLeaderboard = $scopeFilter(User::query())
+            ->where('career_wickets', '>', 0)
+            ->orderByDesc('career_wickets')
+            ->limit(50)
+            ->get();
+
+        return view('site.leaderboard', [
+            'title'              => 'Leaderboard',
+            'scope'              => $scope,
+            'states'             => $states,
+            'districts'          => $districts,
+            'selectedState'      => $selectedState,
+            'selectedDistrict'   => $selectedDistrict,
+            'battingLeaderboard' => $battingLeaderboard,
+            'bowlingLeaderboard' => $bowlingLeaderboard,
+        ]);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  ActionBoard match JSON (polled by the live scoreboards)            */
+    /* ------------------------------------------------------------------ */
+
+    public function actionBoardMatchJson(string $id): JsonResponse
+    {
+        return response()->json(LiveMatch::findOrFail($id));
+    }
+
+    public function actionBoardMatchesJson(): JsonResponse
+    {
+        return response()->json(LiveMatch::orderBy('created_at', 'desc')->get());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Player directory (squad builder + profile-setup claiming)          */
+    /* ------------------------------------------------------------------ */
+
+    public function searchPlayers(Request $request): JsonResponse
+    {
+        $q = trim((string) $request->query('q', ''));
+        if (mb_strlen($q) < 2) {
+            return response()->json([]);
+        }
+
+        $players = User::query()
+            ->where('is_guest', false)
+            ->where(function ($w) use ($q) {
+                $w->where('name', 'like', "%{$q}%")
+                    ->orWhere('player_id', 'like', "%{$q}%");
+            })
+            ->orderBy('name')
+            ->limit(10)
+            ->get();
+
+        return response()->json($players->map(fn (User $u) => [
+            'id'       => $u->player_id,
+            'name'     => $u->name,
+            'role'     => $u->player_role ?: 'Player',
+            'style'    => $u->batting_style ?: ($u->playing_style ?: ''),
+            'district' => $u->district ?: '—',
+        ])->all());
+    }
+
+    public function createGuestPlayer(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['name' => 'required|string|max:255']);
+        $name = trim($validated['name']);
+        if ($name === '') {
+            return response()->json(['success' => false], 422);
+        }
+
+        $guest = User::create([
+            'name'          => $name,
+            'email'         => 'guest_' . Str::random(16) . '@guest.haraan',
+            'password'      => Hash::make(Str::random(24)),
+            'role'          => 'user',
+            'status'        => 'active',
+            'is_guest'      => true,
+            'player_role'   => 'All-rounder',
+            'playing_style' => 'Unknown',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'id'      => $guest->player_id,
+            'name'    => $guest->name,
+            'role'    => $guest->player_role,
+            'style'   => $guest->playing_style,
+        ]);
+    }
+
+    public function getClaimablePlayers(Request $request): JsonResponse
+    {
+        $name = trim((string) $request->query('name', ''));
+        if (mb_strlen($name) < 2) {
+            return response()->json([]);
+        }
+
+        $guests = User::query()
+            ->where('is_guest', true)
+            ->where('name', 'like', "%{$name}%")
+            ->orderBy('name')
+            ->limit(10)
+            ->get();
+
+        return response()->json($guests->map(function (User $g) {
+            $match = LiveMatch::query()
+                ->where('home_squad', 'like', "%{$g->player_id}%")
+                ->orWhere('away_squad', 'like', "%{$g->player_id}%")
+                ->orderByDesc('created_at')
+                ->first();
+
+            $playedWith = $match
+                ? ($match->title ?: trim(($match->home ?? '') . ' vs ' . ($match->away ?? '')))
+                : 'Guest match record';
+
+            return [
+                'id'          => $g->id,
+                'name'        => $g->name,
+                'player_id'   => $g->player_id,
+                'played_with' => $playedWith !== 'vs' ? $playedWith : 'Guest match record',
+            ];
+        })->all());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  ActionBoard profile setup (cricket onboarding)                     */
+    /* ------------------------------------------------------------------ */
+
+    public function showProfileSetupForm(): View
+    {
+        return view('site.profile-setup', [
+            'title' => 'Complete Your Profile',
+            'user'  => auth()->user(),
+        ]);
+    }
+
+    public function saveProfileSetup(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return redirect()->route('site.login');
+        }
+
+        $validated = $request->validate([
+            'name'          => 'required|string|max:255',
+            'state'         => 'required|string|max:255',
+            'district'      => 'required|string|max:255',
+            'batting_style' => 'nullable|string|max:100',
+            'bowling_style' => 'nullable|string|max:100',
+            'claim_user_id' => 'nullable|integer',
+            'photo'         => 'nullable|image|mimes:jpg,jpeg,png,webp|max:4096',
+        ]);
+
+        // Merge a claimed guest profile's career stats into this account.
+        if (!empty($validated['claim_user_id'])) {
+            $guest = User::query()
+                ->where('id', $validated['claim_user_id'])
+                ->where('is_guest', true)
+                ->first();
+
+            if ($guest) {
+                $user->career_runs          += (int) $guest->career_runs;
+                $user->career_balls         += (int) $guest->career_balls;
+                $user->career_matches       += (int) $guest->career_matches;
+                $user->career_wickets       += (int) $guest->career_wickets;
+                $user->career_runs_conceded += (int) $guest->career_runs_conceded;
+                $guest->delete();
+            }
+        }
+
+        if ($request->hasFile('photo')) {
+            $path = $request->file('photo')->store('avatars', 'public');
+            $user->avatar = '/storage/' . $path;
+        }
+
+        $user->name          = $validated['name'];
+        $user->state         = $validated['state'];
+        $user->district      = $validated['district'];
+        $user->batting_style = $validated['batting_style'] ?? $user->batting_style;
+        $user->bowling_style = $validated['bowling_style'] ?? $user->bowling_style;
+        $user->player_role   = $user->player_role ?: 'All-rounder';
+        $user->primary_sport = $user->primary_sport ?: 'Cricket';
+
+        $attrs = $user->sport_attributes ?? [];
+        $attrs['role']    = $attrs['role'] ?? $user->player_role;
+        $attrs['batting'] = $validated['batting_style'] ?? ($attrs['batting'] ?? '');
+        $attrs['bowling'] = $validated['bowling_style'] ?? ($attrs['bowling'] ?? '');
+        $user->sport_attributes = $attrs;
+
+        $user->is_guest = false;
+        // The User model's saving hook mints a structured player_id from state + district.
+        $user->save();
+
+        return redirect()
+            ->route('site.gamehub.actionboard')
+            ->with('success', 'Your cricket profile is ready.');
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  GameHub venue view-model helpers                                   */
+    /* ------------------------------------------------------------------ */
+
+    /** Normalize a stored venue image path into a usable URL. */
+    private function venueImageUrl(?string $path): string
+    {
+        if (!$path) {
+            return asset('gamehub.png');
+        }
+        if (preg_match('/^(http|https):\/\//', $path) || str_starts_with($path, '/')) {
+            return $path;
+        }
+        return asset('storage/' . ltrim($path, '/'));
+    }
+
+    /** Compact venue shape for the GameHub browse grid. */
+    private function decorateVenueCard(Venue $v): object
+    {
+        $images = is_array($v->images) ? $v->images : [];
+
+        return (object) [
+            'id'       => $v->id,
+            'title'    => $v->name,
+            'image'    => $this->venueImageUrl($images[0] ?? null),
+            'location' => $v->location,
+            'category' => $v->category,
+            'rating'   => $v->rating ?: '0.0',
+            'reviews'  => (int) ($v->reviews_count ?? 0),
+            'price'    => (int) ($v->price ?? 0),
+            'badge'    => $v->is_featured ? 'Featured' : null,
+        ];
+    }
+
+    /** Full venue shape for the GameHub detail page. */
+    private function decorateVenueDetail(Venue $v): object
+    {
+        $images  = is_array($v->images) ? $v->images : [];
+        $gallery = array_values(array_map(
+            fn ($p) => $this->venueImageUrl($p),
+            array_slice($images, 1)
+        ));
+
+        $amenities = is_array($v->amenities) ? $v->amenities : [];
+
+        // The detail scheduler needs at least one sport, each with a bookable court.
+        $sport  = $v->category ?: 'Cricket';
+        $sports = [$sport];
+        $courts = [$sport => ['Court 1', 'Court 2', 'Court 3']];
+
+        $reviewsList = $v->reviews->map(fn ($r) => (object) [
+            'user'    => $r->name,
+            'date'    => $r->ago ?: 'recently',
+            'rating'  => (int) $r->rating,
+            'comment' => $r->text ?: '',
+        ])->all();
+
+        return (object) [
+            'id'           => $v->id,
+            'title'        => $v->name,
+            'image'        => $this->venueImageUrl($images[0] ?? null),
+            'gallery'      => $gallery,
+            'location'     => $v->location,
+            'category'     => $v->category,
+            'rating'       => $v->rating ?: '0.0',
+            'reviews'      => (int) ($v->reviews_count ?? 0),
+            'reviews_list' => $reviewsList,
+            'price'        => (int) ($v->price ?? 0),
+            'hours'        => $v->hours ?: '6:00 AM – 11:00 PM',
+            'badge'        => $v->is_featured ? 'Featured' : null,
+            'description'  => $v->about ?: 'A premium sports facility with well-maintained playing surfaces and modern amenities.',
+            'amenities'    => $amenities,
+            'sports'       => $sports,
+            'courts'       => $courts,
+        ];
     }
 
     private function eventFeed(int $limit = 6): Collection
