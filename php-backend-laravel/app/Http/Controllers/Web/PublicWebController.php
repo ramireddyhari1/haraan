@@ -40,11 +40,13 @@ final class PublicWebController extends Controller
     public function events(): View
     {
         $events = $this->eventFeed(8);
+        $trending = $this->trendingFeed(8);
         $bannerEvents = app(EventService::class)->getBannerEvents();
 
         return view('site.events', [
             'title' => 'Events',
             'events' => $events,
+            'trending' => $trending,
             'bannerEvents' => $bannerEvents,
             'categories' => ['All', 'Concerts', 'Workshops', 'Nightlife', 'Comedy', 'Sports', 'Festivals'],
         ]);
@@ -656,6 +658,34 @@ final class PublicWebController extends Controller
             'sports'       => $sports,
             'courts'       => $courts,
         ];
+    }
+
+    /**
+     * "Trending" events, ranked by real ticket sales (sum of booking quantity),
+     * newest-selling first. Only events with at least one non-cancelled booking
+     * are included, so the row is empty (and hidden) until real demand exists —
+     * no synthetic "trending". City-scoped like the main feed.
+     *
+     * Status comparisons are case-insensitive because the data carries mixed
+     * casing (e.g. 'published' vs 'PUBLISHED', 'confirmed' vs 'CONFIRMED').
+     *
+     * @return Collection<int, Event>
+     */
+    private function trendingFeed(int $limit = 8): Collection
+    {
+        $city = CityResolver::selected();
+        $notSold = ['cancelled', 'refunded', 'pending', 'failed'];
+
+        return Event::query()
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->when($city, fn ($q) => $q->where('city', $city))
+            ->whereHas('bookings', fn ($q) => $q
+                ->whereRaw('lower(status) not in (?, ?, ?, ?)', $notSold))
+            ->withSum(['bookings as tickets_sold' => fn ($q) => $q
+                ->whereRaw('lower(status) not in (?, ?, ?, ?)', $notSold)], 'quantity')
+            ->orderByDesc('tickets_sold')
+            ->take($limit)
+            ->get();
     }
 
     private function eventFeed(int $limit = 6): Collection

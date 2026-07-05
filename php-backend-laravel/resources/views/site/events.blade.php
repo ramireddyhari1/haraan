@@ -5,11 +5,10 @@
     $featuredEvent = $events->first();
     $listedEvents = $events->slice(1)->values();
     $mEvents = $events;
-    // "Trending" shows a different lens than "For You": soonest-upcoming first,
-    // so the two carousels aren't identical. Falls back to the full feed if no
-    // dated events are present.
-    $mTrending = $events->filter(fn($e) => optional($e->date)->isFuture())->sortBy('date')->values();
-    if ($mTrending->isEmpty()) { $mTrending = $events; }
+    // "Trending" is real: events ranked by actual ticket sales (from the
+    // controller). Empty until there's genuine demand — the section below
+    // hides itself rather than faking a trending list.
+    $mTrending = $trending ?? collect();
     $catCount = fn($c) => $events->where('category', $c)->count();
     $categoryCards = [
         ['title' => 'All', 'iconImage' => 'https://cdn-icons-png.flaticon.com/512/4784/4784185.png', 'iconAlt' => 'All inclusive', 'href' => '/events', 'from' => '#fff5d8', 'to' => '#ffe4a4', 'accent' => '#d08a00', 'selected' => true],
@@ -92,14 +91,19 @@
         </a>
     </div>
 
-    {{-- Trending: compact row (soonest-upcoming lens, distinct from For You) --}}
+    {{-- Trending: real, ranked by actual ticket sales (from the controller) --}}
     @if($mTrending->count())
     <div class="mhome__head"><h3>Trending</h3><a href="/events">See all</a></div>
     <div class="mhome__scroll mhome__scroll--sm">
         @foreach($mTrending as $ev)
-            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
+            @php
+                $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
+                $sold = (int) ($ev->tickets_sold ?? 0);
+            @endphp
             <a class="mtrend" href="/events/{{ $ev->id }}">
-                <div class="mtrend__img" style="background-image:url('{{ $img }}')"></div>
+                <div class="mtrend__img" style="background-image:url('{{ $img }}')">
+                    @if($sold > 0)<span class="mtrend__sold">🎟 {{ number_format($sold) }} booked</span>@endif
+                </div>
                 <h5>{{ $ev->title }}</h5>
                 <p>{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
             </a>
