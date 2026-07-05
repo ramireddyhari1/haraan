@@ -337,12 +337,12 @@ class EventForm
                     ->helperText('Attendees enter this to unlock a private event.'),
                 Select::make('status')
                     ->options([
-                        'DRAFT'     => 'Draft — not visible yet',
-                        'PUBLISHED' => 'Published — live now',
+                        'draft'     => 'Draft — not visible yet',
+                        'published' => 'Published — live now',
                     ])
                     ->required()
                     ->native(false)
-                    ->default('DRAFT'),
+                    ->default('draft'),
                 Select::make('partner_id')
                     ->label('Host / organizer')
                     ->relationship('partner', 'name')

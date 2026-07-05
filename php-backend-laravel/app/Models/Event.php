@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BroadcastsContentChanges;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -103,6 +104,25 @@ final class Event extends Model
             'schedule'       => 'array',
             'lineup'         => 'array',
         ];
+    }
+
+    // -------------------------------------------------------------------------
+    //  Attributes
+    // -------------------------------------------------------------------------
+
+    /**
+     * Canonicalize status to lowercase on write.
+     *
+     * Public listings query lowercase ('published'), but the Filament admin
+     * form and the events API historically stored 'PUBLISHED'/'DRAFT'. That
+     * mismatch made admin-published events invisible on the public site.
+     * Normalizing on write fixes every write path at once and can't recur.
+     */
+    protected function status(): Attribute
+    {
+        return Attribute::make(
+            set: fn ($value) => is_string($value) ? strtolower(trim($value)) : $value,
+        );
     }
 
     // -------------------------------------------------------------------------
