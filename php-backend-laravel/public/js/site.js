@@ -165,13 +165,17 @@ document.addEventListener('DOMContentLoaded', () => {
      * the modal.
      */
     function selectCity(city) {
-        const label = document.querySelector('.location-pill__label');
-        if (label) {
-            label.querySelector('strong').textContent = city.name;
-            label.querySelector('small').textContent  = city.country;
-        }
-        try { localStorage.setItem('bv_selected_city', JSON.stringify(city)); } catch (_) {}
+        // Persist the choice in a cookie so the server can scope content
+        // (events/venues) to this city and render the pill on every page.
+        try {
+            const maxAge = 60 * 60 * 24 * 365; // 1 year
+            document.cookie = 'haraan_city=' + encodeURIComponent(city.name) +
+                '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+            localStorage.setItem('bv_selected_city', JSON.stringify(city));
+        } catch (_) {}
         closeLocationModal();
+        // Reload so the server re-filters listings and updates the header pill.
+        window.location.reload();
     }
 
     /** Filter the "All Cities" list to show only a given starting letter. */
@@ -231,8 +235,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') closeLocationModal();
     });
 
-    // Restore previously selected city on load
-    loadSelectedCity();
+    // The header pill is rendered server-side from the city cookie, so we no
+    // longer override it from localStorage on load (that would fight the server
+    // value). loadSelectedCity() is kept for reference but intentionally unused.
+    void loadSelectedCity;
 
     /* ------------------------------------------------------------------ */
     /*  5. Mobile action buttons (switch behavior)                         */

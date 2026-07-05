@@ -17,15 +17,17 @@ final class Venue extends Model
     protected string $contentDomain = 'venues';
 
     protected $fillable = [
-        'name', 'category', 'location', 'distance', 'latitude', 'longitude',
-        'price', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'about',
-        'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
+        'name', 'category', 'location', 'city', 'address', 'distance', 'latitude', 'longitude',
+        'price', 'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
+        'about', 'rules', 'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
     ];
 
     protected $casts = [
         'images' => 'array',
         'amenities' => 'array',
+        'rules' => 'array',
+        'price_chart' => 'array',
         'is_bookable' => 'boolean',
         'is_active' => 'boolean',
         'is_featured' => 'boolean',
@@ -42,6 +44,12 @@ final class Venue extends Model
     public function reviews(): HasMany
     {
         return $this->hasMany(VenueReview::class);
+    }
+
+    /** Dates this venue is closed for bookings (holidays / maintenance). */
+    public function blockedDates(): HasMany
+    {
+        return $this->hasMany(VenueBlockedDate::class);
     }
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */

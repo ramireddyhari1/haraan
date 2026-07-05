@@ -93,8 +93,8 @@
                     </lord-icon>
                 </span>
                 <span class="location-pill__label">
-                    <strong>Mumbai</strong>
-                    <small>India</small>
+                    <strong>{{ $selectedCity ?? 'All India' }}</strong>
+                    <small>{{ $selectedCity ? 'India' : 'Choose city' }}</small>
                 </span>
             </a>
 

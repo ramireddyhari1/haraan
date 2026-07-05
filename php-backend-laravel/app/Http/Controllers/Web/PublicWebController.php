@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Services\EventService;
+use App\Support\CityResolver;
 use Illuminate\Support\Collection;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -23,8 +24,11 @@ final class PublicWebController extends Controller
     {
         $events = $this->eventFeed(6);
 
-        $listingCount = Event::query()->where('status', 'published')->count()
-            + Venue::query()->where('is_active', true)->count();
+        $city = CityResolver::selected();
+        $listingCount = Event::query()->where('status', 'published')
+                ->when($city, fn ($q) => $q->where('city', $city))->count()
+            + Venue::query()->where('is_active', true)
+                ->when($city, fn ($q) => $q->where('city', $city))->count();
 
         return view('site.home', [
             'title' => 'Haraan - Home',
@@ -59,8 +63,11 @@ final class PublicWebController extends Controller
 
     public function gamehub(): View
     {
+        $city = CityResolver::selected();
+
         $venues = Venue::query()
             ->where('is_active', true)
+            ->when($city, fn ($q) => $q->where('city', $city))
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->get()
@@ -69,6 +76,7 @@ final class PublicWebController extends Controller
         // Real per-sport venue counts for the "Explore by Sport" tiles.
         $sportCounts = Venue::query()
             ->where('is_active', true)
+            ->when($city, fn ($q) => $q->where('city', $city))
             ->selectRaw('category, COUNT(*) as c')
             ->groupBy('category')
             ->pluck('c', 'category');
@@ -208,6 +216,7 @@ final class PublicWebController extends Controller
         $query = request()->input('q', '');
         $type = request()->input('type', 'all');
         
+        $city = CityResolver::selected();
         $results = [];
         if ($query !== '') {
             $like = '%' . $query . '%';
@@ -215,6 +224,7 @@ final class PublicWebController extends Controller
             if ($type === 'all' || $type === 'events') {
                 $events = Event::query()
                     ->where('status', 'published')
+                    ->when($city, fn ($q) => $q->where('city', $city))
                     ->where(function ($w) use ($like) {
                         $w->where('title', 'like', $like)
                             ->orWhere('venue', 'like', $like)
@@ -237,6 +247,7 @@ final class PublicWebController extends Controller
             if ($type === 'all' || $type === 'venues') {
                 $venues = Venue::query()
                     ->where('is_active', true)
+                    ->when($city, fn ($q) => $q->where('city', $city))
                     ->where(function ($w) use ($like) {
                         $w->where('name', 'like', $like)
                             ->orWhere('category', 'like', $like)
@@ -592,14 +603,23 @@ final class PublicWebController extends Controller
 
     private function eventFeed(int $limit = 6): Collection
     {
+        $city = CityResolver::selected();
+
         $events = Event::query()
             ->where('status', 'published')
+            ->when($city, fn ($q) => $q->where('city', $city))
             ->orderBy('date', 'desc')
             ->take($limit)
             ->get();
 
         if ($events->isNotEmpty()) {
             return $events;
+        }
+
+        // When a city is selected but has no events, show its empty state
+        // rather than sample data from other cities.
+        if ($city !== null) {
+            return collect();
         }
 
         $now = now();

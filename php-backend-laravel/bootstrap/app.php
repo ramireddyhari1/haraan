@@ -13,9 +13,15 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // The header city pill is set client-side (document.cookie) and read
+        // server-side to scope listings, so it must not be encrypted.
+        $middleware->encryptCookies(except: ['haraan_city']);
+
         $middleware->alias([
             'auth.jwt'         => \App\Http\Middleware\EnsureJwtAuthenticated::class,
             'auth.jwt.optional' => \App\Http\Middleware\OptionalJwtAuthenticated::class,
+            'auth.partner'     => \App\Http\Middleware\EnsurePartner::class,
+            'partner.can'      => \App\Http\Middleware\EnsurePartnerPermission::class,
             'erp.key'          => \App\Http\Middleware\EnsureErpPortalKey::class,
             'actionboard.profile' => \App\Http\Middleware\EnsureActionboardProfile::class,
         ]);

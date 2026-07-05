@@ -54,6 +54,7 @@ final class Event extends Model
         'visibility',
         'access_code',
         'location',
+        'city',
         'venue',
         'date',
         'time',
