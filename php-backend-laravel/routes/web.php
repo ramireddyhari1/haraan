@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::controller(PublicWebController::class)->group(function (): void {
-    Route::get('/', 'home');
+    Route::get('/', 'events');
     Route::get('/home', 'home');
     Route::get('/events', 'events');
     Route::get('/events/{id}', 'eventDetail');
@@ -34,6 +34,7 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/gamehub/actionboard/matches/json', 'actionBoardMatchesJson')->name('site.gamehub.actionboard.matches.json');
     Route::get('/gamehub/leaderboard', 'leaderboard')->name('site.gamehub.leaderboard');
     Route::get('/search', 'search')->name('site.search');
+    Route::get('/api/search/suggest', 'searchSuggest')->name('api.search.suggest');
     Route::get('/login', 'login')->name('site.login');
     Route::get('/register', 'register')->name('site.register');
     Route::get('/profile', 'profile')->name('site.profile');

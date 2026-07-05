@@ -86,7 +86,7 @@
                 </span>
             </a>
 
-            <form action="/search" method="GET" class="topbar__search">
+            <form action="/search" method="GET" class="topbar__search" role="search">
                 <span class="search-icon">
                     <lord-icon
                         src="https://cdn.lordicon.com/wjyqkiew.json"
@@ -96,13 +96,18 @@
                         style="width:20px;height:20px">
                     </lord-icon>
                 </span>
-                <input 
-                    type="text" 
-                    name="q" 
-                    class="topbar__search-input" 
+                <input
+                    type="text"
+                    name="q"
+                    class="topbar__search-input"
                     placeholder="Search events, venues, sports..."
                     autocomplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded="false"
+                    aria-controls="searchSuggest"
                 >
+                <div class="search-suggest" id="searchSuggest" role="listbox" hidden></div>
             </form>
 
             <div class="mobile-action-buttons">

@@ -276,6 +276,63 @@ final class PublicWebController extends Controller
         ]);
     }
 
+    /**
+     * Lightweight JSON autocomplete for the header search bar.
+     *
+     * Returns a small, city-scoped set of matching events and venues so the
+     * topbar can render live suggestions as the user types. Mirrors the query
+     * shape of search() but capped tight for latency.
+     */
+    public function searchSuggest(Request $request): JsonResponse
+    {
+        $query = trim((string) $request->input('q', ''));
+
+        if (mb_strlen($query) < 2) {
+            return response()->json(['events' => [], 'venues' => []]);
+        }
+
+        $city = CityResolver::selected();
+        $like = '%' . $query . '%';
+
+        $events = Event::query()
+            ->where('status', 'published')
+            ->when($city, fn ($q) => $q->where('city', $city))
+            ->where(function ($w) use ($like) {
+                $w->where('title', 'like', $like)
+                    ->orWhere('venue', 'like', $like)
+                    ->orWhere('category', 'like', $like);
+            })
+            ->orderBy('date', 'desc')
+            ->limit(5)
+            ->get(['id', 'title', 'category', 'venue'])
+            ->map(fn (Event $e) => [
+                'id'    => $e->id,
+                'title' => $e->title,
+                'meta'  => trim(($e->category ?: 'Event') . ' · ' . ($e->venue ?: 'Mumbai'), ' ·'),
+                'url'   => '/events/' . $e->id,
+            ])->all();
+
+        $venues = Venue::query()
+            ->where('is_active', true)
+            ->when($city, fn ($q) => $q->where('city', $city))
+            ->where(function ($w) use ($like) {
+                $w->where('name', 'like', $like)
+                    ->orWhere('category', 'like', $like)
+                    ->orWhere('location', 'like', $like);
+            })
+            ->orderByDesc('is_featured')
+            ->limit(5)
+            ->get(['id', 'name', 'category', 'location'])
+            ->map(fn (Venue $v) => [
+                'id'    => $v->id,
+                'title' => $v->name,
+                'meta'  => trim(($v->category ?: 'Venue') . ' · ' . ($v->location ?: 'Mumbai'), ' ·'),
+                'url'   => '/gamehub/' . $v->id,
+            ])->all();
+
+        return response()->json(['events' => $events, 'venues' => $venues]);
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Leaderboard (batting / bowling career boards)                      */
     /* ------------------------------------------------------------------ */

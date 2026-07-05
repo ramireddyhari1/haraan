@@ -351,6 +351,97 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /* ------------------------------------------------------------------ */
+    /*  Header search autocomplete (live suggestions)                      */
+    /* ------------------------------------------------------------------ */
+    const searchForm  = document.querySelector('.topbar__search');
+    const searchInput = searchForm ? searchForm.querySelector('.topbar__search-input') : null;
+    const suggestBox  = document.getElementById('searchSuggest');
+    if (searchForm && searchInput && suggestBox) {
+        let items = [];        // flat list of {title, meta, url} in render order
+        let activeIdx = -1;    // keyboard-highlighted item
+        let debounceId = null;
+        let lastQuery = '';
+        let reqToken = 0;      // guards against out-of-order responses
+
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+
+        const closeSuggest = () => {
+            suggestBox.hidden = true;
+            suggestBox.innerHTML = '';
+            items = []; activeIdx = -1;
+            searchInput.setAttribute('aria-expanded', 'false');
+        };
+
+        const render = (data) => {
+            const ev = data.events || [];
+            const vn = data.venues || [];
+            items = [...ev, ...vn];
+            if (!items.length) {
+                suggestBox.innerHTML = '<div class="search-suggest__empty">No matches — press Enter to search everything</div>';
+                suggestBox.hidden = false;
+                searchInput.setAttribute('aria-expanded', 'true');
+                activeIdx = -1;
+                return;
+            }
+            const group = (label, rows) => rows.length
+                ? '<div class="search-suggest__group-label">' + label + '</div>' + rows.map(r =>
+                    '<a class="search-suggest__item" role="option" href="' + esc(r.url) + '">' +
+                        '<span class="search-suggest__title">' + esc(r.title) + '</span>' +
+                        '<span class="search-suggest__meta">' + esc(r.meta) + '</span>' +
+                    '</a>').join('')
+                : '';
+            suggestBox.innerHTML = group('Events', ev) + group('Venues', vn);
+            suggestBox.hidden = false;
+            searchInput.setAttribute('aria-expanded', 'true');
+            activeIdx = -1;
+        };
+
+        const highlight = () => {
+            const nodes = suggestBox.querySelectorAll('.search-suggest__item');
+            nodes.forEach((n, i) => n.classList.toggle('is-active', i === activeIdx));
+            if (activeIdx >= 0 && nodes[activeIdx]) nodes[activeIdx].scrollIntoView({ block: 'nearest' });
+        };
+
+        const fetchSuggest = (q) => {
+            const token = ++reqToken;
+            fetch('/api/search/suggest?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
+                .then(r => r.ok ? r.json() : { events: [], venues: [] })
+                // Only render if this is still the newest request AND the box's
+                // query is still what the user has in the field (guards against
+                // stale results after the input was cleared or changed).
+                .then(data => { if (token === reqToken && searchInput.value.trim() === q) render(data); })
+                .catch(() => { if (token === reqToken) closeSuggest(); });
+        };
+
+        searchInput.addEventListener('input', () => {
+            const q = searchInput.value.trim();
+            lastQuery = q;
+            clearTimeout(debounceId);
+            if (q.length < 2) { closeSuggest(); return; }
+            debounceId = setTimeout(() => fetchSuggest(q), 180);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+            const nodes = suggestBox.querySelectorAll('.search-suggest__item');
+            if (suggestBox.hidden || !nodes.length) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = (activeIdx + 1) % nodes.length; highlight(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = (activeIdx - 1 + nodes.length) % nodes.length; highlight(); }
+            else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); window.location.href = nodes[activeIdx].getAttribute('href'); }
+            else if (e.key === 'Escape') { closeSuggest(); }
+        });
+
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.value.trim().length >= 2 && items.length) suggestBox.hidden = false;
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!searchForm.contains(e.target)) closeSuggest();
+        });
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  5. Mobile action buttons (switch behavior)                         */
     /* ------------------------------------------------------------------ */
     const mobileActionWrap = document.querySelector('.mobile-action-buttons');
