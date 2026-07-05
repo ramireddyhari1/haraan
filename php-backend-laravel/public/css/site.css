@@ -1,17 +1,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
-	--background: #f3f5f7;
-	--foreground: #121620;
-	--muted: #5e6777;
+	--background: #F4F7FB;
+	--foreground: #0F172A;
+	--muted: #64748B;
+	--muted-2: #94A3B8;
 	--surface: rgba(255, 255, 255, 0.86);
 	--surface-strong: #ffffff;
-	--border: rgba(18, 22, 32, 0.08);
-	--shadow: 0 20px 55px rgba(18, 22, 32, 0.08);
-	--accent: #121620;
+	--border: #E2E8F0;
+	--shadow: 0 20px 55px rgba(15, 23, 42, 0.08);
+	--accent: #0F172A;
 	--accent-ink: #ffffff;
-	--events: #cc7a14;
-	--gamehub: #1e7f4f;
+	--events: #2563EB;
+	--gamehub: #1B5E20;
+	--gamehub-cta: #00C853;
+	--live: #D32F2F;
 }
 
 * {
@@ -20,6 +23,7 @@
 
 html {
 	scroll-behavior: smooth;
+	overflow-x: hidden;
 }
 
 body {
@@ -27,9 +31,10 @@ body {
 	color: var(--foreground);
 	font-family: Inter, Arial, Helvetica, sans-serif;
 	background:
-		radial-gradient(circle at top left, rgba(18, 22, 32, 0.05), transparent 34%),
-		linear-gradient(180deg, #fafbfc 0%, #f3f5f7 100%);
+		radial-gradient(circle at top left, rgba(15, 23, 42, 0.05), transparent 34%),
+		linear-gradient(180deg, #fafbfc 0%, #F4F7FB 100%);
 	min-height: 100vh;
+	overflow-x: hidden;
 }
 
 a {
@@ -511,9 +516,22 @@ main.container {
 .event-card__details { display:flex; align-items:center; justify-content:flex-start; gap:10px; color:var(--muted); font-size:13px; }
 .event-card__date { font-weight:600; }
 
+/* App-style mobile home is hidden by default; shown only ≤720px. */
+.mhome { display: none; }
+
 @media (max-width: 720px) {
-	.hero { grid-template-columns: 1fr; min-height: auto; }
+	/* Swap desktop home sections for the app-style mobile home. */
+	.hero, .quick-grid, .section-shell { display: none; }
+	.mhome { display: block; }
 	.event-card__thumb { height: 200px; }
+
+	/* Swap the desktop Events page (banner carousel + category grid + poster
+	   list) for the same app-style mobile home used on "/". */
+	.events-page > .banner-carousel,
+	.events-page > .events-section--filters,
+	.events-page > .events-section:not(.events-section--filters) {
+		display: none;
+	}
 }
 
 .hero__panel-card p {
@@ -649,6 +667,13 @@ main.container {
 	gap: 18px;
 }
 
+/* Grid items default to min-width:auto, which lets a wide inner element
+   (e.g. the booking slots grid) force the whole page wider than the
+   viewport on mobile. Force them to shrink to the track instead. */
+.page-shell > * {
+	min-width: 0;
+}
+
 .hero-feature,
 .promo-banner {
 	display: grid;
@@ -748,6 +773,7 @@ main.container {
 .filter-button,
 .action-chip,
 .chip,
+.filter-btn,
 .sport-card {
 	border: 1px solid var(--border);
 	border-radius: 999px;
@@ -764,6 +790,7 @@ main.container {
 }
 
 .chip.is-active,
+.filter-btn.is-active,
 .action-chip,
 .sport-card:hover,
 .filter-button:hover {
@@ -941,7 +968,7 @@ main.container {
 .event-list-card__title {
 	font-size: 17px;
 	font-weight: 700;
-	color: #0057B8; /* Mumbai Indians blue */
+	color: #2563EB; /* Mumbai Indians blue */
 	margin: 0;
 	line-height: 1.3;
 	display: -webkit-box;
@@ -1996,22 +2023,22 @@ main.container {
 
 /* Theme footer buttons based on active site mode */
 body.mode-events .footer-hero-btn--primary {
-	background: #0057B8; /* Mumbai Indians blue */
+	background: #2563EB; /* Mumbai Indians blue */
 }
 
 body.mode-events .footer-hero-btn--secondary {
 	background: #ffffff; /* white */
-	color: #0057B8; /* blue text */
-	border: 2px solid #0057B8;
+	color: #2563EB; /* blue text */
+	border: 2px solid #2563EB;
 }
 
 body.mode-gamehub .footer-hero-btn--primary {
-	background: #28a745; /* GameHub green */
+	background: #00C853; /* GameHub green */
 }
 body.mode-gamehub .footer-hero-btn--secondary {
 	background: #ffffff; /* white */
-	color: #28a745; /* green text */
-	border: 2px solid #28a745;
+	color: #00C853; /* green text */
+	border: 2px solid #00C853;
 }
 
 /* Make icon circle match button fill or stroke appropriately */
@@ -2041,27 +2068,22 @@ body.mode-gamehub .footer-hero-btn .icon {
 
 /* Ensure icons in secondary (white) buttons use the mode color */
 body.mode-events .footer-hero-btn--secondary .icon {
-	color: #0057B8;
+	color: #2563EB;
 }
 
 body.mode-gamehub .footer-hero-btn--secondary .icon {
-	color: #28a745;
+	color: #00C853;
 }
 
-/* Theme the location pill (city/country) based on active mode */
-body.mode-events .location-pill__label strong,
-body.mode-events .location-pill__label small {
-	color: #0057B8;
-}
-
-body.mode-gamehub .location-pill__label strong,
-body.mode-gamehub .location-pill__label small {
-	color: #28a745;
-}
+/* Location is a secondary control: keep the label text neutral and let the
+   mode accent live on the pin icon only, so search + the Events/GameHub
+   switch remain the primary focal points. */
+body.mode-events .location-pill__pin { color: #2563EB; }
+body.mode-gamehub .location-pill__pin { color: #00C853; }
 
 /* Events heading color */
 body.mode-events .section-shell__header h2 {
-	color: #0057B8;
+	color: #2563EB;
 }
 
 .footer-hero-btn:hover {

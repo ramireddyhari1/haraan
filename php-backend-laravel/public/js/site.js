@@ -200,33 +200,127 @@ document.addEventListener('DOMContentLoaded', () => {
     locationBackdrop?.addEventListener('click', closeLocationModal);
     closeLocationBtn?.addEventListener('click', closeLocationModal);
 
-    useCurrentBtn?.addEventListener('click', () => {
-        if (!navigator.geolocation) {
-            alert('Location is not supported on this device.');
-            return;
+    /**
+     * Map free-text place names from a reverse geocoder onto one of the served
+     * cities (public/data/cities.json). Returns the matching city object, or
+     * null when the viewer is outside every city Haraan serves.
+     */
+    function matchServedCity(candidates) {
+        const names = (candidates || [])
+            .filter(Boolean)
+            .map((s) => String(s).toLowerCase().trim());
+        if (!names.length || !cachedCities.length) return null;
+
+        // Known localities / administrative names → served city label.
+        const aliases = {
+            'mumbai': 'Mumbai', 'bombay': 'Mumbai', 'navi mumbai': 'Mumbai', 'thane': 'Mumbai',
+            'delhi': 'Delhi NCR', 'new delhi': 'Delhi NCR', 'gurgaon': 'Delhi NCR',
+            'gurugram': 'Delhi NCR', 'noida': 'Delhi NCR', 'ghaziabad': 'Delhi NCR', 'faridabad': 'Delhi NCR',
+            'bengaluru': 'Bengaluru', 'bangalore': 'Bengaluru',
+            'pune': 'Pune', 'pimpri': 'Pune', 'chinchwad': 'Pune',
+            'goa': 'Goa', 'panaji': 'Goa', 'panjim': 'Goa', 'mapusa': 'Goa', 'margao': 'Goa', 'vasco': 'Goa',
+        };
+        const findCity = (label) =>
+            cachedCities.find((c) => c.name.toLowerCase() === label.toLowerCase()) || null;
+
+        // 1) Alias hit (longest alias first so "navi mumbai" wins over "mumbai").
+        const needles = Object.keys(aliases).sort((a, b) => b.length - a.length);
+        for (const name of names) {
+            for (const needle of needles) {
+                if (name.includes(needle)) {
+                    const city = findCity(aliases[needle]);
+                    if (city) return city;
+                }
+            }
         }
+        // 2) Direct match against a served city's own name.
+        for (const name of names) {
+            for (const c of cachedCities) {
+                if (name.includes(c.name.toLowerCase())) return c;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Apply a set of geocoder place-name candidates: prefer a curated served
+     * city, otherwise fall back to the raw detected name so the pill still
+     * reflects the viewer's actual city. Returns true when a city was applied
+     * (which triggers a reload), false when nothing usable was found.
+     */
+    function applyDetectedCity(candidates, detectedName, countryName) {
+        const matched = matchServedCity(candidates);
+        if (matched) {
+            selectCity(matched); // persists cookie + reloads (updates the pill)
+            return true;
+        }
+        const name = (detectedName || '').trim();
+        if (name) {
+            selectCity({ name: name, country: countryName || 'India' });
+            return true;
+        }
+        return false;
+    }
+
+    /** Resolve a city from precise GPS coordinates (browser geolocation). */
+    async function resolveCityByCoords(latitude, longitude) {
+        if (!cachedCities.length) await fetchCities();
+        const resp = await fetch(
+            'https://api.bigdatacloud.net/data/reverse-geocode-client' +
+            `?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+        );
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        const admin = (data.localityInfo && data.localityInfo.administrative) || [];
+        const candidates = [data.city, data.locality, data.principalSubdivision, ...admin.map((a) => a && a.name)];
+        return applyDetectedCity(candidates, data.city || data.locality, data.countryName);
+    }
+
+    /**
+     * Resolve a city from the viewer's IP address — the fallback when browser
+     * geolocation is denied, blocked (e.g. inside an embedded frame), or times
+     * out. Less precise than GPS but works without any permission prompt.
+     */
+    async function resolveCityByIp() {
+        if (!cachedCities.length) await fetchCities();
+        const resp = await fetch('https://ipwho.is/');
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        if (data && data.success === false) return false;
+        const candidates = [data.city, data.region, data.country];
+        return applyDetectedCity(candidates, data.city, data.country);
+    }
+
+    useCurrentBtn?.addEventListener('click', () => {
         const originalLabel = useCurrentBtn.textContent;
+        const resetBtn = () => {
+            useCurrentBtn.textContent = originalLabel;
+            useCurrentBtn.disabled = false;
+        };
+        const fail = () => {
+            resetBtn();
+            alert('Could not detect your location. Please pick a city from the list.');
+        };
         useCurrentBtn.textContent = 'Locating…';
         useCurrentBtn.disabled = true;
 
+        // IP fallback — used when precise geolocation is unavailable/denied.
+        const tryIp = () => resolveCityByIp().then((ok) => { if (!ok) fail(); }).catch(fail);
+
+        if (!navigator.geolocation) {
+            tryIp();
+            return;
+        }
+
         navigator.geolocation.getCurrentPosition(
             (pos) => {
-                const city = {
-                    name: 'Current location',
-                    country: 'Near you',
-                    lat: pos.coords.latitude,
-                    lon: pos.coords.longitude,
-                };
-                selectCity(city);
-                useCurrentBtn.textContent = originalLabel;
-                useCurrentBtn.disabled = false;
+                resolveCityByCoords(pos.coords.latitude, pos.coords.longitude)
+                    .then((ok) => { if (!ok) return tryIp(); })
+                    .catch(tryIp);
             },
-            () => {
-                useCurrentBtn.textContent = originalLabel;
-                useCurrentBtn.disabled = false;
-                alert('Could not access your location. Please pick a city instead.');
-            },
-            { enableHighAccuracy: false, timeout: 8000 }
+            // Denied / unavailable / timeout → fall back to IP-based lookup.
+            () => tryIp(),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
         );
     });
 
@@ -246,31 +340,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobileActionWrap = document.querySelector('.mobile-action-buttons');
     const mobileActionBtns = mobileActionWrap ? Array.from(mobileActionWrap.querySelectorAll('.mobile-action-btn')) : [];
     if (mobileActionBtns.length) {
-        // default: make the first button active if none
-        if (!mobileActionBtns.some(b => b.classList.contains('is-active'))) {
-            mobileActionBtns[0].classList.add('is-active');
-        }
+        // Determine active tab from the current URL, not just click state,
+        // so a direct visit/refresh on /gamehub highlights GameHub (not Events).
+        mobileActionBtns.forEach(b => b.classList.remove('is-active'));
+        const isGamehubPath = /^\/gamehub(\/|$)/.test(window.location.pathname);
+        const initialBtn = mobileActionBtns.find(b => isGamehubPath
+            ? b.classList.contains('mobile-action-btn--gamehub')
+            : b.classList.contains('mobile-action-btn--events'));
+        (initialBtn || mobileActionBtns[0]).classList.add('is-active');
+        // These are real anchor links — let the browser navigate natively.
+        // We only nudge the active thumb on tap for instant feedback while the
+        // next page loads (no preventDefault, so no slide-then-flash double action).
         mobileActionBtns.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
+            btn.addEventListener('click', () => {
                 mobileActionBtns.forEach(b => b.classList.remove('is-active'));
                 btn.classList.add('is-active');
-                // Mirror active section to body class so other UI (footer) can theme accordingly
-                if (document && document.body) {
-                    if (btn.classList.contains('mobile-action-btn--events')) {
-                        document.body.classList.add('mode-events');
-                        document.body.classList.remove('mode-gamehub');
-                        updateFooterLordIcon('events');
-                    } else if (btn.classList.contains('mobile-action-btn--gamehub')) {
-                        document.body.classList.add('mode-gamehub');
-                        document.body.classList.remove('mode-events');
-                        updateFooterLordIcon('gamehub');
-                    }
-                }
-                const href = btn.getAttribute('href');
-                if (href && href !== '#') {
-                    window.location.href = href;
-                }
             });
         });
         // Ensure initial body mode reflects the active button on load
@@ -292,41 +376,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const icon = document.querySelector('.footer-star-icon lord-icon');
             if (!icon) return;
             if (mode === 'events') {
-                icon.setAttribute('colors', 'primary:#ffffff,secondary:#0057B8');
+                icon.setAttribute('colors', 'primary:#ffffff,secondary:#2563EB');
             } else if (mode === 'gamehub') {
-                icon.setAttribute('colors', 'primary:#ffffff,secondary:#28a745');
+                icon.setAttribute('colors', 'primary:#ffffff,secondary:#00C853');
             }
         } catch (e) { /* ignore */ }
     }
-
-    /* ------------------------------------------------------------------ */
-    /*  4. Mobile off-canvas menu                                           */
-    /* ------------------------------------------------------------------ */
-    const mobileToggle = document.getElementById('mobileMenuToggle');
-    const mobileNav    = document.getElementById('mobileNav');
-    const mobileClose  = document.getElementById('mobileNavClose');
-    const mobileBackdrop = document.getElementById('mobileNavBackdrop');
-
-    function openMobileNav() {
-        if (!mobileNav) return;
-        mobileNav.classList.add('show');
-        mobileBackdrop.classList.add('show');
-        mobileNav.setAttribute('aria-hidden', 'false');
-        mobileToggle?.setAttribute('aria-expanded', 'true');
-    }
-
-    function closeMobileNav() {
-        if (!mobileNav) return;
-        mobileNav.classList.remove('show');
-        mobileBackdrop.classList.remove('show');
-        mobileNav.setAttribute('aria-hidden', 'true');
-        mobileToggle?.setAttribute('aria-expanded', 'false');
-    }
-
-    mobileToggle?.addEventListener('click', (e) => { e.preventDefault(); openMobileNav(); });
-    mobileClose?.addEventListener('click', (e) => { e.preventDefault(); closeMobileNav(); });
-    mobileBackdrop?.addEventListener('click', closeMobileNav);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMobileNav(); });
 
     /* ------------------------------------------------------------------ */
     /*  2. Login (Auth) Modal                                              */

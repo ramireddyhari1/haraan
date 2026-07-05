@@ -21,9 +21,10 @@
         /* NB: the desktop mobile-UI-hide safety rules live in site.css
            (@media min-width:1025px) — not duplicated here. */
 
-        /* Event-section header accent, applied only on /events pages */
+        /* Event-section header accent, applied only on /events pages.
+           NB: the location-pill label is intentionally left neutral — it is a
+           secondary control and should not compete with search / the nav. */
         .topbar.topbar--events .brand__text strong,
-        .topbar.topbar--events .location-pill__label strong,
         .topbar.topbar--events .topnav__link,
         .topbar.topbar--events .topnav__link.is-active,
         .topbar.topbar--events .topnav__link:hover {
@@ -41,9 +42,9 @@
             box-shadow: 0 10px 20px rgba(13, 110, 253, 0.12) !important;
         }
 
-        /* GameHub section header accent, applied only on /gamehub pages */
+        /* GameHub section header accent, applied only on /gamehub pages.
+           Location-pill label left neutral (see note above). */
         .topbar.topbar--gamehub .brand__text strong,
-        .topbar.topbar--gamehub .location-pill__label strong,
         .topbar.topbar--gamehub .topnav__link,
         .topbar.topbar--gamehub .topnav__link.is-active,
         .topbar.topbar--gamehub .topnav__link:hover {
@@ -63,7 +64,7 @@
     </style>
 </head>
 <body class="@yield('body_class')">
-    <header class="topbar {{ request()->is('events*') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
+    <header class="topbar {{ request()->is('events*') || request()->is('/') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">
                 <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan" class="brand__img">
@@ -73,8 +74,7 @@
                 <span class="location-pill__pin">
                     <lord-icon
                         src="https://cdn.lordicon.com/rbsqvtgo.json"
-                        trigger="loop"
-                        delay="1000"
+                        trigger="hover"
                         stroke="bold"
                         colors="primary:#000000,secondary:#e86830"
                         style="width:18px;height:18px">
@@ -90,7 +90,7 @@
                 <span class="search-icon">
                     <lord-icon
                         src="https://cdn.lordicon.com/wjyqkiew.json"
-                        trigger="loop"
+                        trigger="hover"
                         stroke="bold"
                         colors="primary:#000000,secondary:#e86830"
                         style="width:20px;height:20px">
@@ -110,28 +110,10 @@
                 <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub">GameHub</a>
             </div>
 
-            <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-controls="mobileNav" aria-expanded="false" aria-label="Open menu">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-            </button>
-
             <nav class="topnav" aria-label="Primary">
-                <a href="/" class="topnav__link {{ request()->is('/') ? 'is-active' : '' }}">Overview</a>
-                <a href="/events" class="topnav__link {{ request()->is('events*') ? 'is-active' : '' }}">Events</a>
+                <a href="/events" class="topnav__link {{ request()->is('/') || request()->is('events*') ? 'is-active' : '' }}">Events</a>
                 <a href="/gamehub" class="topnav__link {{ request()->is('gamehub*') && !request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">GameHub</a>
             </nav>
-
-            <!-- Mobile off-canvas nav (mirrors topnav) -->
-            <div id="mobileNav" class="mobile-nav" aria-hidden="true">
-                <button class="mobile-nav__close" id="mobileNavClose" aria-label="Close menu">✕</button>
-                <nav class="mobile-nav__links" aria-label="Mobile Primary">
-                    <a href="/">Overview</a>
-                    <a href="/events">Events</a>
-                    <a href="/gamehub">GameHub</a>
-                    <a href="/gamehub/leaderboard">Leaderboard</a>
-                    <a href="/register" class="btn btn--solid">Join</a>
-                </nav>
-            </div>
-            <div id="mobileNavBackdrop" class="mobile-nav-backdrop" tabindex="-1"></div>
 
             <div class="topbar__actions">
                 @if(auth()->check())

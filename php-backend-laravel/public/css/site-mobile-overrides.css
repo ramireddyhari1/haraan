@@ -2,6 +2,104 @@
 
 .topbar .mobile-menu-toggle { display: none; }
 
+@media (max-width: 640px) {
+    /* Location picker: the desktop layout crams a full-width search input,
+       a text button, and a close button into one flex row, and adds a
+       120px alphabet-index column — both blow out on a 375px viewport and
+       squeeze the search box down to nothing. Stack everything instead. */
+    .location-modal__card {
+        grid-template-columns: 1fr;
+        margin: 0;
+        max-width: 100%;
+        height: 100%;
+        border-radius: 0;
+        padding: 16px;
+        overflow-y: auto;
+    }
+    .location-modal__header {
+        flex-wrap: wrap;
+    }
+    .location-search {
+        flex: 1 1 100% !important;
+        order: -1;
+    }
+    .alpha-index {
+        display: none;
+    }
+    .popular-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Profile header: the desktop row (120px avatar + name column + "Edit
+       Profile" button, all in one nowrap flex row) pushes the button almost
+       entirely off-screen at 375px — it's rendered but unreachable. Rebuild
+       as a compact gradient "identity hero" card, matching the app's
+       AccountProfileScreen IdentityHero (navy → green gradient, avatar +
+       name inline, no button squeeze). */
+    .profile-container .detail-header {
+        background: linear-gradient(135deg, #07111F 0%, #102B52 55%, #0A3D2A 100%) !important;
+        border-radius: 24px !important;
+        padding: 20px !important;
+        gap: 14px !important;
+        margin-bottom: 24px !important;
+        flex-wrap: wrap !important;
+    }
+    .profile-container .detail-header > div:first-child {
+        width: 64px !important;
+        height: 64px !important;
+    }
+    .profile-container .detail-header > div:first-child img {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+    }
+    .profile-container .detail-header > div:nth-child(2) {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+    .profile-container .detail-header .detail-header__title {
+        color: #fff !important;
+        font-size: 19px !important;
+        margin-bottom: 4px !important;
+        overflow-wrap: break-word;
+    }
+    .profile-container .detail-header .detail-header__meta {
+        color: rgba(255, 255, 255, 0.7) !important;
+        font-size: 12.5px !important;
+    }
+    .profile-container .detail-header .detail-header__meta svg {
+        stroke: rgba(255, 255, 255, 0.7) !important;
+    }
+    .profile-container .detail-header .detail-meta-divider {
+        color: rgba(255, 255, 255, 0.3) !important;
+    }
+    .profile-container .detail-header .detail-badge {
+        background: rgba(255, 255, 255, 0.15) !important;
+    }
+    .profile-container .detail-header > div:last-child {
+        width: 100%;
+        order: 3;
+    }
+    .profile-container .detail-header > div:last-child .btn {
+        width: 100%;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.12) !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    }
+
+    /* "My Event Bookings" / "My ActionBoard Matches" section headers:
+       heading + action button crammed into one row wraps awkwardly. */
+    .reviews-section-header {
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 20px !important;
+    }
+    .reviews-section-header h3 {
+        font-size: 19px !important;
+    }
+    .reviews-section-header .btn {
+        flex-shrink: 0;
+    }
+}
+
 @media (max-width: 1024px) {
     :root {
         --mobile-padding: 12px;
@@ -23,26 +121,22 @@
     }
     .topbar__inner {
         display: grid;
-        grid-template-columns: auto 1fr auto;
+        grid-template-columns: 1fr auto;
         grid-template-rows: auto auto auto;
         grid-template-areas:
-            "brand location icons"
-            "search search search"
-            "buttons buttons buttons";
+            "location icons"
+            "search search"
+            "buttons buttons";
         align-items: center;
         row-gap: 8px;
         column-gap: 10px;
         padding: 6px 12px;
     }
 
-    /* Brand: left, row 1 */
+    /* Brand (Haraan logo): hidden on mobile — the app header shows only the
+       location pill (left) and the profile icon (right). */
     .brand {
-        grid-area: brand;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        text-decoration: none;
-        color: inherit;
+        display: none;
     }
     .brand__mark {
         width: 34px;
@@ -65,7 +159,7 @@
     }
     .brand__text { display: none; }
 
-    /* Location pill: next to logo, row 1 */
+    /* Location pill: far left, row 1 */
     .location-pill {
         grid-area: location;
         display: flex;
@@ -74,7 +168,7 @@
         text-decoration: none;
         color: inherit;
         padding: 0 4px 0 0;
-        margin-left: 2px;
+        justify-self: start;
     }
     .location-pill__pin {
         display: flex;
@@ -86,18 +180,14 @@
     }
     .location-pill__pin lord-icon { width: 18px !important; height: 18px !important; }
     .location-pill__label { font-size: 12px; }
-    .location-pill__label strong { font-size: 12px; font-weight: 700; line-height: 1; }
+    .location-pill__label strong { font-size: 12px; font-weight: 600; line-height: 1; color: #1a1d21; }
+    .location-pill__label small { color: #8a8f98; }
 
-    /* Mobile: theme location pill by mode */
-    body.mode-events .location-pill__label strong,
-    body.mode-events .location-pill__label small {
-        color: #0057B8;
-    }
-
-    body.mode-gamehub .location-pill__label strong,
-    body.mode-gamehub .location-pill__label small {
-        color: #28a745;
-    }
+    /* Location is a secondary control — keep it neutral so the search bar and
+       the Events/GameHub switch stay the primary focal points. The mode accent
+       lives on the pin icon only, not the whole label. */
+    body.mode-events .location-pill__pin { color: #2563EB; }
+    body.mode-gamehub .location-pill__pin { color: #00C853; }
 
     /* Hide login button */
     .topbar__actions .btn { display: none; }
@@ -169,8 +259,8 @@
         outline: none;
         color: #222;
     }
-    .topbar__search-input::placeholder { 
-        color: #c7c7c7; 
+    .topbar__search-input::placeholder {
+        color: #8a8f98; /* WCAG AA on white */
         font-size: 14px;
     }
 
@@ -188,15 +278,15 @@
         min-height: 48px;
         border-radius: 26px;
         border: none;
-        font-weight: 700;
-        font-size: 14px;
+        font-weight: 600;
+        font-size: 15px;
         cursor: pointer;
-        text-transform: uppercase;
+        text-transform: none;
         text-decoration: none;
         display: inline-block;
         text-align: center;
         transition: all 200ms ease;
-        letter-spacing: 0.3px;
+        letter-spacing: 0;
     }
     /* Button container style to appear like a switch */
     .topbar .mobile-action-buttons {
@@ -215,12 +305,12 @@
 
     /* Active states (switch thumb colors) */
     .mobile-action-btn.is-active.mobile-action-btn--events {
-        background: #0057B8; /* Mumbai Indians blue */
+        background: #2563EB; /* Mumbai Indians blue */
         color: #fff;
         box-shadow: 0 2px 6px rgba(0,87,184,0.18);
     }
     .mobile-action-btn.is-active.mobile-action-btn--gamehub {
-        background: #28a745; /* green */
+        background: #00C853; /* green */
         color: #fff;
         box-shadow: 0 2px 6px rgba(40,167,69,0.18);
     }
@@ -440,7 +530,7 @@
 
     /* Make event titles MI blue when in Events mode */
     body.mode-events .event-list-card__title {
-        color: #0057B8;
+        color: #2563EB;
     }
 
     .event-list-card__date,
@@ -472,7 +562,7 @@
 
     /* Mobile: Events heading color when in events mode */
     body.mode-events .section-shell__header h2 {
-        color: #0057B8;
+        color: #2563EB;
     }
     .text-link { display: inline-block; margin-top: 8px; }
 
@@ -539,4 +629,144 @@
     .topbar .mobile-menu-toggle { display: none !important; }
     .mobile-nav, .mobile-nav-backdrop { display: none !important; }
     main.container { padding-bottom: unset; }
+}
+
+/* ================================================================= */
+/* APP-STYLE MOBILE HOME — mirrors the Android app (Haraan tokens)    */
+/*   bg #F4F7FB · surface #fff · text #0F172A/#64748B/#94A3B8         */
+/*   EventsBlue #2563EB · GameHubGreen #00C853 · LiveRed #D32F2F      */
+/* ================================================================= */
+@media (max-width: 720px) {
+    /* Slate app canvas + edge-to-edge feel */
+    body { background: #F4F7FB; }
+    main.container { padding: 0 0 88px; background: #F4F7FB; }
+
+    .mhome {
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+        color: #0F172A;
+        /* Sky-blue gradient wash behind the greeting, like the app Events header */
+        background: linear-gradient(180deg, #E0F2FE 0%, #F4F7FB 220px);
+        padding: 14px 16px 8px;
+    }
+
+    /* --- Greeting --- */
+    .mhome__greet { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 16px; }
+    .mhome__hi { margin: 0; font-size: 13px; font-weight: 600; color: #64748B; }
+    .mhome__title { margin: 2px 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: #0F172A; line-height: 1.15; }
+
+    /* --- Section header --- */
+    .mhome__head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 2px 12px; }
+    .mhome__head h3 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: #0F172A; }
+    .mhome__head a { font-size: 13px; font-weight: 700; color: #2563EB; text-decoration: none; }
+
+    /* --- Horizontal scrollers --- */
+    .mhome__scroll {
+        display: flex; gap: 14px;
+        overflow-x: auto; scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -16px; padding: 2px 16px 6px;
+        scrollbar-width: none;
+    }
+    .mhome__scroll::-webkit-scrollbar { display: none; }
+
+    /* --- Poster card ("For You") --- */
+    .mposter {
+        scroll-snap-align: start;
+        flex: 0 0 78%; max-width: 300px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 22px;
+        overflow: hidden; text-decoration: none; color: inherit;
+        box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+    }
+    .mposter__img {
+        position: relative; height: 168px;
+        background-size: cover; background-position: center; background-color: #E2E8F0;
+    }
+    .mposter__badge {
+        position: absolute; top: 10px; left: 10px;
+        background: #D32F2F; color: #fff; font-size: 10px; font-weight: 800;
+        letter-spacing: 0.04em; text-transform: uppercase;
+        padding: 4px 9px; border-radius: 999px;
+        box-shadow: 0 4px 10px rgba(211, 47, 47, 0.35);
+    }
+    .mposter__cat {
+        position: absolute; bottom: 10px; left: 10px;
+        background: rgba(15, 23, 42, 0.72); color: #fff; backdrop-filter: blur(4px);
+        font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+    }
+    .mposter__body { padding: 12px 14px 14px; }
+    .mposter__body h4 {
+        margin: 0 0 6px; font-size: 15.5px; font-weight: 800; line-height: 1.25; color: #0F172A;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .mposter__date { margin: 0 0 3px; font-size: 12.5px; font-weight: 600; color: #2563EB; }
+    .mposter__venue {
+        margin: 0; font-size: 12.5px; color: #64748B;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mposter__foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .mposter__price { font-size: 15px; font-weight: 800; color: #0F172A; }
+    .mposter__book {
+        background: #2563EB; color: #fff; font-size: 13px; font-weight: 700;
+        padding: 8px 16px; border-radius: 999px;
+        box-shadow: 0 6px 14px rgba(37, 99, 235, 0.28);
+    }
+
+    /* --- Trending compact card --- */
+    .mhome__scroll--sm { gap: 12px; }
+    .mtrend { scroll-snap-align: start; flex: 0 0 140px; text-decoration: none; color: inherit; }
+    .mtrend__img {
+        height: 150px; border-radius: 18px; background-size: cover; background-position: center;
+        background-color: #E2E8F0; box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+    }
+    .mtrend h5 {
+        margin: 8px 2px 2px; font-size: 13px; font-weight: 700; line-height: 1.25; color: #0F172A;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .mtrend p { margin: 0 2px; font-size: 12.5px; font-weight: 700; color: #2563EB; }
+
+    /* --- Categories --- */
+    .mhome__cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .mcat {
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 18px;
+        padding: 16px 8px; text-decoration: none; text-align: center;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+    }
+    .mcat__ico {
+        font-size: 22px; width: 46px; height: 46px; border-radius: 14px;
+        display: grid; place-items: center; margin-bottom: 4px;
+    }
+    .mcat--blue .mcat__ico { background: rgba(37, 99, 235, 0.10); }
+    .mcat--green .mcat__ico { background: rgba(0, 200, 83, 0.12); }
+    .mcat strong { font-size: 13px; font-weight: 800; color: #0F172A; }
+    .mcat small { font-size: 11px; color: #94A3B8; }
+
+    /* --- Feed rows --- */
+    .mhome__feed { display: flex; flex-direction: column; gap: 12px; }
+    .mrow {
+        display: flex; align-items: center; gap: 12px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 18px;
+        padding: 10px; text-decoration: none; color: inherit;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+    }
+    .mrow__img {
+        flex: 0 0 76px; width: 76px; height: 76px; border-radius: 14px;
+        background-size: cover; background-position: center; background-color: #E2E8F0;
+    }
+    .mrow__body { flex: 1; min-width: 0; }
+    .mrow__cat {
+        display: inline-block; font-size: 10px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 0.05em; color: #2563EB; background: rgba(37, 99, 235, 0.10);
+        padding: 2px 8px; border-radius: 999px; margin-bottom: 5px;
+    }
+    .mrow__body h4 {
+        margin: 0 0 3px; font-size: 14.5px; font-weight: 800; line-height: 1.2; color: #0F172A;
+        display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .mrow__date { margin: 0 0 1px; font-size: 12px; font-weight: 600; color: #64748B; }
+    .mrow__venue {
+        margin: 0; font-size: 12px; color: #94A3B8;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mrow__price { flex-shrink: 0; align-self: flex-start; font-size: 14px; font-weight: 800; color: #0F172A; }
 }
