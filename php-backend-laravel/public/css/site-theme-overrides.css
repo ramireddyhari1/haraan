@@ -224,6 +224,17 @@ h2, h3 {
     font-size: 12px;
 }
 
+/* Unrated venue: a neutral "New" chip instead of a misleading 0.0 rating */
+.gamehub-venue-card__rating--new {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(22, 94, 32, 0.10);
+    color: #1B5E20;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
 .gamehub-venue-card__actions {
     display: flex;
     justify-content: space-between;

@@ -57,7 +57,7 @@
 
     <section class="gamehub-hero">
         <div class="gamehub-hero__copy">
-            <h1>Venues in Mumbai</h1>
+            <h1>Venues in {{ $selectedCity ?? 'All India' }}</h1>
             <p>Discover and book premium sports facilities curated for champions.</p>
 
             <div class="search-strip search-strip--gamehub">
@@ -149,11 +149,15 @@
                                     @endif
                                     {{ $venue->category }}
                                 </span>
-                                <span class="event-card__rating gamehub-venue-card__rating">
-                                    <span class="gamehub-venue-card__star">★</span>
-                                    <span class="gamehub-venue-card__rating-value">{{ $venue->rating }}</span>
-                                    <span class="gamehub-venue-card__reviews-count">({{ $venue->reviews }})</span>
-                                </span>
+                                @if($venue->reviews > 0)
+                                    <span class="event-card__rating gamehub-venue-card__rating">
+                                        <span class="gamehub-venue-card__star">★</span>
+                                        <span class="gamehub-venue-card__rating-value">{{ $venue->rating }}</span>
+                                        <span class="gamehub-venue-card__reviews-count">({{ $venue->reviews }})</span>
+                                    </span>
+                                @else
+                                    <span class="event-card__rating gamehub-venue-card__rating gamehub-venue-card__rating--new">New</span>
+                                @endif
                             </div>
                             
                             <!-- Price & Action Button Row -->
