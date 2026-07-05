@@ -249,7 +249,7 @@
             <div>
                 <div class="location-modal__header">
                     <label class="location-search" style="flex:1">
-                        <input type="search" id="locationSearch" placeholder="Search city, area or locality">
+                        <input type="search" id="locationSearch" placeholder="Search cities">
                     </label>
                     <div style="display:flex;gap:8px;align-items:center;margin-left:8px">
                         <button id="useCurrent" class="btn btn--ghost">Use Current Location</button>

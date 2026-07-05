@@ -130,17 +130,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** Name of the currently-selected city, for highlighting in the list. */
+    function selectedCityName() {
+        try { return (JSON.parse(localStorage.getItem('bv_selected_city') || '{}').name) || ''; }
+        catch (_) { return ''; }
+    }
+
+    /**
+     * A colored monogram chip for a city — deterministic hue from the name, so
+     * each city reads as a distinct branded tile instead of a gray placeholder.
+     */
+    function cityMonogram(city, cls) {
+        let h = 0;
+        for (const ch of (city.name || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+        const letter = (city.name || '?').charAt(0).toUpperCase();
+        return `<span class="${cls}" style="background:hsl(${h} 68% 93%);color:hsl(${h} 55% 38%)">${letter}</span>`;
+    }
+
     /** Build a card element for the "Popular Cities" grid. */
     function buildCityCard(city) {
         const btn = document.createElement('button');
-        btn.className = 'city-card';
+        btn.className = 'city-card' + (city.name === selectedCityName() ? ' is-selected' : '');
         btn.setAttribute('role', 'listitem');
         btn.innerHTML = `
-            <div class="icon"><img src="${city.icon}" alt="${city.name}"/></div>
-            <div>
-                <strong>${city.name}</strong>
-                <small style="color:#6b7280">${city.country}</small>
-            </div>`;
+            <div class="icon">${cityMonogram(city, 'city-mono')}</div>
+            <div><strong>${city.name}</strong></div>`;
         btn.addEventListener('click', () => selectCity(city));
         return btn;
     }
@@ -148,14 +162,12 @@ document.addEventListener('DOMContentLoaded', () => {
     /** Build a row element for the "All Cities" list. */
     function buildCityRow(city) {
         const div = document.createElement('div');
-        div.className = 'city-row';
+        div.className = 'city-row' + (city.name === selectedCityName() ? ' is-selected' : '');
         div.setAttribute('role', 'listitem');
         div.innerHTML = `
-            <div class="thumb"><img src="${city.icon}" alt="${city.name}"/></div>
-            <div>
-                <strong>${city.name}</strong>
-                <small style="color:#6b7280">${city.country}</small>
-            </div>`;
+            <div class="thumb">${cityMonogram(city, 'city-mono city-mono--sm')}</div>
+            <div><strong>${city.name}</strong></div>
+            ${city.name === selectedCityName() ? '<span class="city-row__check" aria-label="Selected">✓</span>' : ''}`;
         div.addEventListener('click', () => selectCity(city));
         return div;
     }
