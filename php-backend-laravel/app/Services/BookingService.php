@@ -120,7 +120,10 @@ final class BookingService
                     ->where('venue_id', $venueId)
                     ->where('venue_slot_id', $slotId)
                     ->whereDate('slot_date', $date)
-                    ->where('status', 'CONFIRMED')
+                    // Case-insensitive: bookings made via Filament store lowercase
+                    // 'confirmed'; an exact 'CONFIRMED' match would miss them and
+                    // allow a double-booking of the same slot.
+                    ->whereRaw('lower(status) = ?', ['confirmed'])
                     ->exists();
 
                 if ($taken) {
@@ -166,7 +169,10 @@ final class BookingService
             throw new AccessDeniedHttpException('Forbidden');
         }
 
-        if ($booking->status === 'CANCELLED') {
+        // Case-insensitive idempotency guard: a booking cancelled via Filament
+        // stores lowercase 'cancelled'. An exact 'CANCELLED' check would miss it
+        // and re-run the transaction, refunding inventory a second time.
+        if (strtolower((string) $booking->status) === 'cancelled') {
             return $booking;
         }
 
