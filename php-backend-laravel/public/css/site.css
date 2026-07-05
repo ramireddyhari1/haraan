@@ -23,7 +23,9 @@
 
 html {
 	scroll-behavior: smooth;
-	overflow-x: hidden;
+	/* `clip` (not `hidden`) stops horizontal scroll without turning the root
+	   into a scroll container — the latter silently breaks position: sticky. */
+	overflow-x: clip;
 }
 
 body {
@@ -34,7 +36,7 @@ body {
 		radial-gradient(circle at top left, rgba(15, 23, 42, 0.05), transparent 34%),
 		linear-gradient(180deg, #fafbfc 0%, #F4F7FB 100%);
 	min-height: 100vh;
-	overflow-x: hidden;
+	overflow-x: clip; /* see html rule: keep sticky headers working */
 }
 
 a {

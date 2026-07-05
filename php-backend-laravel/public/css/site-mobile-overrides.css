@@ -118,6 +118,13 @@
         z-index: 100;
         background: var(--surface);
         border-bottom: 1px solid var(--border);
+        transition: box-shadow 180ms ease, border-color 180ms ease;
+    }
+    /* Flat at the top, gains a subtle elevation once the page scrolls.
+       Toggled by JS (.is-scrolled) so it feels anchored, not floating. */
+    .topbar.is-scrolled {
+        border-bottom-color: transparent;
+        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
     }
     .topbar__inner {
         display: grid;

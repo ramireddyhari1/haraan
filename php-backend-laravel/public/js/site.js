@@ -335,6 +335,22 @@ document.addEventListener('DOMContentLoaded', () => {
     void loadSelectedCity;
 
     /* ------------------------------------------------------------------ */
+    /*  Topbar elevation on scroll (flat at top, subtle shadow once moved) */
+    /* ------------------------------------------------------------------ */
+    const topbarEl = document.querySelector('.topbar');
+    if (topbarEl) {
+        let ticking = false;
+        const syncTopbar = () => {
+            topbarEl.classList.toggle('is-scrolled', window.scrollY > 4);
+            ticking = false;
+        };
+        window.addEventListener('scroll', () => {
+            if (!ticking) { ticking = true; requestAnimationFrame(syncTopbar); }
+        }, { passive: true });
+        syncTopbar(); // reflect state on load (e.g. restored scroll position)
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  5. Mobile action buttons (switch behavior)                         */
     /* ------------------------------------------------------------------ */
     const mobileActionWrap = document.querySelector('.mobile-action-buttons');
