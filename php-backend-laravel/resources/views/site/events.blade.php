@@ -4,6 +4,13 @@
     $activeCategory = request()->query('category', 'All');
     $featuredEvent = $events->first();
     $listedEvents = $events->slice(1)->values();
+    $mEvents = $events;
+    // "Trending" shows a different lens than "For You": soonest-upcoming first,
+    // so the two carousels aren't identical. Falls back to the full feed if no
+    // dated events are present.
+    $mTrending = $events->filter(fn($e) => optional($e->date)->isFuture())->sortBy('date')->values();
+    if ($mTrending->isEmpty()) { $mTrending = $events; }
+    $catCount = fn($c) => $events->where('category', $c)->count();
     $categoryCards = [
         ['title' => 'All', 'iconImage' => 'https://cdn-icons-png.flaticon.com/512/4784/4784185.png', 'iconAlt' => 'All inclusive', 'href' => '/events', 'from' => '#fff5d8', 'to' => '#ffe4a4', 'accent' => '#d08a00', 'selected' => true],
         ['title' => 'Concerts', 'iconImage' => 'https://cdn-icons-png.flaticon.com/512/8295/8295821.png', 'iconAlt' => 'Stage', 'href' => '/events?category=Concerts', 'from' => '#edf2ff', 'to' => '#d7ddff', 'accent' => '#4b63e6'],
@@ -15,6 +22,111 @@
 @endphp
 
 <link rel="stylesheet" href="/css/banner.css">
+
+{{-- ============================================================= --}}
+{{-- MOBILE APP-STYLE EVENTS HOME (mirrors the Android app; ≤720px) --}}
+{{-- ============================================================= --}}
+<div class="mhome">
+    <div class="mhome__greet">
+        <div>
+            <p class="mhome__hi">Hello 👋</p>
+            <h2 class="mhome__title">Discover in {{ $selectedCity ?? 'All India' }}</h2>
+        </div>
+    </div>
+
+    {{-- For You: poster carousel --}}
+    <div class="mhome__head">
+        <h3>For You</h3>
+        <a href="/events">See all</a>
+    </div>
+    <div class="mhome__scroll">
+        @forelse($mEvents as $ev)
+            @php
+                $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
+                $soon = optional($ev->date)->between(now(), now()->addDays(7)) ?? false;
+            @endphp
+            <a class="mposter" href="/events/{{ $ev->id }}">
+                <div class="mposter__img" style="background-image:url('{{ $img }}')">
+                    @if($soon)<span class="mposter__badge">This week</span>@endif
+                    <span class="mposter__cat">{{ $ev->category ?? 'Event' }}</span>
+                </div>
+                <div class="mposter__body">
+                    <h4>{{ $ev->title }}</h4>
+                    <p class="mposter__date">{{ optional($ev->date)->format('D, M j • g:i A') }}</p>
+                    <p class="mposter__venue">📍 {{ $ev->venue }}</p>
+                    <div class="mposter__foot">
+                        <span class="mposter__price">{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</span>
+                        <span class="mposter__book">Book</span>
+                    </div>
+                </div>
+            </a>
+        @empty
+            <a class="mposter" href="/events">
+                <div class="mposter__img" style="background:linear-gradient(135deg,#2563EB,#1e40af)"></div>
+                <div class="mposter__body">
+                    <h4>Live nights & shows</h4>
+                    <p class="mposter__venue">📍 Near you</p>
+                    <div class="mposter__foot"><span class="mposter__price">Explore</span><span class="mposter__book">Open</span></div>
+                </div>
+            </a>
+        @endforelse
+    </div>
+
+    {{-- Categories --}}
+    <div class="mhome__head"><h3>Categories</h3></div>
+    <div class="mhome__cats">
+        <a href="/events?category=Concerts" class="mcat mcat--blue">
+            <span class="mcat__ico">🎵</span>
+            <strong>Concerts</strong>
+            <small>{{ $catCount('Concerts') ?: 0 }} events</small>
+        </a>
+        <a href="/events?category=Comedy" class="mcat mcat--blue">
+            <span class="mcat__ico">🎤</span>
+            <strong>Comedy</strong>
+            <small>{{ $catCount('Comedy') ?: 0 }} shows</small>
+        </a>
+        <a href="/gamehub" class="mcat mcat--green">
+            <span class="mcat__ico">🏏</span>
+            <strong>GameHub</strong>
+            <small>Turf & slots</small>
+        </a>
+    </div>
+
+    {{-- Trending: compact row (soonest-upcoming lens, distinct from For You) --}}
+    @if($mTrending->count())
+    <div class="mhome__head"><h3>Trending</h3><a href="/events">See all</a></div>
+    <div class="mhome__scroll mhome__scroll--sm">
+        @foreach($mTrending as $ev)
+            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
+            <a class="mtrend" href="/events/{{ $ev->id }}">
+                <div class="mtrend__img" style="background-image:url('{{ $img }}')"></div>
+                <h5>{{ $ev->title }}</h5>
+                <p>{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
+            </a>
+        @endforeach
+    </div>
+    @endif
+
+    {{-- Popular near you: feed --}}
+    @if($mEvents->count())
+    <div class="mhome__head"><h3>Popular near you</h3></div>
+    <div class="mhome__feed">
+        @foreach($mEvents as $ev)
+            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
+            <a class="mrow" href="/events/{{ $ev->id }}">
+                <div class="mrow__img" style="background-image:url('{{ $img }}')"></div>
+                <div class="mrow__body">
+                    <span class="mrow__cat">{{ $ev->category ?? 'Event' }}</span>
+                    <h4>{{ $ev->title }}</h4>
+                    <p class="mrow__date">{{ optional($ev->date)->format('D, M j') }}</p>
+                    <p class="mrow__venue">📍 {{ $ev->venue }}</p>
+                </div>
+                <span class="mrow__price">{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</span>
+            </a>
+        @endforeach
+    </div>
+    @endif
+</div>
 
 <section class="page-shell events-page theme-events">
     <!-- Premium Banner Carousel -->
