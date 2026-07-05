@@ -8,30 +8,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@300..800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ asset('css/site.css') }}?v={{ time() }}">
-    <link rel="stylesheet" href="{{ asset('css/site-theme-overrides.css') }}?v={{ time() }}">
-    <link rel="stylesheet" href="{{ asset('css/site-mobile-overrides.css') }}?v={{ time() }}" media="(max-width:1024px)">
+    @php
+        // Cache-bust assets by file mtime: browsers can cache them, but a new
+        // deploy (changed file) yields a new URL. Beats ?v=time() which never caches.
+        $assetVer = fn (string $p) => asset($p) . '?v=' . (is_file(public_path($p)) ? filemtime(public_path($p)) : '1');
+    @endphp
+    <link rel="stylesheet" href="{{ $assetVer('css/site.css') }}">
+    <link rel="stylesheet" href="{{ $assetVer('css/site-theme-overrides.css') }}">
+    <link rel="stylesheet" href="{{ $assetVer('css/site-mobile-overrides.css') }}" media="(max-width:1024px)">
     <script src="https://cdn.lordicon.com/lordicon.js"></script>
     <style>
-        /* Immediate safety: hide mobile header UI on desktop widths to prevent
-           mobile controls leaking into desktop layout while we debug. */
-        @media (min-width: 1025px) {
-            .mobile-action-buttons,
-            .mobile-menu-toggle,
-            .mobile-nav,
-            .mobile-nav-backdrop,
-            #mobileNav,
-            #mobileNavBackdrop,
-            .mobile-action-btn {
-                display: none !important;
-            }
-            .topnav {
-                display: flex !important;
-                position: absolute !important;
-                left: 50% !important;
-                transform: translateX(-50%) !important;
-            }
-        }
+        /* NB: the desktop mobile-UI-hide safety rules live in site.css
+           (@media min-width:1025px) — not duplicated here. */
 
         /* Event-section header accent, applied only on /events pages */
         .topbar.topbar--events .brand__text strong,
@@ -177,8 +165,8 @@
     <!-- Premium Login Modal -->
     <div id="loginModal" class="auth-modal" aria-hidden="true">
         <div class="auth-modal__backdrop" id="loginBackdrop"></div>
-        <div class="auth-modal__card">
-            <button class="auth-modal__close" id="closeLogin">
+        <div class="auth-modal__card" role="dialog" aria-modal="true" aria-label="Login to Haraan">
+            <button class="auth-modal__close" id="closeLogin" aria-label="Close login">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
             
@@ -310,10 +298,10 @@
     </script>
     @if(config('broadcasting.default') === 'reverb')
         <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
-        <script src="{{ asset('js/realtime.js') }}?v={{ time() }}"></script>
+        <script src="{{ $assetVer('js/realtime.js') }}"></script>
     @endif
 
-    <script src="{{ asset('js/site.js') }}?v={{ time() }}"></script>
+    <script src="{{ $assetVer('js/site.js') }}"></script>
     @if(session('show_login'))
         <script>
             document.addEventListener('DOMContentLoaded', () => {
