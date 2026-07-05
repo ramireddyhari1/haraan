@@ -16,7 +16,7 @@
 
         <div class="hero__stats">
             <div>
-                <strong>120+</strong>
+                <strong>{{ ($listingCount ?? 0) > 0 ? number_format($listingCount) : '—' }}</strong>
                 <span>Live listings</span>
             </div>
             <div>

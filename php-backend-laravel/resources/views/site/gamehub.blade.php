@@ -63,9 +63,9 @@
             <div class="search-strip search-strip--gamehub">
                 <label class="search-field">
                     <span>⌕</span>
-                    <input type="text" value="" placeholder="Search by name or sport...">
+                    <input type="text" id="venueSearchInput" value="" placeholder="Search by name or sport...">
                 </label>
-                <button class="filter-button filter-button--dropdown" type="button">All Sports</button>
+                <button class="filter-button filter-button--dropdown" type="button" id="venueClearFilter">All Sports</button>
             </div>
         </div>
 
@@ -82,43 +82,26 @@
             </div>
         </div>
 
+        @php
+            $sportTiles = [
+                ['name' => 'Cricket', 'icon' => 'https://cdn-icons-png.flaticon.com/512/5140/5140374.png', 'class' => ''],
+                ['name' => 'Football', 'icon' => 'https://cdn-icons-png.flaticon.com/512/7711/7711842.png', 'class' => 'sport-card--football'],
+                ['name' => 'Badminton', 'icon' => 'https://cdn-icons-png.flaticon.com/512/10904/10904303.png', 'class' => ''],
+                ['name' => 'Swimming', 'icon' => 'https://cdn-icons-png.flaticon.com/512/8317/8317259.png', 'class' => ''],
+                ['name' => 'Tennis', 'icon' => 'https://cdn-icons-png.flaticon.com/512/8927/8927653.png', 'class' => ''],
+                ['name' => 'Basketball', 'icon' => 'https://cdn-icons-png.flaticon.com/512/9128/9128501.png', 'class' => ''],
+            ];
+        @endphp
         <div class="sport-grid">
-            <button class="sport-card" type="button">
-                <span class="sport-card__icon" aria-hidden="true">
-                    <img src="https://cdn-icons-png.flaticon.com/512/5140/5140374.png" alt="Cricket icon" />
-                </span>
-                <span>Cricket</span><small>12 venues</small>
-            </button>
-            <button class="sport-card sport-card--football" type="button">
-                <span class="sport-card__icon" aria-hidden="true">
-                    <img src="https://cdn-icons-png.flaticon.com/512/7711/7711842.png" alt="Football icon" />
-                </span>
-                <span>Football</span><small>8 venues</small>
-            </button>
-            <button class="sport-card" type="button">
-                <span class="sport-card__icon" aria-hidden="true">
-                    <img src="https://cdn-icons-png.flaticon.com/512/10904/10904303.png" alt="Badminton icon" />
-                </span>
-                <span>Badminton</span><small>15 venues</small>
-            </button>
-            <button class="sport-card" type="button">
-                <span class="sport-card__icon" aria-hidden="true">
-                    <img src="https://cdn-icons-png.flaticon.com/512/8317/8317259.png" alt="Swimming icon" />
-                </span>
-                <span>Swimming</span><small>5 venues</small>
-            </button>
-            <button class="sport-card" type="button">
-                <span class="sport-card__icon" aria-hidden="true">
-                    <img src="https://cdn-icons-png.flaticon.com/512/8927/8927653.png" alt="Tennis icon" />
-                </span>
-                <span>Tennis</span><small>4 venues</small>
-            </button>
-            <button class="sport-card" type="button">
-                <span class="sport-card__icon" aria-hidden="true">
-                    <img src="https://cdn-icons-png.flaticon.com/512/9128/9128501.png" alt="Basketball icon" />
-                </span>
-                <span>Basketball</span><small>6 venues</small>
-            </button>
+            @foreach($sportTiles as $tile)
+                @php $count = (int) (($sportCounts ?? collect())[$tile['name']] ?? 0); @endphp
+                <button class="sport-card {{ $tile['class'] }}" type="button" data-sport="{{ $tile['name'] }}">
+                    <span class="sport-card__icon" aria-hidden="true">
+                        <img src="{{ $tile['icon'] }}" alt="{{ $tile['name'] }} icon" />
+                    </span>
+                    <span>{{ $tile['name'] }}</span><small>{{ $count }} {{ $count === 1 ? 'venue' : 'venues' }}</small>
+                </button>
+            @endforeach
         </div>
     </section>
 
@@ -144,7 +127,7 @@
             @endphp
             <div class="events-grid gamehub-venues-grid">
                 @foreach($venues as $venue)
-                    <a class="event-card gamehub-venue-card" href="/gamehub/{{ $venue->id }}">
+                    <a class="event-card gamehub-venue-card" href="/gamehub/{{ $venue->id }}" data-venue-name="{{ \Illuminate\Support\Str::lower($venue->title) }}" data-venue-category="{{ \Illuminate\Support\Str::lower($venue->category) }}">
                         <div class="event-card__thumb">
                             <img src="{{ $venue->image }}" alt="{{ $venue->title }}" />
                             <div class="event-card__thumb-overlay">
@@ -213,6 +196,68 @@ document.addEventListener('DOMContentLoaded', () => {
             cards.forEach(c => c.classList.remove('active'));
             card.classList.add('active');
         });
+    });
+
+    /* ---- Venue filtering: search box + sport tiles ---- */
+    const searchInput = document.getElementById('venueSearchInput');
+    const clearBtn    = document.getElementById('venueClearFilter');
+    const sportTiles  = document.querySelectorAll('.sport-card[data-sport]');
+    const venueCards  = Array.from(document.querySelectorAll('.gamehub-venue-card'));
+    const venuesGrid  = document.querySelector('.gamehub-venues-grid');
+
+    let activeSport = null;
+
+    // Empty-message element shown when nothing matches.
+    let emptyMsg = null;
+    if (venuesGrid) {
+        emptyMsg = document.createElement('div');
+        emptyMsg.className = 'empty-state';
+        emptyMsg.style.display = 'none';
+        emptyMsg.innerHTML = '<p>No venues match your filters</p>';
+        venuesGrid.parentNode.insertBefore(emptyMsg, venuesGrid.nextSibling);
+    }
+
+    function applyFilters() {
+        const q = (searchInput?.value || '').trim().toLowerCase();
+        let visible = 0;
+
+        venueCards.forEach(card => {
+            const name = card.getAttribute('data-venue-name') || '';
+            const cat  = card.getAttribute('data-venue-category') || '';
+            const matchesText  = !q || name.includes(q) || cat.includes(q);
+            const matchesSport = !activeSport || cat === activeSport.toLowerCase();
+            const show = matchesText && matchesSport;
+            card.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+
+        if (emptyMsg) emptyMsg.style.display = visible === 0 ? 'block' : 'none';
+        if (venuesGrid) venuesGrid.style.display = visible === 0 ? 'none' : '';
+    }
+
+    searchInput?.addEventListener('input', applyFilters);
+
+    sportTiles.forEach(tile => {
+        tile.addEventListener('click', () => {
+            const sport = tile.getAttribute('data-sport');
+            if (activeSport === sport) {
+                activeSport = null;
+                tile.classList.remove('is-active');
+            } else {
+                activeSport = sport;
+                sportTiles.forEach(t => t.classList.remove('is-active'));
+                tile.classList.add('is-active');
+            }
+            applyFilters();
+            document.getElementById('featured-venues')?.scrollIntoView({ behavior: 'smooth' });
+        });
+    });
+
+    clearBtn?.addEventListener('click', () => {
+        activeSport = null;
+        if (searchInput) searchInput.value = '';
+        sportTiles.forEach(t => t.classList.remove('is-active'));
+        applyFilters();
     });
 });
 </script>

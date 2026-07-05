@@ -197,16 +197,33 @@ document.addEventListener('DOMContentLoaded', () => {
     closeLocationBtn?.addEventListener('click', closeLocationModal);
 
     useCurrentBtn?.addEventListener('click', () => {
-        if (!navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition((pos) => {
-            alert(
-                'Using current location — lat:' +
-                pos.coords.latitude.toFixed(3) +
-                ', lon:' +
-                pos.coords.longitude.toFixed(3)
-            );
-            closeLocationModal();
-        });
+        if (!navigator.geolocation) {
+            alert('Location is not supported on this device.');
+            return;
+        }
+        const originalLabel = useCurrentBtn.textContent;
+        useCurrentBtn.textContent = 'Locating…';
+        useCurrentBtn.disabled = true;
+
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const city = {
+                    name: 'Current location',
+                    country: 'Near you',
+                    lat: pos.coords.latitude,
+                    lon: pos.coords.longitude,
+                };
+                selectCity(city);
+                useCurrentBtn.textContent = originalLabel;
+                useCurrentBtn.disabled = false;
+            },
+            () => {
+                useCurrentBtn.textContent = originalLabel;
+                useCurrentBtn.disabled = false;
+                alert('Could not access your location. Please pick a city instead.');
+            },
+            { enableHighAccuracy: false, timeout: 8000 }
+        );
     });
 
     // Close location modal on Escape key

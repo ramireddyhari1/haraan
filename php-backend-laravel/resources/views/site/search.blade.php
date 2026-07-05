@@ -50,7 +50,7 @@
                     <h2 class="results-title">Venues & Facilities</h2>
                     <div class="results-grid">
                         @foreach($results['venues'] as $venue)
-                            <a href="/gamehub" class="result-card result-card--venue">
+                            <a href="/gamehub/{{ $venue['id'] }}" class="result-card result-card--venue">
                                 <div class="result-card__media">
                                     <span class="result-badge result-badge--green">{{ $venue['sport'] }}</span>
                                 </div>

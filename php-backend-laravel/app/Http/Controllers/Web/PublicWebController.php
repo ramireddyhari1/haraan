@@ -23,7 +23,14 @@ final class PublicWebController extends Controller
     {
         $events = $this->eventFeed(6);
 
-        return view('site.home', ['title' => 'Haraan - Home', 'events' => $events]);
+        $listingCount = Event::query()->where('status', 'published')->count()
+            + Venue::query()->where('is_active', true)->count();
+
+        return view('site.home', [
+            'title' => 'Haraan - Home',
+            'events' => $events,
+            'listingCount' => $listingCount,
+        ]);
     }
 
     public function events(): View
@@ -59,7 +66,18 @@ final class PublicWebController extends Controller
             ->get()
             ->map(fn (Venue $v) => $this->decorateVenueCard($v));
 
-        return view('site.gamehub', ['title' => 'GameHub', 'venues' => $venues]);
+        // Real per-sport venue counts for the "Explore by Sport" tiles.
+        $sportCounts = Venue::query()
+            ->where('is_active', true)
+            ->selectRaw('category, COUNT(*) as c')
+            ->groupBy('category')
+            ->pluck('c', 'category');
+
+        return view('site.gamehub', [
+            'title'       => 'GameHub',
+            'venues'      => $venues,
+            'sportCounts' => $sportCounts,
+        ]);
     }
 
     public function gamehubDetail(string $id): View
@@ -190,20 +208,52 @@ final class PublicWebController extends Controller
         $query = request()->input('q', '');
         $type = request()->input('type', 'all');
         
-        // Mock search results
         $results = [];
-        if ($query) {
+        if ($query !== '') {
+            $like = '%' . $query . '%';
+
             if ($type === 'all' || $type === 'events') {
-                $results['events'] = [
-                    ['id' => 1, 'title' => 'Zomato Feeding India ft. Dua Lipa', 'category' => 'Music', 'venue' => 'MMRDA Grounds, BKC'],
-                    ['id' => 2, 'title' => 'Tech Conference 2026', 'category' => 'Workshops', 'venue' => 'Taj Lands End'],
-                ];
+                $events = Event::query()
+                    ->where('status', 'published')
+                    ->where(function ($w) use ($like) {
+                        $w->where('title', 'like', $like)
+                            ->orWhere('venue', 'like', $like)
+                            ->orWhere('category', 'like', $like);
+                    })
+                    ->orderBy('date', 'desc')
+                    ->limit(12)
+                    ->get(['id', 'title', 'category', 'venue']);
+
+                if ($events->isNotEmpty()) {
+                    $results['events'] = $events->map(fn (Event $e) => [
+                        'id'       => $e->id,
+                        'title'    => $e->title,
+                        'category' => $e->category ?: 'Event',
+                        'venue'    => $e->venue ?: 'Mumbai',
+                    ])->all();
+                }
             }
+
             if ($type === 'all' || $type === 'venues') {
-                $results['venues'] = [
-                    ['id' => 1, 'title' => 'Cricket Ground Mumbai', 'sport' => 'Cricket', 'location' => 'Bombay Gymkhana'],
-                    ['id' => 2, 'title' => 'Football Arena', 'sport' => 'Football', 'location' => 'Cooperage Ground'],
-                ];
+                $venues = Venue::query()
+                    ->where('is_active', true)
+                    ->where(function ($w) use ($like) {
+                        $w->where('name', 'like', $like)
+                            ->orWhere('category', 'like', $like)
+                            ->orWhere('location', 'like', $like);
+                    })
+                    ->orderByDesc('is_featured')
+                    ->limit(12)
+                    ->get(['id', 'name', 'category', 'location']);
+
+                if ($venues->isNotEmpty()) {
+                    $results['venues'] = $venues->map(fn (Venue $v) => [
+                        'id'       => $v->id,
+                        'title'    => $v->name,
+                        'sport'    => $v->category ?: 'Sport',
+                        'location' => $v->location ?: 'Mumbai',
+                    ])->all();
+                }
             }
         }
         
