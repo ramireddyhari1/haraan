@@ -129,14 +129,16 @@
         }
     }
 
-    /* Mobile: keep button near top-left and above content */
+    /* Mobile: float over the hero banner, not the sticky site header above it.
+       Absolute (relative to .container, which starts right below the header)
+       instead of fixed-to-viewport, which used to sit on top of the logo. */
         @media (max-width: 1024px) {
             .floating-left-btn {
                 display: block !important;
-                position: fixed !important;
+                position: absolute !important;
                 left: 12px !important;
                 top: 12px !important;
-                z-index: 100 !important;
+                z-index: 20 !important;
             }
         }
 
@@ -239,9 +241,17 @@
 
         <main class="dr-card-body">
             {{-- Hero Banner --}}
+            @php
+                $heroImg = (is_array($event->images) && count($event->images)) ? $event->images[0] : asset('events.png');
+                // Real countdown from the event date; hidden for past events so we
+                // never show a fabricated "Starts in 3H".
+                $countdown = ($event->date && $event->date->isFuture())
+                    ? 'Starts '.$event->date->diffForHumans()
+                    : null;
+            @endphp
             <div class="dr-hero-banner" style="margin-top: 0; margin-bottom: 12px;">
-                <img src="{{ asset('events.png') }}" alt="{{ $event->title }}">
-                <div class="dr-hero-badge">Starts in 3H</div>
+                <img src="{{ $heroImg }}" alt="{{ $event->title }}">
+                @if($countdown)<div class="dr-hero-badge">{{ $countdown }}</div>@endif
             </div>
 
             {{-- Info Header --}}
@@ -273,13 +283,24 @@
                                 {!! $event->description !!}
                             </div>
 
-                            {{-- Premium Horizontal Maps Card --}}
-                            <div style="margin-top: 24px; border: 1px solid var(--dr-border); border-radius: 24px; background: #ffffff; overflow: hidden; display: flex; height: 160px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.03); border: 1px solid #f0f0f0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 35px rgba(0, 0, 0, 0.06)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 8px 30px rgba(0, 0, 0, 0.03)';">
-                                {{-- Left Half: GPS Map Preview with pulsing marker --}}
-                                <div style="width: 45%; position: relative; height: 100%; background: #e0f2fe; overflow: hidden;">
-                                    {{-- Real OpenStreetMap Embed for South Mumbai (South Bombay Studio location) --}}
-                                    <iframe width="100%" height="100%" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="https://www.openstreetmap.org/export/embed.html?bbox=72.8100%2C18.9200%2C72.8700%2C18.9800&amp;layer=mapnik&amp;marker=18.9500%2C72.8400" style="border: 0; filter: contrast(1.05) brightness(0.98); pointer-events: none; width: 100%; height: 100%;"></iframe>
-                                    
+                            {{-- Premium Horizontal Maps Card — links to a real Maps
+                                 search for the venue. The preview is a generic map
+                                 texture, not a hardcoded (and previously wrong-city)
+                                 embed, so it never claims a false location. --}}
+                            @php
+                                $mapLoc = $event->location ?: '';
+                                $mapVenue = $event->venue ?: '';
+                                // Avoid repeating the venue when the location string already contains it.
+                                $mapBase = ($mapVenue && stripos($mapLoc, $mapVenue) === false)
+                                    ? trim($mapVenue.' '.$mapLoc)
+                                    : ($mapLoc ?: $mapVenue);
+                                $mapQuery = urlencode(trim(trim($mapBase).', '.($event->city ?: 'India'), ', '));
+                            @endphp
+                            <a href="https://www.google.com/maps/search/?api=1&query={{ $mapQuery }}" target="_blank" rel="noopener" aria-label="Open venue location in Maps" style="margin-top: 24px; border: 1px solid #f0f0f0; border-radius: 24px; background: #ffffff; overflow: hidden; display: flex; height: 160px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.03); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; text-decoration: none; color: inherit;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 35px rgba(0, 0, 0, 0.06)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 8px 30px rgba(0, 0, 0, 0.03)';">
+                                {{-- Left Half: generic map texture with a pin affordance --}}
+                                <div style="width: 45%; position: relative; height: 100%; background: linear-gradient(135deg, #e0f2fe 0%, #eff6ff 100%); overflow: hidden;">
+                                    <div style="position:absolute; inset:0; background-image: linear-gradient(rgba(59,130,246,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,0.08) 1px, transparent 1px); background-size: 22px 22px;"></div>
+
                                     {{-- Soft blue translucent circular overlay like the mockup --}}
                                     <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 70px; height: 70px; border-radius: 50%; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10;">
                                         {{-- Glowing central marker --}}
@@ -297,7 +318,7 @@
                                     {{-- Address detail with tiny arrow icon --}}
                                     <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #71717a;">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="color: #71717a; transform: rotate(45deg);"><path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/></svg>
-                                        <span>Mumbai, Maharashtra, India</span>
+                                        <span>{{ $event->location ?: ($event->city ? $event->city.', India' : 'India') }}</span>
                                     </div>
                                     
                                     {{-- Share / Open Map button on bottom right corner --}}
@@ -311,7 +332,7 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         </section>
                     </div>
 
@@ -329,23 +350,20 @@
                                         @endif
                                     </div>
                                     <div class="dr-organizer-name" style="font-size: 12px; font-weight: 900; color: #121620; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2;">
-                                        {{ Str::limit($event->artist->name ?? 'SMAAASH ENT', 14, '...') }}
+                                        {{ Str::limit($event->artist->name ?? 'Event Host', 14, '...') }}
                                     </div>
                                 </div>
 
-                                {{-- Right column: Stats list --}}
+                                {{-- Right column: real event facts (no fabricated stats) --}}
                                 <div style="display: flex; flex-direction: column; flex-grow: 1; gap: 0; width: 55%;">
-                                    {{-- Stat 1 --}}
                                     <div style="padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 13.5px; font-family: 'Inter', sans-serif;">
-                                        <span class="dr-stat-value">84%</span> <span class="dr-stat-label">liked</span>
+                                        <span class="dr-stat-value">{{ $event->category ?: 'Event' }}</span> <span class="dr-stat-label">category</span>
                                     </div>
-                                    {{-- Stat 2 --}}
                                     <div style="padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 13.5px; font-family: 'Inter', sans-serif;">
-                                        <span class="dr-stat-value">345</span> <span class="dr-stat-label">events</span>
+                                        <span class="dr-stat-value">{{ optional($event->date)->format('D, d M') ?: 'TBA' }}</span> <span class="dr-stat-label">date</span>
                                     </div>
-                                    {{-- Stat 3 --}}
                                     <div style="padding: 10px 0; font-size: 13.5px; font-family: 'Inter', sans-serif;">
-                                        <span class="dr-stat-value">7.8 years</span> <span class="dr-stat-label">hosting</span>
+                                        <span class="dr-stat-value">{{ Str::limit($event->venue ?: 'Venue', 16) }}</span> <span class="dr-stat-label">venue</span>
                                     </div>
                                 </div>
                             </div>
@@ -353,110 +371,40 @@
                     </div>
                 </div>
 
-                {{-- Highlights Section --}}
-                <section style="margin-top: 8px; border-top: none; padding-top: 0px; margin-bottom: 8px;">
+                {{-- Highlights: only when the event carries real notes. Previously
+                     this was hardcoded boilerplate ("world-class bowling…") shown on
+                     every event plus a fake carousel — removed to stay honest.
+                     Real highlights live in the "Know Before You Go" tab. --}}
+                @php $highlights = is_array($event->info_notes) ? array_values(array_filter($event->info_notes)) : []; @endphp
+                @if(!empty($highlights))
+                <section style="margin-top: 8px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Highlights</h3>
-                    
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px;">
-                        
-                        {{-- Card 1: Perfect For --}}
-                        <div style="position: relative; border: 1px solid var(--dr-border); padding: 28px 24px; border-radius: 12px; background: #ffffff; min-height: 130px; overflow: hidden; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
-                            <!-- Top Right Golden Wave Pattern -->
-                            <svg width="120" height="90" viewBox="0 0 120 90" fill="none" style="position: absolute; top: 0; right: 0; pointer-events: none; opacity: 0.35;">
-                                <path d="M40 0 C 65 30, 90 20, 120 45" stroke="#E2B13C" stroke-width="1.2" stroke-linecap="round"/>
-                                <path d="M25 0 C 55 40, 85 25, 120 60" stroke="#E2B13C" stroke-width="1.2" stroke-linecap="round"/>
-                                <path d="M10 0 C 45 50, 80 30, 120 75" stroke="#E2B13C" stroke-width="1.2" stroke-linecap="round"/>
-                            </svg>
-                            
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <h4 style="margin: 0; font-size: 15px; font-weight: 800; color: #000000; font-family: 'Inter', sans-serif;">Perfect For</h4>
+                        @foreach(array_slice($highlights, 0, 4) as $note)
+                            <div style="position: relative; border: 1px solid var(--dr-border); padding: 24px; border-radius: 12px; background: #ffffff; min-height: 96px; display: flex; align-items: center; gap: 8px;">
+                                <p style="margin: 0; font-size: 13.5px; line-height: 1.6; color: #555555;">{{ is_array($note) ? ($note['text'] ?? ($note['title'] ?? '')) : $note }}</p>
                             </div>
-                            <p style="margin: 0; font-size: 13.5px; line-height: 1.6; color: #555555; max-width: 82%;">Perfect for families, friends, parties, and corporate outings.</p>
-                        </div>
-
-                        {{-- Card 2: Get Ready To --}}
-                        <div style="position: relative; border: 1px solid var(--dr-border); padding: 28px 24px; border-radius: 12px; background: #ffffff; min-height: 130px; overflow: hidden; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
-                            <!-- Top Right Golden Wave Pattern -->
-                            <svg width="120" height="90" viewBox="0 0 120 90" fill="none" style="position: absolute; top: 0; right: 0; pointer-events: none; opacity: 0.35;">
-                                <path d="M40 0 C 65 30, 90 20, 120 45" stroke="#E2B13C" stroke-width="1.2" stroke-linecap="round"/>
-                                <path d="M25 0 C 55 40, 85 25, 120 60" stroke="#E2B13C" stroke-width="1.2" stroke-linecap="round"/>
-                                <path d="M10 0 C 45 50, 80 30, 120 75" stroke="#E2B13C" stroke-width="1.2" stroke-linecap="round"/>
-                            </svg>
-                            
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <svg width="16" height="16" fill="none" stroke="#E2B13C" stroke-width="2.2" viewBox="0 0 24 24" style="margin-top: -1px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                                <h4 style="margin: 0; font-size: 15px; font-weight: 800; color: #000000; font-family: 'Inter', sans-serif;">Get Ready To</h4>
-                            </div>
-                            <p style="margin: 0; font-size: 13.5px; line-height: 1.6; color: #555555; max-width: 82%;">Experience high-energy gaming, world-class bowling, and all-in-one entertainment.</p>
-                        </div>
-
-                    </div>
-
-                    {{-- Carousel Control Row --}}
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 24px;">
-                        <button type="button" style="width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--dr-border); background: #ffffff; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #000000; outline: none; transition: background 0.2s;">
-                            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-                        </button>
-                        <div style="display: flex; gap: 6px; align-items: center;">
-                            <span style="width: 5px; height: 5px; border-radius: 50%; background: #dddddd;"></span>
-                            <span style="width: 5px; height: 5px; border-radius: 50%; background: #dddddd;"></span>
-                            <span style="width: 6px; height: 6px; border-radius: 50%; background: #000000;"></span>
-                        </div>
+                        @endforeach
                     </div>
                 </section>
+                @endif
 
-                {{-- Gallery Section --}}
-                <section style="margin-top: 12px; border-top: none; padding-top: 0px; margin-bottom: 8px;">
+                {{-- Gallery: the event's own images (not stock arcade photos).
+                     Shown only when there is more than the hero image, so we never
+                     pad the page with unrelated placeholders. --}}
+                @php $gallery = is_array($event->images) ? array_values(array_filter($event->images)) : []; @endphp
+                @if(count($gallery) > 1)
+                <section style="margin-top: 12px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Gallery</h3>
-                    
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
-                        
-                        {{-- Image 1 --}}
-                        <div style="border-radius: 16px; overflow: hidden; height: 180px; border: 1px solid var(--dr-border);">
-                            <img src="https://images.unsplash.com/photo-1593341606579-7e90d290c078?auto=format&fit=crop&w=500&q=80" alt="Sports Arena" style="width: 100%; height: 100%; object-fit: cover;">
-                        </div>
-
-                        {{-- Image 2 --}}
-                        <div style="border-radius: 16px; overflow: hidden; height: 180px; border: 1px solid var(--dr-border);">
-                            <img src="https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=500&q=80" alt="Arcade Zone" style="width: 100%; height: 100%; object-fit: cover;">
-                        </div>
-
-                        {{-- Image 3 --}}
-                        <div style="border-radius: 16px; overflow: hidden; height: 180px; border: 1px solid var(--dr-border);">
-                            <img src="https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=500&q=80" alt="Retro Gaming" style="width: 100%; height: 100%; object-fit: cover;">
-                        </div>
-
-                        {{-- Image 4 --}}
-                        <div style="border-radius: 16px; overflow: hidden; height: 180px; border: 1px solid var(--dr-border);">
-                            <img src="https://images.unsplash.com/photo-1593508512255-86ab42a8e620?auto=format&fit=crop&w=500&q=80" alt="Virtual Reality" style="width: 100%; height: 100%; object-fit: cover;">
-                        </div>
-
-                        {{-- Image 5 --}}
-                        <div style="border-radius: 16px; overflow: hidden; height: 180px; border: 1px solid var(--dr-border);">
-                            <img src="https://images.unsplash.com/photo-1553481187-be93c21490a9?auto=format&fit=crop&w=500&q=80" alt="Arcade Gaming Setups" style="width: 100%; height: 100%; object-fit: cover;">
-                        </div>
-
-                        {{-- Show all photos card --}}
-                        <div style="border-radius: 16px; border: 1px solid var(--dr-border); height: 180px; display: flex; align-items: center; justify-content: center; background: #ffffff;">
-                            <button type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; border: 1px solid var(--dr-border); border-radius: 99px; background: #ffffff; cursor: pointer; font-size: 13px; font-weight: 700; color: #333333; outline: none; transition: all 0.2s;">
-                                <!-- 3x3 dot grid icon -->
-                                <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
-                                    <circle cx="4" cy="4" r="2"/>
-                                    <circle cx="12" cy="4" r="2"/>
-                                    <circle cx="20" cy="4" r="2"/>
-                                    <circle cx="4" cy="12" r="2"/>
-                                    <circle cx="12" cy="12" r="2"/>
-                                    <circle cx="20" cy="12" r="2"/>
-                                    <circle cx="4" cy="20" r="2"/>
-                                    <circle cx="12" cy="20" r="2"/>
-                                    <circle cx="20" cy="20" r="2"/>
-                                </svg>
-                                <span>Show All Photos</span>
-                            </button>
-                        </div>
-
+                        @foreach(array_slice($gallery, 0, 6) as $img)
+                            <div style="border-radius: 16px; overflow: hidden; height: 180px; border: 1px solid var(--dr-border);">
+                                <img src="{{ $img }}" alt="{{ $event->title }}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">
+                            </div>
+                        @endforeach
                     </div>
                 </section>
+                @endif
             </div>
 
             {{-- Content Pane: Know Before You Go --}}
