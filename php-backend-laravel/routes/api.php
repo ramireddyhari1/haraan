@@ -58,6 +58,7 @@ Route::prefix('auth/whatsapp')->controller(WhatsAppAuthController::class)->group
 Route::prefix('auth/email')->controller(EmailAuthController::class)->group(function (): void {
     Route::post('/request', 'requestOtp');
     Route::post('/verify', 'verifyOtp');
+    Route::post('/complete', 'completeProfile'); // new user: name + date of birth after verify
 });
 
 // -------------------------------------------------------------------------

@@ -26,6 +26,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Claude Code local settings (machine-specific, do not publish)
+.claude/
+
 # Expo
 .expo/
 *.jks

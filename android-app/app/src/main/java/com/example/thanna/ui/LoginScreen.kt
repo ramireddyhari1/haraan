@@ -9,7 +9,15 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
@@ -20,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -34,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.painterResource
 import com.example.thanna.data.ApiConfig
 import kotlinx.coroutines.Dispatchers
@@ -67,11 +77,12 @@ fun LoginRoute(
         uiState = uiState,
         onEmailChange = viewModel::onEmailChange,
         onNameChange = viewModel::onNameChange,
-        onAgeChange = viewModel::onAgeChange,
+        onDobChange = viewModel::onDobChange,
         onOtpChange = viewModel::onOtpChange,
         onContinueClick = viewModel::requestOtp,
         onVerifyOtpClick = { viewModel.verifyOtp(onLoginSuccess) },
-        onBackToDetailsClick = viewModel::resetToDetails,
+        onCompleteProfileClick = { viewModel.completeProfile(onLoginSuccess) },
+        onBackToEmailClick = viewModel::resetToEmail,
         onSkipClick = onSkipClick,
         modifier = modifier
     )
@@ -96,11 +107,12 @@ fun LoginScreen(
     uiState: LoginUiState,
     onEmailChange: (String) -> Unit,
     onNameChange: (String) -> Unit,
-    onAgeChange: (String) -> Unit,
+    onDobChange: (String) -> Unit,
     onOtpChange: (String) -> Unit,
     onContinueClick: () -> Unit,
     onVerifyOtpClick: () -> Unit,
-    onBackToDetailsClick: () -> Unit,
+    onCompleteProfileClick: () -> Unit,
+    onBackToEmailClick: () -> Unit,
     onSkipClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -229,7 +241,7 @@ fun LoginScreen(
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
             // card has room and nothing clips.
-            if (uiState.stage == LoginStage.EnterDetails && !isDetailsInputVisible) {
+            if (uiState.stage == LoginStage.EnterEmail && !isDetailsInputVisible) {
                 Row(
                     modifier = Modifier.padding(bottom = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -271,142 +283,295 @@ fun LoginScreen(
                 ) {
                     // Full branding only in the collapsed hero — hidden once the keyboard
                     // is up so the card stays compact and nothing clips at the top.
-                    val showBranding = uiState.stage == LoginStage.EnterDetails && !isDetailsInputVisible
+                    val showBranding = uiState.stage == LoginStage.EnterEmail && !isDetailsInputVisible
 
                     // Grab handle.
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 16.dp)
+                            .padding(bottom = 12.dp)
                             .size(width = 36.dp, height = 4.dp)
                             .clip(RoundedCornerShape(2.dp))
                             .background(Stroke)
                     )
 
                     if (showBranding) {
-                        // Brand mark — blue H in a soft tinted tile.
+                        // Hero — the decorative art (festival left / sports right) is a
+                        // full-bleed backdrop with a clear centre channel; the brand mark,
+                        // wordmark and tagline stack over that channel so the artwork frames
+                        // the branding as one unit, matching the reference design. Bleeds past
+                        // the card's 24dp side padding so the art reaches the card edges.
                         Box(
                             modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(16.dp))
+                                .layout { measurable, constraints ->
+                                    val bleed = 24.dp.roundToPx()
+                                    val fullWidth = constraints.maxWidth + bleed * 2
+                                    val placeable = measurable.measure(
+                                        constraints.copy(minWidth = fullWidth, maxWidth = fullWidth)
+                                    )
+                                    // Report the ORIGINAL width so the parent keeps this node in
+                                    // its normal centred slot; the content overflows symmetrically
+                                    // by `bleed` on each side to reach both card edges.
+                                    layout(constraints.maxWidth, placeable.height) {
+                                        placeable.place(-bleed, 0)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Full art (not cropped) so the festival/sports clusters and their
+                            // waves run down the left/right sides of the card instead of leaving
+                            // empty margins.
+                            Image(
+                                painter = painterResource(id = R.drawable.login_card_art),
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxWidth(),
+                                contentScale = ContentScale.FillWidth
+                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                // Brand mark — blue H in a soft tinted tile.
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(BlueTint),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = R.drawable.haraan_copy),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(30.dp),
+                                        contentScale = ContentScale.Fit,
+                                        colorFilter = ColorFilter.tint(Accent)
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                // Brand wordmark image — replaces the text wordmark.
+                                Image(
+                                    painter = painterResource(id = R.drawable.haraan_wordmark),
+                                    contentDescription = com.example.thanna.ui.theme.Brand.name,
+                                    modifier = Modifier.height(46.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        }
+                        // Tagline + subtitle on clean white, flanked by matching accent
+                        // motifs (blue left / green right) drawn into the side margins so the
+                        // empty lower sides of the card carry the artwork downward.
+                        Spacer(Modifier.height(8.dp))
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            LoginSideAccents(modifier = Modifier.matchParentSize())
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = com.example.thanna.ui.theme.Brand.tagline.uppercase(),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Text2,
+                                    letterSpacing = 1.4.sp,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = "Login or sign up to continue",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Text2,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        // Compact header for the email / OTP / profile steps — keeps the brand
+                        // mark for identity but drops the full artwork so the card stays tight.
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
                                 .background(BlueTint),
                             contentAlignment = Alignment.Center
                         ) {
                             Image(
                                 painter = painterResource(id = R.drawable.haraan_copy),
-                                contentDescription = com.example.thanna.ui.theme.Brand.name,
-                                modifier = Modifier.size(30.dp),
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
                                 contentScale = ContentScale.Fit,
-                                colorFilter = ColorFilter.tint(com.example.thanna.ui.theme.Brand.accent)
+                                colorFilter = ColorFilter.tint(Accent)
                             )
                         }
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = com.example.thanna.ui.theme.Brand.name,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Text1,
+                            letterSpacing = (-0.5).sp
+                        )
+                        Spacer(Modifier.height(16.dp))
                     }
 
-                    Text(
-                        text = com.example.thanna.ui.theme.Brand.name,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Text1,
-                        letterSpacing = (-0.5).sp
-                    )
-
-                    if (showBranding) {
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            text = com.example.thanna.ui.theme.Brand.tagline.uppercase(),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Text3,
-                            letterSpacing = 1.5.sp,
-                            maxLines = 1,
-                            textAlign = TextAlign.Center
-                        )
+                    // On the branding landing the subtitle is rendered inside the accent box
+                    // above; here it covers every other stage (email entry / OTP / profile),
+                    // flanked by the same accent motifs so these cards aren't blank either.
+                    if (!showBranding) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            LoginSideAccents(modifier = Modifier.matchParentSize())
+                            Text(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(vertical = 6.dp),
+                                text = when (uiState.stage) {
+                                    LoginStage.EnterEmail ->
+                                        if (!isDetailsInputVisible) "Login or sign up to continue"
+                                        else "Enter your email to get a login code"
+                                    LoginStage.VerifyOtp -> "Enter the 6-digit code sent to your email"
+                                    LoginStage.CompleteProfile -> "Almost there — tell us a bit about you"
+                                    else -> ""
+                                },
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Text2,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
 
                     Spacer(Modifier.height(18.dp))
 
-                    Text(
-                        text = if (uiState.stage == LoginStage.EnterDetails) {
-                            if (!isDetailsInputVisible) "Login or sign up to continue" else "Enter your details to get a login code"
-                        } else {
-                            "Enter the 6-digit code sent to your email"
-                        },
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Text2,
-                        textAlign = TextAlign.Center
+                    val fieldColors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = Stroke,
+                        focusedContainerColor = FieldBg,
+                        unfocusedContainerColor = FieldBg
                     )
 
-                    Spacer(Modifier.height(22.dp))
+                    when (uiState.stage) {
+                        // ── Step 1: email only ────────────────────────────────────────────
+                        LoginStage.EnterEmail -> {
+                            if (!isDetailsInputVisible) {
+                                val ci = remember { MutableInteractionSource() }
+                                Button(
+                                    onClick = {
+                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                        isDetailsInputVisible = true
+                                    },
+                                    interactionSource = ci,
+                                    modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Email,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        "Continue with email",
+                                        fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                                        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            } else {
+                                OutlinedTextField(
+                                    value = uiState.email,
+                                    onValueChange = onEmailChange,
+                                    placeholder = { Text("Email address", color = Text3) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                    singleLine = true,
+                                    colors = fieldColors
+                                )
 
-                    if (uiState.stage == LoginStage.EnterDetails) {
-                        if (!isDetailsInputVisible) {
-                            val ci = remember { MutableInteractionSource() }
+                                if (!uiState.errorMessage.isNullOrEmpty()) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
+                                }
+
+                                Spacer(Modifier.height(14.dp))
+
+                                val pi = remember { MutableInteractionSource() }
+                                Button(
+                                    onClick = {
+                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                        onContinueClick()
+                                    },
+                                    interactionSource = pi,
+                                    modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(pi),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
+                                    enabled = uiState.canContinue
+                                ) {
+                                    Text(
+                                        if (uiState.isLoading) "Please wait…" else "Get login code",
+                                        fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                        color = if (uiState.canContinue) Color.White else Text3
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Step 2: verify the 6-digit code ───────────────────────────────
+                        LoginStage.VerifyOtp -> {
+                            OtpEntryRow(otp = uiState.otp, onOtpChange = onOtpChange, modifier = Modifier.fillMaxWidth())
+
+                            if (!uiState.errorMessage.isNullOrEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
+                            }
+                            if (!uiState.successMessage.isNullOrEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(uiState.successMessage, color = Color(0xFF16A34A), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
+                            }
+
+                            Spacer(Modifier.height(14.dp))
+
+                            val vi = remember { MutableInteractionSource() }
                             Button(
                                 onClick = {
                                     view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                    isDetailsInputVisible = true
+                                    onVerifyOtpClick()
                                 },
-                                interactionSource = ci,
-                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
+                                interactionSource = vi,
+                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(vi),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
+                                enabled = uiState.isOtpValid && !uiState.isLoading
                             ) {
                                 Text(
-                                    "Continue with email",
-                                    fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                                    maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
+                                    if (uiState.isLoading) "Verifying…" else "Verify & Proceed",
+                                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                    color = if (uiState.isOtpValid && !uiState.isLoading) Color.White else Text3
                                 )
                             }
-                        } else {
-                            val fieldColors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Accent,
-                                unfocusedBorderColor = Stroke,
-                                focusedContainerColor = FieldBg,
-                                unfocusedContainerColor = FieldBg
-                            )
 
-                            // Email — the login identity.
+                            Spacer(Modifier.height(4.dp))
+                            TextButton(onClick = onBackToEmailClick) {
+                                Text("Change email", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        // ── Step 3: new users only — name + date of birth ─────────────────
+                        LoginStage.CompleteProfile -> {
                             OutlinedTextField(
-                                value = uiState.email,
-                                onValueChange = onEmailChange,
-                                placeholder = { Text("Email address", color = Text3) },
+                                value = uiState.name,
+                                onValueChange = onNameChange,
+                                placeholder = { Text("Your name", color = Text3) },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                                 singleLine = true,
                                 colors = fieldColors
                             )
 
                             Spacer(Modifier.height(10.dp))
 
-                            // Name + age — used only when creating a new account.
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = uiState.name,
-                                    onValueChange = onNameChange,
-                                    placeholder = { Text("Name", color = Text3) },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(16.dp),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                                    singleLine = true,
-                                    colors = fieldColors
-                                )
-                                OutlinedTextField(
-                                    value = uiState.age,
-                                    onValueChange = onAgeChange,
-                                    placeholder = { Text("Age", color = Text3) },
-                                    modifier = Modifier.width(96.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    singleLine = true,
-                                    colors = fieldColors
-                                )
-                            }
+                            DateOfBirthField(dob = uiState.dob, onDobChange = onDobChange)
 
                             if (!uiState.errorMessage.isNullOrEmpty()) {
                                 Spacer(Modifier.height(12.dp))
@@ -415,62 +580,27 @@ fun LoginScreen(
 
                             Spacer(Modifier.height(14.dp))
 
-                            val pi = remember { MutableInteractionSource() }
+                            val fi = remember { MutableInteractionSource() }
                             Button(
                                 onClick = {
                                     view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                    onContinueClick()
+                                    onCompleteProfileClick()
                                 },
-                                interactionSource = pi,
-                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(pi),
+                                interactionSource = fi,
+                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(fi),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
-                                enabled = uiState.canContinue
+                                enabled = uiState.canComplete
                             ) {
                                 Text(
-                                    if (uiState.isLoading) "Please wait…" else "Proceed",
+                                    if (uiState.isLoading) "Creating account…" else "Create account",
                                     fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                    color = if (uiState.canContinue) Color.White else Text3
+                                    color = if (uiState.canComplete) Color.White else Text3
                                 )
                             }
                         }
-                    } else {
-                        OtpEntryRow(otp = uiState.otp, onOtpChange = onOtpChange, modifier = Modifier.fillMaxWidth())
 
-                        if (!uiState.errorMessage.isNullOrEmpty()) {
-                            Spacer(Modifier.height(12.dp))
-                            Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
-                        }
-                        if (!uiState.successMessage.isNullOrEmpty()) {
-                            Spacer(Modifier.height(12.dp))
-                            Text(uiState.successMessage, color = Color(0xFF16A34A), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
-                        }
-
-                        Spacer(Modifier.height(14.dp))
-
-                        val vi = remember { MutableInteractionSource() }
-                        Button(
-                            onClick = {
-                                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                onVerifyOtpClick()
-                            },
-                            interactionSource = vi,
-                            modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(vi),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
-                            enabled = uiState.isOtpValid && !uiState.isLoading
-                        ) {
-                            Text(
-                                if (uiState.isLoading) "Verifying…" else "Verify & Proceed",
-                                fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                color = if (uiState.isOtpValid && !uiState.isLoading) Color.White else Text3
-                            )
-                        }
-
-                        Spacer(Modifier.height(4.dp))
-                        TextButton(onClick = onBackToDetailsClick) {
-                            Text("Change email", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        }
+                        else -> {}
                     }
 
                     Spacer(Modifier.height(16.dp))
@@ -489,6 +619,76 @@ fun LoginScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Date-of-birth picker field (new-user sign-up). Renders like the other fields but opens a
+ * Material date picker; emits the chosen date as an ISO yyyy-MM-dd string. Future dates are
+ * not selectable.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateOfBirthField(dob: String, onDobChange: (String) -> Unit) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    val display = remember(dob) {
+        runCatching {
+            java.time.LocalDate.parse(dob)
+                .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+        }.getOrNull()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(FieldBg)
+            .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+            .clickable { showPicker = true }
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = display ?: "Date of birth",
+            color = if (display == null) Text3 else Text1,
+            fontSize = 16.sp
+        )
+    }
+
+    if (showPicker) {
+        val today = remember { java.time.LocalDate.now() }
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = dob.takeIf { it.isNotBlank() }?.let {
+                runCatching {
+                    java.time.LocalDate.parse(it).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+                }.getOrNull()
+            },
+            yearRange = 1920..today.year,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                    utcTimeMillis <= System.currentTimeMillis()
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        val iso = java.time.Instant.ofEpochMilli(millis)
+                            .atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
+                        onDobChange(iso)
+                    }
+                    showPicker = false
+                }) { Text("OK", color = Accent, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPicker = false }) { Text("Cancel", color = Text2) }
+            }
+        ) {
+            DatePicker(state = pickerState, title = null, showModeToggle = false)
         }
     }
 }
@@ -541,4 +741,71 @@ fun OtpEntryRow(
             }
         }
     )
+}
+
+// Art green sampled from the login artwork's sports (right) cluster.
+private val ArtGreen = Color(0xFF16A34A)
+
+/**
+ * Decorative accent motifs — sparkles, a dotted path and a location pin — drawn into the
+ * left/right side margins (blue on the left, green on the right) so the empty lower sides
+ * of the login card echo the artwork instead of reading as blank white.
+ */
+@Composable
+private fun LoginSideAccents(modifier: Modifier = Modifier) {
+    val blue = Accent.copy(alpha = 0.55f)
+    val green = ArtGreen.copy(alpha = 0.55f)
+    Canvas(modifier = modifier) {
+        drawAccentCluster(size.width, size.height, mirror = false, color = blue)
+        drawAccentCluster(size.width, size.height, mirror = true, color = green)
+    }
+}
+
+/** Draws one side's cluster; [mirror] flips it horizontally for the opposite margin. */
+private fun DrawScope.drawAccentCluster(w: Float, h: Float, mirror: Boolean, color: Color) {
+    fun px(fx: Float) = if (mirror) w - w * fx else w * fx
+    val path = Path().apply {
+        moveTo(px(0.05f), h * 0.12f)
+        quadraticBezierTo(px(0.22f), h * 0.32f, px(0.10f), h * 0.62f)
+    }
+    drawPath(
+        path,
+        color,
+        style = DrawStroke(
+            width = 1.5.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 8f))
+        )
+    )
+    drawSparkle(Offset(px(0.14f), h * 0.30f), 6.dp.toPx(), color)
+    drawSparkle(Offset(px(0.045f), h * 0.54f), 3.5.dp.toPx(), color)
+    drawPin(Offset(px(0.11f), h * 0.82f), 5.dp.toPx(), color)
+}
+
+/** A 4-point sparkle (concave star). */
+private fun DrawScope.drawSparkle(c: Offset, r: Float, color: Color) {
+    val i = r * 0.36f
+    val p = Path().apply {
+        moveTo(c.x, c.y - r)
+        lineTo(c.x + i, c.y - i)
+        lineTo(c.x + r, c.y)
+        lineTo(c.x + i, c.y + i)
+        lineTo(c.x, c.y + r)
+        lineTo(c.x - i, c.y + i)
+        lineTo(c.x - r, c.y)
+        lineTo(c.x - i, c.y - i)
+        close()
+    }
+    drawPath(p, color)
+}
+
+/** A location pin (teardrop with a hollow centre via even-odd fill). */
+private fun DrawScope.drawPin(c: Offset, r: Float, color: Color) {
+    val p = Path().apply {
+        fillType = PathFillType.EvenOdd
+        moveTo(c.x, c.y + r * 1.9f)
+        cubicTo(c.x - r * 1.4f, c.y + r * 0.4f, c.x - r, c.y - r * 0.6f, c.x, c.y - r)
+        cubicTo(c.x + r, c.y - r * 0.6f, c.x + r * 1.4f, c.y + r * 0.4f, c.x, c.y + r * 1.9f)
+        addOval(Rect(c.x - r * 0.42f, c.y - r * 0.55f, c.x + r * 0.42f, c.y + r * 0.29f))
+    }
+    drawPath(p, color)
 }

@@ -10,22 +10,28 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed interface LoginStage {
-    data object EnterDetails : LoginStage
+    /** Step 1 — email only. */
+    data object EnterEmail : LoginStage
+    /** Step 2 — the 6-digit code. */
     data object VerifyOtp : LoginStage
+    /** Step 3 — new users only: name + date of birth. */
+    data object CompleteProfile : LoginStage
     data object Success : LoginStage
 }
 
 data class LoginUiState(
     val email: String = "",
     val name: String = "",
-    val age: String = "",
+    /** Date of birth as yyyy-MM-dd; blank until the new user picks one. */
+    val dob: String = "",
     val otp: String = "",
     val verificationToken: String? = null,
     val token: String? = null,
+    val newUser: Boolean = false,
     val isLoading: Boolean = false,
     val successMessage: String? = null,
     val errorMessage: String? = null,
-    val stage: LoginStage = LoginStage.EnterDetails
+    val stage: LoginStage = LoginStage.EnterEmail
 ) {
     val isEmailValid: Boolean
         get() {
@@ -38,6 +44,9 @@ data class LoginUiState(
 
     val canContinue: Boolean
         get() = isEmailValid && !isLoading
+
+    val canComplete: Boolean
+        get() = name.trim().isNotEmpty() && dob.isNotBlank() && !isLoading
 }
 
 class LoginViewModel : ViewModel() {
@@ -54,9 +63,9 @@ class LoginViewModel : ViewModel() {
         _uiState.update { it.copy(name = input.take(120), errorMessage = null) }
     }
 
-    fun onAgeChange(input: String) {
-        val digitsOnly = input.filter { it.isDigit() }.take(3)
-        _uiState.update { it.copy(age = digitsOnly, errorMessage = null) }
+    /** [isoDate] is yyyy-MM-dd from the date picker. */
+    fun onDobChange(isoDate: String) {
+        _uiState.update { it.copy(dob = isoDate, errorMessage = null) }
     }
 
     fun onOtpChange(input: String) {
@@ -64,10 +73,10 @@ class LoginViewModel : ViewModel() {
         _uiState.update { it.copy(otp = digitsOnly, errorMessage = null) }
     }
 
-    fun resetToDetails() {
+    fun resetToEmail() {
         _uiState.update {
             it.copy(
-                stage = LoginStage.EnterDetails,
+                stage = LoginStage.EnterEmail,
                 otp = "",
                 errorMessage = null,
                 successMessage = null
@@ -81,7 +90,7 @@ class LoginViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            runCatching { authRepository.requestEmailOtp(state.email, state.name, state.age) }
+            runCatching { authRepository.requestEmailOtp(state.email) }
                 .onSuccess { result ->
                     _uiState.update {
                         it.copy(
@@ -116,6 +125,53 @@ class LoginViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
             runCatching { authRepository.verifyEmailOtp(verificationToken, state.otp) }
                 .onSuccess { result ->
+                    if (result.newUser || result.token.isNullOrBlank()) {
+                        // Brand-new email → collect name + date of birth before creating the account.
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                newUser = true,
+                                verificationToken = result.verificationToken ?: verificationToken,
+                                stage = LoginStage.CompleteProfile,
+                                successMessage = result.message
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                token = result.token,
+                                stage = LoginStage.Success,
+                                successMessage = result.message
+                            )
+                        }
+                        onSuccess(result.token)
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = throwable.message ?: "Invalid code. Please try again."
+                        )
+                    }
+                }
+        }
+    }
+
+    fun completeProfile(onSuccess: (String) -> Unit) {
+        val state = _uiState.value
+        val verificationToken = state.verificationToken
+        if (verificationToken.isNullOrBlank()) {
+            _uiState.update { it.copy(errorMessage = "Session expired. Please request a code again.") }
+            return
+        }
+        if (!state.canComplete) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
+            runCatching { authRepository.completeEmailProfile(verificationToken, state.name.trim(), state.dob) }
+                .onSuccess { result ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -130,7 +186,7 @@ class LoginViewModel : ViewModel() {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = throwable.message ?: "Invalid code. Please try again."
+                            errorMessage = throwable.message ?: "Couldn't finish sign-up. Please try again."
                         )
                     }
                 }

@@ -24,6 +24,19 @@ data class VerifyOtpResult(
   val message: String,
 )
 
+/**
+ * Result of verifying an email code. Existing users come back logged in ([newUser] = false,
+ * [token] set). A brand-new email comes back verified-but-not-registered ([newUser] = true,
+ * [token] null) — the caller then collects name + date of birth and calls [completeProfile].
+ */
+data class VerifyEmailResult(
+  val newUser: Boolean,
+  val token: String?,
+  val userName: String?,
+  val verificationToken: String?,
+  val message: String,
+)
+
 class HaraanAuthRepository(
   // Single source of truth — reaches the local server via `adb reverse` on both
   // emulator and physical device. Hardcoding 10.0.2.2 broke login on real phones.
@@ -70,15 +83,11 @@ class HaraanAuthRepository(
   }
 
   /**
-   * Request an email OTP. Name/age are only used when creating a brand-new account
-   * (existing users can leave them blank). Delivered via the self-hosted email bridge.
+   * Step 1 of email login: request a code for [email] only. Whether the account is new is
+   * decided by the backend and reported back on verify — not here.
    */
-  suspend fun requestEmailOtp(email: String, name: String, age: String): RequestOtpResult = withContext(Dispatchers.IO) {
-    val body = JSONObject().put("email", email)
-    if (name.isNotBlank()) body.put("name", name)
-    age.trim().toIntOrNull()?.let { body.put("age", it) }
-
-    val response = postJson(path = "/api/auth/email/request", jsonBody = body)
+  suspend fun requestEmailOtp(email: String): RequestOtpResult = withContext(Dispatchers.IO) {
+    val response = postJson(path = "/api/auth/email/request", jsonBody = JSONObject().put("email", email))
 
     if (response.code !in 200..299) {
       throw IllegalStateException(parseErrorMessage(response.body, "Unable to send the code."))
@@ -93,7 +102,8 @@ class HaraanAuthRepository(
     )
   }
 
-  suspend fun verifyEmailOtp(verificationToken: String, otp: String): VerifyOtpResult = withContext(Dispatchers.IO) {
+  /** Step 2: verify the code. Existing users get a token; new users get sent to profile setup. */
+  suspend fun verifyEmailOtp(verificationToken: String, otp: String): VerifyEmailResult = withContext(Dispatchers.IO) {
     val response = postJson(
       path = "/api/auth/email/verify",
       jsonBody = JSONObject()
@@ -106,13 +116,40 @@ class HaraanAuthRepository(
     }
 
     val json = JSONObject(response.body)
-    val user = json.getJSONObject("user")
-    VerifyOtpResult(
-      token = json.getString("token"),
-      userName = user.optString("name", "Haraan user"),
-      message = json.optString("message", "Login successful."),
+    val newUser = json.optBoolean("newUser", false)
+    val user = json.optJSONObject("user")
+    VerifyEmailResult(
+      newUser = newUser,
+      token = json.optString("token").takeIf { it.isNotBlank() },
+      userName = user?.optString("name"),
+      verificationToken = json.optString("verificationToken").takeIf { it.isNotBlank() } ?: verificationToken,
+      message = json.optString("message", if (newUser) "Email verified." else "Login successful."),
     )
   }
+
+  /** Step 3 (new users only): submit name + date of birth (yyyy-MM-dd) to create the account. */
+  suspend fun completeEmailProfile(verificationToken: String, name: String, dateOfBirth: String): VerifyOtpResult =
+    withContext(Dispatchers.IO) {
+      val response = postJson(
+        path = "/api/auth/email/complete",
+        jsonBody = JSONObject()
+          .put("verification_token", verificationToken)
+          .put("name", name)
+          .put("date_of_birth", dateOfBirth),
+      )
+
+      if (response.code !in 200..299) {
+        throw IllegalStateException(parseErrorMessage(response.body, "Couldn't finish sign-up. Please try again."))
+      }
+
+      val json = JSONObject(response.body)
+      val user = json.getJSONObject("user")
+      VerifyOtpResult(
+        token = json.getString("token"),
+        userName = user.optString("name", "Haraan user"),
+        message = json.optString("message", "Welcome to Haraan!"),
+      )
+    }
 
   private fun postJson(path: String, jsonBody: JSONObject): HttpResult {
     val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {

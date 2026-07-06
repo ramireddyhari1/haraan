@@ -3182,11 +3182,12 @@ fun MainScreenPreview() {
       uiState = com.example.thanna.ui.LoginUiState(),
       onEmailChange = {},
       onNameChange = {},
-      onAgeChange = {},
+      onDobChange = {},
       onOtpChange = {},
       onContinueClick = {},
       onVerifyOtpClick = {},
-      onBackToDetailsClick = {}
+      onCompleteProfileClick = {},
+      onBackToEmailClick = {}
     )
   }
 }
@@ -3199,11 +3200,12 @@ fun MainScreenPortraitPreview() {
       uiState = com.example.thanna.ui.LoginUiState(),
       onEmailChange = {},
       onNameChange = {},
-      onAgeChange = {},
+      onDobChange = {},
       onOtpChange = {},
       onContinueClick = {},
       onVerifyOtpClick = {},
-      onBackToDetailsClick = {}
+      onCompleteProfileClick = {},
+      onBackToEmailClick = {}
     )
   }
 }
