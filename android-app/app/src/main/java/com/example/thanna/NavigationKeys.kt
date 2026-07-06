@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object Main : NavKey
 
+@Serializable data object SupportChat : NavKey
+
 @Serializable
 data class EventDetail(
 	val id: String,
@@ -39,3 +41,5 @@ data class VenueDetail(
 	val tagline: String = "",
 	val distance: String = "",
 ) : NavKey
+
+@Serializable data class PriceChart(val venueId: String) : NavKey

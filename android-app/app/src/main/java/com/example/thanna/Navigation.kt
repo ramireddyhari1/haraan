@@ -4,12 +4,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import com.example.thanna.data.TokenStore
 import com.example.thanna.ui.main.EventDetailScreen
 import com.example.thanna.ui.main.MainScreen
+import com.example.thanna.ui.main.PriceChartScreen
+import com.example.thanna.ui.main.SupportChatScreen
+import com.example.thanna.ui.main.VenueDetailScreen
 import com.example.thanna.ui.matches.MatchDetailsScreen
 import com.example.thanna.ui.matches.ScoringScreen
 
@@ -42,8 +47,22 @@ fun MainNavigation() {
         entry<Scoring> { s ->
           ScoringScreen(matchId = s.id, code = s.code, onBack = { backStack.removeLastOrNull() })
         }
-        entry<VenueDetail> { _ ->
-          // Venue detail screen placeholder — TODO: implement VenueDetailScreen
+        entry<SupportChat> {
+          val ctx = LocalContext.current
+          SupportChatScreen(
+            token = TokenStore.getToken(ctx) ?: "",
+            onClose = { backStack.removeLastOrNull() }
+          )
+        }
+        entry<VenueDetail> { venue ->
+          VenueDetailScreen(
+            venue = venue,
+            onBack = { backStack.removeLastOrNull() },
+            onOpenPriceChart = { backStack.add(PriceChart(venue.id)) }
+          )
+        }
+        entry<PriceChart> { pc ->
+          PriceChartScreen(venueId = pc.venueId, onBack = { backStack.removeLastOrNull() })
         }
       },
   )

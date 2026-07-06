@@ -70,7 +70,19 @@ data class MatchUiState(
     val rrr: String,
     val status: String,
     val isLive: Boolean = true,
-    
+    /** Sport code, e.g. "cricket", "football", "badminton". Drives which scorer/view opens. */
+    val sport: String = "cricket",
+
+    // ── Result verification (create → verify → XP) ──
+    /** Backend verification state: "" (n/a), "pending", "settled", or "expired". */
+    val verificationStatus: String = "",
+    /** True when the viewer is a captain who can still confirm this completed result. */
+    val canConfirm: Boolean = false,
+    /** Where the result settled once verified: "low"/"medium"/"high"/"verified". */
+    val trustLevel: String = "low",
+    val homeConfirmed: Boolean = false,
+    val awayConfirmed: Boolean = false,
+
     val striker: String = "",
     val strikerStats: BatterStats? = null,
     val nonStriker: String = "",

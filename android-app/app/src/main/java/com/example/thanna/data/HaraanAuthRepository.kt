@@ -69,6 +69,51 @@ class HaraanAuthRepository(
     )
   }
 
+  /**
+   * Request an email OTP. Name/age are only used when creating a brand-new account
+   * (existing users can leave them blank). Delivered via the self-hosted email bridge.
+   */
+  suspend fun requestEmailOtp(email: String, name: String, age: String): RequestOtpResult = withContext(Dispatchers.IO) {
+    val body = JSONObject().put("email", email)
+    if (name.isNotBlank()) body.put("name", name)
+    age.trim().toIntOrNull()?.let { body.put("age", it) }
+
+    val response = postJson(path = "/api/auth/email/request", jsonBody = body)
+
+    if (response.code !in 200..299) {
+      throw IllegalStateException(parseErrorMessage(response.body, "Unable to send the code."))
+    }
+
+    val json = JSONObject(response.body)
+    RequestOtpResult(
+      verificationToken = json.getString("verificationToken"),
+      phone = json.optString("email", email),
+      message = json.optString("message", "A login code has been sent to your email."),
+      expiresInSeconds = json.optInt("expiresIn", 300),
+    )
+  }
+
+  suspend fun verifyEmailOtp(verificationToken: String, otp: String): VerifyOtpResult = withContext(Dispatchers.IO) {
+    val response = postJson(
+      path = "/api/auth/email/verify",
+      jsonBody = JSONObject()
+        .put("verification_token", verificationToken)
+        .put("otp", otp),
+    )
+
+    if (response.code !in 200..299) {
+      throw IllegalStateException(parseErrorMessage(response.body, "Invalid code. Please try again."))
+    }
+
+    val json = JSONObject(response.body)
+    val user = json.getJSONObject("user")
+    VerifyOtpResult(
+      token = json.getString("token"),
+      userName = user.optString("name", "Haraan user"),
+      message = json.optString("message", "Login successful."),
+    )
+  }
+
   private fun postJson(path: String, jsonBody: JSONObject): HttpResult {
     val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"

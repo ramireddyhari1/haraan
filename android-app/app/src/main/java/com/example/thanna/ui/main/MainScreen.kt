@@ -356,49 +356,7 @@ private data class MatchRow(
   val resultSubtitle: String
 )
 
-@Composable
-private fun SegmentTabs(selected: String, onSelect: (String) -> Unit) {
-  val sections = listOf("Live (5)", "For You", "Upcoming", "Finished")
-  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-    sections.forEach { s ->
-      val isSelected = s == selected
-      Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-          text = s,
-          color = if (isSelected) Color.White else Color(0xFF7F97B0),
-          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-          fontSize = 14.sp
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Box(
-          modifier = Modifier
-            .height(3.dp)
-            .width(48.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(if (isSelected) Color(0xFFFF6B81) else Color.Transparent)
-            .clickable { onSelect(s) }
-        )
-      }
-    }
-  }
-}
 
-@Composable
-private fun TournamentSection(title: String, matches: List<MatchRow>) {
-  Column(modifier = Modifier.fillMaxWidth()) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-      Text(text = title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-      androidx.compose.material3.Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = "expand", tint = Color(0xFF94A3B8))
-    }
-
-    Spacer(modifier = Modifier.height(10.dp))
-
-    matches.forEach { m ->
-      MatchCard(match = m)
-      Spacer(modifier = Modifier.height(12.dp))
-    }
-  }
-}
 
 @Composable
 private fun MatchCard(match: MatchRow) {
@@ -470,84 +428,6 @@ private fun MatchCard(match: MatchRow) {
 
 // LoginScreen and its local helper methods have been migrated to com.example.thanna.ui package.
 
-@Composable
-private fun CustomBottomNav(
-  selectedTab: Int,
-  activeSubTab: String,
-  onTabSelected: (Int) -> Unit
-) {
-  val isDark = false // Force light theme everywhere for clean aesthetic
-  Card(
-    modifier = Modifier
-      .fillMaxWidth()
-      .navigationBarsPadding()
-      .padding(12.dp)
-      .height(64.dp),
-    shape = RoundedCornerShape(UnifiedCornerRadius),
-    colors = CardDefaults.cardColors(
-      containerColor = Color.White
-    ),
-    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-  ) {
-    Row(
-      modifier = Modifier.fillMaxSize(),
-      horizontalArrangement = Arrangement.SpaceAround,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      val tabs = listOf(
-        TabInfo("Explore", Icons.Default.Home),
-        TabInfo("Leaderboard", Icons.Default.List)
-      )
-      
-      tabs.forEachIndexed { index, tab ->
-        val selected = index == selectedTab
-        val accentColor = if (index == 0) {
-          if (activeSubTab == "Events") {
-            Color(0xFF0288D1) // Premium sky blue for Events subtab
-          } else {
-            MIGreen
-          }
-        } else {
-          if (isDark) Color(0xFF0288D1) else MIBlue
-        }
-        val bubbleColor = if (selected) accentColor.copy(alpha = 0.08f) else Color.Transparent
-        val textColor = if (selected) accentColor else (if (isDark) Color.Gray else Color(0xFF94A3B8))
-        val iconColor = if (selected) accentColor else (if (isDark) Color.Gray else Color(0xFF94A3B8))
-        
-        Box(
-          modifier = Modifier
-            .weight(1f)
-            .padding(horizontal = 4.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(UnifiedCornerRadius))
-            .background(bubbleColor)
-            .clickable { onTabSelected(index) }
-            .padding(vertical = 6.dp),
-          contentAlignment = Alignment.Center
-        ) {
-          Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-          ) {
-            androidx.compose.material3.Icon(
-              imageVector = tab.icon,
-              contentDescription = tab.title,
-              tint = iconColor,
-              modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-              text = tab.title,
-              color = textColor,
-              fontSize = 10.sp,
-              fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-            )
-          }
-        }
-      }
-    }
-  }
-}
 
 private data class TabInfo(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
@@ -743,6 +623,7 @@ internal fun MainAppContainer(
               onDark = false,
               onAvatarClick = { showAccountProfile = true },
               onLocationClick = { showLocationSheet = true },
+              onChatClick = { onItemClick(com.example.thanna.SupportChat) },
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -1003,6 +884,7 @@ internal fun MainAppContainer(
                 searchRadiusKm = searchRadiusKm,
                 onLocateClick = { requestCurrentLocation() },
                 onMatchClick = { id -> onItemClick(com.example.thanna.MatchDetails(id)) },
+                onSupportClick = { onItemClick(com.example.thanna.SupportChat) },
                 onVenueClick = { v ->
                   onItemClick(
                     com.example.thanna.VenueDetail(
@@ -1120,14 +1002,27 @@ private fun EventsTabScreen(
     )
   )
   
-  val eventsData = listOf(
+  // Bundled samples — only shown if the API is empty/unreachable so the tab is never blank.
+  val sampleEvents = listOf(
     EventItem("13", "Karthik Live In Hyderabad", "Sat, 13 Jun, 7:00 PM", "Quake Arena, Kondapur", "₹2999 onwards", "Concerts", "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1777470598/ikf8alfkn0vutbb1ugxz.jpg", isFillingFast = true),
     EventItem("14", "Amaal Mallik Live at Quake Arena", "Fri, 12 Jun, 7:00 PM", "Quake Arena, Kondapur", "₹599 onwards", "Concerts", "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1778825095/gvfqqsvogxamj88yijun.jpg", isFillingFast = true),
     EventItem("15", "Saturday Soiree ft. Merakee Live", "Sat, 13 Jun, 9:30 PM", "Raasta, Hitech City", "₹1000 onwards", "Concerts", "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KTEMTANYJC4WW9B7XGPZKQM3.png", isFillingFast = true),
     EventItem("16", "Tribute to Arijit Singh (Ed. 2) Ft. Root 35", "Sat, 27 Jun, 9:00 PM", "Hard Rock Cafe, Banjara Hills", "₹249 onwards", "Concerts", "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KS7X3SFGYW02JHNBXEYYB7KJ.jpg", isFillingFast = true),
     EventItem("17", "Bassi Live - Show", "Sun, 14 Jun, 6:00 PM", "Shilpakala Vedika, Madhapur", "₹999 onwards", "Comedy", "https://images.unsplash.com/photo-1516280440614-37939bbacd6a?w=500&q=80", isFillingFast = true),
   )
-  
+
+  // Events tab is backend-driven: pull real events (real ids → real booking) from
+  // GET /api/events, mapped to the card model. Falls back to samples on empty/failure.
+  var eventsData by remember { mutableStateOf(sampleEvents) }
+  LaunchedEffect(Unit) {
+    val fetched = runCatching { com.example.thanna.data.EventRepository().getEvents() }.getOrNull().orEmpty()
+    if (fetched.isNotEmpty()) {
+      eventsData = fetched.map {
+        EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast)
+      }
+    }
+  }
+
   val filteredEvents = eventsData.filter {
     val matchesSearch = searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.venue.contains(searchQuery, ignoreCase = true)
     val matchesCategory = when (selectedCategory) {
@@ -1384,87 +1279,6 @@ private data class SpotlightItem(
   val imageUrl: String
 )
 
-@Composable
-private fun CustomCategoryCard(
-  title: String,
-  painter: androidx.compose.ui.graphics.painter.Painter,
-  iconColor: Color,
-  glowColor: Color,
-  selected: Boolean,
-  onClick: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  Card(
-    modifier = modifier
-      .height(100.dp)
-      .clickable { onClick() },
-    shape = RoundedCornerShape(UnifiedCornerRadius),
-    colors = CardDefaults.cardColors(
-      containerColor = if (selected) Color.Transparent else Color(0xFFF1F5F9) // Set transparent for gradient overlay
-    ),
-    border = BorderStroke(
-      width = if (selected) 1.5.dp else 1.dp,
-      color = if (selected) LightAccentBlue.copy(alpha = 0.6f) else Color(0xFFE2E8F0)
-    ),
-    elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 3.dp else 0.dp)
-  ) {
-    val boxModifier = if (selected) {
-      Modifier
-        .fillMaxSize()
-        .background(
-          Brush.verticalGradient(
-            colors = listOf(
-              LightAccentBlue.copy(alpha = 0.60f), // Onwards blue color
-              Color.White                          // Fading into pure white
-            )
-          )
-        )
-        .padding(8.dp)
-    } else {
-      Modifier
-        .fillMaxSize()
-        .padding(8.dp)
-    }
-
-    Box(
-      modifier = boxModifier,
-      contentAlignment = Alignment.Center
-    ) {
-      Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-      ) {
-        // Simple minimal backdrop behind icon (No glow)
-        Box(
-          modifier = Modifier
-            .size(50.dp)
-            .background(
-              if (selected) Color.White.copy(alpha = 0.5f) else Color.Transparent,
-              RoundedCornerShape(UnifiedCornerRadius)
-            ),
-          contentAlignment = Alignment.Center
-        ) {
-          androidx.compose.material3.Icon(
-            painter = painter,
-            contentDescription = title,
-            tint = Color.Unspecified,
-            modifier = Modifier.size(38.dp)
-          )
-        }
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-          text = title,
-          color = if (selected) Color(0xFF0F172A) else Color(0xFF64748B),
-          fontSize = 13.sp,
-          fontWeight = FontWeight.Bold,
-          textAlign = TextAlign.Center
-        )
-      }
-    }
-  }
-}
 
 @Immutable
 private data class EventItem(
@@ -1645,114 +1459,10 @@ private fun EventListCard(
 
 
 
-@Composable
-private fun CategoryChip(label: String) {
-  Surface(
-    color = Color(0xFFF0F0F0),
-    shape = RoundedCornerShape(6.dp),
-    modifier = Modifier.padding(vertical = 2.dp)
-  ) {
-    Text(
-      text = label,
-      fontSize = 12.sp,
-      color = Color(0xFF444444),
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-      fontWeight = FontWeight.Medium
-    )
-  }
-}
 
-@Composable
-private fun InteractiveRowItem(painter: androidx.compose.ui.graphics.painter.Painter, title: String, subtitle: String) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Box(
-      modifier = Modifier
-        .size(40.dp)
-        .background(Color(0xFFE3F2FD), RoundedCornerShape(8.dp)),
-      contentAlignment = Alignment.Center
-    ) {
-      Icon(painter = painter, contentDescription = null, tint = LightAccentBlue, modifier = Modifier.size(20.dp))
-    }
-    Spacer(modifier = Modifier.width(14.dp))
-    Column(modifier = Modifier.weight(1f)) {
-      Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF333333))
-      Text(subtitle, fontSize = 13.sp, color = Color.Gray)
-    }
-    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "View Details icon arrow", tint = Color.LightGray, modifier = Modifier.size(20.dp))
-  }
-}
 
-@Composable
-private fun InfoQuestionBox(title: String, desc: String, modifier: Modifier = Modifier) {
-  Column(
-    modifier = modifier
-      .background(Color(0xFFF7F7F9), RoundedCornerShape(12.dp))
-      .padding(14.dp)
-  ) {
-    Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111111))
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(desc, fontSize = 12.sp, color = Color(0xFF555555), lineHeight = 16.sp)
-  }
-}
 
-@Composable
-private fun PerformerCard(performer: Performer) {
-  Box(
-    modifier = Modifier
-      .width(140.dp)
-      .height(190.dp)
-      .clip(RoundedCornerShape(14.dp))
-      .background(Color.DarkGray)
-  ) {
-    // Image item placeholder frame base layer
-    Box(modifier = Modifier.fillMaxSize().background(Color.Gray))
 
-    // Text data footer alignment card overlay item
-    Column(
-      modifier = Modifier
-        .fillMaxWidth()
-        .align(Alignment.BottomCenter)
-        .background(Color.Black.copy(alpha = 0.7f))
-        .padding(8.dp)
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Column {
-          Text(performer.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-          Text(performer.type, color = Color.LightGray, fontSize = 11.sp)
-        }
-        Icon(
-          Icons.Default.BookmarkBorder, 
-          contentDescription = "Save Performer icon state", 
-          tint = Color.White,
-          modifier = Modifier.size(16.dp)
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun GuidelineRowItem(
-  painter: androidx.compose.ui.graphics.painter.Painter,
-  text: String,
-  tint: Color = Color.Unspecified
-) {
-  Row(
-    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Icon(painter = painter, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
-    Spacer(modifier = Modifier.width(12.dp))
-    Text(text, fontSize = 13.sp, color = Color(0xFF444444))
-  }
-}
 
 // Data models initialization structures
 private data class Performer(val name: String, val type: String)
@@ -1778,6 +1488,7 @@ private fun GameHubTabScreen(
   onLocateClick: () -> Unit = {},
   onMatchClick: (String) -> Unit = {},
   onVenueClick: (VenueItem) -> Unit = {},
+  onSupportClick: () -> Unit = {},
   userName: String = "",
   avatarUrl: String = ""
 ) {
@@ -1935,6 +1646,7 @@ private fun GameHubTabScreen(
           onDark = true,
           onAvatarClick = onProfileClick,
           onLocationClick = onLocationClick,
+          onChatClick = onSupportClick,
           onNotificationClick = { /* Notifications */ },
         )
 
@@ -2879,68 +2591,6 @@ private fun ActionboardLiveTeamRow(
 }
 
 
-@Composable
-private fun CategoryCard(
-  title: String,
-  icon: androidx.compose.ui.graphics.vector.ImageVector,
-  isSelected: Boolean,
-  onClick: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  Card(
-    modifier = modifier
-      .height(64.dp)
-      .clickable { onClick() },
-    shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = if (isSelected) Color(0xFF1B5E20).copy(alpha = 0.08f) else Color.White
-    ),
-    border = BorderStroke(
-      width = 1.dp,
-      color = if (isSelected) Color(0xFF1B5E20) else Color(0xFFE2E8F0)
-    )
-  ) {
-    Row(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(horizontal = 12.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-          modifier = Modifier
-            .size(36.dp)
-            .background(
-              color = if (isSelected) Color(0xFF1B5E20).copy(alpha = 0.15f) else Color(0xFFF1F5F9),
-              shape = RoundedCornerShape(10.dp)
-            ),
-          contentAlignment = Alignment.Center
-        ) {
-          Icon(
-            imageVector = icon,
-            contentDescription = title,
-            tint = if (isSelected) Color(0xFF1B5E20) else Color(0xFF64748B),
-            modifier = Modifier.size(18.dp)
-          )
-        }
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(
-          text = title,
-          color = Color(0xFF0F172A),
-          fontWeight = FontWeight.Bold,
-          fontSize = 13.sp
-        )
-      }
-      Icon(
-        imageVector = Icons.Default.KeyboardArrowRight,
-        contentDescription = "Go",
-        tint = Color(0xFF94A3B8),
-        modifier = Modifier.size(16.dp)
-      )
-    }
-  }
-}
 
 @Composable
 private fun GameHubSegmentedSwitch(
@@ -3530,11 +3180,13 @@ fun MainScreenPreview() {
   ThannaTheme {
     com.example.thanna.ui.LoginScreen(
       uiState = com.example.thanna.ui.LoginUiState(),
-      onPhoneNumberChange = {},
+      onEmailChange = {},
+      onNameChange = {},
+      onAgeChange = {},
       onOtpChange = {},
       onContinueClick = {},
       onVerifyOtpClick = {},
-      onBackToPhoneClick = {}
+      onBackToDetailsClick = {}
     )
   }
 }
@@ -3545,11 +3197,13 @@ fun MainScreenPortraitPreview() {
   ThannaTheme {
     com.example.thanna.ui.LoginScreen(
       uiState = com.example.thanna.ui.LoginUiState(),
-      onPhoneNumberChange = {},
+      onEmailChange = {},
+      onNameChange = {},
+      onAgeChange = {},
       onOtpChange = {},
       onContinueClick = {},
       onVerifyOtpClick = {},
-      onBackToPhoneClick = {}
+      onBackToDetailsClick = {}
     )
   }
 }
@@ -3564,6 +3218,7 @@ private fun DistrictActionBoardScreen(
   CrexMatchesScreen(onBack, onMatchClick, onHomeClick, onJoinByCode)
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun CrexMatchesScreen(
   onBack: () -> Unit,
@@ -3584,6 +3239,9 @@ private fun CrexMatchesScreen(
   val bg = LightBackground
   var selectedSport by remember { mutableStateOf("Cricket") }
   var selectedTab by remember { mutableStateOf(0) }
+  // The Live/Finished/District/State views used to live in a top strip; they now open
+  // from the "Others" button in the bottom bar (this sheet is that menu).
+  var showTabMenu by remember { mutableStateOf(false) }
   var showCreateWizard by remember { mutableStateOf(false) }
   var isCreatingMatch by remember { mutableStateOf(false) }
   // Holds the share code after a private match is created (drives the share dialog).
@@ -3648,7 +3306,8 @@ private fun CrexMatchesScreen(
       CrexBottomBar(
         selectedSport = selectedSport,
         onSportSelected = { selectedSport = it },
-        onHomeClick = onHomeClick
+        onHomeClick = onHomeClick,
+        onOthersClick = { showTabMenu = true }
       )
     }
   ) { padding ->
@@ -3672,13 +3331,11 @@ private fun CrexMatchesScreen(
             .shadow(topElev)
             .background(currentBg)
             .padding(horizontal = 16.dp)
-            .padding(top = 12.dp, bottom = 10.dp)
+            .padding(top = 12.dp, bottom = 6.dp)
         ) {
+          // The Live/Finished/District/State strip that used to sit here now lives in the
+          // "Others" bottom-bar menu, so the header sits directly above the content.
           CrexHeaderSection(onBack, onCreateMatch = { requireRankedAccess { showCreateWizard = true } }, onOpenMenu = { showMenu = true }, onJoinByCode = { showJoinDialog = true })
-          CrexTabsSection(
-            selectedTab = selectedTab,
-            onTabSelected = { selectedTab = it }
-          )
         }
 
       LazyColumn(
@@ -4029,6 +3686,55 @@ private fun CrexMatchesScreen(
       )
     }
 
+    if (showTabMenu) {
+      val sheetState = androidx.compose.material3.rememberModalBottomSheetState()
+      androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = { showTabMenu = false },
+        sheetState = sheetState,
+        containerColor = Color.White,
+      ) {
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+          Text(
+            text = "Boards",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF94A3B8),
+            modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
+          )
+          val menuItems = listOf(
+            Triple(0, "Live", Icons.Default.PlayArrow),
+            Triple(1, "Finished", Icons.Default.CheckCircle),
+            Triple(2, "District", Icons.Default.Apartment),
+            Triple(3, "State", Icons.Default.AccountBalance),
+          )
+          menuItems.forEach { (index, label, icon) ->
+            val active = selectedTab == index
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clickable { selectedTab = index; showTabMenu = false }
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (active) Color(0xFF2563EB) else Color(0xFF64748B),
+                modifier = Modifier.size(22.dp)
+              )
+              Spacer(Modifier.width(16.dp))
+              Text(
+                text = label,
+                fontSize = 16.sp,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                color = if (active) Color(0xFF2563EB) else Color(0xFF0F172A)
+              )
+            }
+          }
+        }
+      }
+    }
+
     if (showMenu) {
       com.example.thanna.ui.profile.ActionMenuScreen(
         onClose = { showMenu = false },
@@ -4372,42 +4078,6 @@ private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onO
   }
 }
 
-@Composable
-private fun CrexSearchBar(modifier: Modifier = Modifier) {
-  Row(
-    modifier = modifier
-      .height(38.dp)
-      .shadow(
-        elevation = 3.dp,
-        shape = RoundedCornerShape(22.dp),
-        ambientColor = Color.Black.copy(alpha = 0.04f),
-        spotColor = Color.Black.copy(alpha = 0.08f),
-      )
-      .clip(RoundedCornerShape(22.dp))
-      .background(Color.White)
-      .border(1.dp, Color(0xFFE9ECF0), RoundedCornerShape(22.dp))
-      .padding(horizontal = 12.dp),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Icon(
-      imageVector = Icons.Default.Search,
-      contentDescription = null,
-      tint = Color(0xFFB0B7C3),
-      modifier = Modifier.size(17.dp)
-    )
-
-    Spacer(modifier = Modifier.width(7.dp))
-
-    Text(
-      text = "Search players, teams",
-      color = Color(0xFFB0B7C3),
-      fontSize = 13.5.sp,
-      fontWeight = FontWeight.Normal,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-    )
-  }
-}
 
 // Softly pulsing red dot — signals live activity on the Live tab.
 @Composable
@@ -4426,99 +4096,6 @@ private fun LivePulseDot(modifier: Modifier = Modifier) {
   )
 }
 
-@Composable
-private fun CrexTabsSection(
-  selectedTab: Int,
-  onTabSelected: (Int) -> Unit
-) {
-  data class TabItem(val title: String, val icon: ImageVector)
-
-  val tabs = listOf(
-    TabItem("Live", Icons.Default.PlayArrow),
-    TabItem("Finished", Icons.Default.CheckCircle),
-    TabItem("District", Icons.Default.Apartment),
-    TabItem("State", Icons.Default.AccountBalance)
-  )
-
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(top = 4.dp)
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-      tabs.forEachIndexed { index, tab ->
-        val isSelected = selectedTab == index
-        // Smooth color crossfade between active/inactive (vs. an instant cut).
-        val tabColor by androidx.compose.animation.animateColorAsState(
-          targetValue = if (isSelected) Color(0xFF2563EB) else Color(0xFF94A3B8),
-          animationSpec = tween(200),
-          label = "tabColor"
-        )
-        Column(
-          modifier = Modifier
-            .weight(1f)
-            .clickable { onTabSelected(index) }
-            .padding(top = 8.dp),
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.Center
-        ) {
-          Box(contentAlignment = Alignment.TopEnd) {
-            Icon(
-              imageVector = tab.icon,
-              contentDescription = null,
-              tint = tabColor,
-              modifier = Modifier.size(17.dp)
-            )
-            if (tab.title == "Live") {
-              LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(5.dp))
-
-          Text(
-            text = tab.title,
-            fontSize = 12.5.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-            color = tabColor
-          )
-
-        }
-      }
-    }
-
-    // Single sliding indicator that animates between tabs (vs. the old per-tab block
-    // that just blinked on) — the motion is what reads "expensive".
-    Spacer(Modifier.height(8.dp))
-    BoxWithConstraints(Modifier.fillMaxWidth().height(2.5.dp)) {
-      val slot = maxWidth / tabs.size
-      val indW = slot * 0.5f
-      val pos by animateDpAsState(
-        targetValue = slot * selectedTab + (slot - indW) / 2f,
-        // Emphasized easing — the "expensive" travel curve (fast out, gentle settle).
-        animationSpec = tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
-        label = "tabSlide",
-      )
-      Box(
-        Modifier
-          .offset(x = pos)
-          .width(indW)
-          .height(2.5.dp)
-          .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
-          .background(Color(0xFF2563EB))
-      )
-    }
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(1.dp)
-        .background(Color(0xFFE2E8F0))
-    )
-  }
-}
 
 internal data class LeaderboardPlayer(
   val name: String,
@@ -4550,38 +4127,6 @@ private fun PlayerTeamDetails(team: String) {
     }
 }
 
-@Composable
-private fun StyledSecondaryStats(secondaryStat: String) {
-    val parts = secondaryStat.split(Regex("\\s{2,}"))
-    Row(
-        modifier = Modifier.padding(top = 3.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        parts.forEach { part ->
-            val tokens = part.trim().split(Regex("\\s+"))
-            if (tokens.size >= 2) {
-                val first = tokens[0]
-                val second = tokens.subList(1, tokens.size).joinToString(" ")
-                val isFirstValue = first.firstOrNull()?.isDigit() == true
-                val label = if (isFirstValue) second else first
-                val value = if (isFirstValue) first else second
-                Row {
-                    if (isFirstValue) {
-                        Text(text = value, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = T.Text2)
-                        Text(text = " ", fontSize = 10.5.sp)
-                        Text(text = label, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = T.Text3)
-                    } else {
-                        Text(text = label, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = T.Text3)
-                        Text(text = " ", fontSize = 10.5.sp)
-                        Text(text = value, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = T.Text2)
-                    }
-                }
-            } else if (part.isNotEmpty()) {
-                Text(text = part, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = T.Text3)
-            }
-        }
-    }
-}
 
 // Parse a stat string ("Avg 41.5  HS 76" or "15 inn · Avg 42.8") into (label, value)
 // pairs so they can render as aligned columns instead of a cramped middot string.
@@ -7229,49 +6774,6 @@ private fun nationalFlagUrl(team: String): String? {
   return "https://flagcdn.com/w160/$code.png"
 }
 
-@Composable
-private fun CrexTeamScore_Unused(
-  team: String,
-  logoUrl: String,
-  score: String,
-  overs: String
-) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    TeamLogo(team = team, logoUrl = logoUrl, modifier = Modifier.size(32.dp))
-
-    Spacer(modifier = Modifier.width(12.dp))
-
-    Text(
-      text = team,
-      color = LightPrimaryText,
-      fontSize = 17.sp,
-      fontWeight = FontWeight.ExtraBold,
-      maxLines = 1,
-      modifier = Modifier.weight(1f),
-    )
-
-    Column(horizontalAlignment = Alignment.End) {
-      Text(
-        text = score,
-        color = LightPrimaryText,
-        fontSize = 17.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = (-0.3).sp,
-      )
-      if (overs.isNotEmpty()) {
-        Text(
-          text = overs,
-          color = LightSecondaryText.copy(alpha = 0.75f),
-          fontSize = 11.sp,
-          fontWeight = FontWeight.Medium,
-        )
-      }
-    }
-  }
-}
 
 @Composable
 private fun CrexUpcomingMatchCard(
@@ -7415,7 +6917,8 @@ private fun CrexUpcomingMatchCard(
 private fun CrexBottomBar(
   selectedSport: String,
   onSportSelected: (String) -> Unit,
-  onHomeClick: () -> Unit
+  onHomeClick: () -> Unit,
+  onOthersClick: () -> Unit = {}
 ) {
   // (label, filled icon, outlined icon) — outline when idle, filled when active, one
   // coherent family; "Others" gets a proper apps/grid metaphor instead of a play arrow.
@@ -7449,7 +6952,11 @@ private fun CrexBottomBar(
       NavigationBarItem(
         selected = isSelected,
         onClick = {
-          if (label == "Home") onHomeClick() else onSportSelected(label)
+          when (label) {
+            "Home" -> onHomeClick()
+            "Others" -> onOthersClick()
+            else -> onSportSelected(label)
+          }
         },
         icon = {
           // Springy scale + lift on the active icon — the bit of motion that reads premium.
@@ -7493,412 +7000,21 @@ private fun CrexBottomBar(
   }
 }
 
-@Composable
-private fun CrexBottomNavItem(
-  label: String,
-  icon: androidx.compose.ui.graphics.vector.ImageVector,
-  selected: Boolean,
-  badge: String? = null
-) {
-  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Box(contentAlignment = Alignment.TopEnd) {
-      Icon(
-        imageVector = icon,
-        contentDescription = label,
-        tint = if (selected) Color(0xFF7FB8D8) else Color.White
-      )
-      if (badge != null) {
-        Box(
-          modifier = Modifier
-            .offset(x = 10.dp, y = (-6).dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color(0xFFFF5A3D))
-            .padding(horizontal = 7.dp, vertical = 2.dp)
-        ) {
-          Text(text = badge, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        }
-      }
-    }
 
-    Spacer(modifier = Modifier.height(4.dp))
 
-    Text(
-      text = label,
-      color = if (selected) Color(0xFF7FB8D8) else Color.White,
-      fontSize = 12.sp,
-      fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-    )
-  }
-}
 
-@Composable
-private fun CrexBottomNavCenterItem(label: String, icon: ImageVector) {
-  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Box(
-      modifier = Modifier
-        .size(46.dp)
-        .clip(RoundedCornerShape(22.dp))
-        .background(Color.White.copy(alpha = 0.10f))
-        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), RoundedCornerShape(22.dp)),
-      contentAlignment = Alignment.Center
-    ) {
-      Icon(
-        imageVector = icon,
-        contentDescription = label,
-        tint = Color.White,
-        modifier = Modifier.size(28.dp)
-      )
-    }
-
-    Spacer(modifier = Modifier.height(4.dp))
-
-    Text(
-      text = label,
-      color = Color(0xFF7FB8D8),
-      fontSize = 12.sp,
-      fontWeight = FontWeight.Bold
-    )
-  }
-}
-
-@Composable
-private fun LeaderboardTabPanel() {
-  Card(
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(24.dp),
-    colors = CardDefaults.cardColors(containerColor = Color(0xFF102133)),
-    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-  ) {
-    Column(modifier = Modifier.padding(14.dp)) {
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Text(text = "Rk", color = Color(0xFF7F97B0), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
-        Text(text = "Player", color = Color(0xFF7F97B0), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.5f))
-        Text(text = "District", color = Color(0xFF7F97B0), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.1f))
-        Text(text = "Runs", color = Color(0xFF7F97B0), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.9f), textAlign = TextAlign.End)
-        Text(text = "Wkts", color = Color(0xFF7F97B0), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.8f), textAlign = TextAlign.End)
-        Text(text = "Avg", color = Color(0xFF7F97B0), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.9f), textAlign = TextAlign.End)
-      }
-      
-      Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-      
-      val list = listOf(
-        LeaderboardRow(1, "R. Hari", "Kadapa", 482, 12, "68.8"),
-        LeaderboardRow(2, "P. Naidu", "Chittoor", 410, 8, "51.2"),
-        LeaderboardRow(3, "K. Reddy", "Kurnool", 385, 19, "42.7"),
-        LeaderboardRow(4, "S. Khan", "Anantapur", 340, 15, "37.8"),
-        LeaderboardRow(5, "M. Prasad", "Nellore", 298, 22, "29.8")
-      )
-      
-      list.forEachIndexed { index, row ->
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          val bgCircle = when (row.rk) {
-            1 -> Gold
-            2 -> Color(0xFFC0C0C0)
-            3 -> Color(0xFFCD7F32)
-            else -> Color(0xFF20364F)
-          }
-          Box(
-            modifier = Modifier
-              .width(32.dp)
-              .height(24.dp)
-              .clip(RoundedCornerShape(999.dp))
-              .background(bgCircle.copy(alpha = if (row.rk <= 3) 1f else 0.45f)),
-            contentAlignment = Alignment.Center
-          ) {
-            Text(
-              text = row.rk.toString(),
-              color = if (row.rk <= 3) Color.Black else Color.White,
-              fontWeight = FontWeight.Bold,
-              fontSize = 11.sp
-            )
-          }
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(text = row.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1.5f))
-          Text(text = row.district, color = Color(0xFF9FB2C8), fontSize = 12.sp, modifier = Modifier.weight(1.1f))
-          Text(text = row.runs.toString(), color = Color(0xFF68F29F), fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(0.9f), textAlign = TextAlign.End)
-          Text(text = row.wickets.toString(), color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(0.8f), textAlign = TextAlign.End)
-          Text(text = row.avg, color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(0.9f), textAlign = TextAlign.End)
-        }
-        if (index < list.lastIndex) {
-          Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.05f)))
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun StatPill(label: String, value: String, modifier: Modifier = Modifier) {
-  Column(
-    modifier = modifier
-      .clip(RoundedCornerShape(18.dp))
-      .background(Color.White.copy(alpha = 0.06f))
-      .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), RoundedCornerShape(18.dp))
-      .padding(horizontal = 10.dp, vertical = 10.dp)
-  ) {
-    Text(
-      text = label,
-      color = Color(0xFF8FA8C0),
-      fontSize = 10.sp,
-      fontWeight = FontWeight.Medium
-    )
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(
-      text = value,
-      color = Color.White,
-      fontSize = 12.sp,
-      fontWeight = FontWeight.Bold
-    )
-  }
-}
 
 private data class LeaderboardRow(val rk: Int, val name: String, val district: String, val runs: Int, val wickets: Int, val avg: String)
 
-@Composable
-private fun TournamentsTabPanel() {
-  Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-    val tourneys = listOf(
-      TournamentRow("Kadapa District T20 Championship", "ONGOING", "12 Local Clubs • Matches played daily at District Stadium", "May - June", Color(0xFF00C853)),
-      TournamentRow("Rayalaseema State Selection Cup", "ONGOING", "Knockout stages underway • Dynamic Live stats tracking", "May 28 - Jun 10", Color(0xFF00C853)),
-      TournamentRow("Nellore Inter-District Invitation League", "UPCOMING", "Registrations open for certified players ID", "Starts Jun 15", Color(0xFFFFB000))
-    )
-    
-    tourneys.forEach { t ->
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF102133)),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-      ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(
-              modifier = Modifier
-                .background(t.statusColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                .border(BorderStroke(1.dp, t.statusColor), RoundedCornerShape(4.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) {
-              Text(
-                text = t.status,
-                color = t.statusColor,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold
-              )
-            }
-            Text(
-              text = t.date,
-              color = Color(0xFF94A3B8),
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Medium
-            )
-          }
-          
-          Spacer(modifier = Modifier.height(8.dp))
-          Text(
-            text = t.title,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-          )
-          Spacer(modifier = Modifier.height(4.dp))
-          Text(
-            text = t.desc,
-            color = Color(0xFF94A3B8),
-            fontSize = 12.sp,
-            lineHeight = 16.sp
-          )
-        }
-      }
-    }
-  }
-}
 
 private data class TournamentRow(val title: String, val status: String, val desc: String, val date: String, val statusColor: Color)
 
-@Composable
-private fun LocalTalentsTabPanel() {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    val talents = listOf(
-      TalentRow("R. Hari", "All-Rounder (Kadapa)", 5, "https://api.dicebear.com/7.x/avataaars/svg?seed=Hari"),
-      TalentRow("K. Reddy", "Bowler (Kurnool)", 4, "https://api.dicebear.com/7.x/avataaars/svg?seed=Kiran"),
-      TalentRow("P. Naidu", "Batter (Chittoor)", 4, "https://api.dicebear.com/7.x/avataaars/svg?seed=Naidu")
-    )
-    
-    talents.forEach { p ->
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF102133)),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Box(
-            modifier = Modifier
-              .size(44.dp)
-              .clip(RoundedCornerShape(UnifiedCornerRadius))
-              .background(Color(0xFF0F172A)),
-            contentAlignment = Alignment.Center
-          ) {
-            Text(
-              text = p.name.first().toString(),
-              color = Color(0xFF00C853),
-              fontWeight = FontWeight.Bold,
-              fontSize = 18.sp
-            )
-          }
-          
-          Spacer(modifier = Modifier.width(12.dp))
-          
-          Column(modifier = Modifier.weight(1f)) {
-            Text(
-              text = p.name,
-              color = Color.White,
-              fontWeight = FontWeight.Bold,
-              fontSize = 14.sp
-            )
-            Text(
-              text = p.role,
-              color = Color(0xFF94A3B8),
-              fontSize = 12.sp
-            )
-          }
-          
-          Column(horizontalAlignment = Alignment.End) {
-            Text(
-              text = "Form",
-              color = Color(0xFF64748B),
-              fontSize = 10.sp,
-              fontWeight = FontWeight.Bold
-            )
-            Row {
-              repeat(5) { index ->
-                Text(
-                  text = "★",
-                  color = if (index < p.stars) Color(0xFFFFB000) else Color(0xFF475569),
-                  fontSize = 12.sp
-                )
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
 
 private data class TalentRow(val name: String, val role: String, val stars: Int, val avatarUrl: String)
 
-@Composable
-private fun DistrictStatsTabPanel() {
-  val stats = listOf(
-    StatCardRow("Registered Players", "1,248", Color(0xFF38BDF8)),
-    StatCardRow("Active Tournaments", "14", Color(0xFF00C853)),
-    StatCardRow("Matches Logged", "3,892", Color(0xFFFFB000)),
-    StatCardRow("Total Boundary Fours", "8,410", Color(0xFFF472B6))
-  )
-  
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    val chunks = stats.chunked(2)
-    chunks.forEach { chunk ->
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        chunk.forEach { s ->
-          Card(
-            modifier = Modifier
-              .weight(1f)
-              .height(90.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF102133)),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-              verticalArrangement = Arrangement.Center
-            ) {
-              Text(
-                text = s.label,
-                color = Color(0xFF94A3B8),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-              )
-              Spacer(modifier = Modifier.height(4.dp))
-              Text(
-                text = s.value,
-                color = s.accentColor,
-                fontWeight = FontWeight.Black,
-                fontSize = 20.sp
-              )
-            }
-          }
-        }
-        if (chunk.size < 2) {
-          Spacer(modifier = Modifier.weight(1f))
-        }
-      }
-    }
-  }
-}
 
 private data class StatCardRow(val label: String, val value: String, val accentColor: Color)
 
-@Composable
-private fun GreetingStatPill(
-  icon: ImageVector,
-  value: String,
-  label: String,
-  tint: Color
-) {
-  Row(
-    modifier = Modifier
-      .clip(RoundedCornerShape(50))
-      .background(tint.copy(alpha = 0.08f))
-      .border(BorderStroke(1.dp, tint.copy(alpha = 0.16f)), RoundedCornerShape(50))
-      .padding(horizontal = 12.dp, vertical = 7.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(6.dp)
-  ) {
-    Icon(
-      imageVector = icon,
-      contentDescription = null,
-      tint = tint,
-      modifier = Modifier.size(14.dp)
-    )
-    Text(
-      text = value,
-      style = HaraanTypography.LabelSmall.copy(fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold),
-      color = HaraanColors.TextPrimary
-    )
-    Text(
-      text = label,
-      style = HaraanTypography.BodyMedium.copy(fontSize = 12.sp),
-      color = HaraanColors.TextSecondary
-    )
-  }
-}
 
 // One ad creative — drives the native slot. Swap these fields (or rotate a list of
 // them) to serve different campaigns through the same layout. An empty [imageUrl]
@@ -8496,33 +7612,6 @@ private fun ContinueExploringCard(
   }
 }
 
-@Composable
-private fun QuickActionChip(
-  label: String,
-  icon: ImageVector,
-  onClick: () -> Unit
-) {
-  Surface(
-    onClick = onClick,
-    shape = RoundedCornerShape(HaraanRadius.Medium),
-    color = Color.White.copy(alpha = 0.15f),
-    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-    modifier = Modifier.height(38.dp)
-  ) {
-    Row(
-      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-      Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
-      Text(
-        text = label,
-        color = Color.White,
-        style = HaraanTypography.BodyMedium.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp)
-      )
-    }
-  }
-}
 
 @Composable
 private fun LeaderboardHomeWidget(district: String?) {

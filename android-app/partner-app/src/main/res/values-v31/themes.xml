@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 31+ system splash screen: white background behind the branded icon. -->
+    <style name="Theme.HaraanPartner" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenBackground">#FFFFFF</item>
+    </style>
+</resources>

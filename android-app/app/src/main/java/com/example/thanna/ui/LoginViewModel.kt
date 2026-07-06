@@ -10,30 +10,34 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed interface LoginStage {
-    data object EnterPhone : LoginStage
+    data object EnterDetails : LoginStage
     data object VerifyOtp : LoginStage
     data object Success : LoginStage
 }
 
 data class LoginUiState(
-    val countryCode: String = "+91",
-    val phoneNumber: String = "",
+    val email: String = "",
+    val name: String = "",
+    val age: String = "",
     val otp: String = "",
     val verificationToken: String? = null,
     val token: String? = null,
     val isLoading: Boolean = false,
     val successMessage: String? = null,
     val errorMessage: String? = null,
-    val stage: LoginStage = LoginStage.EnterPhone
+    val stage: LoginStage = LoginStage.EnterDetails
 ) {
-    val isPhoneValid: Boolean
-        get() = phoneNumber.length == 10
+    val isEmailValid: Boolean
+        get() {
+            val at = email.indexOf('@')
+            return at > 0 && email.indexOf('.', at) > at + 1 && !email.endsWith(".")
+        }
 
     val isOtpValid: Boolean
         get() = otp.length == 6
 
     val canContinue: Boolean
-        get() = isPhoneValid && !isLoading
+        get() = isEmailValid && !isLoading
 }
 
 class LoginViewModel : ViewModel() {
@@ -42,30 +46,28 @@ class LoginViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    fun onPhoneNumberChange(input: String) {
-        val digitsOnly = input.filter { it.isDigit() }.take(10)
-        _uiState.update {
-            it.copy(
-                phoneNumber = digitsOnly,
-                errorMessage = null
-            )
-        }
+    fun onEmailChange(input: String) {
+        _uiState.update { it.copy(email = input.trim().take(255), errorMessage = null) }
+    }
+
+    fun onNameChange(input: String) {
+        _uiState.update { it.copy(name = input.take(120), errorMessage = null) }
+    }
+
+    fun onAgeChange(input: String) {
+        val digitsOnly = input.filter { it.isDigit() }.take(3)
+        _uiState.update { it.copy(age = digitsOnly, errorMessage = null) }
     }
 
     fun onOtpChange(input: String) {
         val digitsOnly = input.filter { it.isDigit() }.take(6)
-        _uiState.update {
-            it.copy(
-                otp = digitsOnly,
-                errorMessage = null
-            )
-        }
+        _uiState.update { it.copy(otp = digitsOnly, errorMessage = null) }
     }
 
-    fun resetToPhoneEntry() {
+    fun resetToDetails() {
         _uiState.update {
             it.copy(
-                stage = LoginStage.EnterPhone,
+                stage = LoginStage.EnterDetails,
                 otp = "",
                 errorMessage = null,
                 successMessage = null
@@ -75,12 +77,11 @@ class LoginViewModel : ViewModel() {
 
     fun requestOtp() {
         val state = _uiState.value
-        if (!state.isPhoneValid || state.isLoading) return
+        if (!state.isEmailValid || state.isLoading) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            val fullNumber = "${state.countryCode}${state.phoneNumber}"
-            runCatching { authRepository.requestOtp(fullNumber) }
+            runCatching { authRepository.requestEmailOtp(state.email, state.name, state.age) }
                 .onSuccess { result ->
                     _uiState.update {
                         it.copy(
@@ -95,7 +96,7 @@ class LoginViewModel : ViewModel() {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = throwable.message ?: "Failed to request OTP. Please check your network."
+                            errorMessage = throwable.message ?: "Failed to send the code. Please check your network."
                         )
                     }
                 }
@@ -106,14 +107,14 @@ class LoginViewModel : ViewModel() {
         val state = _uiState.value
         val verificationToken = state.verificationToken
         if (verificationToken.isNullOrBlank()) {
-            _uiState.update { it.copy(errorMessage = "Session expired. Please request OTP again.") }
+            _uiState.update { it.copy(errorMessage = "Session expired. Please request a code again.") }
             return
         }
         if (!state.isOtpValid || state.isLoading) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            runCatching { authRepository.verifyOtp(verificationToken, state.otp) }
+            runCatching { authRepository.verifyEmailOtp(verificationToken, state.otp) }
                 .onSuccess { result ->
                     _uiState.update {
                         it.copy(
@@ -129,7 +130,7 @@ class LoginViewModel : ViewModel() {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = throwable.message ?: "Invalid OTP. Please try again."
+                            errorMessage = throwable.message ?: "Invalid code. Please try again."
                         )
                     }
                 }

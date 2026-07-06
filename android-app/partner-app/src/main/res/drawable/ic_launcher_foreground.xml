@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Haraan wordmark inset into the adaptive-icon safe zone so it isn't
+     clipped by the launcher mask. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/haraan_logo"
+    android:insetLeft="18%"
+    android:insetRight="18%"
+    android:insetTop="34%"
+    android:insetBottom="34%" />

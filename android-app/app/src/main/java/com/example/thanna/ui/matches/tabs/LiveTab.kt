@@ -89,29 +89,6 @@ private fun ChaseStat(label: String, value: String) {
     }
 }
 
-@Composable
-private fun OverSummaryStrip(state: MatchUiState) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        state.recentOvers.takeLast(4).forEach { over ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OverBallChip(over.balls.lastOrNull() ?: "•")
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(color = CrexColors.TextPrimary, fontWeight = FontWeight.Bold)) { append("= ${over.runs}") }
-                    },
-                    fontSize = 12.sp
-                )
-                Text("Over ${over.label}", color = CrexColors.TextMuted, fontSize = 12.sp)
-            }
-        }
-    }
-}
 
 @Composable
 private fun OverBallChip(ball: String) {

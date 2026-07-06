@@ -24,6 +24,7 @@ final class CityResolver
     public const CITIES = [
         'Mumbai',
         'Delhi NCR',
+        'Bengaluru',
         'Bangalore',
         'Hyderabad',
         'Pune',
@@ -92,14 +93,23 @@ final class CityResolver
     public static function selected(): ?string
     {
         $value = request()->cookie(self::COOKIE);
-        if (!is_string($value) || $value === '' || strtolower($value) === 'all') {
+        if (!is_string($value) || trim($value) === '' || strtolower(trim($value)) === 'all') {
             return null;
         }
+        $value = trim($value);
 
+        // Canonical casing when it's one of the curated cities.
         foreach (self::CITIES as $city) {
             if (strcasecmp($city, $value) === 0) {
                 return $city;
             }
+        }
+
+        // Otherwise accept a real, GPS-detected city name (letters/spaces/basic
+        // punctuation, reasonable length) so "Use current location" can show the
+        // viewer's actual city even when it isn't in the curated picker list.
+        if (mb_strlen($value) <= 40 && preg_match('/^[\p{L}\p{M}\s.,&()\-]+$/u', $value)) {
+            return $value;
         }
 
         return null;

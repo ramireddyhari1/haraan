@@ -1310,6 +1310,12 @@ body.scrolled-down .sticky-broadcast-scorebar {
         border-top: 1px solid #e2e8f0;
         padding-top: 8px;
     }
+    /* Stack the two-column match layout on mobile — otherwise the 320px
+       side column squeezes .match-main down to ~39px and the innings
+       selector bleeds off the left edge. */
+    .match-grid {
+        grid-template-columns: 1fr !important;
+    }
 }
 
 .meta-line{font-size:14px;color:#475569;margin-bottom:8px}

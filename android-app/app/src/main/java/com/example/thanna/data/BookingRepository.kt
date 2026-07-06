@@ -28,12 +28,16 @@ class BookingRepository(
     token: String,
     eventId: Int,
     quantity: Int,
+    ticketTypeId: Int? = null,
     couponCode: String? = null
   ): BookingResult = withContext(Dispatchers.IO) {
     try {
       val jsonBody = JSONObject().apply {
         put("eventId", eventId)
         put("quantity", quantity)
+        if (ticketTypeId != null) {
+          put("ticketTypeId", ticketTypeId)
+        }
         if (!couponCode.isNullOrBlank()) {
           put("couponCode", couponCode)
         }

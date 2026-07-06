@@ -62,7 +62,7 @@
     margin: 0 0 12px;
     line-height: 1.05;
     letter-spacing: -0.04em;
-    color: #0057B8; /* Mumbai Indians blue */
+    color: #2563EB; /* Mumbai Indians blue */
 }
 
 .banner-item__left .venue {
@@ -81,7 +81,7 @@
 
 .banner-item__left .book-btn {
     display: inline-block;
-    background: #0057B8; /* Mumbai Indians blue */
+    background: #2563EB; /* Mumbai Indians blue */
     color: #fff;
     padding: 15px 36px;
     border-radius: 12px;
@@ -174,7 +174,7 @@
     .banner-carousel { height: auto; padding: 60px 20px; }
     .banner-item { flex-direction: column-reverse; text-align: center; padding: 0; }
     .banner-item__left { padding-right: 0; margin-top: 32px; }
-    .banner-item__left h2 { font-size: 32px; color: #0057B8; }
+    .banner-item__left h2 { font-size: 32px; color: #2563EB; }
     .banner-item__right { flex: 0 0 auto; width: 220px; }
     .banner-item__right img { height: 300px; }
     .banner-dots { left: 50%; transform: translateX(-50%); bottom: 20px; }

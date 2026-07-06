@@ -98,14 +98,14 @@
             <!-- Bookings / Events Section -->
             <div class="reviews-section-header">
                 <h3>My Event Bookings</h3>
-                <a href="{{ url('/events') }}" class="btn btn--solid" style="background: #ff9f1a; border-color: #ff9f1a; color: #fff;">Browse Events</a>
+                <a href="{{ url('/events') }}" class="btn btn--solid" style="background: #2563EB; border-color: #2563EB; color: #fff;">Browse Events</a>
             </div>
 
             @if(count($myBookings) > 0)
                 <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px;">
                     <!-- Placeholder for actual bookings loop, using first as example if array wasn't empty -->
                     @foreach($myBookings as $booking)
-                        <div class="detail-card-panel" style="padding: 24px; margin-bottom: 0; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #ff9f1a;">
+                        <div class="detail-card-panel" style="padding: 24px; margin-bottom: 0; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #2563EB;">
                             <div>
                                 <h4 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 800; color: #111827;">Booking #{{ $booking->id }}</h4>
                                 <span style="font-size: 14px; color: #6b7280;">Confirmed</span>
@@ -114,8 +114,8 @@
                     @endforeach
                 </div>
             @else
-                <div class="detail-card-panel" style="text-align: center; padding: 40px 20px; margin-bottom: 48px; border-left: 4px solid #ff9f1a;">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff9f1a" stroke-width="1.5" style="margin-bottom: 16px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                <div class="detail-card-panel" style="text-align: center; padding: 40px 20px; margin-bottom: 48px; border-left: 4px solid #2563EB;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.5" style="margin-bottom: 16px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                     <h4 class="detail-card-panel__title" style="margin-bottom: 8px;">No event bookings</h4>
                     <p class="detail-card-panel__text">You haven't booked any events yet. Check out what's happening nearby!</p>
                 </div>

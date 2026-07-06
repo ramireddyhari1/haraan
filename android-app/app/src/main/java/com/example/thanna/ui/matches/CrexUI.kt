@@ -487,43 +487,7 @@ private fun fireScoreHaptic(view: android.view.View, wicket: Boolean) {
     view.performHapticFeedback(constant)
 }
 
-@Composable
-private fun BatsmanMini(name: String, runs: Int, balls: Int, sr: Float, isStriker: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (isStriker) {
-            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(CrexColors.AccentGreen))
-        }
-        Column {
-            Text(
-                name + if (isStriker) " 🏏" else "",
-                color = if (isStriker) CrexColors.TextPrimary else CrexColors.TextSecondary,
-                fontSize = 12.sp, fontWeight = FontWeight.SemiBold
-            )
-            Text("$runs ($balls) • SR $sr", color = CrexColors.TextMuted, fontSize = 10.sp)
-        }
-    }
-}
 
-@Composable
-private fun BallDot(label: String) {
-    val bg = when (label) {
-        "6" -> CrexColors.SixBall
-        "4" -> CrexColors.FourBall
-        "W" -> CrexColors.WicketBall
-        "•" -> CrexColors.DotBall
-        else -> CrexColors.NormalBall
-    }
-    Box(
-        modifier = Modifier
-            .size(28.dp)
-            .clip(CircleShape)
-            .background(bg.copy(alpha = 0.2f))
-            .border(1.dp, bg, CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(label, color = bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-    }
-}
 
 @Composable
 private fun CrexTeamFlag(emoji: String, size: Dp) {

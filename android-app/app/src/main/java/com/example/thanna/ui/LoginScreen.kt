@@ -65,11 +65,13 @@ fun LoginRoute(
 
     LoginScreen(
         uiState = uiState,
-        onPhoneNumberChange = viewModel::onPhoneNumberChange,
+        onEmailChange = viewModel::onEmailChange,
+        onNameChange = viewModel::onNameChange,
+        onAgeChange = viewModel::onAgeChange,
         onOtpChange = viewModel::onOtpChange,
         onContinueClick = viewModel::requestOtp,
         onVerifyOtpClick = { viewModel.verifyOtp(onLoginSuccess) },
-        onBackToPhoneClick = viewModel::resetToPhoneEntry,
+        onBackToDetailsClick = viewModel::resetToDetails,
         onSkipClick = onSkipClick,
         modifier = modifier
     )
@@ -92,15 +94,17 @@ private val FrostBorder = Color.White.copy(alpha = 0.30f)
 @Composable
 fun LoginScreen(
     uiState: LoginUiState,
-    onPhoneNumberChange: (String) -> Unit,
+    onEmailChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onAgeChange: (String) -> Unit,
     onOtpChange: (String) -> Unit,
     onContinueClick: () -> Unit,
     onVerifyOtpClick: () -> Unit,
-    onBackToPhoneClick: () -> Unit,
+    onBackToDetailsClick: () -> Unit,
     onSkipClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var isPhoneInputVisible by remember { mutableStateOf(false) }
+    var isDetailsInputVisible by remember { mutableStateOf(false) }
     val view = LocalView.current
 
     // Card entrance — a subtle rise + fade the first time the screen appears.
@@ -225,7 +229,7 @@ fun LoginScreen(
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
             // card has room and nothing clips.
-            if (uiState.stage == LoginStage.EnterPhone && !isPhoneInputVisible) {
+            if (uiState.stage == LoginStage.EnterDetails && !isDetailsInputVisible) {
                 Row(
                     modifier = Modifier.padding(bottom = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -267,7 +271,7 @@ fun LoginScreen(
                 ) {
                     // Full branding only in the collapsed hero — hidden once the keyboard
                     // is up so the card stays compact and nothing clips at the top.
-                    val showBranding = uiState.stage == LoginStage.EnterPhone && !isPhoneInputVisible
+                    val showBranding = uiState.stage == LoginStage.EnterDetails && !isDetailsInputVisible
 
                     // Grab handle.
                     Box(
@@ -322,10 +326,10 @@ fun LoginScreen(
                     Spacer(Modifier.height(18.dp))
 
                     Text(
-                        text = if (uiState.stage == LoginStage.EnterPhone) {
-                            if (!isPhoneInputVisible) "Login or sign up to continue" else "Enter your mobile number to verify"
+                        text = if (uiState.stage == LoginStage.EnterDetails) {
+                            if (!isDetailsInputVisible) "Login or sign up to continue" else "Enter your details to get a login code"
                         } else {
-                            "Enter the 6-digit code sent via WhatsApp"
+                            "Enter the 6-digit code sent to your email"
                         },
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
@@ -335,13 +339,13 @@ fun LoginScreen(
 
                     Spacer(Modifier.height(22.dp))
 
-                    if (uiState.stage == LoginStage.EnterPhone) {
-                        if (!isPhoneInputVisible) {
+                    if (uiState.stage == LoginStage.EnterDetails) {
+                        if (!isDetailsInputVisible) {
                             val ci = remember { MutableInteractionSource() }
                             Button(
                                 onClick = {
                                     view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                    isPhoneInputVisible = true
+                                    isDetailsInputVisible = true
                                 },
                                 interactionSource = ci,
                                 modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
@@ -349,46 +353,58 @@ fun LoginScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = Accent)
                             ) {
                                 Text(
-                                    "Continue with phone",
+                                    "Continue with email",
                                     fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
                                     maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
                                 )
                             }
                         } else {
+                            val fieldColors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Accent,
+                                unfocusedBorderColor = Stroke,
+                                focusedContainerColor = FieldBg,
+                                unfocusedContainerColor = FieldBg
+                            )
+
+                            // Email — the login identity.
+                            OutlinedTextField(
+                                value = uiState.email,
+                                onValueChange = onEmailChange,
+                                placeholder = { Text("Email address", color = Text3) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                singleLine = true,
+                                colors = fieldColors
+                            )
+
+                            Spacer(Modifier.height(10.dp))
+
+                            // Name + age — used only when creating a new account.
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Country selector — flag + code + chevron, matched height.
-                                Row(
-                                    modifier = Modifier
-                                        .height(56.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(FieldBg)
-                                        .border(1.dp, Stroke, RoundedCornerShape(16.dp))
-                                        .padding(horizontal = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text("🇮🇳", fontSize = 16.sp)
-                                    Text("+91", color = Text1, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Text3, modifier = Modifier.size(18.dp))
-                                }
                                 OutlinedTextField(
-                                    value = uiState.phoneNumber,
-                                    onValueChange = onPhoneNumberChange,
-                                    placeholder = { Text("Phone number", color = Text3) },
+                                    value = uiState.name,
+                                    onValueChange = onNameChange,
+                                    placeholder = { Text("Name", color = Text3) },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(16.dp),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                                     singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Accent,
-                                        unfocusedBorderColor = Stroke,
-                                        focusedContainerColor = FieldBg,
-                                        unfocusedContainerColor = FieldBg
-                                    )
+                                    colors = fieldColors
+                                )
+                                OutlinedTextField(
+                                    value = uiState.age,
+                                    onValueChange = onAgeChange,
+                                    placeholder = { Text("Age", color = Text3) },
+                                    modifier = Modifier.width(96.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    colors = fieldColors
                                 )
                             }
 
@@ -421,27 +437,6 @@ fun LoginScreen(
                     } else {
                         OtpEntryRow(otp = uiState.otp, onOtpChange = onOtpChange, modifier = Modifier.fillMaxWidth())
 
-                        // Dev builds have no WhatsApp bridge, so no real OTP is delivered.
-                        // Surface the master code and let a tap auto-fill it.
-                        if (com.example.thanna.BuildConfig.DEBUG) {
-                            Spacer(Modifier.height(12.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFFEF3C7))
-                                    .clickable { onOtpChange("000000") }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    "Dev · master code 000000 also works. Tap to fill it",
-                                    color = Color(0xFF92400E),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-
                         if (!uiState.errorMessage.isNullOrEmpty()) {
                             Spacer(Modifier.height(12.dp))
                             Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
@@ -473,8 +468,8 @@ fun LoginScreen(
                         }
 
                         Spacer(Modifier.height(4.dp))
-                        TextButton(onClick = onBackToPhoneClick) {
-                            Text("Change number", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        TextButton(onClick = onBackToDetailsClick) {
+                            Text("Change email", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
 

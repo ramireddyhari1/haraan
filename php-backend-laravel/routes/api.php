@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ConfigController;
+use App\Http\Controllers\Api\EmailAuthController;
 use App\Http\Controllers\Api\WhatsAppAuthController;
 use App\Http\Controllers\Api\BookingsController;
 use App\Http\Controllers\Api\DistrictsController;
@@ -50,6 +51,11 @@ Route::prefix('auth')->group(function (): void {
 });
 
 Route::prefix('auth/whatsapp')->controller(WhatsAppAuthController::class)->group(function (): void {
+    Route::post('/request', 'requestOtp');
+    Route::post('/verify', 'verifyOtp');
+});
+
+Route::prefix('auth/email')->controller(EmailAuthController::class)->group(function (): void {
     Route::post('/request', 'requestOtp');
     Route::post('/verify', 'verifyOtp');
 });

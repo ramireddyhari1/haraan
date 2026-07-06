@@ -229,6 +229,105 @@
             transform: translateX(-50%) !important;
         }
     }
+
+    /* =====================================================================
+       MOBILE PREMIUM PASS (≤1024px): an immersive, app-style detail screen.
+       Hide the home chrome, full-bleed hero with the title overlaid on a
+       gradient, a clean meta row, and a sticky booking bar.
+       ===================================================================== */
+    @media (max-width: 1024px) {
+        /* Reclaim the whole viewport: the home topbar is noise on a detail page. */
+        body.event-detail-page .topbar { display: none !important; }
+        body.event-detail-page main.container { padding: 0 !important; }
+        .district-event-page .container { padding: 0 !important; }
+
+        /* Full-bleed immersive hero */
+        .district-event-page .dr-card-body { padding: 0 0 96px !important; }
+        .district-event-page .dr-hero-banner {
+            margin: 0 !important;
+            height: 60vh !important; min-height: 360px; max-height: 520px;
+            border: none !important; border-radius: 0 !important;
+        }
+        .district-event-page .dr-hero-banner img {
+            border-radius: 0 !important; width: 100%; height: 100%; object-fit: cover;
+        }
+        /* Legibility scrim so the overlaid title reads on any poster */
+        .district-event-page .dr-hero-banner::after {
+            content: ''; position: absolute; inset: 0; pointer-events: none;
+            background: linear-gradient(180deg, rgba(4,8,15,0.30) 0%, rgba(4,8,15,0) 20%,
+                        rgba(4,8,15,0.12) 44%, rgba(4,8,15,0.42) 62%, rgba(4,8,15,0.70) 80%, rgba(4,8,15,0.95) 100%);
+        }
+
+        /* Premium circular back button floating over the hero */
+        .floating-left-btn {
+            border-radius: 50% !important; width: 40px !important; height: 40px !important;
+            top: 16px !important; left: 16px !important;
+            background: rgba(255,255,255,0.92) !important; border: none !important;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.18) !important;
+        }
+
+        /* Pull the title/meta up onto the hero's dark gradient */
+        .district-event-page .dr-info-row {
+            position: relative; z-index: 5;
+            margin: -162px 0 18px !important; padding: 0 20px !important;
+            flex-direction: column; align-items: flex-start;
+            border-bottom: none !important;
+        }
+        body.event-detail-page .dr-main-title {
+            color: #ffffff !important;
+            font-size: 25px !important; line-height: 1.22 !important;
+            letter-spacing: -0.02em !important; margin-bottom: 10px !important;
+            text-shadow: 0 1px 12px rgba(0,0,0,0.35);
+            padding-bottom: 2px; /* room for descenders */
+        }
+        /* Meta chips (date / venue) instead of one flat line */
+        .district-event-page .dr-info-row .dr-meta-text { display: none !important; }
+        .dr-meta-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .dr-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(255,255,255,0.16); backdrop-filter: blur(6px);
+            border: 1px solid rgba(255,255,255,0.22);
+            color: #fff; font-size: 12.5px; font-weight: 600;
+            padding: 6px 11px; border-radius: 999px; max-width: 100%;
+        }
+        .dr-chip svg { width: 13px; height: 13px; flex-shrink: 0; opacity: 0.9; }
+        .dr-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* The inline CTA moves into the sticky bar on mobile */
+        .district-event-page .dr-info-row .dr-checkin-btn { display: none !important; }
+
+        /* Content: re-inset the sections the full-bleed hero un-padded */
+        .district-event-page .dr-tabs { padding: 0 20px !important; margin-top: 4px !important; gap: 20px !important; }
+        .district-event-page .dr-tab-pane { padding: 0 20px !important; }
+        .district-event-page .dr-tab { font-size: 13px !important; letter-spacing: 0 !important; white-space: nowrap; }
+
+        /* Venue map card: stack (map on top, address below) instead of a cramped
+           45/55 split that squeezes the address at 375px. */
+        a[aria-label="Open venue location in Maps"] { flex-direction: column !important; height: auto !important; }
+        a[aria-label="Open venue location in Maps"] > div { width: 100% !important; }
+        a[aria-label="Open venue location in Maps"] > div:first-child { height: 132px !important; }
+
+        /* Sticky booking bar */
+        .dr-book-bar {
+            display: flex !important; position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+            align-items: center; justify-content: space-between; gap: 16px;
+            padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+            background: #ffffff; border-top: 1px solid #eef1f5;
+            box-shadow: 0 -8px 26px rgba(4,8,15,0.10);
+        }
+        .dr-book-bar__price { display: flex; flex-direction: column; line-height: 1.15; }
+        .dr-book-bar__amount { font-size: 20px; font-weight: 800; color: #121620; letter-spacing: -0.01em; }
+        .dr-book-bar__label { font-size: 11.5px; color: #8a8f98; font-weight: 600; }
+        .dr-book-bar__btn {
+            flex: 1; max-width: 62%;
+            background: var(--mi-accent, #0d6efd); color: #fff; border: none;
+            padding: 15px 24px; border-radius: 16px; font-size: 15.5px; font-weight: 700;
+            letter-spacing: -0.01em; cursor: pointer;
+            box-shadow: 0 8px 20px rgba(13,110,253,0.28);
+        }
+    }
+    /* Mobile-only elements hidden on desktop */
+    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips { display: none !important; } }
 </style>
 
 <div class="district-event-page" style="position: relative;">
@@ -259,6 +358,21 @@
                 <div>
                     <h1 class="dr-main-title" style="margin-bottom: 8px;">{{ $event->title }}</h1>
                     <p class="dr-meta-text">{{ optional($event->date)->format('D, d M Y') }} • {{ optional($event->date)->format('g:i A') }}</p>
+                    {{-- Mobile-only glass meta chips overlaid on the hero --}}
+                    <div class="dr-meta-chips">
+                        @if($event->date)
+                        <span class="dr-chip">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            <span>{{ $event->date->format('D, d M') }} · {{ $event->date->format('g:i A') }}</span>
+                        </span>
+                        @endif
+                        @if($event->venue)
+                        <span class="dr-chip">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            <span>{{ $event->venue }}</span>
+                        </span>
+                        @endif
+                    </div>
                 </div>
                 <button class="dr-checkin-btn">
                     Book Tickets
@@ -489,6 +603,15 @@
             </div>
 
         </main>
+    </div>
+
+    {{-- Sticky booking bar (mobile only) --}}
+    <div class="dr-book-bar">
+        <div class="dr-book-bar__price">
+            <span class="dr-book-bar__amount">{{ $event->price ? '₹'.number_format($event->price) : 'Free' }}</span>
+            <span class="dr-book-bar__label">{{ $event->price ? 'onwards' : 'entry' }}</span>
+        </div>
+        <button class="dr-book-bar__btn" type="button">Book Tickets</button>
     </div>
 </div>
 

@@ -68,6 +68,8 @@ dependencies {
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.coil.compose)
+  // QR code generation (attendee ticket QRs)
+  implementation("com.google.zxing:core:3.5.3")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests

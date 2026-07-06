@@ -4,6 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
 import java.net.URL
 
 data class VenueApiItem(
@@ -26,7 +29,63 @@ data class VenueSlotItem(
     val time: String,
     val available: Boolean,
     val fillingFast: Boolean,
+    val price: Int = 0,
+    val capacity: Int = 1,
 )
+
+/** A single user review on a venue detail page. */
+data class VenueReviewItem(
+    val name: String,
+    val rating: Int,
+    val text: String,
+    val ago: String = "",
+)
+
+/** One price row in the admin-authored price chart (a time band → hourly rate). */
+data class VenuePriceBand(val time: String, val price: Int)
+
+/** A day grouping inside a price-chart variant (e.g. "Mon–Fri" → bands). */
+data class VenuePriceGroup(val days: String, val rows: List<VenuePriceBand>)
+
+/** A price-chart variant (e.g. a sport / court type) → day groups. */
+data class VenuePriceVariant(val label: String, val groups: List<VenuePriceGroup>)
+
+/**
+ * Rich venue detail backing the "view → trust → book" page. Assembled from
+ * GET /api/venues/{id}. Fields the backend does not yet emit (hours, rules,
+ * address, price chart) default to empty so the UI degrades gracefully.
+ */
+data class VenueDetailData(
+    val id: String,
+    val name: String,
+    val category: String,
+    val location: String,
+    val address: String,
+    val distance: String,
+    val rating: String,
+    val price: Int,
+    val ratingsCount: Int,
+    val reviewsCount: Int,
+    val isBookable: Boolean,
+    val isFeatured: Boolean,
+    val images: List<String>,
+    val amenities: List<String>,
+    val about: String,
+    val hours: String,
+    val rules: List<String>,
+    val priceNote: String,
+    val latitude: Double?,
+    val longitude: Double?,
+    val slots: List<VenueSlotItem>,
+    val reviews: List<VenueReviewItem>,
+    val priceChart: List<VenuePriceVariant>,
+)
+
+/** Outcome of submitting a venue review. */
+sealed interface ReviewResult {
+    data object Success : ReviewResult
+    data class Error(val message: String) : ReviewResult
+}
 
 class VenueRepository {
     suspend fun getVenues(): List<VenueApiItem> = withContext(Dispatchers.IO) {
@@ -65,7 +124,115 @@ class VenueRepository {
                 time = o.optString("time"),
                 available = o.optBoolean("available", true),
                 fillingFast = o.optBoolean("filling_fast", false),
+                price = o.optInt("price", 0),
+                capacity = o.optInt("capacity", 1),
             )
         }
     }
+
+    /** Full venue detail (GET /api/venues/{id}); null on network/parse failure. */
+    suspend fun getVenueDetail(id: String): VenueDetailData? = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = URL("${ApiConfig.BASE_URL}/api/venues/$id").readText()
+            val d = JSONObject(body).optJSONObject("data") ?: return@runCatching null
+            parseDetail(d)
+        }.getOrNull()
+    }
+
+    private fun parseDetail(d: JSONObject): VenueDetailData {
+        val images = d.optJSONArray("images").toStringList()
+        return VenueDetailData(
+            id = d.optString("id"),
+            name = d.optString("name"),
+            category = d.optString("category"),
+            location = d.optString("location"),
+            address = d.optString("address"),
+            distance = d.optString("distance"),
+            rating = d.optString("rating"),
+            price = d.optInt("price", 0),
+            ratingsCount = d.optInt("ratings_count", 0),
+            reviewsCount = d.optInt("reviews_count", 0),
+            isBookable = d.optBoolean("is_bookable", false),
+            isFeatured = d.optBoolean("is_featured", false),
+            images = images,
+            amenities = d.optJSONArray("amenities").toStringList(),
+            about = d.optString("about"),
+            hours = d.optString("hours"),
+            rules = d.optJSONArray("rules").toStringList(),
+            priceNote = d.optString("price_note"),
+            latitude = if (d.isNull("latitude")) null else d.optDouble("latitude").takeIf { !it.isNaN() },
+            longitude = if (d.isNull("longitude")) null else d.optDouble("longitude").takeIf { !it.isNaN() },
+            slots = (d.optJSONArray("slots") ?: JSONArray()).mapObjects { s ->
+                VenueSlotItem(
+                    id = s.optInt("id"),
+                    day = s.optString("day", "Today"),
+                    time = s.optString("time"),
+                    available = s.optBoolean("available", true),
+                    fillingFast = s.optBoolean("filling_fast", false),
+                    price = s.optInt("price", 0),
+                    capacity = s.optInt("capacity", 1),
+                )
+            },
+            reviews = (d.optJSONArray("reviews") ?: JSONArray()).mapObjects { r ->
+                VenueReviewItem(
+                    name = r.optString("name"),
+                    rating = r.optInt("rating", 0),
+                    text = r.optString("text"),
+                    ago = r.optString("ago"),
+                )
+            },
+            priceChart = (d.optJSONArray("price_chart") ?: JSONArray()).mapObjects { v ->
+                VenuePriceVariant(
+                    label = v.optString("label"),
+                    groups = (v.optJSONArray("groups") ?: JSONArray()).mapObjects { g ->
+                        VenuePriceGroup(
+                            days = g.optString("days"),
+                            rows = (g.optJSONArray("rows") ?: JSONArray()).mapObjects { b ->
+                                VenuePriceBand(time = b.optString("time"), price = b.optInt("price", 0))
+                            },
+                        )
+                    },
+                )
+            },
+        )
+    }
+
+    /** Submit a 1–5 star review (POST /api/venues/{id}/reviews). */
+    suspend fun submitReview(token: String, venueId: String, stars: Int, note: String): ReviewResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("rating", stars)
+                    if (note.isNotBlank()) put("text", note)
+                }
+                val conn = (URL("${ApiConfig.BASE_URL}/api/venues/$venueId/reviews").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 15000
+                    readTimeout = 15000
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+                conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                val stream = if (code >= 400) conn.errorStream else conn.inputStream
+                val respBody = stream?.let { BufferedReader(InputStreamReader(it)).use(BufferedReader::readText) } ?: ""
+                conn.disconnect()
+                if (code in 200..299) {
+                    ReviewResult.Success
+                } else {
+                    val msg = runCatching { JSONObject(respBody).optString("message") }.getOrNull()
+                    ReviewResult.Error(msg?.takeIf { it.isNotBlank() } ?: "Couldn't submit rating (code $code).")
+                }
+            } catch (e: Exception) {
+                ReviewResult.Error(e.message ?: "Failed to connect. Please check your network.")
+            }
+        }
 }
+
+private fun JSONArray?.toStringList(): List<String> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull { optString(it).takeIf { s -> s.isNotBlank() } }
+
+private inline fun <T> JSONArray.mapObjects(transform: (JSONObject) -> T): List<T> =
+    (0 until length()).mapNotNull { optJSONObject(it)?.let(transform) }
