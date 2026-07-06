@@ -3306,7 +3306,9 @@ private fun CrexMatchesScreen(
         selectedSport = selectedSport,
         onSportSelected = { selectedSport = it },
         onHomeClick = onHomeClick,
-        onOthersClick = { showMenu = true }
+        // Gate the profile behind sign-in + a completed player profile: an un-set-up
+        // user is routed to login / profile setup instead of an empty profile screen.
+        onOthersClick = { requireRankedAccess { showProfile = true } }
       )
     }
   ) { padding ->
@@ -3330,7 +3332,7 @@ private fun CrexMatchesScreen(
             .shadow(topElev)
             .background(currentBg)
             .padding(horizontal = 16.dp)
-            .padding(top = 12.dp, bottom = 6.dp)
+            .padding(top = 12.dp, bottom = 2.dp)
         ) {
           CrexHeaderSection(onBack, onCreateMatch = { requireRankedAccess { showCreateWizard = true } }, onJoinByCode = { showJoinDialog = true })
           // Live/Finished/District/State board strip — back up top, directly under the header.
@@ -6178,7 +6180,7 @@ private fun CrexLeagueTitle(title: String) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(top = 22.dp, bottom = 10.dp),
+      .padding(top = 10.dp, bottom = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
