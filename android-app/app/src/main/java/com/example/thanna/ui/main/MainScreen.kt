@@ -3241,9 +3241,6 @@ private fun CrexMatchesScreen(
   val bg = LightBackground
   var selectedSport by remember { mutableStateOf("Cricket") }
   var selectedTab by remember { mutableStateOf(0) }
-  // The Live/Finished/District/State views used to live in a top strip; they now open
-  // from the "Others" button in the bottom bar (this sheet is that menu).
-  var showTabMenu by remember { mutableStateOf(false) }
   var showCreateWizard by remember { mutableStateOf(false) }
   var isCreatingMatch by remember { mutableStateOf(false) }
   // Holds the share code after a private match is created (drives the share dialog).
@@ -3309,7 +3306,7 @@ private fun CrexMatchesScreen(
         selectedSport = selectedSport,
         onSportSelected = { selectedSport = it },
         onHomeClick = onHomeClick,
-        onOthersClick = { showTabMenu = true }
+        onOthersClick = { showMenu = true }
       )
     }
   ) { padding ->
@@ -3335,9 +3332,12 @@ private fun CrexMatchesScreen(
             .padding(horizontal = 16.dp)
             .padding(top = 12.dp, bottom = 6.dp)
         ) {
-          // The Live/Finished/District/State strip that used to sit here now lives in the
-          // "Others" bottom-bar menu, so the header sits directly above the content.
-          CrexHeaderSection(onBack, onCreateMatch = { requireRankedAccess { showCreateWizard = true } }, onOpenMenu = { showMenu = true }, onJoinByCode = { showJoinDialog = true })
+          CrexHeaderSection(onBack, onCreateMatch = { requireRankedAccess { showCreateWizard = true } }, onJoinByCode = { showJoinDialog = true })
+          // Live/Finished/District/State board strip — back up top, directly under the header.
+          CrexTabsSection(
+            selectedTab = selectedTab,
+            onTabSelected = { selectedTab = it }
+          )
         }
 
       LazyColumn(
@@ -3688,55 +3688,6 @@ private fun CrexMatchesScreen(
       )
     }
 
-    if (showTabMenu) {
-      val sheetState = androidx.compose.material3.rememberModalBottomSheetState()
-      androidx.compose.material3.ModalBottomSheet(
-        onDismissRequest = { showTabMenu = false },
-        sheetState = sheetState,
-        containerColor = Color.White,
-      ) {
-        Column(modifier = Modifier.padding(bottom = 24.dp)) {
-          Text(
-            text = "Boards",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF94A3B8),
-            modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
-          )
-          val menuItems = listOf(
-            Triple(0, "Live", Icons.Default.PlayArrow),
-            Triple(1, "Finished", Icons.Default.CheckCircle),
-            Triple(2, "District", Icons.Default.Apartment),
-            Triple(3, "State", Icons.Default.AccountBalance),
-          )
-          menuItems.forEach { (index, label, icon) ->
-            val active = selectedTab == index
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clickable { selectedTab = index; showTabMenu = false }
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (active) Color(0xFF2563EB) else Color(0xFF64748B),
-                modifier = Modifier.size(22.dp)
-              )
-              Spacer(Modifier.width(16.dp))
-              Text(
-                text = label,
-                fontSize = 16.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                color = if (active) Color(0xFF2563EB) else Color(0xFF0F172A)
-              )
-            }
-          }
-        }
-      }
-    }
-
     if (showMenu) {
       com.example.thanna.ui.profile.ActionMenuScreen(
         onClose = { showMenu = false },
@@ -3975,7 +3926,7 @@ private fun JoinByCodeDialog(onDismiss: () -> Unit, onJoin: (String) -> Unit) {
 }
 
 @Composable
-private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onOpenMenu: () -> Unit, onJoinByCode: () -> Unit = {}) {
+private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onJoinByCode: () -> Unit = {}) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
@@ -4062,21 +4013,102 @@ private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onO
       Spacer(modifier = Modifier.width(4.dp))
       Text(text = "Create", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
     }
-    Box(
-      modifier = Modifier
-        .size(38.dp)
-        .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9))
-        .clickable(onClick = onOpenMenu),
-      contentAlignment = Alignment.Center
+    // The menu (≡) that used to sit here now lives on the bottom-bar "Others" button.
+  }
+}
+
+
+@Composable
+private fun CrexTabsSection(
+  selectedTab: Int,
+  onTabSelected: (Int) -> Unit
+) {
+  data class TabItem(val title: String, val icon: ImageVector)
+
+  val tabs = listOf(
+    TabItem("Live", Icons.Default.PlayArrow),
+    TabItem("Finished", Icons.Default.CheckCircle),
+    TabItem("District", Icons.Default.Apartment),
+    TabItem("State", Icons.Default.AccountBalance)
+  )
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(top = 4.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-      Icon(
-        imageVector = Icons.Default.List,
-        contentDescription = null,
-        tint = LightSecondaryText,
-        modifier = Modifier.size(20.dp)
+      tabs.forEachIndexed { index, tab ->
+        val isSelected = selectedTab == index
+        // Smooth color crossfade between active/inactive (vs. an instant cut).
+        val tabColor by androidx.compose.animation.animateColorAsState(
+          targetValue = if (isSelected) Color(0xFF2563EB) else Color(0xFF94A3B8),
+          animationSpec = tween(200),
+          label = "tabColor"
+        )
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .clickable { onTabSelected(index) }
+            .padding(top = 8.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Box(contentAlignment = Alignment.TopEnd) {
+            Icon(
+              imageVector = tab.icon,
+              contentDescription = null,
+              tint = tabColor,
+              modifier = Modifier.size(17.dp)
+            )
+            if (tab.title == "Live") {
+              LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
+            }
+          }
+
+          Spacer(modifier = Modifier.height(5.dp))
+
+          Text(
+            text = tab.title,
+            fontSize = 12.5.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+            color = tabColor
+          )
+
+        }
+      }
+    }
+
+    // Single sliding indicator that animates between tabs (vs. the old per-tab block
+    // that just blinked on) — the motion is what reads "expensive".
+    Spacer(Modifier.height(8.dp))
+    BoxWithConstraints(Modifier.fillMaxWidth().height(2.5.dp)) {
+      val slot = maxWidth / tabs.size
+      val indW = slot * 0.5f
+      val pos by animateDpAsState(
+        targetValue = slot * selectedTab + (slot - indW) / 2f,
+        // Emphasized easing — the "expensive" travel curve (fast out, gentle settle).
+        animationSpec = tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+        label = "tabSlide",
+      )
+      Box(
+        Modifier
+          .offset(x = pos)
+          .width(indW)
+          .height(2.5.dp)
+          .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
+          .background(Color(0xFF2563EB))
       )
     }
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(1.dp)
+        .background(Color(0xFFE2E8F0))
+    )
   }
 }
 
