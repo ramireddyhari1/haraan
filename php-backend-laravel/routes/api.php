@@ -118,6 +118,16 @@ Route::get('/login-posters', static function () {
 });
 
 // -------------------------------------------------------------------------
+//  In-app support chat — user <-> admin. Backed by SupportController; the
+//  admin side lives in the Filament "Support" resource. Requires a signed-in
+//  user (JWT); the app opens the thread and polls it while the chat is open.
+// -------------------------------------------------------------------------
+Route::middleware('auth.jwt')->prefix('support')->controller(\App\Http\Controllers\Api\SupportController::class)->group(function (): void {
+    Route::get('/thread', 'thread');
+    Route::post('/messages', 'send');
+});
+
+// -------------------------------------------------------------------------
 //  Live match detail (public, read-only) — feeds the app's Match Details screen
 // -------------------------------------------------------------------------
 

@@ -59,7 +59,9 @@ fun SupportChatScreen(
     loading = false
     while (true) {
       delay(4000)
-      runCatching { repo.getThread(token) }.getOrNull()?.let { messages = it.messages }
+      // A successful refresh must also clear any earlier "unable to reach" error,
+      // otherwise a transient failure on open leaves the banner stuck forever.
+      runCatching { repo.getThread(token) }.getOrNull()?.let { messages = it.messages; error = null }
     }
   }
 

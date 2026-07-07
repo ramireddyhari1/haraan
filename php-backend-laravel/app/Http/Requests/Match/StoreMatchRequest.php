@@ -29,7 +29,8 @@ final class StoreMatchRequest extends FormRequest
             // Private = pure scoreboard: no XP, no rank, hidden from feeds, share-code access.
             'isPrivate'      => ['nullable', 'boolean'],
             'overs'          => ['required', 'integer', 'min:1', 'max:50'],
-            'ball'           => ['nullable', 'string', 'in:tennis,leather'],
+            // Must stay in sync with the app's BallType enum (CreateMatchWizard.kt).
+            'ball'           => ['nullable', 'string', 'in:tennis,tape,rubber,cork,synthetic,leather,season'],
             'playersPerSide' => ['required', 'integer', 'min:2', 'max:15'],
             'venue'          => ['nullable', 'string', 'max:255'],
             // Area/Village is mandatory for public matches (they appear in the district
