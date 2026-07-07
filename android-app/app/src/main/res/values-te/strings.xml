@@ -18,4 +18,22 @@
     <string name="wicket">వికెట్</string>
     <string name="select_new_batsman">కొత్త బ్యాట్స్‌మన్‌ను ఎంచుకోండి</string>
     <string name="innings_complete_fmt">ఇన్నింగ్స్ పూర్తయింది · %1$d ఓవర్లు</string>
+
+    <string name="toss_title">టాస్</string>
+    <string name="toss_later">తర్వాత</string>
+    <string name="toss_tap_coin">నాణేన్ని తట్టి టాస్ వేయండి</string>
+    <string name="toss_tails">టెయిల్స్</string>
+    <string name="toss_who_won">టాస్ ఎవరు గెలిచారు?</string>
+    <string name="toss_elected_to">టాస్ గెలిచిన జట్టు ఎంచుకున్నది?</string>
+    <string name="toss_bat">బ్యాటింగ్</string>
+    <string name="toss_bowl">బౌలింగ్</string>
+    <string name="toss_need_help">సహాయం కావాలా?</string>
+    <string name="toss_lets_play">ఆడదాం</string>
+    <string name="toss_help_hint">నాణేన్ని తట్టి టాస్ వేయండి, ఆపై నిజంగా ఎవరు టాస్ గెలిచారో, వారు ఏమి ఎంచుకున్నారో నమోదు చేయండి.</string>
+    <string name="toss_striker">స్ట్రైకర్</string>
+    <string name="toss_non_striker">నాన్-స్ట్రైకర్</string>
+    <string name="toss_opening_bowler">ఆరంభ బౌలర్</string>
+    <string name="toss_start_match">మ్యాచ్ ప్రారంభించండి</string>
+    <string name="toss_no_players">ఆటగాళ్లు జోడించలేదు — డిఫాల్ట్ పేరు ఉపయోగించబడుతుంది.</string>
+    <string name="toss_line_fmt">%1$s టాస్ గెలిచి %2$s ఎంచుకుంది.</string>
 </resources>

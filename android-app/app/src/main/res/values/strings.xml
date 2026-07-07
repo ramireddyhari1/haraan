@@ -23,4 +23,23 @@
     <string name="wicket">WICKET</string>
     <string name="select_new_batsman">Select the new batsman</string>
     <string name="innings_complete_fmt">Innings complete · %1$d overs</string>
+
+    <!-- Toss -->
+    <string name="toss_title">Toss</string>
+    <string name="toss_later">Later</string>
+    <string name="toss_tap_coin">Tap the coin to flip</string>
+    <string name="toss_tails">TAILS</string>
+    <string name="toss_who_won">Who won the toss?</string>
+    <string name="toss_elected_to">Winner of the toss elected to?</string>
+    <string name="toss_bat">Bat</string>
+    <string name="toss_bowl">Bowl</string>
+    <string name="toss_need_help">Need help?</string>
+    <string name="toss_lets_play">Let\'s Play</string>
+    <string name="toss_help_hint">Tap the coin for a flip, then record who actually won the toss and what they chose.</string>
+    <string name="toss_striker">Striker</string>
+    <string name="toss_non_striker">Non-striker</string>
+    <string name="toss_opening_bowler">Opening bowler</string>
+    <string name="toss_start_match">Start Match</string>
+    <string name="toss_no_players">No players added — a default name will be used.</string>
+    <string name="toss_line_fmt">%1$s won the toss &amp; chose to %2$s.</string>
 </resources>

@@ -3631,6 +3631,10 @@ private fun CrexMatchesScreen(
                     squadB = draft.squadB.toList(),
                     isPrivate = result.isPrivate,
                     joinCode = result.joinCode,
+                    teamAEmblem = emblems.getOrNull(draft.teamAEmblem)?.key,
+                    teamBEmblem = emblems.getOrNull(draft.teamBEmblem)?.key,
+                    teamAPhoto = draft.teamAPhoto,
+                    teamBPhoto = draft.teamBPhoto,
                   )
                 }
               } catch (e: Exception) {
@@ -3660,6 +3664,10 @@ private fun CrexMatchesScreen(
         teamB = setup.teamB,
         squadA = setup.squadA,
         squadB = setup.squadB,
+        teamAEmblem = setup.teamAEmblem,
+        teamBEmblem = setup.teamBEmblem,
+        teamAPhoto = setup.teamAPhoto,
+        teamBPhoto = setup.teamBPhoto,
         onStarted = {
           tossSetup = null
           // Private match → now surface the share code so the group can follow it.
