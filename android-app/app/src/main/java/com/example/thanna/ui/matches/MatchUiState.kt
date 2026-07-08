@@ -27,7 +27,20 @@ data class ScorecardBowler(
 }
 data class FallOfWicket(val wicketNo: Int, val score: Int, val over: String, val batter: String)
 
-/** One line in the ball-by-ball commentary feed. [kind] is "ball" or "header". */
+/** Real career batting for a player, aggregated from the ball log (null for guests / no history). */
+data class CareerBatting(
+    val innings: Int,
+    val runs: Int,
+    val balls: Int,
+    val highScore: Int,
+    val avg: Double?,   // null until they've been dismissed at least once
+    val sr: Double?
+)
+
+/**
+ * One line in the ball-by-ball commentary feed. [kind] is "ball", "header", or
+ * "batter_in" (a new batter arriving — [career] carries their real career line).
+ */
 data class CommentaryLine(
     val innings: Int,
     val over: String,
@@ -37,7 +50,9 @@ data class CommentaryLine(
     val runs: Int,
     val wicket: Boolean,
     val boundary: Boolean,
-    val battingName: String
+    val battingName: String,
+    val playerId: String = "",
+    val career: CareerBatting? = null
 )
 data class InningsExtras(val total: Int, val wides: Int, val noBalls: Int, val byes: Int, val legByes: Int)
 data class InningsCard(

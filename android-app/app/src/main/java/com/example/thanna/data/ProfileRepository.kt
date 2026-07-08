@@ -20,6 +20,15 @@ data class RecentMatch(
   val awardedAt: String,
 )
 
+data class AchievementDto(
+  val key: String,
+  val icon: String,
+  val label: String,
+  val tier: String,
+  val unlocked: Boolean,
+  val progress: String?,
+)
+
 data class PlayerProfile(
   val id: Int,
   val playerId: String,
@@ -40,6 +49,7 @@ data class PlayerProfile(
   val careerWickets: Int,
   val profileComplete: Boolean,
   val recentMatches: List<RecentMatch>,
+  val achievements: List<AchievementDto> = emptyList(),
   // Crex-style "About" details (any may be null if not filled in yet).
   val playerRole: String? = null,
   val battingStyle: String? = null,
@@ -101,6 +111,22 @@ class ProfileRepository(
         )
       }
     }
+    val achievements = mutableListOf<AchievementDto>()
+    json.optJSONArray("achievements")?.let { aa ->
+      for (i in 0 until aa.length()) {
+        val o = aa.getJSONObject(i)
+        achievements.add(
+          AchievementDto(
+            key = o.optString("key", ""),
+            icon = o.optString("icon", ""),
+            label = o.optString("label", ""),
+            tier = o.optString("tier", "bronze"),
+            unlocked = o.optBoolean("unlocked", false),
+            progress = o.optString("progress", null).cleanNull(),
+          )
+        )
+      }
+    }
     return PlayerProfile(
       id = json.optInt("id", 0),
       playerId = json.optString("player_id", ""),
@@ -121,6 +147,7 @@ class ProfileRepository(
       careerWickets = json.optJSONObject("career")?.optInt("wickets", 0) ?: 0,
       profileComplete = json.optBoolean("profile_complete", false),
       recentMatches = recent,
+      achievements = achievements,
       playerRole = json.optString("player_role", null).cleanNull(),
       battingStyle = json.optString("batting_style", null).cleanNull(),
       bowlingStyle = json.optString("bowling_style", null).cleanNull(),

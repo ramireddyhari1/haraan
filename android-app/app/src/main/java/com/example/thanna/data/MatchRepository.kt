@@ -41,6 +41,8 @@ data class LiveMatchRow(
   val team2Logo: String = "",
   val team1Emblem: String = "",
   val team2Emblem: String = "",
+  /** True when the signed-in viewer created this match (server-scoped) — tags "mine" in the feed. */
+  val isMine: Boolean = false,
 )
 
 /**
@@ -179,17 +181,10 @@ class MatchRepository(
   ): List<LiveMatchRow> = withContext(Dispatchers.IO) {
     try {
       val query = if (scope.isNullOrBlank()) "" else "?scope=$scope"
-      val connection = (URL("${baseUrl.trimEnd('/')}/api/live-matches$query").openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = 15000
-        readTimeout = 15000
-        setRequestProperty("Accept", "application/json")
-        if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
-      }
-      val code = connection.responseCode
-      val body = readBody(connection)
-      connection.disconnect()
-      if (code !in 200..299) return@withContext emptyList()
+      // Conditional GET: an unchanged feed comes back 304 and is served from cache, so
+      // the 20s AutoRefresh poll re-downloads nothing when nothing's happening.
+      val body = ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/live-matches$query", token)
+        ?: return@withContext emptyList()
       val arr = JSONObject(body).optJSONArray("data") ?: return@withContext emptyList()
       (0 until arr.length()).map { i ->
         val o = arr.getJSONObject(i)
@@ -213,6 +208,7 @@ class MatchRepository(
           team2Logo = o.optString("team2Logo", ""),
           team1Emblem = o.optString("team1Emblem", ""),
           team2Emblem = o.optString("team2Emblem", ""),
+          isMine = o.optBoolean("isMine", false),
         )
       }
     } catch (_: Exception) {
@@ -227,23 +223,10 @@ class MatchRepository(
    * Returns the raw JSON body, or null on any failure (so callers can fall back to
    * cached/mock data without crashing the screen).
    */
-  suspend fun getLiveMatchJson(id: String, token: String? = null): String? = withContext(Dispatchers.IO) {
-    try {
-      val connection = (URL("${baseUrl.trimEnd('/')}/api/live-matches/$id").openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = 15000
-        readTimeout = 15000
-        setRequestProperty("Accept", "application/json")
-        if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
-      }
-      val code = connection.responseCode
-      val body = readBody(connection)
-      connection.disconnect()
-      if (code in 200..299) body else null
-    } catch (_: Exception) {
-      null
-    }
-  }
+  suspend fun getLiveMatchJson(id: String, token: String? = null): String? =
+    // Conditional GET so the 12s live-detail poll is a 304 (served from cache) between
+    // actual score changes — the biggest single bandwidth win of the auto-refresh work.
+    ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/live-matches/$id", token)
 
   /**
    * GET /api/live-matches/code/{code} — open a PRIVATE match by its share code.
@@ -251,22 +234,9 @@ class MatchRepository(
    * null on any failure (bad/expired code, network).
    */
   suspend fun getLiveMatchByCode(code: String): String? = withContext(Dispatchers.IO) {
-    try {
-      val clean = code.trim().uppercase()
-      if (clean.isEmpty()) return@withContext null
-      val connection = (URL("${baseUrl.trimEnd('/')}/api/live-matches/code/$clean").openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = 15000
-        readTimeout = 15000
-        setRequestProperty("Accept", "application/json")
-      }
-      val httpCode = connection.responseCode
-      val body = readBody(connection)
-      connection.disconnect()
-      if (httpCode in 200..299) body else null
-    } catch (_: Exception) {
-      null
-    }
+    val clean = code.trim().uppercase()
+    if (clean.isEmpty()) return@withContext null
+    ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/live-matches/code/$clean")
   }
 
   suspend fun sendScoreAction(

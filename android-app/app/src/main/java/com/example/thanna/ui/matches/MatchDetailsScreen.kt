@@ -12,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.thanna.ui.components.AutoRefresh
 import com.example.thanna.ui.matches.tabs.InfoTab
 import com.example.thanna.ui.matches.tabs.CommentaryTab
 import com.example.thanna.ui.matches.tabs.LiveTab
@@ -46,16 +48,16 @@ fun MatchDetailsScreen(
         viewModel.load(id = matchId, code = joinCode, token = token)
     }
 
-    // Live auto-refresh — poll every 12s while the match is live so the score ticks on
-    // its own (no more frozen "LIVE" screen). Stops once the match is no longer live.
-    LaunchedEffect(matchId, joinCode) {
-        while (true) {
-            kotlinx.coroutines.delay(12_000)
-            val s = viewModel.uiState.value
-            if (s is MatchScreenState.Success && !s.data.isLive) continue
-            val token = com.example.thanna.data.TokenStore.getToken(loadContext)
-            viewModel.refresh(id = matchId, code = joinCode, token = token)
-        }
+    // Live auto-refresh — ticks the score every 12s while the match is live, AND re-pulls
+    // the instant the viewer returns to the screen / foregrounds the app, so they never
+    // stare at a frozen "LIVE" board. Lifecycle-aware: polling fully pauses off-screen
+    // (no battery/data drain in the background) and resumes on return. A finished match
+    // refreshes once on resume for the final score, then stops hitting the network.
+    AutoRefresh(12_000L, true, matchId, joinCode) {
+        val s = viewModel.uiState.value
+        if (s is MatchScreenState.Success && !s.data.isLive) return@AutoRefresh
+        val token = com.example.thanna.data.TokenStore.getToken(loadContext)
+        viewModel.refresh(id = matchId, code = joinCode, token = token)
     }
 
     // Compact "premium" content scale: shrink every dp + sp uniformly so the screen
@@ -70,9 +72,7 @@ fun MatchDetailsScreen(
     ) {
     when (val state = uiState) {
         is MatchScreenState.Loading -> {
-            Box(modifier = Modifier.fillMaxSize().background(Color(0xFF07162B)), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = CrexColors.AccentRed)
-            }
+            MatchDetailSkeleton()
         }
         is MatchScreenState.Error -> {
             Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
@@ -88,6 +88,17 @@ fun MatchDetailsScreen(
             // Open on Commentary by default (index 1 in tabsList).
             val pagerState = rememberPagerState(initialPage = 1, pageCount = { tabsList.size })
             val coroutineScope = rememberCoroutineScope()
+            val view = androidx.compose.ui.platform.LocalView.current
+
+            // Tab taps tick immediately (in MatchTabs). Swipes don't, so tick when the pager
+            // *settles* on a new page — but skip the settle that a tap itself caused, so a tap
+            // isn't felt twice. `tapDriven` is raised by onTabSelected and consumed here.
+            var tapDriven by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            var firstSettle by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+            LaunchedEffect(pagerState.settledPage) {
+                if (firstSettle) { firstSettle = false; return@LaunchedEffect }
+                if (tapDriven) tapDriven = false else hapticTick(view)
+            }
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
             val scrollOffset by androidx.compose.runtime.remember {
                 androidx.compose.runtime.derivedStateOf {
@@ -108,7 +119,9 @@ fun MatchDetailsScreen(
                         // Floating Tabs
                         MatchTabs(
                             selectedTabIndex = pagerState.currentPage,
+                            liveActive = state.data.isLive,
                             onTabSelected = { index ->
+                                tapDriven = true
                                 coroutineScope.launch {
                                     pagerState.animateScrollToPage(index)
                                 }

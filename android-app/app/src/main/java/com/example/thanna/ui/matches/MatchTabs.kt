@@ -1,21 +1,25 @@
 package com.example.thanna.ui.matches
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.border
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,44 +43,98 @@ private fun tabLabel(index: Int): String = stringResource(
 fun MatchTabs(
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // When the match is in progress, the "Live" tab (index 2) gets a pulsing red dot.
+    liveActive: Boolean = false
 ) {
-    LazyRow(
+    val view = LocalView.current
+
+    // One shared pulse so the live dot breathes rather than sits static.
+    val pulse = rememberInfiniteTransition(label = "livePulse")
+    val dotAlpha by pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "liveDotAlpha"
+    )
+
+    val count = tabsList.size
+    val indicatorWidth = 22.dp
+
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .background(CrexColors.Background)
-            .drawBehind { drawLine(color = CrexColors.Border, start = androidx.compose.ui.geometry.Offset(0f, size.height), end = androidx.compose.ui.geometry.Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) },
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp)
     ) {
-        itemsIndexed(tabsList) { index, _ ->
-            val title = tabLabel(index)
-            val isSelected = selectedTabIndex == index
-            val textColor by animateColorAsState(
-                targetValue = if (isSelected) CrexColors.TextPrimary else CrexColors.TextSecondary,
-                label = "tabText"
-            )
+        val tabWidth = maxWidth / count
+        // The 2dp underline slides to sit centred under the selected tab, rather than
+        // snapping between tabs — the single biggest "premium" tell on a tab bar.
+        val indicatorOffset by animateDpAsState(
+            targetValue = tabWidth * selectedTabIndex + (tabWidth - indicatorWidth) / 2,
+            animationSpec = tween(260),
+            label = "tabIndicator"
+        )
 
-            Box(
-                modifier = Modifier
-                    .clickable { onTabSelected(index) }
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-                    // Stitch has a 2px border on active tab
-                    .then(if (isSelected) Modifier.drawBehind {
-                        val strokeWidth = 2.dp.toPx()
-                        drawLine(
-                            color = CrexColors.AccentRed,
-                            start = androidx.compose.ui.geometry.Offset(0f, size.height),
-                            end = androidx.compose.ui.geometry.Offset(size.width, size.height),
-                            strokeWidth = strokeWidth
-                        )
-                    } else Modifier)
-            ) {
-                Text(
-                    text = title,
-                    color = textColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                tabsList.forEachIndexed { index, _ ->
+                    val title = tabLabel(index)
+                    val isSelected = selectedTabIndex == index
+                    val textColor by animateColorAsState(
+                        targetValue = if (isSelected) CrexColors.TextPrimary else CrexColors.TextSecondary,
+                        label = "tabText"
+                    )
+                    // Only the Live tab (index 2) shows the pulsing dot, and only while live.
+                    val showLiveDot = index == 2 && liveActive
+
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                if (index != selectedTabIndex) hapticTick(view)
+                                onTabSelected(index)
+                            }
+                            .padding(vertical = 12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (showLiveDot) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .alpha(dotAlpha)
+                                        .clip(CircleShape)
+                                        .background(CrexColors.AccentRed)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                            }
+                            Text(
+                                text = title,
+                                color = textColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Underline lane: full-width hairline with the sliding red indicator on top.
+            Box(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(CrexColors.Border)
+                )
+                Box(
+                    modifier = Modifier
+                        .offset(x = indicatorOffset)
+                        .width(indicatorWidth)
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(CrexColors.AccentRed)
                 )
             }
         }

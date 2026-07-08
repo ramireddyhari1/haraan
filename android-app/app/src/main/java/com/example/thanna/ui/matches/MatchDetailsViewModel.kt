@@ -113,6 +113,17 @@ class MatchDetailsViewModel : ViewModel() {
         if (arr == null) return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val careerObj = o.optJSONObject("career")
+            val career = careerObj?.let {
+                CareerBatting(
+                    innings = it.optInt("innings"),
+                    runs = it.optInt("runs"),
+                    balls = it.optInt("balls"),
+                    highScore = it.optInt("highScore"),
+                    avg = if (it.isNull("avg")) null else it.optDouble("avg"),
+                    sr = if (it.isNull("sr")) null else it.optDouble("sr"),
+                )
+            }
             CommentaryLine(
                 innings = o.optInt("innings", 1),
                 over = o.optString("over"),
@@ -123,6 +134,8 @@ class MatchDetailsViewModel : ViewModel() {
                 wicket = o.optBoolean("wicket"),
                 boundary = o.optBoolean("boundary"),
                 battingName = o.optString("battingName"),
+                playerId = o.optString("playerId"),
+                career = career,
             )
         }
     }

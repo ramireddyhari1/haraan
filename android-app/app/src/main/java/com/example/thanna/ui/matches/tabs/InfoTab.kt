@@ -34,8 +34,7 @@ fun InfoTab(state: MatchUiState, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(vertical = 14.dp)
     ) {
-        item { MatchupCard(state) }
-        item { MatchDetailsCard(state) }
+        item { MatchOverviewCard(state) }
 
         // Per-innings summary — score, run rate, top scorer & best bowler.
         state.inningsCards.forEach { card ->
@@ -150,10 +149,24 @@ private fun SquadMemberCell(m: SquadMember, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Single header card: the matchup (teams + logos) and the match facts in one surface,
+ * so the tab opens with one clean card instead of two near-duplicate ones. "Format" is
+ * shown as the card's eyebrow (competition), so it isn't repeated in the rows below.
+ */
 @Composable
-private fun MatchupCard(state: MatchUiState) {
+private fun MatchOverviewCard(state: MatchUiState) {
     val team1Full = state.team1FullName.ifBlank { state.team1 }
     val team2Full = state.team2FullName.ifBlank { state.team2 }
+
+    // Only rows we actually have values for — an empty field is omitted, not faked.
+    // Competition is the eyebrow above, so it's excluded here to avoid the duplicate.
+    val rows = buildList {
+        if (state.status.isNotBlank()) add("Status" to state.status)
+        if (state.venue.isNotBlank()) add("Venue" to state.venue)
+        if (state.toss.isNotBlank()) add("Toss" to state.toss)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -163,7 +176,7 @@ private fun MatchupCard(state: MatchUiState) {
             .padding(18.dp)
     ) {
         if (state.competition.isNotBlank()) {
-            Text(state.competition, color = CrexColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text(state.competition.uppercase(), color = CrexColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Spacer(Modifier.height(14.dp))
         }
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -177,32 +190,11 @@ private fun MatchupCard(state: MatchUiState) {
                 TeamLogo(team = state.team2, logoUrl = state.team2Logo, modifier = Modifier.size(34.dp))
             }
         }
-    }
-}
 
-@Composable
-private fun MatchDetailsCard(state: MatchUiState) {
-    // Only rows we actually have values for — an empty field is omitted, not faked.
-    val rows = buildList {
-        if (state.status.isNotBlank()) add("Status" to state.status)
-        if (state.competition.isNotBlank()) add("Format" to state.competition)
-        if (state.venue.isNotBlank()) add("Venue" to state.venue)
-        if (state.toss.isNotBlank()) add("Toss" to state.toss)
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CrexColors.Surface)
-            .border(1.dp, CrexColors.Border, RoundedCornerShape(16.dp))
-            .padding(18.dp)
-    ) {
-        Text("MATCH DETAILS", color = CrexColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(Modifier.height(12.dp))
-        if (rows.isEmpty()) {
-            Text("Details will appear here once the match is set.", color = CrexColors.TextSecondary, fontSize = 13.sp)
-        } else {
+        if (rows.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(CrexColors.Border))
+            Spacer(Modifier.height(16.dp))
             rows.forEachIndexed { i, (label, value) ->
                 if (i > 0) Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {

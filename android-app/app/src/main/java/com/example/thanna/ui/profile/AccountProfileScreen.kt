@@ -1,6 +1,9 @@
 package com.example.thanna.ui.profile
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,9 +34,10 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsCricket
@@ -56,14 +60,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.thanna.ui.components.AutoRefresh
 import com.example.thanna.data.AccountInfo
+import com.example.thanna.data.ApiConfig
 import com.example.thanna.data.BookingLite
 import com.example.thanna.data.BookingRepository
 import com.example.thanna.data.BookingResult
+import com.example.thanna.data.ProfileRepository
 import com.example.thanna.data.TokenStore
 import com.example.thanna.data.VenueApiItem
 import com.example.thanna.data.VenueRepository
@@ -131,6 +140,16 @@ fun AccountProfileScreen(
         }
     }
 
+    // Keep bookings current without a manual refresh: silently re-fetch on screen
+    // re-focus / app foreground and every 30s while open. Unlike the reloadKey path
+    // above this never flips back to Loading — on success it swaps in fresh data, on
+    // failure it keeps what's on screen — so there's no spinner flash mid-view.
+    AutoRefresh(intervalMs = 30_000L) {
+        val account = runCatching { fetchAccount() }.getOrNull() ?: return@AutoRefresh
+        val bookings = runCatching { fetchBookings() }.getOrDefault(emptyList())
+        state = AccountState.Loaded(account, bookings)
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -178,7 +197,42 @@ private fun Content(
     onReload: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val soon: (String) -> Unit = { Toast.makeText(context, "$it coming soon.", Toast.LENGTH_SHORT).show() }
+
+    // The only thing "edit" does here: pick a photo and upload it as the profile avatar.
+    var uploadingPhoto by remember { mutableStateOf(false) }
+    val photoLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploadingPhoto = true
+        scope.launch {
+            val ok = try {
+                val token = TokenStore.getToken(context) ?: ""
+                val resolver = context.contentResolver
+                val mime = resolver.getType(uri) ?: "image/jpeg"
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    resolver.openInputStream(uri)?.use { it.readBytes() }
+                }
+                if (bytes != null) {
+                    ProfileRepository().uploadAvatar(token, bytes, mime); true
+                } else false
+            } catch (_: Exception) {
+                false
+            }
+            uploadingPhoto = false
+            if (ok) {
+                Toast.makeText(context, "Photo updated.", Toast.LENGTH_SHORT).show()
+                onReload()
+            } else {
+                Toast.makeText(context, "Couldn't upload photo. Try again.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val editPhoto: () -> Unit = {
+        photoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
 
     val confirmed = bookings.count { it.status.equals("CONFIRMED", true) }
     val pending = bookings.count { it.status.equals("PENDING", true) }
@@ -201,7 +255,7 @@ private fun Content(
         contentPadding = PaddingValues(16.dp),
     ) {
         // ── Identity hero — the one moment that dominates the screen ──
-        item { IdentityHero(account) }
+        item { IdentityHero(account, uploadingPhoto, onEditPhoto = editPhoto) }
 
         // ── Quick-stats strip — makes the account feel substantial ──
         item { Spacer(Modifier.height(14.dp)); QuickStats(account, bookings.size) }
@@ -242,7 +296,7 @@ private fun Content(
 
         // ── Account settings ──
         item { Spacer(Modifier.height(24.dp)); SectionTitle("Account") }
-        item { Spacer(Modifier.height(12.dp)); SettingsList(soon) }
+        item { Spacer(Modifier.height(12.dp)); SettingsList(soon, onEditPhoto = editPhoto) }
 
         item {
             Spacer(Modifier.height(28.dp))
@@ -263,7 +317,7 @@ private fun Content(
 
 // ─────────────────────────────────────────────── Identity hero (gradient) ───────
 @Composable
-private fun IdentityHero(a: AccountInfo) {
+private fun IdentityHero(a: AccountInfo, uploadingPhoto: Boolean, onEditPhoto: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -272,28 +326,58 @@ private fun IdentityHero(a: AccountInfo) {
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(68.dp)
-                    .clip(CircleShape)
-                    .background(AvatarGradient)
-                    .border(2.dp, Color.White.copy(alpha = 0.25f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    a.name.take(1).uppercase().ifBlank { "?" },
-                    color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                )
+            // Tappable avatar — the one "edit" action on this screen: upload a photo.
+            Box(contentAlignment = Alignment.BottomEnd) {
+                Box(
+                    Modifier
+                        .size(68.dp)
+                        .clip(CircleShape)
+                        .background(AvatarGradient)
+                        .border(2.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                        .clickable(onClick = onEditPhoto),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val photo = avatarUrl(a.avatar)
+                    when {
+                        uploadingPhoto -> CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                        photo != null -> AsyncImage(
+                            model = photo,
+                            contentDescription = "Profile photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        )
+                        else -> Text(
+                            a.name.take(1).uppercase().ifBlank { "?" },
+                            color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                // Camera badge signals the avatar is editable.
+                Box(
+                    Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(BlueBright)
+                        .border(2.dp, Navy, CircleShape)
+                        .clickable(onClick = onEditPhoto),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Default.PhotoCamera, "Upload photo", tint = Color.White, modifier = Modifier.size(12.dp)) }
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(a.name.ifBlank { "Haraan user" }, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                // Always show the email the user logged in with.
+                a.email?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Email, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, maxLines = 1)
+                    }
+                }
                 memberSinceYear(a.memberSince)?.let {
                     Spacer(Modifier.height(3.dp))
-                    Text("Member since $it", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-                } ?: (a.phone ?: a.email)?.let {
-                    Spacer(Modifier.height(3.dp))
-                    Text(it, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                    Text("Member since $it", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
                 a.playerId?.let {
                     Spacer(Modifier.height(8.dp))
@@ -659,7 +743,7 @@ private fun ActionPoint(icon: ImageVector, text: String) {
 
 // ─────────────────────────────────────────────────────────── Settings ───────────
 @Composable
-private fun SettingsList(onTap: (String) -> Unit) {
+private fun SettingsList(onTap: (String) -> Unit, onEditPhoto: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -667,7 +751,8 @@ private fun SettingsList(onTap: (String) -> Unit) {
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp)),
     ) {
-        SettingRow(Icons.Default.Person, "Edit profile") { onTap("Edit profile") }
+        // The only editable field on this account: the profile photo.
+        SettingRow(Icons.Default.PhotoCamera, "Upload profile photo") { onEditPhoto() }
         ThinDivider()
         SettingRow(Icons.Default.Notifications, "Notifications") { onTap("Notifications") }
         ThinDivider()
@@ -704,6 +789,13 @@ private fun SectionTitle(title: String, trailing: String? = null) {
             Text(trailing, color = Text3, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
         }
     }
+}
+
+/** Absolute avatar URL (backend may hand back a relative /storage path). */
+private fun avatarUrl(raw: String?): String? {
+    val s = raw?.trim().orEmpty()
+    if (s.isBlank() || s == "null") return null
+    return if (s.startsWith("http")) s else ApiConfig.BASE_URL.trimEnd('/') + "/" + s.trimStart('/')
 }
 
 /** Pull the year out of an ISO-ish createdAt string ("2025-06-01T…" → "2025"). */

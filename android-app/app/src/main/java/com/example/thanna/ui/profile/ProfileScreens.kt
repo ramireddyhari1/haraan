@@ -60,6 +60,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.MilitaryTech
+import androidx.compose.material.icons.filled.SportsCricket
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Whatshot
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
+import com.example.thanna.data.ApiConfig
+import kotlinx.coroutines.launch
 import com.example.thanna.data.PlayerProfile
 import com.example.thanna.data.RecentMatch
 
@@ -83,15 +108,16 @@ private val GoldTint  = Color(0xFFFAF3E0)
 
 private val HeroGradient = Brush.linearGradient(listOf(Navy, Blue, Green))
 
-// ─── Mock gamification — TODO: wire to backend (no fields on PlayerProfile yet) ──
+// Level, tier, profile-completion, win streak and recognition chips are all DERIVED from
+// real profile data (XP, filled fields, recent results). Only [achievements] remain a
+// static list — real milestone tracking is a later batch.
 private data class PlayerExtras(
     val level: Int,
     val tier: String,
     val profilePct: Int,
     val profileSteps: List<String>,
     val role: String,
-    val streak: String,
-    val rankUpThisMonth: Int,
+    val streakWins: Int,
     val chips: List<RepChip>,
     val achievements: List<Achievement>,
 )
@@ -100,32 +126,62 @@ private enum class BadgeTier(val label: String, val color: Color) {
     BRONZE("Bronze", Bronze), SILVER("Silver", Silver), GOLD("Gold", Gold)
 }
 
-private data class RepChip(val emoji: String, val label: String, val green: Boolean)
-private data class Achievement(val emoji: String, val label: String, val tier: BadgeTier, val unlocked: Boolean)
+private data class RepChip(val icon: ImageVector, val label: String, val green: Boolean)
+private data class Achievement(val icon: ImageVector, val label: String, val tier: BadgeTier, val unlocked: Boolean, val progress: String? = null)
 
-private val mockPlayerExtras = PlayerExtras(
-    level = 12,
-    tier = "Rising Player",
-    profilePct = 85,
-    profileSteps = listOf("Add player photo", "Play first match"),
-    role = "All Rounder",
-    streak = "7 Match Streak",
-    rankUpThisMonth = 14,
-    chips = listOf(
-        RepChip("🏏", "All Rounder", green = true),
-        RepChip("🔥", "7 Match Streak", green = false),
-        RepChip("⭐", "Top 10 Kadapa", green = true),
-        RepChip("🛡", "Verified", green = false),
-    ),
-    achievements = listOf(
-        Achievement("🏆", "First Century", BadgeTier.GOLD, unlocked = true),
-        Achievement("🔥", "5 Match Streak", BadgeTier.SILVER, unlocked = true),
-        Achievement("⭐", "District Top 100", BadgeTier.BRONZE, unlocked = true),
-        Achievement("🎯", "First Tournament", BadgeTier.BRONZE, unlocked = false),
-        Achievement("🥇", "MVP x10", BadgeTier.SILVER, unlocked = false),
-        Achievement("🏏", "50 Wickets", BadgeTier.GOLD, unlocked = false),
-    ),
-)
+/** Backend sends a stable icon key + tier string; map them to Compose icons / tiers. */
+private fun achievementIcon(key: String): ImageVector = when (key) {
+    "SportsCricket" -> Icons.Default.SportsCricket
+    "EmojiEvents" -> Icons.Default.EmojiEvents
+    "Star" -> Icons.Default.Star
+    "WorkspacePremium" -> Icons.Default.WorkspacePremium
+    "MilitaryTech" -> Icons.Default.MilitaryTech
+    "Whatshot" -> Icons.Default.Whatshot
+    "Shield" -> Icons.Default.Shield
+    "TrendingUp" -> Icons.Default.TrendingUp
+    "Verified" -> Icons.Default.Verified
+    else -> Icons.Default.EmojiEvents
+}
+
+private fun achievementTier(tier: String): BadgeTier = when (tier.lowercase()) {
+    "gold" -> BadgeTier.GOLD
+    "silver" -> BadgeTier.SILVER
+    else -> BadgeTier.BRONZE
+}
+
+/** Derive the gamified layer from REAL profile fields — no invented numbers. */
+private fun deriveExtras(p: PlayerProfile): PlayerExtras {
+    val xp = p.rankedXp
+    val level = 1 + xp / 250
+    val tier = when {
+        xp >= 5000 -> "Elite"
+        xp >= 2000 -> "Pro"
+        xp >= 750 -> "Rising Player"
+        xp >= 200 -> "Prospect"
+        else -> "Rookie"
+    }
+    val fields = listOf(p.avatar, p.district, p.state, p.playerRole, p.battingStyle, p.bowlingStyle, p.gender, p.dateOfBirth)
+    val filled = fields.count { !it.isNullOrBlank() }
+    val profilePct = filled * 100 / fields.size
+    val steps = buildList {
+        if (p.avatar.isNullOrBlank()) add("Add photo")
+        if (p.playerRole.isNullOrBlank()) add("Set role")
+        if (p.battingStyle.isNullOrBlank()) add("Batting style")
+        if (p.recentMatches.isEmpty()) add("Play a match")
+    }
+    // Current win streak = leading run of wins in the (newest-first) recent list.
+    val streakWins = p.recentMatches.takeWhile { it.won }.count()
+    val chips = buildList {
+        if (p.trustScore >= 80) add(RepChip(Icons.Default.Verified, "Verified", green = true))
+        if (p.isOrganizer) add(RepChip(Icons.Default.WorkspacePremium, "Organizer", green = false))
+        p.rankDistrict?.let { r -> if (r <= 100) add(RepChip(Icons.Default.TrendingUp, "Top $r ${p.district ?: "District"}", green = true)) }
+        if (streakWins >= 2) add(RepChip(Icons.Default.Whatshot, "$streakWins-win streak", green = false))
+    }
+    val achievements = p.achievements.map {
+        Achievement(achievementIcon(it.icon), it.label, achievementTier(it.tier), it.unlocked, it.progress)
+    }
+    return PlayerExtras(level, tier, profilePct, steps, p.playerRole ?: "Cricketer", streakWins, chips, achievements)
+}
 
 // ─────────────────────────────────────────────────────────── Action menu ───────
 private sealed interface MenuHeaderState {
@@ -484,7 +540,7 @@ fun PlayerProfileScreen(
                     ) { Text("Retry", color = Color.White, fontWeight = FontWeight.Bold) }
                 }
             }
-            is ProfileState.Loaded -> ProfileContent(s.profile, mockPlayerExtras)
+            is ProfileState.Loaded -> ProfileContent(s.profile, deriveExtras(s.profile))
         }
     }
 }
@@ -492,23 +548,43 @@ fun PlayerProfileScreen(
 @Composable
 private fun ProfileContent(p: PlayerProfile, e: PlayerExtras) {
     val clipboard = LocalClipboardManager.current
+    var showShare by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
     ) {
-        item { HeroCard(p, e, onCopyId = { clipboard.setText(AnnotatedString(p.playerId)) }) }
+        // Identity — photo, tier, level, trust+ID (each fact appears once, only here).
+        item { HeroCard(p, e, onCopyId = { clipboard.setText(AnnotatedString(p.playerId)) }, onShare = { showShare = true }) }
+
+        // Signature — the district rank as the screen's dominant number.
+        item { Spacer(Modifier.height(14.dp)); DistrictRankCard(p) }
+
+        // Career stats (real) — matches / runs / wickets / rank, with count-up.
+        item { Spacer(Modifier.height(14.dp)); SectionTitle("Career"); Spacer(Modifier.height(12.dp)); StatRow(p) }
+
+        // Recent form (real) — last five results as a W/L guide.
+        if (p.recentMatches.isNotEmpty()) {
+            item { Spacer(Modifier.height(20.dp)); SectionTitle("Recent form"); Spacer(Modifier.height(12.dp)); RecentForm(p.recentMatches) }
+        }
+
+        // XP (real).
+        item { Spacer(Modifier.height(20.dp)); SectionTitle("Experience"); Spacer(Modifier.height(12.dp)); XpCard(p) }
+
+        // Recognition (real chips) — only when the player has earned any.
+        if (e.chips.isNotEmpty()) {
+            item { Spacer(Modifier.height(20.dp)); SectionTitle("Recognition"); Spacer(Modifier.height(12.dp)); ReputationChips(e.chips) }
+        }
+
+        // About (real, de-duped — the single home for role / batting / bowling / bio).
         aboutRows(p).takeIf { it.isNotEmpty() }?.let { rows ->
-            item { Spacer(Modifier.height(14.dp)); SectionTitle("About ${p.name.ifBlank { "player" }}") }
+            item { Spacer(Modifier.height(20.dp)); SectionTitle("About ${p.name.ifBlank { "player" }}") }
             item { Spacer(Modifier.height(12.dp)); AboutCard(rows) }
         }
-        item { Spacer(Modifier.height(14.dp)); PlayerSnapshot(p, e) }
-        item { Spacer(Modifier.height(14.dp)); ReputationChips(e.chips) }
-        item { Spacer(Modifier.height(14.dp)); StatRow(p) }
-        item { Spacer(Modifier.height(14.dp)); DistrictRankCard(p, e) }
-        item { Spacer(Modifier.height(14.dp)); XpCard(p) }
 
-        item { Spacer(Modifier.height(24.dp)); SectionTitle("Achievements", "${e.achievements.count { it.unlocked }}/${e.achievements.size} unlocked") }
-        item { Spacer(Modifier.height(12.dp)); Achievements(e.achievements) }
+        if (e.achievements.isNotEmpty()) {
+            item { Spacer(Modifier.height(24.dp)); SectionTitle("Achievements", "${e.achievements.count { it.unlocked }}/${e.achievements.size} unlocked") }
+            item { Spacer(Modifier.height(12.dp)); Achievements(e.achievements) }
+        }
 
         item { Spacer(Modifier.height(24.dp)); SectionTitle("Recent matches") }
         item { Spacer(Modifier.height(12.dp)) }
@@ -521,6 +597,61 @@ private fun ProfileContent(p: PlayerProfile, e: PlayerExtras) {
             }
         }
         item { Spacer(Modifier.height(16.dp)) }
+    }
+
+    if (showShare) ShareCardSheet(p, e, onDismiss = { showShare = false })
+}
+
+/** Count-up number — the big stats animate to their value instead of snapping in. */
+@Composable
+private fun AnimatedInt(target: Int): Int {
+    val v by animateIntAsState(
+        targetValue = target,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "countUp",
+    )
+    return v
+}
+
+/** Absolute avatar URL (backend may hand back a relative /storage path). */
+private fun avatarModel(raw: String?): String? {
+    val s = raw?.trim().orEmpty()
+    if (s.isBlank() || s == "null") return null
+    return if (s.startsWith("http")) s else ApiConfig.BASE_URL.trimEnd('/') + "/" + s.trimStart('/')
+}
+
+// ─────────────────────────────────────────────────────── Recent form ────────────
+@Composable
+private fun RecentForm(matches: List<RecentMatch>) {
+    val last = matches.take(5)
+    val wins = last.count { it.won }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
+            .padding(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Last ${last.size}", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("$wins W · ${last.size - wins} L", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            last.forEach { m ->
+                val won = m.won
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(if (won) Green else Color(0xFFEEF1F5)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (won) "W" else "L", color = if (won) Color.White else Text3, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
     }
 }
 
@@ -571,7 +702,7 @@ private fun AboutCard(rows: List<Pair<String, String>>) {
 
 // ─────────────────────────────────────────────────────────── Hero card ──────────
 @Composable
-private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit) {
+private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, onShare: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -595,14 +726,24 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit) {
                         style = DrawStroke(width = sw, cap = StrokeCap.Round),
                     )
                 }
+                val photo = avatarModel(p.avatar)
                 Box(
                     Modifier.size(62.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        p.name.take(1).uppercase().ifBlank { "?" },
-                        color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                    )
+                    if (photo != null) {
+                        AsyncImage(
+                            model = photo,
+                            contentDescription = "Profile photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        )
+                    } else {
+                        Text(
+                            p.name.take(1).uppercase().ifBlank { "?" },
+                            color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(16.dp))
@@ -627,7 +768,13 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit) {
                     Text(loc, color = Color.White.copy(alpha = 0.85f), fontSize = 12.5.sp)
                 }
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(horizontalAlignment = Alignment.End) {
+                Box(
+                    Modifier.size(32.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f))
+                        .clickable(onClick = onShare),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Default.Share, "Share card", tint = Color.White, modifier = Modifier.size(16.dp)) }
+                Spacer(Modifier.height(8.dp))
                 Box(
                     Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.16f))
                         .padding(horizontal = 11.dp, vertical = 6.dp),
@@ -668,31 +815,6 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit) {
     }
 }
 
-// ─────────────────────────────────────────────────────── Player snapshot ────────
-@Composable
-private fun PlayerSnapshot(p: PlayerProfile, e: PlayerExtras) {
-    val tiles = listOf(
-        Triple("🏏", "Role", e.role),
-        Triple("📍", "Location", p.district ?: p.state ?: "—"),
-        Triple("⭐", "Tier", e.tier),
-        Triple("🔥", "Streak", e.streak.removeSuffix(" Match Streak").let { "$it matches" }),
-    )
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        tiles.forEach { (emoji, label, value) ->
-            Column(
-                Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Surface)
-                    .border(1.dp, Stroke, RoundedCornerShape(14.dp)).padding(vertical = 12.dp, horizontal = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(emoji, fontSize = 18.sp)
-                Spacer(Modifier.height(5.dp))
-                Text(value, color = Text1, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.Center)
-                Text(label, color = Text3, fontSize = 10.sp)
-            }
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────── Reputation chips ───────
 @Composable
 private fun ReputationChips(chips: List<RepChip>) {
@@ -708,7 +830,7 @@ private fun ReputationChips(chips: List<RepChip>) {
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(c.emoji, fontSize = 13.sp)
+                Icon(c.icon, null, tint = fg, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(c.label, color = fg, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -729,11 +851,11 @@ private fun StatRow(p: PlayerProfile) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatCell("${p.careerMatches}", "Matches", Green)
+        StatCell("${AnimatedInt(p.careerMatches)}", "Matches", Green)
         VDivider()
-        StatCell("${p.careerRuns}", "Runs", Green)
+        StatCell("${AnimatedInt(p.careerRuns)}", "Runs", Green)
         VDivider()
-        StatCell("${p.careerWickets}", "Wickets", Green)
+        StatCell("${AnimatedInt(p.careerWickets)}", "Wickets", Green)
         VDivider()
         StatCell(p.rankDistrict?.let { "#$it" } ?: "—", "Rank", BlueBright)
     }
@@ -755,7 +877,7 @@ private fun VDivider() {
 
 // ─────────────────────────────────────────────── District ranking (REAL) ────────
 @Composable
-private fun DistrictRankCard(p: PlayerProfile, e: PlayerExtras) {
+private fun DistrictRankCard(p: PlayerProfile) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -765,46 +887,74 @@ private fun DistrictRankCard(p: PlayerProfile, e: PlayerExtras) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("DISTRICT RANKING", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("DISTRICT RANKING", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
             Spacer(Modifier.height(4.dp))
-            Text(p.rankDistrict?.let { "#$it" } ?: "Unranked", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            Text(p.rankDistrict?.let { "#${AnimatedInt(it)}" } ?: "Unranked", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
             Text("${p.district ?: "Your"} District", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
         }
-        if (p.rankDistrict != null) {
-            Row(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.18f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Default.TrendingUp, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("↑ ${e.rankUpThisMonth} this month", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-            }
+        // Real wider-context ranks (state / country) instead of an invented monthly delta.
+        Column(horizontalAlignment = Alignment.End) {
+            p.rankState?.let { RankChip("State", "#$it") }
+            p.rankCountry?.let { Spacer(Modifier.height(8.dp)); RankChip("India", "#$it") }
         }
+    }
+}
+
+@Composable
+private fun RankChip(label: String, value: String) {
+    Row(
+        Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.18f))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(6.dp))
+        Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
 // ─────────────────────────────────────────────────────────── XP card (REAL) ─────
 @Composable
 private fun XpCard(p: PlayerProfile) {
-    Row(
+    // Level curve mirrors deriveExtras: one level per 250 ranked XP.
+    val perLevel = 250
+    val level = 1 + p.rankedXp / perLevel
+    val into = p.rankedXp % perLevel
+    val toNext = perLevel - into
+    val pct = (into.toFloat() / perLevel).coerceIn(0f, 1f)
+
+    Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp))
             .padding(18.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text("RANKED XP", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            Text("${p.rankedXp}", color = BlueBright, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Casual XP: ${p.casualXp}", color = Text2, fontSize = 12.5.sp)
-        }
-        Column(horizontalAlignment = Alignment.End) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("RANKED XP", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("${AnimatedInt(p.rankedXp)}", color = BlueBright, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Casual XP: ${p.casualXp}", color = Text2, fontSize = 12.5.sp)
+            }
             StatMini("This month", "${p.monthRankedXp}")
-            Spacer(Modifier.height(8.dp))
-            StatMini("Casual XP", "${p.casualXp}")
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Level $level", color = Text1, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("$toNext XP to Level ${level + 1}", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(8.dp))
+        // Progress bar toward the next level.
+        Box(Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFFEEF1F5))) {
+            Box(
+                Modifier
+                    .fillMaxWidth(pct)
+                    .height(9.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Brush.linearGradient(listOf(BlueBright, Green))),
+            )
         }
     }
 }
@@ -836,11 +986,13 @@ private fun AchievementBadge(item: Achievement) {
             if (locked) {
                 Icon(Icons.Default.Lock, null, tint = Text3, modifier = Modifier.size(20.dp))
             } else {
-                Text(item.emoji, fontSize = 27.sp)
+                Icon(item.icon, null, tint = item.tier.color, modifier = Modifier.size(26.dp))
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(item.tier.label, color = if (locked) Text3 else item.tier.color, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold)
+        // Locked badges with a progress hint show it (e.g. "12/50") in place of the tier label.
+        val topLabel = if (locked && item.progress != null) item.progress else item.tier.label
+        Text(topLabel, color = if (locked) Text3 else item.tier.color, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold)
         Text(item.label, color = if (locked) Text3 else Text2, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, maxLines = 2, textAlign = TextAlign.Center)
     }
 }
@@ -938,4 +1090,128 @@ private fun trustColors(trust: String): Pair<Color, Color> = when (trust) {
     "high" -> Green to GreenTint
     "medium" -> Gold to GoldTint
     else -> Text3 to Bg
+}
+
+// ─────────────────────────────────────────────── Shareable player card ───────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShareCardSheet(p: PlayerProfile, e: PlayerExtras, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val graphicsLayer = rememberGraphicsLayer()
+    var sharing by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Surface) {
+        Column(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Share your card", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("A snapshot of your real numbers.", color = Text3, fontSize = 12.5.sp)
+            Spacer(Modifier.height(18.dp))
+
+            // Capture exactly what's drawn here into the graphics layer.
+            Box(
+                Modifier.drawWithContent {
+                    graphicsLayer.record { this@drawWithContent.drawContent() }
+                    drawLayer(graphicsLayer)
+                }
+            ) { ShareablePlayerCard(p, e) }
+
+            Spacer(Modifier.height(20.dp))
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                    .background(if (sharing) Color(0xFFBFC8D2) else BlueBright)
+                    .clickable(enabled = !sharing) {
+                        sharing = true
+                        scope.launch {
+                            runCatching { captureAndShare(ctx, graphicsLayer) }
+                            sharing = false
+                        }
+                    }
+                    .padding(vertical = 15.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Share, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (sharing) "Preparing…" else "Share image", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/** The card that gets rendered to an image — a compact, branded snapshot. */
+@Composable
+private fun ShareablePlayerCard(p: PlayerProfile, e: PlayerExtras) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(HeroGradient).padding(20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val photo = avatarModel(p.avatar)
+            Box(
+                Modifier.size(58.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (photo != null) {
+                    AsyncImage(photo, "Photo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape))
+                } else {
+                    Text(p.name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(p.name.ifBlank { "Player" }, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text("${e.tier} · Lvl ${e.level}", color = Green, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                val loc = listOfNotNull(p.district, p.state).joinToString(" · ")
+                if (loc.isNotBlank()) Text(loc, color = Color.White.copy(alpha = 0.85f), fontSize = 11.5.sp)
+            }
+            Text("HARAAN", color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.15f)))
+        Spacer(Modifier.height(14.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            ShareStat("RANK", p.rankDistrict?.let { "#$it" } ?: "—")
+            ShareStat("RUNS", "${p.careerRuns}")
+            ShareStat("WKTS", "${p.careerWickets}")
+            ShareStat("XP", "${p.rankedXp}")
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "ActionBoard · ID ${p.playerId}",
+            color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun ShareStat(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+    }
+}
+
+/** Render the captured layer to a PNG in cache and fire a share-image chooser. */
+private suspend fun captureAndShare(context: android.content.Context, graphicsLayer: GraphicsLayer) {
+    val bitmap = graphicsLayer.toImageBitmap().asAndroidBitmap()
+    val dir = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+    val file = java.io.File(dir, "player_card.png")
+    java.io.FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "image/png"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(send, "Share player card"))
 }

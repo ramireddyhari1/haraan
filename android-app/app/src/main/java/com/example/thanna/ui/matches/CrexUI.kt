@@ -233,9 +233,18 @@ private fun HeroTeamColumn(
         val slash = score.indexOf('/')
         val runs = if (slash >= 0) score.substring(0, slash) else score
         val wkts = if (slash >= 0) score.substring(slash) else ""
+        // Roll the runs up to the new total instead of hard-swapping, so a boundary reads
+        // as the number *climbing*. Non-numeric scores ("Yet to bat") fall through as-is.
+        val runsInt = runs.toIntOrNull()
+        val animatedRuns by androidx.compose.animation.core.animateIntAsState(
+            targetValue = runsInt ?: 0,
+            animationSpec = androidx.compose.animation.core.tween(550, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            label = "runsRoll"
+        )
+        val runsText = if (runsInt != null) animatedRuns.toString() else runs
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                runs, color = runsColor, fontSize = 34.sp,
+                runsText, color = runsColor, fontSize = 34.sp,
                 fontFamily = com.example.thanna.theme.ArchivoDisplay,
                 letterSpacing = (-1).sp,
                 style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
@@ -311,6 +320,28 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
         label = "glow"
     )
 
+    // ── Live-event reaction: when a new ball is a 4/6/W, the hero card flashes a colour
+    // wash and gives a tiny scale "pop". The haptic itself is fired by ScoringRibbon, so
+    // here we only add the visual payoff (keyed to the same thisOver signal). ──
+    val pulse = remember { Animatable(0f) }
+    var pulseColor by remember { mutableStateOf(Color.Transparent) }
+    var firstBall by remember { mutableStateOf(true) }
+    LaunchedEffect(state.thisOver) {
+        if (firstBall) { firstBall = false; return@LaunchedEffect }
+        val flash = when (state.thisOver.lastOrNull()) {
+            "4", "6" -> CrexColors.AccentGreen
+            "W" -> CrexColors.WicketBall
+            else -> null
+        }
+        if (flash != null) {
+            pulseColor = flash
+            pulse.snapTo(1f)
+            pulse.animateTo(0f, tween(900, easing = FastOutSlowInEasing))
+        }
+    }
+    // 1f pulse → ~4% larger, settling back — a subtle heartbeat, not a bounce.
+    val popScale = 1f + pulse.value * 0.04f
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -332,12 +363,17 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(band)
+                .graphicsLayer { scaleX = popScale; scaleY = popScale }
                 .clip(RoundedCornerShape(12.dp))
                 .background(
                     Brush.verticalGradient(
                         listOf(Color(0xFFD3EAF8), Color(0xFFAFD2EC))
                     )
                 )
+                .drawWithContent {
+                    drawContent()
+                    if (pulse.value > 0f) drawRect(pulseColor.copy(alpha = pulse.value * 0.28f))
+                }
                 .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
                 // Meta line — real format/status, no placeholders.

@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.thanna.ui.components.AutoRefresh
 import com.example.thanna.VenueDetail
 import com.example.thanna.data.ApiConfig
 import com.example.thanna.data.BookingRepository
@@ -109,9 +110,16 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
   var isFavorite by remember { mutableStateOf(FavoritesStore.isFavorite(ctx, venue.id)) }
   val scope = rememberCoroutineScope()
 
+  val venueRepo = remember { VenueRepository() }
   LaunchedEffect(venue.id) {
-    detail = VenueRepository().getVenueDetail(venue.id)
+    detail = venueRepo.getVenueDetail(venue.id)
     loading = false
+  }
+  // Re-pull slot availability / details when the user returns to this page or the app
+  // comes back to the foreground, so a slot booked elsewhere isn't shown as free.
+  // On-resume only (no constant poll) — keeps the last good detail on any failure.
+  AutoRefresh(intervalMs = 0L) {
+    venueRepo.getVenueDetail(venue.id)?.let { detail = it }
   }
 
   // Seed the header from the nav args so the page isn't blank while the detail loads.

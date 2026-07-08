@@ -38,7 +38,7 @@ class LiveMatchController extends Controller
             ->limit(20)
             ->get();
 
-        $data = $matches->map(function (LiveMatch $m): array {
+        $data = $matches->map(function (LiveMatch $m) use ($viewer): array {
             // Which side is batting (latest over's tag)? Drives score/overs attribution and
             // lets the app put the batting side on top of the card.
             $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
@@ -74,6 +74,9 @@ class LiveMatchController extends Controller
                 'visibility'  => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
                 'district'    => (string) ($m->district ?? ''),
                 'locality'    => (string) ($m->locality ?? ''),
+                // Whether the signed-in viewer created this match — lets the app tag their
+                // own matches in the feed so they can spot them at a glance.
+                'isMine'      => $viewer !== null && (int) $m->user_id === (int) $viewer->id,
             ];
         })->all();
 
@@ -173,6 +176,19 @@ class LiveMatchController extends Controller
         // Replay once, then derive the live partnership + last wicket from the current innings.
         $cards = $this->buildInningsCards($match);
         $liveCard = !empty($cards) ? end($cards) : null;
+
+        // Hero headline scores must carry wickets — but `home_score`/`away_score` are
+        // run-only integers and `score_text` is only ever set by the admin panel, so an
+        // app-scored match would otherwise show "45" with no "/wkts". Rebuild each side's
+        // score from the replayed innings (runs AND wickets); fall back to the raw columns
+        // for admin-managed matches that have no ball-by-ball log.
+        foreach ($cards as $c) {
+            $t = (int) ($c['battingTeam'] ?? 1);
+            $line = ((int) ($c['runs'] ?? 0)) . '/' . ((int) ($c['wickets'] ?? 0));
+            if ($t === 2) { $awayScoreText = $line; } else { $homeScoreText = $line; }
+        }
+        $score = $battingTeam === 2 ? $awayScoreText : $homeScoreText;
+        $opponentScore = $battingTeam === 2 ? $homeScoreText : $awayScoreText;
         $partnership = null;
         $lastWicket = null;
         if ($liveCard !== null) {
@@ -269,6 +285,7 @@ class LiveMatchController extends Controller
         $nonStriker = '';
         $bowler = '';
         $legalBalls = 0;
+        $careerCache = []; // id -> real career line (looked up once per match build)
 
         foreach ($actions as $act) {
             $type = (string) $act->action_type;
@@ -285,6 +302,9 @@ class LiveMatchController extends Controller
                 $feed[] = ['innings' => $inningsNo, 'over' => '', 'kind' => 'header',
                     'text' => "Innings $inningsNo — $battingName", 'label' => '', 'runs' => 0,
                     'wicket' => false, 'boundary' => false, 'battingName' => $battingName];
+                // Opening pair: each opener is a "new batter" arriving at the crease.
+                $feed[] = $this->batterInLine($inningsNo, '', $striker, $p['striker_id'] ?? null, $battingName, $careerCache);
+                $feed[] = $this->batterInLine($inningsNo, '', $nonStriker, $p['non_striker_id'] ?? null, $battingName, $careerCache);
                 continue;
             }
             if ($type === 'change_bowler') {
@@ -337,11 +357,61 @@ class LiveMatchController extends Controller
             // Strike rotation (so the next line names the right batter).
             $runsToSwap = ($type === 'bye' || $type === 'legbye') ? $extras : $runsOffBat;
             if ($runsToSwap % 2 === 1) { [$striker, $nonStriker] = [$nonStriker, $striker]; }
-            if ($wicket) { $striker = $this->resolvePlayerName($match, $p['new_batsman_id'] ?? null); }
+            if ($wicket) {
+                $newId = $p['new_batsman_id'] ?? null;
+                $striker = $this->resolvePlayerName($match, $newId);
+                // The incoming batter walks in — emit their "new batter" card at this over.
+                if ($striker !== '') {
+                    $feed[] = $this->batterInLine($inningsNo, $overMark, $striker, $newId, $battingName, $careerCache);
+                }
+            }
             if ($isLegal && $legalBalls % 6 === 0) { [$striker, $nonStriker] = [$nonStriker, $striker]; }
         }
 
         return array_reverse($feed);
+    }
+
+    /**
+     * Build a "new batter" feed entry. Carries the batter's real career line (or null when
+     * they're a guest / have no completed matches yet) so the app can show RUNS/BALLS/AVG.
+     */
+    private function batterInLine(int $inningsNo, string $over, string $name, $id, string $battingName, array &$cache): array
+    {
+        return [
+            'innings'     => $inningsNo,
+            'over'        => $over,
+            'kind'        => 'batter_in',
+            'text'        => $name,
+            'label'       => '',
+            'runs'        => 0,
+            'wicket'      => false,
+            'boundary'    => false,
+            'battingName' => $battingName,
+            'playerId'    => (string) ($id ?? ''),
+            'career'      => $this->careerFor($id, $cache),
+        ];
+    }
+
+    /** Real career batting for a player id, memoised per match build. Null if none/guest. */
+    private function careerFor($id, array &$cache): ?array
+    {
+        $key = trim((string) ($id ?? ''));
+        if ($key === '' || strtolower($key) === 'null') {
+            return null;
+        }
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
+        }
+        $row = \App\Models\PlayerCareerBatting::where('player_id', $key)->first();
+        $cache[$key] = $row ? [
+            'innings'   => (int) $row->innings,
+            'runs'      => (int) $row->runs,
+            'balls'     => (int) $row->balls,
+            'highScore' => (int) $row->high_score,
+            'avg'       => $row->average(),     // float | null
+            'sr'        => $row->strikeRate(),  // float | null
+        ] : null;
+        return $cache[$key];
     }
 
     /**

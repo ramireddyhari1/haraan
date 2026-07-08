@@ -66,7 +66,9 @@ private data class ScorerState(
     val striker: ScorerBatter,
     val nonStriker: ScorerBatter,
     val bowler: ScorerBowler,
-    val thisOver: List<String>
+    val thisOver: List<String>,
+    // Names of batters already dismissed this innings — they can't be sent back in.
+    val dismissed: Set<String> = emptySet()
 )
 
 private fun oversText(balls: Int) = "${balls / 6}.${balls % 6}"
@@ -256,6 +258,10 @@ private fun seedFrom(d: MatchUiState): ScorerState {
     val parts = d.score.split("/")
     // Over quota comes from the match format ("20 Over Match"); default to 20.
     val maxOvers = Regex("(\\d+)").find(d.competition)?.value?.toIntOrNull()?.takeIf { it > 0 } ?: 20
+    // On resume, carry forward who's already out this innings so they can't bat again.
+    val dismissed = d.inningsCards.lastOrNull()?.batters
+        ?.filter { it.out && it.name.isNotBlank() }
+        ?.map { it.name }?.toSet() ?: emptySet()
     return ScorerState(
         title = d.team1FullName.ifBlank { d.team1 },
         toss = d.status.ifBlank { "${d.team1} elected to bat." },
@@ -266,7 +272,8 @@ private fun seedFrom(d: MatchUiState): ScorerState {
         striker = ScorerBatter(d.striker.ifBlank { "Batter 1" }, d.strikerStats?.runs ?: 0, d.strikerStats?.balls ?: 0),
         nonStriker = ScorerBatter(d.nonStriker.ifBlank { "Batter 2" }, d.nonStrikerStats?.runs ?: 0, d.nonStrikerStats?.balls ?: 0),
         bowler = ScorerBowler(d.bowler.ifBlank { "Bowler" }, d.bowlerStats?.balls ?: 0, d.bowlerStats?.runs ?: 0, d.bowlerStats?.wickets ?: 0),
-        thisOver = d.thisOver
+        thisOver = d.thisOver,
+        dismissed = dismissed
     )
 }
 
@@ -328,8 +335,11 @@ private fun ScorerLoaded(
 
     // In the chase, the match is won the instant the target is passed.
     val chaseWon = currentInnings >= 2 && firstInningsTotal != null && state.runs > firstInningsTotal!!
+    // "All out" depends on how many batters the side actually has — a 7-a-side gully team
+    // is all out at 6 wickets, not 10. Fall back to 10 when no squad was entered (guests).
+    val allOutWickets = activeBattingSquad.size.takeIf { it >= 2 }?.let { (it - 1).coerceIn(1, 10) } ?: 10
     // Innings is done once the over quota is bowled, the side is all out, or the chase is won.
-    val inningsOver = state.balls >= state.maxOvers * 6 || state.wickets >= 10 || chaseWon
+    val inningsOver = state.balls >= state.maxOvers * 6 || state.wickets >= allOutWickets || chaseWon
     // After the 1st innings closes (but not a won chase), the scorer rolls into the chase.
     val canStartSecondInnings = inningsOver && currentInnings < 2
 
@@ -365,13 +375,17 @@ private fun ScorerLoaded(
     fun finishWicket(newBatsman: SquadMember?) {
         history = history + state
         val before = state.balls
-        val newName = newBatsman?.name?.takeIf { it.isNotBlank() } ?: "New Batter"
+        val outName = state.striker.name
+        val willBeAllOut = state.wickets + 1 >= allOutWickets
+        // When the side is all out there's no incoming batter; keep the crease as-is.
+        val newName = if (willBeAllOut) outName else (newBatsman?.name?.takeIf { it.isNotBlank() } ?: "New Batter")
         var next = state.copy(
-            wickets = (state.wickets + 1).coerceAtMost(10),
+            wickets = (state.wickets + 1).coerceAtMost(allOutWickets),
             balls = state.balls + 1,
             bowler = state.bowler.copy(balls = state.bowler.balls + 1, wickets = state.bowler.wickets + 1),
             striker = ScorerBatter(newName, 0, 0),
-            thisOver = state.thisOver + "W"
+            thisOver = state.thisOver + "W",
+            dismissed = if (outName.isNotBlank()) state.dismissed + outName else state.dismissed
         )
         if (next.balls > 0 && next.balls % 6 == 0) {
             next = next.copy(striker = next.nonStriker, nonStriker = next.striker, thisOver = emptyList())
@@ -379,7 +393,7 @@ private fun ScorerLoaded(
         state = next
         onWicket(newBatsman, pendingDismissal)
         pickBatsman = false
-        val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= 10
+        val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
         if (next.balls > before && next.balls % 6 == 0 && !nextOver) {
             if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null)
         }
@@ -416,7 +430,7 @@ private fun ScorerLoaded(
         onEvent(ev, next)
         // A legal delivery just completed the over → bring on a new bowler (and roll the
         // over). Skip the prompt when that ball also ended the innings.
-        val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= 10
+        val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
         if (next.balls > before && next.balls % 6 == 0 && !nextOver) {
             if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null)
         }
@@ -427,7 +441,9 @@ private fun ScorerLoaded(
             onPick = { type ->
                 pendingDismissal = type
                 pickDismissal = false
-                if (activeBattingSquad.isNotEmpty()) pickBatsman = true else finishWicket(null)
+                // Last wicket → no new batter to pick; close the innings straight away.
+                val willBeAllOut = state.wickets + 1 >= allOutWickets
+                if (!willBeAllOut && activeBattingSquad.isNotEmpty()) pickBatsman = true else finishWicket(null)
             }
         )
     }
@@ -436,6 +452,7 @@ private fun ScorerLoaded(
         BatsmanPicker(
             squad = activeBattingSquad,
             atCrease = setOf(state.striker.name, state.nonStriker.name),
+            dismissed = state.dismissed,
             onPick = { member -> finishWicket(member) }
         )
     }
@@ -444,6 +461,7 @@ private fun ScorerLoaded(
         BatsmanPicker(
             squad = activeBattingSquad,
             atCrease = setOf(state.striker.name, state.nonStriker.name),
+            dismissed = state.dismissed,
             tag = "CHANGE BATTER", headline = "Replace this batter", tagColor = ScTeal,
             dismissable = true, onDismiss = { pickChangeBatsman = false },
             onPick = { member ->
@@ -530,7 +548,7 @@ private fun ScorerLoaded(
             val target = firstInningsTotal?.let { it + 1 }
             when {
                 chaseWon -> Text(
-                    "Target chased · won by ${(10 - state.wickets).coerceAtLeast(0)} wickets",
+                    "Target chased · won by ${(allOutWickets - state.wickets).coerceAtLeast(0)} wickets",
                     color = ScOlive, fontSize = 13.sp, fontWeight = FontWeight.Bold
                 )
                 canStartSecondInnings -> Text(
@@ -832,6 +850,7 @@ private fun DismissalPicker(onPick: (String) -> Unit) {
 private fun BatsmanPicker(
     squad: List<SquadMember>,
     atCrease: Set<String>,
+    dismissed: Set<String> = emptySet(),
     onPick: (SquadMember) -> Unit,
     tag: String? = null,
     headline: String? = null,
@@ -853,8 +872,9 @@ private fun BatsmanPicker(
             Spacer(Modifier.height(4.dp))
             Text(headline ?: stringResource(R.string.select_new_batsman), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            // Drop anyone already at the crease (the not-out batter stays on).
-            val options = squad.filter { it.name !in atCrease }.ifEmpty { squad }
+            // Drop anyone already at the crease (the not-out batter stays on) and anyone
+            // already dismissed this innings — a batter who is out can't come back in.
+            val options = squad.filter { it.name !in atCrease && it.name !in dismissed }
             Column(
                 Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)

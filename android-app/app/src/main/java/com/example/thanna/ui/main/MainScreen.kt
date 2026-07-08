@@ -103,6 +103,7 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Notifications
@@ -207,6 +208,7 @@ import com.example.thanna.theme.Poppins
 import android.widget.Toast
 import android.app.Activity
 import androidx.core.view.WindowCompat
+import com.example.thanna.ui.components.AutoRefresh
 import com.example.thanna.ui.components.SectionHeader
 import com.example.thanna.ui.theme.HaraanColors
 import com.example.thanna.ui.theme.HaraanRadius
@@ -1014,14 +1016,21 @@ private fun EventsTabScreen(
   // Events tab is backend-driven: pull real events (real ids → real booking) from
   // GET /api/events, mapped to the card model. Falls back to samples on empty/failure.
   var eventsData by remember { mutableStateOf(sampleEvents) }
-  LaunchedEffect(Unit) {
-    val fetched = runCatching { com.example.thanna.data.EventRepository().getEvents() }.getOrNull().orEmpty()
-    if (fetched.isNotEmpty()) {
-      eventsData = fetched.map {
-        EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast)
+  val eventRepo = remember { com.example.thanna.data.EventRepository() }
+  val loadEvents: suspend () -> Unit = remember {
+    {
+      val fetched = runCatching { eventRepo.getEvents() }.getOrNull().orEmpty()
+      if (fetched.isNotEmpty()) {
+        eventsData = fetched.map {
+          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast)
+        }
       }
     }
   }
+  LaunchedEffect(Unit) { loadEvents() }
+  // Refresh events when the tab is re-focused / app returns to foreground, and every
+  // 30s while open — so newly published events appear without reopening the app.
+  AutoRefresh(intervalMs = 30_000L) { loadEvents() }
 
   val filteredEvents = eventsData.filter {
     val matchesSearch = searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.venue.contains(searchQuery, ignoreCase = true)
@@ -1518,11 +1527,16 @@ private fun GameHubTabScreen(
   // includes a feed_section / ad_strip block, so they cost nothing when those blocks are absent.
   var feedSections by remember { mutableStateOf<Map<String, List<com.example.thanna.data.FeedCard>>>(emptyMap()) }
   var homeAds by remember { mutableStateOf<List<com.example.thanna.data.AdItem>>(emptyList()) }
-  LaunchedEffect(Unit) {
-    val venueRepo = com.example.thanna.data.VenueRepository()
-    val layoutRepo = com.example.thanna.data.HomeLayoutRepository()
-    val contentRepo = com.example.thanna.data.ContentRepository()
-    suspend fun loadVenues() {
+  // Loaders hoisted so three refresh triggers can share them: the initial load, the
+  // Reverb push (admin/content edits), and AutoRefresh (screen re-focus / app foreground
+  // / periodic tick). remember{} keeps one instance each; they capture the MutableState
+  // setters above, which are stable across recomposition.
+  val venueRepo = remember { com.example.thanna.data.VenueRepository() }
+  val layoutRepo = remember { com.example.thanna.data.HomeLayoutRepository() }
+  val contentRepo = remember { com.example.thanna.data.ContentRepository() }
+  val matchRepo = remember { com.example.thanna.data.MatchRepository() }
+  val loadVenues: suspend () -> Unit = remember {
+    {
       val api = runCatching { venueRepo.getVenues() }.getOrNull()
       // Always assign (even on failure → emptyList) so `null` strictly means "still loading"
       // and the skeleton gives way to a real list or an honest empty state.
@@ -1535,21 +1549,25 @@ private fun GameHubTabScreen(
         )
       } ?: emptyList()
     }
-    suspend fun loadLive() {
+  }
+  val loadLive: suspend () -> Unit = remember {
+    {
       val token = com.example.thanna.data.TokenStore.getToken(gameHubCtx)
-      liveMatches = runCatching { com.example.thanna.data.MatchRepository().getLiveMatches(token) }
+      liveMatches = runCatching { matchRepo.getLiveMatches(token) }
         .getOrDefault(emptyList())
         .filter { it.isLive }
     }
-    suspend fun loadLayout() {
-      remoteBlocks = layoutRepo.fetch(com.example.thanna.data.TokenStore.getToken(gameHubCtx))
-    }
-    suspend fun loadFeed() {
-      feedSections = runCatching { contentRepo.getFeed() }.getOrDefault(emptyMap())
-    }
-    suspend fun loadAds() {
-      homeAds = runCatching { contentRepo.getAds("home") }.getOrDefault(emptyList())
-    }
+  }
+  val loadLayout: suspend () -> Unit = remember {
+    { remoteBlocks = layoutRepo.fetch(com.example.thanna.data.TokenStore.getToken(gameHubCtx)) }
+  }
+  val loadFeed: suspend () -> Unit = remember {
+    { feedSections = runCatching { contentRepo.getFeed() }.getOrDefault(emptyMap()) }
+  }
+  val loadAds: suspend () -> Unit = remember {
+    { homeAds = runCatching { contentRepo.getAds("home") }.getOrDefault(emptyList()) }
+  }
+  LaunchedEffect(Unit) {
     loadVenues()
     loadLayout()
     loadFeed()
@@ -1566,6 +1584,13 @@ private fun GameHubTabScreen(
         "matches", "live" -> loadLive()
       }
     }
+  }
+  // No-manual-refresh: re-pull the volatile data (live scores, venue availability)
+  // whenever the user returns to this screen or the app comes back to the foreground,
+  // and tick every 20s while it's on-screen. Paused entirely in the background.
+  AutoRefresh(intervalMs = 20_000L) {
+    loadLive()
+    loadVenues()
   }
 
   val isVenuesLoading = venuesData == null
@@ -3265,10 +3290,18 @@ private fun CrexMatchesScreen(
   // so the screen falls back to its demo leagues and never shows an error.
   // The token scopes the feed to the viewer's district (+ FEATURED); admins get all.
   var liveFeed by remember { mutableStateOf<List<com.example.thanna.data.LiveMatchRow>?>(null) }
-  LaunchedEffect(Unit) {
-    val token = com.example.thanna.data.TokenStore.getToken(context)
-    liveFeed = matchRepository.getLiveMatches(token)
+  val loadLiveFeed: suspend () -> Unit = remember {
+    {
+      val token = com.example.thanna.data.TokenStore.getToken(context)
+      // On refresh, keep the last good feed if a fetch fails rather than flashing back
+      // to the demo leagues; only the initial null shows the loading state.
+      runCatching { matchRepository.getLiveMatches(token) }.getOrNull()?.let { liveFeed = it }
+    }
   }
+  LaunchedEffect(Unit) { loadLiveFeed() }
+  // Keep the live feed ticking without a manual pull: refresh on tab re-focus / app
+  // foreground and every 20s while visible; paused entirely in the background.
+  AutoRefresh(intervalMs = 20_000L) { loadLiveFeed() }
 
   // District Home snapshot — lazily loaded the first time the District tab opens.
   // null = not loaded / unavailable (guest or no district set); the card hides itself then.
@@ -4842,7 +4875,12 @@ private fun CrexLeaderboardSection(
   // ranked list — not split by batter/bowler — so when we have it we show that and
   // hide the category switch; otherwise we fall back to the demo content below.
   val leaderboardRepo = remember { com.example.thanna.data.LeaderboardRepository() }
-  val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard) {
+  // Re-rank on screen re-focus / app foreground (rank changes slowly, so no constant
+  // poll — bumping this tick relaunches the producer, which keeps the last board on
+  // screen until the fresh one arrives).
+  var boardTick by remember { mutableStateOf(0) }
+  AutoRefresh(intervalMs = 0L) { boardTick++ }
+  val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard, boardTick) {
     value = if (location.isNullOrBlank()) {
       null
     } else {
@@ -6386,6 +6424,9 @@ private fun MatchLiveContent(
   // shown with the venue on the meta line.
   district: String = "",
   locality: String = "",
+  // True when the viewer created this match — tints the row and shows a "YOU" badge so
+  // they can spot their own match in the feed.
+  isMine: Boolean = false,
   onClick: (() -> Unit)? = null,
 ) {
   val team1YetToBat = cricketInnings && battingTeam != 1 && hasNotBatted(score1, overs1)
@@ -6401,6 +6442,7 @@ private fun MatchLiveContent(
   Column(
     modifier = modifier
       .then(if (onClick != null) Modifier.graphicsLayer { scaleX = scale; scaleY = scale } else Modifier)
+      // Cards created by the viewer stay white like the rest — only the "YOU" badge marks them.
       .then(
         if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = null) { onClick() }
         else Modifier
@@ -6441,6 +6483,26 @@ private fun MatchLiveContent(
         }
       } else {
         Spacer(Modifier.weight(1f))
+      }
+      // "YOU" badge — the viewer's own match, pinned to the right of the context strip.
+      if (isMine) {
+        Spacer(Modifier.width(6.dp))
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color(0xFF2563EB))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        ) {
+          Icon(
+            imageVector = Icons.Outlined.Person,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(11.dp),
+          )
+          Spacer(Modifier.width(2.dp))
+          Text("YOU", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp)
+        }
       }
     }
 
@@ -6526,6 +6588,7 @@ private fun LiveFeedGroup(
         locality = m.locality,
         battingTeam = 1,
         cricketInnings = true,
+        isMine = m.isMine,
       )
     }
   }

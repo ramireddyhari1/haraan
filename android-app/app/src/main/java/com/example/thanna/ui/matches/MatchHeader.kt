@@ -137,11 +137,12 @@ private fun LivePill() {
 
 @Composable
 private fun ScoreButton(onClick: () -> Unit) {
+    val view = androidx.compose.ui.platform.LocalView.current
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(19.dp))
             .background(Color(0xFF0F1F33))
-            .clickable(onClick = onClick)
+            .clickable { hapticConfirm(view); onClick() }
             .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)

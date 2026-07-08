@@ -9,17 +9,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Verified
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -58,7 +55,7 @@ fun BallCircle(ball: String) {
                 when {
                     isW -> Modifier.background(CrexColors.AccentRed)
                     accent != null -> Modifier.background(accent.copy(alpha = 0.15f)).border(1.5.dp, accent, CircleShape)
-                    else -> Modifier.background(Color(0xFFF1F5F9)).border(1.dp, CrexColors.Border, CircleShape)
+                    else -> Modifier.background(CrexColors.Background).border(1.dp, CrexColors.Border, CircleShape)
                 }
             ),
         contentAlignment = Alignment.Center
@@ -125,7 +122,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     .fillMaxWidth()
                     .background(CrexColors.Background)
                     .horizontalScroll(androidx.compose.foundation.rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -150,27 +147,38 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
             }
         }
 
-        // Batting List
+        // Batter + Partnership + Bowler unified into a single card so the whole
+        // "mini-scorecard" reads as one consistent surface (not two floating strips).
         item {
-            Column(modifier = Modifier.padding(top = 8.dp).background(Color.White)) {
+            val pShipText = state.partnership?.takeIf { it.balls > 0 || it.runs > 0 }?.let { "P'Ship: ${it.runs} (${it.balls})" }
+            val lastWktText = state.lastWicket?.takeIf { it.name.isNotBlank() }?.let { "Last wkt: ${it.name} ${it.runs} (${it.balls})" }
+
+            Column(
+                modifier = Modifier
+                    .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(CrexColors.Surface)
+                    .border(1.dp, CrexColors.Border, RoundedCornerShape(16.dp))
+            ) {
+                // ── Batter ──
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .drawBehind { drawLine(color = Color(0xFFE5E7EB), start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("BATTER", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp)
+                    Text("BATTER", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("R", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center)
-                        Text("B", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(34.dp), textAlign = TextAlign.Center)
-                        Text("4S", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
-                        Text("6S", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
+                        Text("R", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center)
+                        Text("B", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(34.dp), textAlign = TextAlign.Center)
+                        Text("4S", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
+                        Text("6S", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.width(24.dp))
                     }
                 }
-                
+
                 if (state.striker.isNotEmpty()) {
                     val stats = state.strikerStats
                     val runs = stats?.runs?.toString() ?: "0"
@@ -193,46 +201,40 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     } else "0.00"
                     BatterRow(name = state.nonStriker, runs = runs, balls = balls, fours = fours, sixes = sixes, sr = sr)
                 }
-            }
-        }
 
-        // Stats Row — only real values; no "0(0)" / "N/A" placeholders.
-        val pShipText = state.partnership?.takeIf { it.balls > 0 || it.runs > 0 }?.let { "P'Ship: ${it.runs} (${it.balls})" }
-        val lastWktText = state.lastWicket?.takeIf { it.name.isNotBlank() }?.let { "Last wkt: ${it.name} ${it.runs} (${it.balls})" }
-        if (pShipText != null || lastWktText != null) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(pShipText ?: "", color = Color(0xFF6B7280), fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                    Text(lastWktText ?: "", color = Color(0xFF6B7280), fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                // ── Partnership / last wicket — only real values ──
+                if (pShipText != null || lastWktText != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CrexColors.Background)
+                            .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(pShipText ?: "", color = CrexColors.TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                        Text(lastWktText ?: "", color = CrexColors.TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
-            }
-        }
 
-        // Bowling List
-        item {
-            Column(modifier = Modifier.padding(top = 8.dp).background(Color.White)) {
+                // ── Bowler ──
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .drawBehind { drawLine(color = Color(0xFFE5E7EB), start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+                        .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("BOWLER", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp)
+                    Text("BOWLER", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("W-R", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
-                        Text("OV", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
-                        Text("ECON", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
+                        Text("W-R", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
+                        Text("OV", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
+                        Text("ECON", color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.width(24.dp))
                     }
                 }
-                
+
                 if (state.bowler.isNotEmpty()) {
                     val stats = state.bowlerStats
                     val wickets = stats?.wickets ?: 0
@@ -252,12 +254,17 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
             item {
                 Text(
                     "COMMENTARY",
-                    color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                    color = CrexColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
                     modifier = Modifier.fillMaxWidth().background(CrexColors.Background).padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
                 )
             }
             items(state.commentary) { line ->
-                if (line.kind == "header") CommentaryHeader(line.text) else CommentaryRow(line)
+                when {
+                    line.kind == "header" -> CommentaryHeader(line.text)
+                    line.kind == "batter_in" -> NewBatterBanner(line)
+                    line.wicket -> WicketBanner(line, state)
+                    else -> CommentaryRow(line)
+                }
             }
         }
 
@@ -270,7 +277,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                 ) {
                     Text(
                         "No commentary yet — it'll appear here once scoring begins.",
-                        color = Color(0xFF9CA3AF), fontSize = 13.sp, textAlign = TextAlign.Center
+                        color = CrexColors.TextMuted, fontSize = 13.sp, textAlign = TextAlign.Center
                     )
                 }
             }
@@ -290,20 +297,141 @@ private fun CommentaryHeader(text: String) {
     }
 }
 
+/**
+ * Premium red WICKET banner shown inline in the feed for every dismissal — the out
+ * batter's name + figures, how they went, and the score at the fall. Name/figures/score
+ * are cross-referenced from the replayed innings (fall-of-wickets → batting card) so it's
+ * all real; if a live wicket hasn't landed in the card yet it degrades to the dismissal
+ * line alone.
+ */
+@Composable
+private fun WicketBanner(line: CommentaryLine, state: MatchUiState) {
+    val card = state.inningsCards.firstOrNull { it.number == line.innings }
+    val fow = card?.fallOfWickets?.firstOrNull { it.over == line.over }
+    val batterName = fow?.batter?.takeIf { it.isNotBlank() }
+    val bat = batterName?.let { name -> card?.batters?.firstOrNull { it.name == name } }
+    val figures = bat?.let { "${it.runs} (${it.balls})" }
+    // The backend prepends "OUT! " to the dismissal — strip it for the sub-line.
+    val dismissal = line.text.removePrefix("OUT!").trim().ifBlank { "out" }
+    val scoreAtFall = fow?.let { "${it.score}-${it.wicketNo}" }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFFE23B3B), Color(0xFFB91C1C))))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text((batterName ?: "?").first().uppercase(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("WICKET", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color.White).padding(horizontal = 5.dp, vertical = 1.dp)) {
+                    Text("OUT", color = Color(0xFFB91C1C), fontSize = 8.sp, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+                }
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                buildString {
+                    append(batterName ?: line.battingName.ifBlank { "Batter" })
+                    if (figures != null) append("  $figures")
+                },
+                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1
+            )
+            Text(dismissal, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2)
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            if (scoreAtFall != null) Text(scoreAtFall, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            if (line.over.isNotBlank()) Text("${line.over} ov", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * Premium blue "new batter" card shown when a batter walks in. Career figures (RUNS /
+ * BALLS / HS / AVG / SR) are the player's REAL totals from the ball log; guests or players
+ * with no completed innings show a clean "first recorded innings" line instead of faked stats.
+ */
+@Composable
+private fun NewBatterBanner(line: CommentaryLine) {
+    val c = line.career
+    val name = line.text.ifBlank { "New batter" }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))))
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(name.first().uppercase(), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("NEW BATTER", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Spacer(Modifier.height(2.dp))
+                Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            }
+            if (line.over.isNotBlank()) {
+                Text("${line.over} ov", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        if (c != null && (c.innings > 0 || c.balls > 0)) {
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.15f)))
+            Spacer(Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                StatCol("INN", c.innings.toString())
+                StatCol("RUNS", c.runs.toString())
+                StatCol("BALLS", c.balls.toString())
+                StatCol("HS", c.highScore.toString())
+                StatCol("AVG", c.avg?.let { String.format("%.1f", it) } ?: "—")
+                StatCol("SR", c.sr?.let { String.format("%.1f", it) } ?: "—")
+            }
+        } else {
+            Spacer(Modifier.height(8.dp))
+            Text("First recorded innings", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun StatCol(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+    }
+}
+
 @Composable
 private fun CommentaryRow(line: CommentaryLine) {
     val (bg, fg) = when {
         line.wicket -> CrexColors.AccentRed to Color.White
         line.boundary -> CrexColors.SixBall.copy(alpha = 0.15f) to CrexColors.SixBall
-        line.label == "0" -> Color(0xFFF1F5F9) to CrexColors.TextMuted
+        line.label == "0" -> CrexColors.Background to CrexColors.TextMuted
         line.label.lowercase() in setOf("wd", "nb", "b", "lb") -> Color(0xFFFEF3C7) to Color(0xFF92400E)
-        else -> Color(0xFFF1F5F9) to CrexColors.TextSecondary
+        else -> CrexColors.Background to CrexColors.TextSecondary
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White)
-            .drawBehind { drawLine(color = Color(0xFFEEF0F3), start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+            .background(CrexColors.Surface)
+            .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -339,7 +467,7 @@ fun BatterRow(name: String, runs: String, balls: String, fours: String, sixes: S
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .drawBehind { drawLine(color = Color(0xFFE5E7EB), start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+            .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -349,32 +477,27 @@ fun BatterRow(name: String, runs: String, balls: String, fours: String, sixes: S
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFF3F4F6)),
+                    .background(CrexColors.Background),
                 contentAlignment = Alignment.Center
             ) {
-                Text(name.first().toString(), color = Color(0xFF6B7280))
+                Text(name.first().toString(), color = CrexColors.TextSecondary)
             }
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(name, color = Color(0xFF111827), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(name, color = CrexColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("SR $sr", color = Color(0xFF6B7280), fontSize = 10.sp, letterSpacing = 1.sp)
+                    Text("SR $sr", color = CrexColors.TextSecondary, fontSize = 10.sp, letterSpacing = 1.sp)
                     XpChip((runs.toIntOrNull() ?: 0) + (fours.toIntOrNull() ?: 0) + (sixes.toIntOrNull() ?: 0) * 2)
                 }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(runs, color = Color(0xFF111827), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center)
-            Text(balls, color = Color(0xFF6B7280), fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(34.dp), textAlign = TextAlign.Center)
-            Text(fours, color = Color(0xFF6B7280), fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
-            Text(sixes, color = Color(0xFF6B7280), fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
-            Icon(
-                imageVector = Icons.Outlined.ArrowDropDown,
-                contentDescription = "Expand",
-                tint = Color(0xFF9CA3AF),
-                modifier = Modifier.size(24.dp)
-            )
+            Text(runs, color = CrexColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center)
+            Text(balls, color = CrexColors.TextSecondary, fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(34.dp), textAlign = TextAlign.Center)
+            Text(fours, color = CrexColors.TextSecondary, fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
+            Text(sixes, color = CrexColors.TextSecondary, fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.width(24.dp))
         }
     }
 }
@@ -384,7 +507,7 @@ fun BowlerRow(name: String, figures: String, overs: String, econ: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .drawBehind { drawLine(color = Color(0xFFE5E7EB), start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+            .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -394,37 +517,32 @@ fun BowlerRow(name: String, figures: String, overs: String, econ: String) {
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFF3F4F6)),
+                    .background(CrexColors.Background),
                 contentAlignment = Alignment.Center
             ) {
-                Text(name.first().toString(), color = Color(0xFF6B7280))
+                Text(name.first().toString(), color = CrexColors.TextSecondary)
             }
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(name, color = Color(0xFF111827), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(name, color = CrexColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     Icon(
                         imageVector = Icons.Outlined.Verified,
                         contentDescription = "Verified",
-                        tint = Color(0xFF6B7280),
+                        tint = CrexColors.TextSecondary,
                         modifier = Modifier.size(10.dp)
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("BOWLER", color = Color(0xFF6B7280), fontSize = 10.sp, letterSpacing = 1.sp)
+                    Text("BOWLER", color = CrexColors.TextSecondary, fontSize = 10.sp, letterSpacing = 1.sp)
                     XpChip((figures.split("-").getOrNull(0)?.toIntOrNull() ?: 0) * 20 + 5)
                 }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(figures, color = Color(0xFF111827), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
-            Text(overs, color = Color(0xFF6B7280), fontSize = 13.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
-            Text(econ, color = Color(0xFF6B7280), fontSize = 13.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
-            Icon(
-                imageVector = Icons.Outlined.ArrowDropDown,
-                contentDescription = "Expand",
-                tint = Color(0xFF9CA3AF),
-                modifier = Modifier.size(24.dp)
-            )
+            Text(figures, color = CrexColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
+            Text(overs, color = CrexColors.TextSecondary, fontSize = 13.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
+            Text(econ, color = CrexColors.TextSecondary, fontSize = 13.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(48.dp), textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.width(24.dp))
         }
     }
 }
@@ -436,7 +554,7 @@ private fun OverChip(label: String, balls: List<String>, runs: Int, current: Boo
         modifier = Modifier
             .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (current) CrexColors.AccentBlue.copy(alpha = 0.06f) else Color.White)
+            .background(if (current) CrexColors.AccentBlue.copy(alpha = 0.06f) else CrexColors.Surface)
             .border(
                 1.dp,
                 if (current) CrexColors.AccentBlue.copy(alpha = 0.40f) else CrexColors.Border,

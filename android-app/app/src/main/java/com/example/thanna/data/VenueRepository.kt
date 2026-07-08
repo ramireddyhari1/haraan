@@ -89,7 +89,10 @@ sealed interface ReviewResult {
 
 class VenueRepository {
     suspend fun getVenues(): List<VenueApiItem> = withContext(Dispatchers.IO) {
-        val body = URL("${ApiConfig.BASE_URL}/api/venues").readText()
+        // Conditional GET: the 20s home poll gets a 304 (served from cache) while the
+        // venue list is unchanged. Null (nothing cached + failure) → empty list.
+        val body = ConditionalHttp.getText("${ApiConfig.BASE_URL}/api/venues")
+            ?: return@withContext emptyList()
         // Endpoint returns {"data":[...]}; tolerate a bare array too for safety.
         val arr = runCatching { JSONObject(body).optJSONArray("data") }.getOrNull()
             ?: runCatching { JSONArray(body) }.getOrNull()
@@ -133,7 +136,8 @@ class VenueRepository {
     /** Full venue detail (GET /api/venues/{id}); null on network/parse failure. */
     suspend fun getVenueDetail(id: String): VenueDetailData? = withContext(Dispatchers.IO) {
         runCatching {
-            val body = URL("${ApiConfig.BASE_URL}/api/venues/$id").readText()
+            val body = ConditionalHttp.getText("${ApiConfig.BASE_URL}/api/venues/$id")
+                ?: return@runCatching null
             val d = JSONObject(body).optJSONObject("data") ?: return@runCatching null
             parseDetail(d)
         }.getOrNull()

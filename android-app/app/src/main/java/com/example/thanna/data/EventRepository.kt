@@ -71,7 +71,9 @@ class EventRepository(
 ) {
     /** Public events for the Events tab. Empty on failure so callers can fall back to samples. */
     suspend fun getEvents(): List<EventApiItem> = withContext(Dispatchers.IO) {
-        val body = runCatching { URL("${baseUrl}/api/events").readText() }.getOrNull()
+        // Conditional GET: the 30s Events poll gets a 304 (served from cache) while the
+        // events list is unchanged.
+        val body = ConditionalHttp.getText("${baseUrl}/api/events")
             ?: return@withContext emptyList()
         val arr = runCatching { JSONObject(body).optJSONArray("data") }.getOrNull()
             ?: runCatching { JSONArray(body) }.getOrNull()

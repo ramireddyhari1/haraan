@@ -189,6 +189,8 @@ final class MatchesController extends Controller
 
         $match->update(['status' => 'Completed']);
         PlayerStatsService::freezeMatchStats($match);
+        // Re-derive real career batting from the ball log (feeds the "new batter" card).
+        \App\Services\CareerBattingService::rebuildAll();
         // Auto-verify Haraan turf matches; otherwise open the captain window.
         VenueVerificationService::onMatchCompleted($match);
 
@@ -511,20 +513,36 @@ final class MatchesController extends Controller
         $maxOvers = self::maxOversFor($match);
         $ballsBowled = self::oversToBalls((string) ($match->overs ?? '0.0'));
         $wickets = self::countInningsWickets($match, $inningsCount);
+        // All out depends on the chasing side's squad size (a 7-a-side team is all out at
+        // 6, not 10) — otherwise a small-squad chase that's bowled out under the target
+        // would never register as complete and the match would stay "LIVE" forever.
+        $chasingSquad = $battingTeam === 2 ? ($match->away_squad ?? []) : ($match->home_squad ?? []);
+        $allOut = self::allOutWicketsFor($chasingSquad);
 
         if ($chasing > $defending) {
-            $wktsLeft = max(0, 10 - $wickets);
+            $wktsLeft = max(0, $allOut - $wickets);
             $match->status = "$chasingName won by $wktsLeft " . ($wktsLeft === 1 ? 'wicket' : 'wickets');
             return;
         }
 
-        $inningsDone = ($maxOvers > 0 && $ballsBowled >= $maxOvers * 6) || $wickets >= 10;
+        $inningsDone = ($maxOvers > 0 && $ballsBowled >= $maxOvers * 6) || $wickets >= $allOut;
         if ($inningsDone) {
             $match->status = match (true) {
                 $chasing === $defending => 'Match tied',
                 default => "$defendingName won by " . ($defending - $chasing) . ' runs',
             };
         }
+    }
+
+    /**
+     * How many wickets make a side "all out" — one fewer than the batters available, so a
+     * 7-a-side team is all out at 6. Clamped to 1..10; falls back to 10 when no squad was
+     * entered (guests-only matches).
+     */
+    private static function allOutWicketsFor($squad): int
+    {
+        $n = is_array($squad) ? count($squad) : 0;
+        return $n >= 2 ? max(1, min(10, $n - 1)) : 10;
     }
 
     /** Count wickets that fell in a given innings from the action log. */

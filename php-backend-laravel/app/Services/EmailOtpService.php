@@ -66,6 +66,7 @@ class EmailOtpService
 
             $email = (new Email())
                 ->from(new Address($account->username, $fromName))
+                ->replyTo(new Address($account->username, $fromName))
                 ->to($to)
                 ->subject($subject)
                 ->text($text);

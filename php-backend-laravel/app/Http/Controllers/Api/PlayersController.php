@@ -94,7 +94,51 @@ final class PlayersController extends Controller
             ],
 
             'recent_matches'  => $recent,
+            'achievements'    => $this->buildAchievements($pid, $user),
         ]);
+    }
+
+    /**
+     * Real, earned achievements — computed from the full match ledger, career batting
+     * (high score) and rankings. Locked ones carry a "progress" hint. No invented data.
+     */
+    private function buildAchievements(?string $pid, User $user): array
+    {
+        $pid = (string) $pid;
+        $ledger = $pid === '' ? collect() : DB::table('match_xp_ledger')
+            ->where('player_id', $pid)->orderBy('awarded_at')->get(['won', 'mom']);
+
+        $matches = $ledger->count();
+        $wins = $ledger->filter(fn ($r) => (bool) $r->won)->count();
+        $moms = $ledger->filter(fn ($r) => (bool) $r->mom)->count();
+        $bestStreak = 0; $run = 0;
+        foreach ($ledger as $r) {
+            if ((bool) $r->won) { $run++; $bestStreak = max($bestStreak, $run); } else { $run = 0; }
+        }
+
+        $hs = 0;
+        if ($pid !== '') {
+            $cb = DB::table('player_career_batting')->where('player_id', $pid)->first();
+            $hs = (int) ($cb->high_score ?? 0);
+        }
+        $wickets = (int) ($user->career_wickets ?? 0);
+        $rankD = $user->rank_district;
+
+        $mk = fn (string $key, string $icon, string $label, string $tier, bool $unlocked, ?string $progress = null): array =>
+            compact('key', 'icon', 'label', 'tier', 'unlocked', 'progress');
+
+        return [
+            $mk('first_match', 'SportsCricket', 'First Match', 'bronze', $matches >= 1, $matches >= 1 ? null : '0/1'),
+            $mk('first_win', 'EmojiEvents', 'First Win', 'bronze', $wins >= 1),
+            $mk('fifty', 'Star', 'Half Century', 'silver', $hs >= 50, $hs >= 50 ? null : "$hs/50"),
+            $mk('century', 'WorkspacePremium', 'First Century', 'gold', $hs >= 100, $hs >= 100 ? null : "$hs/100"),
+            $mk('mom', 'MilitaryTech', 'Man of the Match', 'silver', $moms >= 1),
+            $mk('mvp5', 'MilitaryTech', 'MVP x5', 'gold', $moms >= 5, $moms >= 5 ? null : "$moms/5"),
+            $mk('streak5', 'Whatshot', '5-Win Streak', 'gold', $bestStreak >= 5, $bestStreak >= 5 ? null : "$bestStreak/5"),
+            $mk('veteran', 'Shield', '10 Matches', 'silver', $matches >= 10, $matches >= 10 ? null : "$matches/10"),
+            $mk('top100', 'TrendingUp', 'District Top 100', 'bronze', $rankD !== null && $rankD <= 100),
+            $mk('wkts50', 'SportsCricket', '50 Wickets', 'gold', $wickets >= 50, $wickets >= 50 ? null : "$wickets/50"),
+        ];
     }
 
     /**
