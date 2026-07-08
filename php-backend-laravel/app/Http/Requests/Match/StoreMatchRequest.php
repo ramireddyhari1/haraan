@@ -25,6 +25,9 @@ final class StoreMatchRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Which sport this match is. Defaults to cricket (the only sport with a full
+            // create/toss/scorer flow) when omitted, so older clients keep working.
+            'sport'          => ['nullable', 'string', 'in:cricket,football,badminton,basketball'],
             'matchType'      => ['required', 'string', 'in:casual,league,tournament'],
             // Private = pure scoreboard: no XP, no rank, hidden from feeds, share-code access.
             'isPrivate'      => ['nullable', 'boolean'],

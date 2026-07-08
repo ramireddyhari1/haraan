@@ -155,6 +155,10 @@ fun emblemDrawableFor(key: String): Int? =
     teamEmblems.firstOrNull { it.key == key }?.resId
 
 class CreateMatchDraft {
+    // Which sport this match is. Cricket is the only sport with a full create/toss/scorer
+    // flow today; other sports are gated at the wizard entry (see [CreateMatchWizard]).
+    // Persisted so the feed/detail can branch and the match is never mislabelled as cricket.
+    var sport by mutableStateOf("cricket")
     // Public = ranked/feed-visible (earns XP after verification). Private = a closed
     // scoreboard reachable only by share code: no XP, never ranked, hidden from feeds.
     var isPrivate by mutableStateOf(false)
@@ -195,9 +199,20 @@ fun CreateMatchWizard(
     onCreate: (CreateMatchDraft) -> Unit,
     lookupPlayer: suspend (playerId: String) -> PlayerLite?,
     loadBookings: suspend () -> List<com.example.thanna.data.BookingLite> = { emptyList() },
+    // The sport the creator picked on the ActionBoard tab. Only Cricket has a full
+    // create/toss/scorer flow today; any other sport is shown an honest "coming soon"
+    // gate so it can never silently be created as a cricket match.
+    sport: String = "Cricket",
     modifier: Modifier = Modifier,
 ) {
-    val draft = remember { CreateMatchDraft() }
+    // Cricket is the only sport wired end-to-end. For everything else, gate here rather
+    // than fall through the cricket wizard (which would persist a mislabelled match).
+    if (!sport.equals("Cricket", ignoreCase = true)) {
+        SportComingSoon(sport = sport, onDismiss = onDismiss, modifier = modifier)
+        return
+    }
+
+    val draft = remember { CreateMatchDraft().apply { this.sport = "cricket" } }
     var step by remember { mutableStateOf(0) }
     val lastStep = 3
 
@@ -240,6 +255,85 @@ fun CreateMatchWizard(
                 if (step == lastStep) onCreate(draft) else step++
             },
         )
+    }
+}
+
+/**
+ * Gate shown when a creator taps "Create" on a non-cricket ActionBoard tab. Cricket is the
+ * only sport with a full toss + scorer + feed today; rather than silently produce a cricket
+ * match, we say so plainly and send them back. Removing this branch (and wiring a real
+ * per-sport create) is the follow-up once each sport has its own scorer flow.
+ */
+@Composable
+private fun SportComingSoon(sport: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Bg)
+    ) {
+        WizardTopBar(
+            step = 0,
+            total = 1,
+            onBack = onDismiss,
+            onClose = onDismiss,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .clip(CircleShape)
+                    .background(Blue.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.SportsCricket,
+                    contentDescription = null,
+                    tint = Blue,
+                    modifier = Modifier.size(40.dp),
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "$sport is coming soon",
+                color = Text1,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Live scoring for $sport isn't ready yet. Right now only Cricket matches can be created and scored on the ActionBoard.",
+                color = Text3,
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                lineHeight = 20.sp,
+            )
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(Surface)
+                .navigationBarsPadding()
+                .padding(16.dp)
+        ) {
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
+            ) {
+                Text("Got it", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 

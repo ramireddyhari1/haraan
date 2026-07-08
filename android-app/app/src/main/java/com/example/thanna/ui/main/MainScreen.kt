@@ -3620,6 +3620,7 @@ private fun CrexMatchesScreen(
 
     if (showCreateWizard) {
       com.example.thanna.ui.matches.create.CreateMatchWizard(
+        sport = selectedSport,
         onDismiss = { showCreateWizard = false },
         onCreate = { draft ->
           if (!isCreatingMatch) {
@@ -3633,6 +3634,7 @@ private fun CrexMatchesScreen(
                   val emblems = com.example.thanna.ui.matches.create.teamEmblems
                   val result = matchRepository.createMatch(
                     token = token,
+                    sport = draft.sport,
                     matchType = draft.type.serverValue,
                     overs = draft.overs,
                     ball = draft.ball.serverValue,

@@ -60,6 +60,9 @@ final class MatchesController extends Controller
 
         $match = LiveMatch::query()->create([
             'title'        => $v['teamA'] . ' vs ' . $v['teamB'],
+            // Stamp the sport so the feed/detail can branch and the match is never
+            // mislabelled as cricket. Defaults to cricket when the client omits it.
+            'sport'        => $v['sport'] ?? 'cricket',
             // Short code for compact displays (hero monogram, live list); full name kept for headers.
             'home'         => self::shortName($v['teamA']),
             'away'         => self::shortName($v['teamB']),

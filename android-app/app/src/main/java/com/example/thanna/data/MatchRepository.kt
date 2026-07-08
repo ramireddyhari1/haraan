@@ -59,6 +59,7 @@ class MatchRepository(
    */
   suspend fun createMatch(
     token: String,
+    sport: String = "cricket",
     matchType: String,
     overs: Int,
     ball: String,
@@ -76,6 +77,7 @@ class MatchRepository(
     isPrivate: Boolean = false,
   ): CreateMatchResult = withContext(Dispatchers.IO) {
     val body = JSONObject()
+      .put("sport", sport.lowercase())
       .put("matchType", matchType)
       .put("isPrivate", isPrivate)
       .put("overs", overs)
