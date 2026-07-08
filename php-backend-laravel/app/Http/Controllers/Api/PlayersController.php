@@ -28,6 +28,37 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        return response()->json($this->profilePayload($user));
+    }
+
+    /**
+     * Any player's public ActionBoard card, by their Player ID (HRN…). Same shape as
+     * {@see me()} so the app opens the real profile from the leaderboard instead of a
+     * fabricated one. Public (read-only) — no auth required.
+     * GET /api/players/{playerId}
+     */
+    public function show(Request $request, string $playerId): JsonResponse
+    {
+        $user = User::query()
+            ->where('player_id', $playerId)
+            ->where('is_guest', false)
+            ->first();
+
+        if (!$user instanceof User) {
+            return response()->json(['error' => 'No player with that ID'], 404);
+        }
+
+        return response()->json($this->profilePayload($user));
+    }
+
+    /**
+     * Assemble a player's full ActionBoard card (profile + ranks + career + recent
+     * matches + achievements). Shared by {@see me()} and {@see show()}.
+     *
+     * @return array<string, mixed>
+     */
+    private function profilePayload(User $user): array
+    {
         $pid = $user->player_id;
         $month = now()->format('Y-m');
 
@@ -60,7 +91,7 @@ final class PlayersController extends Controller
             ])
             ->all();
 
-        return response()->json([
+        return [
             'id'               => $user->id,
             'player_id'        => $pid,
             'name'             => $user->name,
@@ -95,7 +126,7 @@ final class PlayersController extends Controller
 
             'recent_matches'  => $recent,
             'achievements'    => $this->buildAchievements($pid, $user),
-        ]);
+        ];
     }
 
     /**

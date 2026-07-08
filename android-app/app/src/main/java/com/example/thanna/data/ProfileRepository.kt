@@ -90,6 +90,35 @@ class ProfileRepository(
     }
   }
 
+  /**
+   * Fetches ANY player's public ActionBoard profile by their Player ID (HRN…).
+   * Same payload shape as [fetchMe], so the leaderboard can open the real profile
+   * screen instead of a fabricated one. Token is optional (public endpoint) but
+   * forwarded when present.
+   */
+  suspend fun fetchPlayer(token: String?, playerId: String): PlayerProfile = withContext(Dispatchers.IO) {
+    val encoded = java.net.URLEncoder.encode(playerId, "UTF-8")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/$encoded").openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 15000
+      readTimeout = 15000
+      setRequestProperty("Accept", "application/json")
+      if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+    }
+
+    try {
+      val code = connection.responseCode
+      val stream = if (code >= 400) connection.errorStream else connection.inputStream
+      val body = stream?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } } ?: ""
+      if (code !in 200..299) {
+        throw IllegalStateException(parseError(body))
+      }
+      parseProfile(JSONObject(body))
+    } finally {
+      connection.disconnect()
+    }
+  }
+
   private fun parseProfile(json: JSONObject): PlayerProfile {
     val recent = mutableListOf<RecentMatch>()
     val arr = json.optJSONArray("recent_matches")

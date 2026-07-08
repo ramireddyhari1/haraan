@@ -153,6 +153,10 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::get('/lookup', [PlayersController::class, 'lookup']);
 });
 
+// Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
+// Registered after the literal /players/* routes above so it never shadows them.
+Route::get('players/{playerId}', [PlayersController::class, 'show']);
+
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {
     Route::post('/', [MatchesController::class, 'store']);

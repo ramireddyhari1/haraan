@@ -3418,180 +3418,16 @@ private fun CrexMatchesScreen(
                 }
               }
             }
-            "Badminton" -> {
-              item { CrexLeagueTitle("BWF World Tour Finals 2026") }
-              item {
-                MatchGroup {
-                  MatchLiveContent(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onMatchClick("live-bad-1") },
-                    team1 = "IND", team1Logo = "", score1 = "1", overs1 = "21-18, 14-11",
-                    team2 = "CHN", team2Logo = "", score2 = "0", overs2 = "",
-                    statusLine = "Game 2", statusSub = "IND lead",
-                    matchContext = "SF", venue = "Impact Arena, Bangkok", battingTeam = 1,
-                  )
-                }
-              }
-              item { Spacer(modifier = Modifier.height(8.dp)) }
-              item { CrexLeagueTitle("All England Open Badminton Championships 2026") }
-              item {
-                CrexUpcomingMatchCard(
-                  team1 = "IND", team1Logo = "", team2 = "MAS", team2Logo = "",
-                  venue = "Utilita Arena, Birmingham", timeLeft = "2h : 15m",
-                  onClick = { onMatchClick("bad-up-1") }
-                )
-              }
-            }
-            "Football" -> {
-              item { CrexLeagueTitle("English Premier League 2026") }
-              item {
-                MatchGroup {
-                  MatchLiveContent(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onMatchClick("live-foot-1") },
-                    team1 = "LIV", team1Logo = "", score1 = "2", overs1 = "67'",
-                    team2 = "TOT", team2Logo = "", score2 = "1", overs2 = "",
-                    statusLine = "LIVE 67'", statusSub = "LIV lead",
-                    matchContext = "GW 38", venue = "Anfield, Liverpool", battingTeam = 1,
-                  )
-                }
-              }
-              item { Spacer(modifier = Modifier.height(8.dp)) }
-              item { CrexLeagueTitle("UEFA Champions League 2026") }
-              item {
-                CrexUpcomingMatchCard(
-                  team1 = "MNC", team1Logo = "", team2 = "RMD", team2Logo = "",
-                  venue = "Etihad Stadium, Manchester", timeLeft = "4h : 45m",
-                  onClick = { onMatchClick("foot-up-1") }
-                )
-              }
-            }
-            "Others" -> {
-              item { CrexLeagueTitle("NBA Finals 2026") }
-              item {
-                MatchGroup {
-                  MatchLiveContent(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onMatchClick("live-oth-1") },
-                    team1 = "GSW", team1Logo = "", score1 = "78", overs1 = "Q3",
-                    team2 = "MIA", team2Logo = "", score2 = "71", overs2 = "",
-                    statusLine = "Q3 4:12", statusSub = "GSW lead",
-                    matchContext = "Game 6", venue = "Chase Center, San Francisco", battingTeam = 1,
-                  )
-                }
-              }
-              item { Spacer(modifier = Modifier.height(8.dp)) }
-              item { CrexLeagueTitle("US Open Tennis 2026") }
-              item {
-                CrexUpcomingMatchCard(
-                  team1 = "USA", team1Logo = "", team2 = "ITA", team2Logo = "",
-                  venue = "Arthur Ashe Stadium, New York", timeLeft = "1d : 3h",
-                  onClick = { onMatchClick("oth-up-1") }
-                )
-              }
+            else -> {
+              // Only Cricket has a real live feed today. Other sports show an honest
+              // empty state instead of fabricated pro fixtures.
+              item { CrexTabEmpty("No live $selectedSport matches yet") }
             }
           }
         } else if (selectedTab == 1) {
-          // ── FINISHED: completed results only ──
-          when (selectedSport) {
-            "Cricket" -> {
-              item { CrexLeagueTitle("Indian Premier League 2026") }
-              item {
-                MatchGroup {
-                  MatchResultContent(
-                    modifier = Modifier.fillMaxWidth().clickable { onMatchClick("ind-aus-1") },
-                    team1 = "GT",
-                    team1Logo = "https://upload.wikimedia.org/wikipedia/en/thumb/9/9e/Gujarat_Titans_Logo.svg/1200px-Gujarat_Titans_Logo.svg.png",
-                    score1 = "155-8", overs1 = "20.0 ov",
-                    team2 = "RCB",
-                    team2Logo = "https://upload.wikimedia.org/wikipedia/en/thumb/5/5e/Royal_Challengers_Bengaluru_Logo.svg/1200px-Royal_Challengers_Bengaluru_Logo.svg.png",
-                    score2 = "161-5", overs2 = "18.0 ov",
-                    result = "RCB Won", subResult = "by 5 wickets",
-                    matchContext = "Final", venue = "Narendra Modi Stadium, Ahmedabad",
-                  )
-                  MatchGroupDivider()
-                  MatchResultContent(
-                    modifier = Modifier.fillMaxWidth().clickable { onMatchClick("ind-aus-2") },
-                    team1 = "RR",
-                    team1Logo = "https://upload.wikimedia.org/wikipedia/en/thumb/6/6d/Rajasthan_Royals_Logo.svg/1200px-Rajasthan_Royals_Logo.svg.png",
-                    score1 = "214-6", overs1 = "20.0 ov",
-                    team2 = "GT",
-                    team2Logo = "https://upload.wikimedia.org/wikipedia/en/thumb/9/9e/Gujarat_Titans_Logo.svg/1200px-Gujarat_Titans_Logo.svg.png",
-                    score2 = "219-3", overs2 = "18.4 ov",
-                    result = "GT Won", subResult = "by 7 wickets",
-                    matchContext = "Qualifier 2", venue = "Narendra Modi Stadium, Ahmedabad",
-                  )
-                }
-              }
-            }
-            "Badminton" -> {
-              item { CrexLeagueTitle("BWF World Tour Finals 2026") }
-              item {
-                MatchGroup {
-                  MatchResultContent(
-                    modifier = Modifier.fillMaxWidth().clickable { onMatchClick("bad-1") },
-                    team1 = "IND", team1Logo = "", score1 = "2", overs1 = "21-19, 21-17",
-                    team2 = "ESP", team2Logo = "", score2 = "0", overs2 = "",
-                    result = "IND Won", subResult = "in straight sets",
-                    matchContext = "SF", venue = "Impact Arena, Bangkok",
-                  )
-                  MatchGroupDivider()
-                  MatchResultContent(
-                    modifier = Modifier.fillMaxWidth().clickable { onMatchClick("bad-2") },
-                    team1 = "DEN", team1Logo = "", score1 = "2", overs1 = "21-14, 19-21, 21-16",
-                    team2 = "SGP", team2Logo = "", score2 = "1", overs2 = "",
-                    result = "DEN Won", subResult = "in a thriller",
-                    matchContext = "QF", venue = "Impact Arena, Bangkok",
-                  )
-                }
-              }
-            }
-            "Football" -> {
-              item { CrexLeagueTitle("English Premier League 2026") }
-              item {
-                MatchGroup {
-                  MatchResultContent(
-                    modifier = Modifier.fillMaxWidth().clickable { onMatchClick("foot-1") },
-                    team1 = "ARS", team1Logo = "", score1 = "3", overs1 = "FT",
-                    team2 = "CHE", team2Logo = "", score2 = "1", overs2 = "",
-                    result = "ARS Won", subResult = "at Emirates",
-                    matchContext = "GW 38", venue = "Emirates Stadium, London",
-                  )
-                  MatchGroupDivider()
-                  MatchResultContent(
-                    modifier = Modifier.fillMaxWidth().clickable { onMatchClick("foot-2") },
-                    team1 = "MNC", team1Logo = "", score1 = "2", overs1 = "FT",
-                    team2 = "LIV", team2Logo = "", score2 = "2", overs2 = "",
-                    result = "Draw", subResult = "at Etihad",
-                    matchContext = "GW 37", venue = "Etihad Stadium, Manchester",
-                  )
-                }
-              }
-            }
-            "Others" -> {
-              item { CrexLeagueTitle("NBA Finals 2026") }
-              item {
-                CrexMatchResultCard(
-                  team1 = "LAL", team1Logo = "", score1 = "104", overs1 = "FT",
-                  team2 = "BOS", team2Logo = "", score2 = "98", overs2 = "",
-                  result = "LAL Won", subResult = "leads series 3-2",
-                  matchContext = "Game 5", venue = "Crypto.com Arena, Los Angeles",
-                  onClick = { onMatchClick("oth-1") }
-                )
-              }
-              item { Spacer(modifier = Modifier.height(8.dp)) }
-              item { CrexLeagueTitle("Wimbledon Championships 2026") }
-              item {
-                CrexMatchResultCard(
-                  team1 = "ESP", team1Logo = "", score1 = "3", overs1 = "6-4, 6-7, 6-3, 6-2",
-                  team2 = "SRB", team2Logo = "", score2 = "1", overs2 = "",
-                  result = "ESP Won", subResult = "Men's Singles",
-                  matchContext = "Final", venue = "All England Club, Wimbledon",
-                  onClick = { onMatchClick("oth-2") }
-                )
-              }
-            }
-          }
+          // ── FINISHED: completed results only. No real finished-match feed is wired
+          // yet, so every sport shows an honest empty state (no demo results). ──
+          item { CrexTabEmpty("No finished $selectedSport matches yet") }
         } else if (selectedTab == 2) {
           districtSummary?.let { summary ->
             item { DistrictHomeCard(summary) }
@@ -3761,11 +3597,15 @@ private fun CrexMatchesScreen(
     }
 
     selectedLeaderboardPlayer?.let { player ->
-      CrexPlayerProfileScreen(
-        player = player,
-        isStateBoard = selectedTab == 3,
+      // Tapping any leaderboard player opens the SAME real profile screen used by
+      // "Others" in the bottom bar — just loaded for that player by their Player ID.
+      // The old fabricated Crex profile card is retired.
+      com.example.thanna.ui.profile.PlayerProfileScreen(
         onBack = { selectedLeaderboardPlayer = null },
-        onOpenBoard = { board -> selectedLeaderboardPlayer = null; selectedTab = board },
+        fetchProfile = {
+          val token = com.example.thanna.data.TokenStore.getToken(context)
+          profileRepository.fetchPlayer(token, player.playerId)
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4183,7 +4023,10 @@ internal data class LeaderboardPlayer(
   val secondaryStat: String,
   val rank: Int,
   // Uploaded profile photo URL. Blank → the profile falls back to a generated portrait.
-  val photoUrl: String = ""
+  val photoUrl: String = "",
+  // Stable Player ID (HRN…) from the ranked board. When present, tapping the row opens
+  // the player's real profile (loaded by id); demo/seed rows leave this blank.
+  val playerId: String = ""
 )
 
 @Composable
@@ -4371,70 +4214,6 @@ private fun playerColor(name: String): Color {
     Color(0xFF7C2D12), // brown
   )
   return palette[kotlin.math.abs(name.hashCode()) % palette.size]
-}
-
-// The "You" anchor — a pinned, highlighted row answering a leaderboard's #1 question:
-// "where do I stand?". Representative values, consistent with the demo board.
-@Composable
-private fun YourStandingRow() {
-  val brand = Color(0xFF2563EB)
-  Column(Modifier.padding(top = 14.dp)) {
-    Text("YOUR STANDING", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = T.Text3, letterSpacing = 0.8.sp)
-    Spacer(Modifier.height(8.dp))
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .shadow(3.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0F2563EB), spotColor = Color(0x242563EB))
-        .clip(RoundedCornerShape(16.dp))
-        .background(Brush.horizontalGradient(listOf(Color(0xFFEFF4FF), Color(0xFFE6EDFF))))
-        .border(1.dp, brand.copy(alpha = 0.30f), RoundedCornerShape(16.dp))
-        .padding(horizontal = 16.dp, vertical = 13.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Column(Modifier.width(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("14", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = brand,
-          style = TextStyle(fontFeatureSettings = "tnum"))
-        Spacer(Modifier.height(2.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          TrendTriangle(up = true, color = Color(0xFF12824A), size = 6.dp)
-          Spacer(Modifier.width(1.dp))
-          Text("2", color = Color(0xFF12824A), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-        }
-      }
-      Spacer(Modifier.width(12.dp))
-      Box(
-        modifier = Modifier
-          .size(42.dp)
-          .shadow(3.dp, CircleShape, ambientColor = Color(0x18000000), spotColor = Color(0x202563EB))
-          .clip(CircleShape)
-          .background(brand)
-          .border(2.dp, Color.White, CircleShape),
-        contentAlignment = Alignment.Center,
-      ) { Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(22.dp)) }
-      Spacer(Modifier.width(12.dp))
-      Column(Modifier.weight(1f)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Text("You", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = T.Text1, letterSpacing = (-0.2).sp)
-          Spacer(Modifier.width(6.dp))
-          Box(
-            Modifier.clip(RoundedCornerShape(6.dp)).background(brand).padding(horizontal = 6.dp, vertical = 1.dp),
-          ) { Text("YOU", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp) }
-        }
-        Spacer(Modifier.height(1.dp))
-        Text("Top 8% this season", fontSize = 11.5.sp, color = T.Text3, fontWeight = FontWeight.Medium)
-      }
-      Column(horizontalAlignment = Alignment.End) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          TrendTriangle(up = true, color = Color(0xFF12824A), size = 7.dp)
-          Spacer(Modifier.width(2.dp))
-          Text("38", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = T.Text1,
-            letterSpacing = (-0.4).sp, style = TextStyle(fontFeatureSettings = "tnum"))
-        }
-        Spacer(Modifier.height(1.dp))
-        Text("TO #13", fontSize = 8.5.sp, fontWeight = FontWeight.SemiBold, color = T.Text3, letterSpacing = 0.5.sp)
-      }
-    }
-  }
 }
 
 // Staggered fade-up entrance for list rows — each row eases in slightly after the one
@@ -4896,14 +4675,12 @@ private fun CrexLeaderboardSection(
             secondaryStat = if (row.matches > 0) "${row.matches} matches" else "",
             rank = row.rank,
             photoUrl = row.avatar ?: "",
+            playerId = row.playerId,
           )
         }
         .ifEmpty { null }
     }
   }
-  val useReal = realPlayers != null
-
-
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -4962,42 +4739,20 @@ private fun CrexLeaderboardSection(
 
     Spacer(modifier = Modifier.height(8.dp))
 
-    // List of players — real ranked board when available, else demo content.
-    // Single XP-ranked list (demo until a real ranked board exists for this scope).
-    val players = realPlayers ?: if (isStateBoard) {
-      listOf(
-        LeaderboardPlayer("KL Rahul", "Karnataka", "1860 XP", "15 matches", 1),
-        LeaderboardPlayer("Ruturaj Gaikwad", "Maharashtra", "1720 XP", "14 matches", 2),
-        LeaderboardPlayer("Shreyas Iyer", "Mumbai", "1590 XP", "13 matches", 3),
-        LeaderboardPlayer("Tilak Varma", "Hyderabad", "1460 XP", "12 matches", 4),
-        LeaderboardPlayer("Hanuma Vihari", "Andhra", "1330 XP", "11 matches", 5),
-        LeaderboardPlayer("Mayank Agarwal", "Karnataka", "1200 XP", "12 matches", 6)
-      )
-    } else {
-      listOf(
-        LeaderboardPlayer("Vijay Kumar", "Nellore", "1240 XP", "15 matches", 1),
-        LeaderboardPlayer("Suresh Reddy", "Kurnool", "1115 XP", "13 matches", 2),
-        LeaderboardPlayer("Ramesh Naidu", "Guntur", "980 XP", "12 matches", 3),
-        LeaderboardPlayer("Mahesh Babu", "Nellore", "865 XP", "12 matches", 4),
-        LeaderboardPlayer("Kalyan Ram", "Chittoor", "740 XP", "9 matches", 5),
-        LeaderboardPlayer("Dev Prasad", "Guntur", "620 XP", "11 matches", 6)
-      )
-    }
+    // Real ranked board only — no demo players. Empty (still loading or no ranked
+    // players in this scope yet) shows an honest empty state below.
+    val players = realPlayers.orEmpty()
 
     val topThree = players.filter { it.rank <= 3 }.sortedBy { it.rank }
     val remainingPlayers = players.filter { it.rank > 3 }.sortedBy { it.rank }
 
     if (topThree.isNotEmpty()) {
       val title = when {
-        useReal && !location.isNullOrBlank() -> if (isStateBoard) location else "$location District"
+        !location.isNullOrBlank() -> if (isStateBoard) location else "$location District"
         isStateBoard -> "State Board"
-        else -> "Nellore District"
+        else -> "District Board"
       }
-      val subtitle = when {
-        useReal -> "${players.size} ranked ${if (players.size == 1) "player" else "players"}"
-        isStateBoard -> "45 players • 32 matches"
-        else -> "12 players • 8 matches"
-      }
+      val subtitle = "${players.size} ranked ${if (players.size == 1) "player" else "players"}"
       LeaderboardPodium(title = title, subtitle = subtitle, topPlayers = topThree, onPlayerClick = onPlayerClick)
       Spacer(modifier = Modifier.height(10.dp))
     }
@@ -5006,7 +4761,9 @@ private fun CrexLeaderboardSection(
       LeaderboardListGroup(remainingPlayers, onPlayerClick)
     }
 
-    YourStandingRow()
+    if (players.isEmpty()) {
+      CrexTabEmpty("No ranked players in this ${if (isStateBoard) "state" else "district"} yet")
+    }
   }
 }
 
@@ -5074,330 +4831,6 @@ private fun firstNumber(s: String): Int =
 
 private fun afterLabel(s: String, label: String): String? =
   Regex("$label\\s*([0-9.]+\\*?)").find(s)?.groupValues?.getOrNull(1)
-
-private fun buildPlayerStats(player: LeaderboardPlayer, isStateBoard: Boolean): CrexPlayerStats {
-  val seed = player.name.sumOf { it.code }
-  val role = when {
-    player.primaryStat.contains("Wkts", true) -> PlayerRoleKind.BOWLER
-    player.primaryStat.contains("pts", true)  -> PlayerRoleKind.ALLROUNDER
-    else -> PlayerRoleKind.BATTER
-  }
-  val region = player.team.split(Regex("[•·]")).first().trim()
-  // innings from the team meta ("Nellore • 12 inn") when present, else derived from seed
-  val innings = firstNumber(player.team).let { if (it in 5..40) it else 9 + seed % 12 }
-  val matches = (innings * 0.9).toInt().coerceAtLeast(innings - 2)
-  val headlineValue = firstNumber(player.primaryStat)
-
-  val avg = afterLabel(player.secondaryStat, "Avg") ?: String.format("%.1f", 20.0 + seed % 30)
-  val hs = afterLabel(player.secondaryStat, "HS") ?: (headlineValue / (innings.coerceAtLeast(4) / 3 + 1)).toString()
-  val econ = afterLabel(player.secondaryStat, "Econ") ?: String.format("%.1f", 4.0 + seed % 4)
-  val sr = afterLabel(player.secondaryStat, "SR") ?: String.format("%.1f", 110.0 + seed % 50)
-
-  // Split a career headline into "this season" + "last season" rows so the table reads like Crex.
-  fun split(total: Int): Pair<Int, Int> {
-    val a = (total * (0.55 + (seed % 10) / 50.0)).toInt()
-    return a to (total - a).coerceAtLeast(0)
-  }
-
-  val battingTotalRuns = if (role == PlayerRoleKind.BOWLER) (headlineValue.coerceAtMost(60) + 40 + seed % 80) else headlineValue
-  val (rSeason, rPrev) = split(battingTotalRuns)
-  val fifties = (battingTotalRuns / 80).coerceAtMost(12)
-  val hundreds = (battingTotalRuns / 250).coerceAtMost(4)
-  val battingRows = listOf(
-    CrexCareerRow("This Season", matches, innings, rSeason, hs, avg, sr,
-      (fifties * 0.6).toInt(), (hundreds * 0.6).toInt()),
-    CrexCareerRow("Last Season", matches - 1, innings - 1, rPrev, (firstNumber(hs) - 6).coerceAtLeast(20).toString(),
-      String.format("%.1f", (firstNumber(avg).coerceAtLeast(15) - 4).toDouble()), String.format("%.1f", 100.0 + seed % 40),
-      (fifties * 0.4).toInt(), (hundreds * 0.4).toInt()),
-    CrexCareerRow("Overall", matches * 2 - 1, innings * 2 - 1, battingTotalRuns, hs, avg, sr, fifties, hundreds),
-  )
-
-  val totalWkts = if (role == PlayerRoleKind.BATTER) (5 + seed % 14) else firstNumber(player.primaryStat).coerceAtLeast(8 + seed % 20)
-  val (wSeason, wPrev) = split(totalWkts)
-  val bbi = "${3 + seed % 4}/${15 + seed % 20}"
-  val fourW = (totalWkts / 9).coerceAtMost(6)
-  val fiveW = (totalWkts / 18).coerceAtMost(3)
-  val bowlAvg = String.format("%.1f", 14.0 + seed % 18)
-  val bowlingRows = listOf(
-    CrexCareerRow("This Season", matches, innings, wSeason, bbi, bowlAvg, econ, (fourW * 0.6).toInt(), (fiveW * 0.6).toInt()),
-    CrexCareerRow("Last Season", matches - 1, innings - 1, wPrev, "${2 + seed % 3}/${18 + seed % 18}",
-      String.format("%.1f", 16.0 + seed % 14), String.format("%.1f", 5.0 + seed % 3), (fourW * 0.4).toInt(), (fiveW * 0.4).toInt()),
-    CrexCareerRow("Overall", matches * 2 - 1, innings * 2 - 1, totalWkts, bbi, bowlAvg, econ, fourW, fiveW),
-  )
-
-  val form = if (role == PlayerRoleKind.BOWLER) {
-    listOf("2/24", "3/31", "1/19", "4/28", "0/22")
-  } else {
-    val base = firstNumber(hs).coerceAtLeast(30)
-    listOf("$base", "${(base * 0.4).toInt()}", "${(base * 0.7).toInt()}*", "${(base * 0.2).toInt()}", "${(base * 0.55).toInt()}")
-  }
-
-  val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-  val birth = "${1 + seed % 27} ${months[seed % 12]} ${1990 + seed % 16}"
-  val heightStr = "5ft ${3 + seed % 9}in"
-  val batStyle = if (seed % 5 == 0) "Left Handed" else "Right Handed"
-  val bowlStyle = when (role) {
-    PlayerRoleKind.BOWLER -> if (seed % 2 == 0) "Right-arm Fast" else "Right-arm Off-break"
-    else -> if (seed % 3 == 0) "Right-arm Medium" else "Right-arm Off-break"
-  }
-  val regionName = region.ifBlank { if (isStateBoard) "State" else "District" }
-
-  val winPct = 48 + seed % 38
-  val momCount = (totalWkts + battingTotalRuns) / 170 + 1
-  // Disciplined palette: brand blue throughout; green reserved for the win-rate signal.
-  val brand = Color(0xFF2563EB)
-  val hsHi = ProfileHighlight(Icons.Outlined.SportsCricket, brand, hs, "High score")
-  val bowlHi = ProfileHighlight(Icons.Outlined.TrackChanges, brand, bbi, "Best bowling")
-  val momHi = ProfileHighlight(Icons.Outlined.WorkspacePremium, brand, momCount.toString(), "Player of match")
-  val winHi = ProfileHighlight(Icons.Outlined.EmojiEvents, Color(0xFF12824A), "$winPct%", "Win rate")
-  val highlights = if (role == PlayerRoleKind.BOWLER) listOf(bowlHi, hsHi, momHi, winHi)
-    else listOf(hsHi, bowlHi, momHi, winHi)
-
-  val opponents = listOf("Kurnool XI", "Guntur Strikers", "Kadapa Kings", "Tirupati CC", "Anantapur XI", "Chittoor Warriors")
-  val recentMatches = (0 until 5).map { i ->
-    val s2 = seed + i * 31
-    val won = (s2 % 3) != 0
-    val line = if (role == PlayerRoleKind.BOWLER) "${1 + s2 % 4}/${12 + s2 % 28}"
-      else "${5 + s2 % 95}${if (s2 % 4 == 0) "*" else ""} (${10 + s2 % 50})"
-    ProfileMatch(
-      opponent = opponents[s2 % opponents.size],
-      meta = "${if (isStateBoard) "State League" else "District League"} · ${1 + s2 % 27} ${months[s2 % 12]}",
-      won = won,
-      playerLine = line,
-      mom = i == 0 && won,
-    )
-  }
-
-  val districtRank = if (isStateBoard) 1 + seed % 5 else player.rank
-  val stateRank = if (isStateBoard) player.rank else 8 + seed % 40
-  val percentile = if (isStateBoard) 1 + seed % 4 else 1 + seed % 9
-  val districtChip = RankChip("DISTRICT", "#$districtRank", Icons.Outlined.LocationOn, board = 2)
-  val stateChip = RankChip("STATE", "#$stateRank", Icons.Outlined.Public, board = 3)
-  val pctChip = RankChip("PERCENTILE", "Top $percentile%", Icons.Outlined.TrendingUp, board = null, percent = percentile)
-  // Lead chip = the board the player is currently ranked on.
-  val rankChips = if (isStateBoard) listOf(stateChip, districtChip, pctChip)
-    else listOf(districtChip, stateChip, pctChip)
-  val rankTrend = 1 + seed % 3
-  val rankBoardLabel = if (isStateBoard) "State Rank" else "District Rank"
-
-  // Real-photo pipeline: show the player's uploaded photo when they have one; otherwise a
-  // deterministic portrait placeholder (Coil loads it, initials fall back on failure).
-  val photoUrl = player.photoUrl.ifBlank { "https://i.pravatar.cc/240?img=${1 + seed % 70}" }
-  val jersey = 1 + seed % 98
-
-  // Season-over-season deltas for the quick-stat bar (vs "Last Season" row).
-  fun delta(now: Float, prev: Float, decimals: Int): String? {
-    val d = now - prev
-    if (kotlin.math.abs(d) < 0.05f) return null
-    val sign = if (d >= 0) "+" else "−"
-    return sign + (if (decimals == 0) kotlin.math.abs(d).toInt().toString() else String.format("%.1f", kotlin.math.abs(d)))
-  }
-  val seasonRows = if (role == PlayerRoleKind.BOWLER) bowlingRows else battingRows
-  val nowR = seasonRows[0]; val lastR = seasonRows[1]
-  val quickDeltas = listOf(
-    null,
-    delta(nowR.runsOrWickets.toFloat(), lastR.runsOrWickets.toFloat(), 0),
-    delta(nowR.avg.toFloatOrNull() ?: 0f, lastR.avg.toFloatOrNull() ?: 0f, 1),
-    delta(nowR.rate.toFloatOrNull() ?: 0f, lastR.rate.toFloatOrNull() ?: 0f, 1),
-  )
-  val about = listOf(
-    "Gender" to "Male",
-    "Born" to birth,
-    "Birth Place" to "$regionName, Andhra Pradesh",
-    "Height" to heightStr,
-    "Nationality" to "Indian",
-    "Role" to role.label,
-    "Bats" to "$batStyle · ${if (role == PlayerRoleKind.BOWLER) "Lower order" else "Top order"}",
-    "Bowls" to bowlStyle,
-  )
-
-  return CrexPlayerStats(
-    role = role,
-    region = region.ifBlank { if (isStateBoard) "State" else "District" },
-    matches = matches,
-    headlineLabel = if (role == PlayerRoleKind.BOWLER) "Wickets" else "Runs",
-    headlineValue = if (role == PlayerRoleKind.BOWLER) totalWkts else battingTotalRuns,
-    avg = if (role == PlayerRoleKind.BOWLER) bowlAvg else avg,
-    rateLabel = if (role == PlayerRoleKind.BOWLER) "Econ" else "SR",
-    rateValue = if (role == PlayerRoleKind.BOWLER) econ else sr,
-    battingRows = battingRows,
-    bowlingRows = bowlingRows,
-    recentForm = form,
-    about = about,
-    rankChips = rankChips,
-    rankTrend = rankTrend,
-    rankBoardLabel = rankBoardLabel,
-    highlights = highlights,
-    recentMatches = recentMatches,
-    photoUrl = photoUrl,
-    jersey = jersey,
-    winRate = winPct,
-    quickDeltas = quickDeltas,
-  )
-}
-
-@Composable
-internal fun CrexPlayerProfileScreen(
-  player: LeaderboardPlayer,
-  isStateBoard: Boolean,
-  onBack: () -> Unit,
-  onOpenBoard: (Int) -> Unit = {},
-  modifier: Modifier = Modifier,
-) {
-  val stats = remember(player, isStateBoard) { buildPlayerStats(player, isStateBoard) }
-  var battingSelected by remember { mutableStateOf(stats.role != PlayerRoleKind.BOWLER) }
-  var tab by remember { mutableStateOf(0) }
-  var loading by remember { mutableStateOf(true) }
-  val context = LocalContext.current
-
-  // Brief shimmer so the profile feels "fetched" rather than popping in.
-  LaunchedEffect(player) {
-    loading = true
-    delay(550)
-    loading = false
-  }
-
-  Column(
-    modifier = modifier
-      .fillMaxSize()
-      .background(
-        // Subtle wash from a hero-tinted top into the page grey, so the hero feels integrated.
-        Brush.verticalGradient(
-          colors = listOf(Color(0xFFE6ECF7), T.BgPage, T.BgPage),
-          startY = 0f,
-          endY = 900f,
-        )
-      )
-  ) {
-    // Top bar
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .background(T.Surface)
-        .padding(horizontal = 12.dp, vertical = 12.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Box(
-        modifier = Modifier
-          .size(36.dp)
-          .clip(CircleShape)
-          .background(Color(0xFFEFF2F7))
-          .clickable { onBack() },
-        contentAlignment = Alignment.Center,
-      ) {
-        Icon(Icons.Default.ArrowBack, "Back", tint = T.Text1, modifier = Modifier.size(18.dp))
-      }
-      Spacer(Modifier.width(12.dp))
-      Text("Player Profile", color = T.Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-      Box(
-        modifier = Modifier
-          .size(36.dp)
-          .clip(CircleShape)
-          .background(Color(0xFFEFF2F7))
-          .clickable {
-            val msg = buildString {
-              append("${player.name} — ${stats.role.label}\n")
-              append("${stats.rankChips.joinToString(" · ")}\n")
-              append("${stats.matches} M · ${stats.headlineValue} ${stats.headlineLabel} · Avg ${stats.avg}\n")
-              append("via ActionBoard")
-            }
-            val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-              type = "text/plain"
-              putExtra(android.content.Intent.EXTRA_TEXT, msg)
-            }
-            context.startActivity(android.content.Intent.createChooser(share, "Share profile"))
-          },
-        contentAlignment = Alignment.Center,
-      ) {
-        Icon(Icons.Default.Share, "Share", tint = T.Text1, modifier = Modifier.size(17.dp))
-      }
-    }
-
-    if (loading) {
-      ProfileShimmer()
-      return@Column
-    }
-
-    Column(
-      Modifier
-        .weight(1f)
-        .verticalScroll(rememberScrollState())
-        .padding(16.dp)
-    ) {
-      CrexProfileHero(player, stats, onOpenBoard)
-
-      Spacer(Modifier.height(14.dp))
-      CrexProfileTabs(tab) { tab = it }
-      Spacer(Modifier.height(16.dp))
-
-      when (tab) {
-        0 -> {
-          CrexProfileQuickStats(stats)
-
-          Spacer(Modifier.height(18.dp))
-          CrexProfileSectionTitle("Performance")
-          Spacer(Modifier.height(10.dp))
-          CrexHighlights(stats.highlights)
-
-          Spacer(Modifier.height(18.dp))
-          CrexProfileSectionTitle("About ${player.name}")
-          Spacer(Modifier.height(10.dp))
-          CrexAboutSection(stats.about)
-
-          Spacer(Modifier.height(16.dp))
-          CrexProfileSectionTitle("Recent form", "Last 5 innings")
-          Spacer(Modifier.height(10.dp))
-          CrexProfileSparkline(stats)
-          Spacer(Modifier.height(10.dp))
-          CrexProfileForm(stats)
-
-          Spacer(Modifier.height(18.dp))
-          CrexProfileSectionTitle("Career")
-          Spacer(Modifier.height(10.dp))
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(24.dp))
-              .background(T.BgPage)
-              .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-          ) {
-            listOf("Batting" to true, "Bowling" to false).forEach { (label, isBat) ->
-              val sel = battingSelected == isBat
-              Box(
-                modifier = Modifier
-                  .weight(1f)
-                  .clip(RoundedCornerShape(20.dp))
-                  .background(if (sel) T.Surface else Color.Transparent)
-                  .clickable { battingSelected = isBat }
-                  .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center,
-              ) {
-                Text(label, fontSize = 12.5.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                  color = if (sel) T.Text1 else T.Text3)
-              }
-            }
-          }
-          Spacer(Modifier.height(10.dp))
-          CrexCareerTable(
-            rows = if (battingSelected) stats.battingRows else stats.bowlingRows,
-            batting = battingSelected,
-          )
-        }
-        1 -> CrexMatchesTab(stats)
-        else -> CrexNewsTab()
-      }
-
-      Spacer(Modifier.height(16.dp))
-      Text(
-        "Stats are representative for this demo leaderboard.",
-        color = T.Text3, fontSize = 11.sp, textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth(),
-      )
-      Spacer(Modifier.height(20.dp))
-    }
-  }
-}
 
 @Composable
 private fun CrexProfileTabs(selected: Int, onSelect: (Int) -> Unit) {
@@ -6252,6 +5685,19 @@ private fun CrexLeagueTitle(title: String) {
       fontSize = 12.sp,
       fontWeight = FontWeight.SemiBold,
     )
+  }
+}
+
+/** Honest empty state for an ActionBoard tab/sport that has no real data yet. */
+@Composable
+private fun CrexTabEmpty(message: String) {
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 40.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    Text(message, color = Color(0xFF94A3B8), fontSize = 13.sp)
   }
 }
 
