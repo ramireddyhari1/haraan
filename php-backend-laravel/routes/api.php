@@ -191,7 +191,54 @@ Route::middleware('auth.jwt.optional')->get('/districts/summary', [DistrictsCont
 Route::middleware('auth.jwt')->prefix('bookings')->group(function (): void {
     Route::get('/', [BookingsController::class, 'index']);
     Route::post('/venue', [BookingsController::class, 'storeVenue']);
+    Route::post('/validate-coupon', [BookingsController::class, 'validateCoupon']);
     Route::get('/{id}', [BookingsController::class, 'show']);
     Route::post('/', [BookingsController::class, 'store']);
     Route::patch('/{id}/cancel', [BookingsController::class, 'cancel']);
 });
+
+// -------------------------------------------------------------------------
+//  Partner API — dashboard/read endpoints for the partner mobile app.
+//  Scoped to the signed-in partner (auth.jwt + auth.partner). Ticket check-in
+//  reuses the host-gated /api/bookings/resolve + check-in routes above.
+// -------------------------------------------------------------------------
+
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\PartnerController::class)
+    ->group(function (): void {
+        Route::get('/overview', 'overview');
+        Route::get('/events', 'events');
+        Route::get('/events/{id}', 'showEvent')->whereNumber('id');
+        Route::get('/events/{id}/analytics', 'eventAnalytics')->whereNumber('id');
+        Route::get('/venues', 'venues');
+        Route::get('/venues/{id}', 'showVenue')->whereNumber('id');
+        Route::get('/venues/{id}/analytics', 'venueAnalytics')->whereNumber('id');
+        Route::get('/venues/{id}/day', 'venueDay')->whereNumber('id');
+        Route::get('/venues/{id}/slots', 'venueSlots')->whereNumber('id');
+        Route::get('/bookings', 'bookings');
+
+        // --- Write actions gated by staff capability (owners hold all) ---
+        Route::middleware('partner.can:pricing')->group(function (): void {
+            Route::post('/venues/{id}/slots', 'saveSlot')->whereNumber('id');
+            Route::post('/venues/{id}/slots/{slotId}', 'saveSlot')->whereNumber('id')->whereNumber('slotId');
+            Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');
+        });
+        Route::middleware('partner.can:bookings')->group(function (): void {
+            Route::post('/venues/{id}/bookings', 'storeOfflineBooking')->whereNumber('id');
+            Route::post('/venues/{id}/block', 'blockDate')->whereNumber('id');
+            Route::delete('/venues/{id}/block', 'unblockDate')->whereNumber('id');
+            Route::patch('/bookings/{id}/cancel', 'cancelBooking')->whereNumber('id');
+            Route::post('/bookings/{id}/cancel', 'cancelBooking')->whereNumber('id'); // app (no PATCH)
+        });
+        Route::middleware('partner.can:checkin')->post('/check-in', 'checkInByCode');
+        Route::middleware('partner.can:reports')->get('/reports/bookings', 'bookingsReport');
+
+        // --- Staff management (owner-only; desk persons never hold 'staff') ---
+        Route::middleware('partner.can:staff')->group(function (): void {
+            Route::get('/staff', 'staff');
+            Route::post('/staff', 'createStaff');
+            Route::post('/staff/{id}', 'updateStaff')->whereNumber('id');
+            Route::delete('/staff/{id}', 'deleteStaff')->whereNumber('id');
+        });
+    });

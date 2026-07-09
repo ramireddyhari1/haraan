@@ -25,10 +25,16 @@ class SupportThreadResource extends Resource
 
     protected static ?int $navigationSort = 20;
 
-    /** Any control-panel user may help with support. */
+    /**
+     * Support conversations are private user data. Limit them to super-admins
+     * and the ops team — not every department manager (and definitely not
+     * partners, who are kept out of /control entirely).
+     */
     public static function canAccess(): bool
     {
-        return (bool) auth()->user();
+        $user = auth()->user();
+
+        return $user !== null && ($user->isSuperAdmin() || $user->hasRoleEither(['OPS']));
     }
 
     /** New threads always start in the app — never created from the panel. */

@@ -82,12 +82,59 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     }
 
     /**
-     * Gate the Filament admin panel: super-admins or any department role get in;
-     * the per-workspace clusters then decide what each role actually sees.
+     * Gate the Filament panels. Partners live in the dedicated /partner console
+     * and must never reach the internal /control panel (where support threads
+     * and other tenants' data would otherwise be exposed); internal department
+     * staff get /control but not /partner. Super-admins get both. The
+     * per-workspace clusters then decide what each role actually sees.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return $this->isSuperAdmin() || $this->hasRoleEither(self::DEPT_ROLES);
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($panel->getId() === 'partner') {
+            return $this->hasRoleEither(['PARTNER']);
+        }
+
+        // /control — internal staff only, never partners.
+        return $this->hasRoleEither(['FINANCE', 'MARKETING', 'OPS']);
+    }
+
+    /**
+     * The partner account that owns this user's data. Owners resolve to their
+     * own id; desk staff (created with a parent_partner_id) resolve to their
+     * owner, so both operate on the same venues/events/bookings. The entire
+     * /api/partner surface scopes on this — see PartnerController.
+     */
+    public function effectivePartnerId(): int
+    {
+        return (int) ($this->parent_partner_id ?? $this->id);
+    }
+
+    /** Every capability a desk person can be granted (owners hold all of them). */
+    public const STAFF_PERMISSIONS = ['bookings', 'checkin', 'pricing', 'reports'];
+
+    /** True when this user is a desk person under a partner owner. */
+    public function isDeskStaff(): bool
+    {
+        return $this->parent_partner_id !== null;
+    }
+
+    /**
+     * Whether this user may perform a partner capability. Owners always may;
+     * desk persons only if the capability is in their staff_permissions.
+     */
+    public function hasPartnerPermission(string $permission): bool
+    {
+        if (! $this->isDeskStaff()) {
+            return true;
+        }
+
+        $perms = $this->staff_permissions;
+
+        return is_array($perms) && in_array($permission, $perms, true);
     }
 
     protected $fillable = [
@@ -103,6 +150,8 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'status',
         'partner_type',
         'event_host_id',
+        'parent_partner_id',
+        'staff_permissions',
         'player_role',
         'playing_style',
         'is_guest',
@@ -258,6 +307,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'password'          => 'hashed',
             'date_of_birth'     => 'date',
             'sport_attributes'  => 'array',
+            'staff_permissions' => 'array',
             'app_authentication_secret' => 'encrypted',
             'app_authentication_recovery_codes' => 'encrypted:array',
         ];

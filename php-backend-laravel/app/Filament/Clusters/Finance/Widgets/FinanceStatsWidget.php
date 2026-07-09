@@ -22,9 +22,12 @@ class FinanceStatsWidget extends StatsOverviewWidget
         // lower(status) so uppercase 'CONFIRMED' bookings (the DB default) are
         // counted — a bare whereIn on mixed-case data under-reports revenue.
         $revenue = (float) Booking::whereIn(DB::raw('lower(status)'), self::PAID)->sum('total_amount');
-        $pendingPayouts = (float) Payout::where('status', 'pending')->sum('amount');
-        $pendingCount = Payout::where('status', 'pending')->count();
-        $processed = (float) Payout::where('status', 'processed')->sum('amount');
+        // Payouts are created as uppercase 'PENDING' (migration default) but the
+        // "mark processed" action writes lowercase 'processed' — compare on
+        // lower(status) or the pending totals silently read as ₹0.
+        $pendingPayouts = (float) Payout::whereRaw('lower(status) = ?', ['pending'])->sum('amount');
+        $pendingCount = Payout::whereRaw('lower(status) = ?', ['pending'])->count();
+        $processed = (float) Payout::whereRaw('lower(status) = ?', ['processed'])->sum('amount');
         $paidBookings = Booking::whereIn(DB::raw('lower(status)'), self::PAID)->count();
         $avgOrder = $paidBookings > 0 ? $revenue / $paidBookings : 0.0;
 

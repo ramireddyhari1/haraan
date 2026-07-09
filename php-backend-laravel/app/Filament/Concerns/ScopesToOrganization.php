@@ -4,13 +4,20 @@ declare(strict_types=1);
 
 namespace App\Filament\Concerns;
 
+use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Phase 1c — panel-only tenant scoping. A Filament resource that uses this trait
  * has every query (list/view/edit/delete) restricted to the current admin's
  * organization subtree, unless the admin is unrestricted (super_admin or no org
  * assigned). See User::scopedOrganizationIds() for the policy.
+ *
+ * The partner console (/partner) is different: partners own records by
+ * partner_id, not by organization, and have no org — so in that panel we scope
+ * hard to the partner's own records instead. A model without a partner_id column
+ * denies all rows in the partner panel rather than leaking the global table.
  *
  * This deliberately overrides only the resource's Eloquent query, so the mobile
  * API (which shares these models) is unaffected. Records with a null
@@ -28,6 +35,19 @@ trait ScopesToOrganization
             return $query;
         }
 
+        // Partner console: hard-scope to the partner's own records by partner_id.
+        // Super-admins (who can also open /partner) stay unrestricted.
+        if (Filament::getCurrentPanel()?->getId() === 'partner' && ! $user->isSuperAdmin()) {
+            $table = $query->getModel()->getTable();
+            $column = static::partnerScopeColumn();
+
+            if (! Schema::hasColumn($table, $column)) {
+                return $query->whereRaw('1 = 0'); // no ownership column → show nothing
+            }
+
+            return $query->where($table.'.'.$column, $user->effectivePartnerId());
+        }
+
         $ids = $user->scopedOrganizationIds();
         if ($ids === null) {
             return $query; // unrestricted
@@ -40,5 +60,11 @@ trait ScopesToOrganization
     protected static function organizationScopeColumn(): string
     {
         return 'organization_id';
+    }
+
+    /** Column on the resource's model that holds the owning partner id. */
+    protected static function partnerScopeColumn(): string
+    {
+        return 'partner_id';
     }
 }
