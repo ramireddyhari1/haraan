@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Venues\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
@@ -19,7 +20,20 @@ class VenueForm
                 OrganizationSelect::make(),
                 TextInput::make('category')
                     ->required()
-                    ->default('Badminton'),
+                    ->default('Badminton')
+                    ->helperText('Primary sport — shown as the card badge and used by the sport filter.'),
+                Select::make('sports')
+                    ->label('Sports offered')
+                    ->multiple()
+                    ->options([
+                        'Cricket' => 'Cricket',
+                        'Football' => 'Football',
+                        'Badminton' => 'Badminton',
+                        'Basketball' => 'Basketball',
+                        'Tennis' => 'Tennis',
+                        'Volleyball' => 'Volleyball',
+                    ])
+                    ->helperText('All games playable here. Shown as icons on the venue card (first two + a count). The primary category is always included.'),
                 TextInput::make('location')
                     ->required(),
                 TextInput::make('distance'),
@@ -27,6 +41,13 @@ class VenueForm
                     ->numeric(),
                 TextInput::make('longitude')
                     ->numeric(),
+                TextInput::make('map_link')
+                    ->label('Google Maps link')
+                    ->url()
+                    ->maxLength(600)
+                    ->placeholder('https://maps.app.goo.gl/…')
+                    ->helperText('Open the venue in Google Maps → Share → Copy link, and paste it here. Powers "Show in Map" / "Get directions".')
+                    ->columnSpanFull(),
                 TextInput::make('price')
                     ->required()
                     ->numeric()

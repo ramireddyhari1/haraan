@@ -17,7 +17,7 @@ final class Venue extends Model
     protected string $contentDomain = 'venues';
 
     protected $fillable = [
-        'name', 'category', 'location', 'city', 'address', 'distance', 'latitude', 'longitude',
+        'name', 'category', 'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link',
         'price', 'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
@@ -26,6 +26,7 @@ final class Venue extends Model
     protected $casts = [
         'images' => 'array',
         'amenities' => 'array',
+        'sports' => 'array',
         'rules' => 'array',
         'price_chart' => 'array',
         'is_bookable' => 'boolean',
@@ -35,6 +36,19 @@ final class Venue extends Model
         'latitude' => 'float',
         'longitude' => 'float',
     ];
+
+    /**
+     * Sports this venue offers, always non-empty: the explicit `sports` list when set, else the
+     * primary category. The category is guaranteed first so the card's leading icon matches the
+     * badge. De-duplicated and trimmed.
+     */
+    public function sportsList(): array
+    {
+        $list = is_array($this->sports) ? $this->sports : [];
+        $list = array_merge([$this->category], $list);
+
+        return array_values(array_unique(array_filter(array_map('trim', $list))));
+    }
 
     public function slots(): HasMany
     {

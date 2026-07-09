@@ -10,6 +10,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -41,6 +42,7 @@ class TicketTypesRelationManager extends RelationManager
                         'free'       => 'Free Pass',
                         'tier'       => 'Tier / Category (Gold, VIP…)',
                         'early_bird' => 'Early Bird (timed)',
+                        'dynamic'    => 'Dynamic Pricing (price rises as it sells)',
                         'bundle'     => 'Bundle (Couple / Group / Family)',
                         'addon'      => 'Add-on (parking, food…)',
                         'donation'   => 'Donation (pay what you want)',
@@ -53,6 +55,7 @@ class TicketTypesRelationManager extends RelationManager
                             'general'    => self::applyPreset($set, 'General Admission', 'standard', 0),
                             'tier'       => self::applyPreset($set, 'Gold', 'standard', 0),
                             'early_bird' => self::applyPreset($set, 'Early Bird', 'standard', 0),
+                            'dynamic'    => self::applyDynamicPreset($set),
                             'bundle'     => self::applyPreset($set, 'Couple Pass', 'standard', 0, admits: 2),
                             'addon'      => self::applyPreset($set, 'Parking', 'addon', 0),
                             'donation'   => self::applyPreset($set, 'Donation', 'donation', 0, minPrice: 0),
@@ -99,6 +102,31 @@ class TicketTypesRelationManager extends RelationManager
                     ->numeric()
                     ->minValue(0)
                     ->helperText('Leave blank for unlimited (bounded by the event capacity).'),
+                Repeater::make('pricing_phases')
+                    ->label('Dynamic price phases')
+                    ->schema([
+                        TextInput::make('label')
+                            ->placeholder('Early bird')
+                            ->required()
+                            ->maxLength(40),
+                        TextInput::make('price')
+                            ->numeric()
+                            ->minValue(1)
+                            ->prefix('₹')
+                            ->required(),
+                        TextInput::make('capacity')
+                            ->label('Spots at this price')
+                            ->numeric()
+                            ->minValue(1)
+                            ->required(),
+                    ])
+                    ->columns(3)
+                    ->addActionLabel('Add phase')
+                    ->reorderable()
+                    ->collapsible()
+                    ->visible(fn ($get) => $get('kind') === 'standard')
+                    ->helperText('Optional. Price climbs as spots sell — the first phase fills, then the next. '
+                        . 'The live price is always the earliest phase with room left. Leave empty for a flat price.'),
                 DateTimePicker::make('sales_start')
                     ->label('On sale from')
                     ->helperText('Leave blank to sell immediately (used for Early Bird).'),
@@ -126,6 +154,21 @@ class TicketTypesRelationManager extends RelationManager
         $set('price', $price);
         $set('admits', $admits);
         $set('min_price', $minPrice);
+    }
+
+    /** Prefill a demand-based dynamic-pricing tier with a sensible 3-phase ladder. */
+    private static function applyDynamicPreset(Set $set): void
+    {
+        $set('name', 'Regular Ticket');
+        $set('kind', 'standard');
+        $set('price', 499);
+        $set('admits', 1);
+        $set('min_price', null);
+        $set('pricing_phases', [
+            ['label' => 'Early bird', 'price' => 350, 'capacity' => 20],
+            ['label' => 'Phase 1', 'price' => 450, 'capacity' => 180],
+            ['label' => 'Phase 2', 'price' => 499, 'capacity' => 100],
+        ]);
     }
 
     public function table(Table $table): Table

@@ -66,12 +66,69 @@ final class BookingsController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        $booking = $this->bookings->create($authUser, $request->validated());
+        $bookings = $this->bookings->createOrder(
+            $authUser,
+            (int) $request->validated('eventId'),
+            $request->orderLines(),
+            $request->validated('couponCode'),
+        )->load('ticketType');
+
+        $primary  = $bookings->first();
+        $subtotal = round((float) $bookings->sum('total_amount'), 2);
+        $fee      = round((float) $bookings->sum('convenience_fee'), 2);
+        $discount = round((float) $bookings->sum('discount'), 2);
+        $grand    = round($subtotal + $fee - $discount, 2);
+
+        // Aggregate envelope: the top-level fields keep the legacy single-booking
+        // shape (so older clients keep working) — `totalAmount` is the grand total
+        // charged. `bookings` carries the full per-tier breakdown (one pass each).
+        return response()->json([
+            'message' => 'Booking confirmed',
+            'data'    => [
+                'id'             => $primary->id,
+                'quantity'       => (int) $bookings->sum('quantity'),
+                'subtotal'       => (string) $subtotal,
+                'convenienceFee' => (string) $fee,
+                'discount'       => (string) $discount,
+                'totalAmount'    => (string) $grand,
+                'status'         => $primary->status,
+                'ticketCode'     => $primary->ticket_code,
+                'bookings'       => BookingResource::collection($bookings),
+            ],
+        ], 201);
+    }
+
+    /**
+     * Validate a coupon code for the checkout screen (preview only — the discount is
+     * re-applied authoritatively on booking). Returns the flat ₹ amount it takes off.
+     */
+    public function validateCoupon(Request $request): JsonResponse
+    {
+        $code    = trim((string) $request->input('code'));
+        $eventId = $request->filled('eventId') ? (int) $request->input('eventId') : null;
+        $coupon  = \App\Models\Coupon::findByCode($code);
+
+        if ($coupon === null || ! $coupon->isRedeemable()) {
+            return response()->json([
+                'valid'   => false,
+                'message' => 'This code isn’t valid.',
+            ]);
+        }
+
+        // A coupon scoped to another event must not preview a discount here.
+        if (! $coupon->appliesToEvent($eventId)) {
+            return response()->json([
+                'valid'   => false,
+                'message' => 'This code isn’t valid for this event.',
+            ]);
+        }
 
         return response()->json([
-            'message' => 'Booking created',
-            'data'    => new BookingResource($booking),
-        ], 201);
+            'valid'    => true,
+            'code'     => $coupon->code,
+            'discount' => (float) $coupon->discount,
+            'message'  => 'Coupon applied.',
+        ]);
     }
 
     /** POST /api/bookings/venue — reserve a venue slot for a date. */

@@ -28,11 +28,6 @@ import androidx.compose.ui.unit.sp
 import com.example.thanna.data.CityOption
 import com.example.thanna.data.LocationState
 
-private val popularCities = listOf(
-    "Chennai", "Coimbatore", "Madurai", "Trichy", "Salem",
-    "Tirunelveli", "Vellore", "Erode", "Thoothukudi", "Tiruppur"
-).map { CityOption(it) }
-
 // 0 == "Any distance".
 private val radiusOptions = listOf(2, 5, 10, 25, 0)
 private val accent = Color(0xFF2563EB)
@@ -47,11 +42,16 @@ fun LocationPickerSheet(
     onUseCurrentLocation: () -> Unit,
     onSelectCity: (CityOption) -> Unit,
     onDismiss: () -> Unit,
+    // Sourced from the shared cities.json catalog; falls back to popular-only when empty.
+    popularCities: List<CityOption> = emptyList(),
+    allCities: List<CityOption> = emptyList(),
 ) {
     var citySearch by remember { mutableStateOf("") }
     val q = citySearch.trim()
     val filteredRecents = recents.filter { q.isBlank() || it.name.contains(q, ignoreCase = true) }
-    val filteredPopular = popularCities.filter { q.isBlank() || it.name.contains(q, ignoreCase = true) }
+    // Blank query → the popular shortlist; typing → search the whole catalog.
+    val cityResults = if (q.isBlank()) popularCities
+        else allCities.filter { it.name.contains(q, ignoreCase = true) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -74,8 +74,14 @@ fun LocationPickerSheet(
                 Icon(Icons.Default.MyLocation, contentDescription = null, tint = accent)
                 Column {
                     Text("Use current location", fontWeight = FontWeight.Medium)
-                    if (state is LocationState.Locating) {
-                        Text("Detecting…", fontSize = 12.sp, color = Color(0xFF64748B))
+                    val hint = when (state) {
+                        LocationState.Locating -> "Detecting…"
+                        LocationState.Denied -> "Location permission off — tap to allow"
+                        LocationState.Unavailable -> "Couldn't get a fix — check GPS is on"
+                        else -> null
+                    }
+                    if (hint != null) {
+                        Text(hint, fontSize = 12.sp, color = Color(0xFF64748B))
                     }
                 }
             }
@@ -136,12 +142,15 @@ fun LocationPickerSheet(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             }
 
-            Text("Popular Cities", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF64748B))
+            Text(
+                if (q.isBlank()) "Popular Cities" else "Results",
+                fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF64748B),
+            )
             LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
-                items(filteredPopular) { city ->
+                items(cityResults) { city ->
                     CityRow(city, onSelectCity)
                 }
-                if (filteredPopular.isEmpty()) {
+                if (cityResults.isEmpty()) {
                     item {
                         Text(
                             "No cities match \"$q\"",

@@ -72,6 +72,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.thanna.ui.components.AutoRefresh
+import com.example.thanna.ui.util.openMap
 import com.example.thanna.VenueDetail
 import com.example.thanna.data.ApiConfig
 import com.example.thanna.data.BookingRepository
@@ -256,9 +257,7 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                 val addr = detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location
                 val q = if (lat != null && lng != null) "$lat,$lng($name)"
                 else "$name $addr"
-                runCatching {
-                  ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=${Uri.encode(q)}")))
-                }
+                openMap(ctx, detail?.mapLink, q)
               }
               .padding(horizontal = 14.dp, vertical = 8.dp)
           ) {
@@ -332,9 +331,7 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                   modifier = Modifier.clickable {
                     val q = if (d.latitude != null && d.longitude != null) "${d.latitude},${d.longitude}(${d.name})"
                     else "${d.name} ${d.location}"
-                    runCatching {
-                      ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=${Uri.encode(q)}")))
-                    }
+                    openMap(ctx, d.mapLink, q)
                   }
                 )
               }

@@ -57,6 +57,9 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.activity.compose)
 
+  // Fused location (fresh GPS fix instead of the flaky LocationManager last-known)
+  implementation("com.google.android.gms:play-services-location:21.3.0")
+
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.viewmodel.compose)

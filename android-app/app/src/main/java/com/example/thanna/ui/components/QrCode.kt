@@ -33,7 +33,8 @@ fun QrImage(
 fun generateQrBitmap(content: String, size: Int): Bitmap? = try {
   val hints = mapOf(
     EncodeHintType.MARGIN to 1,
-    EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+    // Level H (30% recovery) so a centered brand logo occluding the middle can't break a scan.
+    EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
   )
   val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
   val w = matrix.width

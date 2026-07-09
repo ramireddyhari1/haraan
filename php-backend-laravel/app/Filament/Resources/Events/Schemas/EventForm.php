@@ -38,6 +38,90 @@ class EventForm
         'EXHIBITION' => 'Exhibition',
     ];
 
+    /**
+     * City dropdown options sourced from the same `public/data/cities.json` the
+     * app/website pickers use, keyed by name so the stored value matches what
+     * the event page displays (e.g. "Hyderabad"). Falls back to a small default
+     * set if the file is missing or unreadable.
+     *
+     * @return array<string, string>
+     */
+    private static function cityOptions(): array
+    {
+        $path = public_path('data/cities.json');
+        $cities = is_file($path)
+            ? json_decode((string) file_get_contents($path), true)
+            : null;
+
+        if (! is_array($cities)) {
+            return ['Hyderabad' => 'Hyderabad', 'Bengaluru' => 'Bengaluru', 'Chennai' => 'Chennai'];
+        }
+
+        $options = [];
+        foreach ($cities as $c) {
+            $name = is_array($c) ? trim((string) ($c['name'] ?? '')) : '';
+            if ($name !== '') {
+                $options[$name] = $name;
+            }
+        }
+
+        return $options === [] ? ['Hyderabad' => 'Hyderabad'] : $options;
+    }
+
+    /**
+     * Fold the `image_urls` helper field into the `images` column on save: real
+     * uploads first, pasted URLs after (so an uploaded poster wins when both are
+     * present). The helper key is removed so it never hits the model. Shared by
+     * the Create and Edit pages.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function mergeImageSources(array $data): array
+    {
+        $files = array_values(array_filter(
+            (array) ($data['images'] ?? []),
+            static fn ($i): bool => is_string($i) && trim($i) !== '',
+        ));
+        $urls = array_values(array_filter(
+            array_map(static fn ($u) => trim((string) $u), (array) ($data['image_urls'] ?? [])),
+            static fn ($u): bool => $u !== '',
+        ));
+
+        $data['images'] = array_values(array_merge($files, $urls));
+        unset($data['image_urls']);
+
+        return $data;
+    }
+
+    /**
+     * Inverse of {@see mergeImageSources()} for the Edit form: split the stored
+     * `images` back into uploaded files (shown in the FileUpload) and pasted
+     * http(s) URLs (shown in the TagsInput), so the FileUpload never chokes on a
+     * remote URL it can't resolve as a local file.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function splitImageSources(array $data): array
+    {
+        $all = array_values(array_filter(
+            (array) ($data['images'] ?? []),
+            static fn ($i): bool => is_string($i) && trim($i) !== '',
+        ));
+
+        $data['images'] = array_values(array_filter(
+            $all,
+            static fn ($i): bool => ! preg_match('#^https?://#i', $i),
+        ));
+        $data['image_urls'] = array_values(array_filter(
+            $all,
+            static fn ($i): bool => (bool) preg_match('#^https?://#i', $i),
+        ));
+
+        return $data;
+    }
+
     public static function configure(Schema $schema): Schema
     {
         return $schema
@@ -102,15 +186,28 @@ class EventForm
                     ->format('g:i A')       // store "7:00 PM" to match existing display strings
                     ->displayFormat('g:i A')
                     ->placeholder('7:00 PM'),
+                Select::make('city')
+                    ->label('City')
+                    ->options(self::cityOptions())
+                    ->required()
+                    ->searchable()
+                    ->native(false)
+                    ->helperText('Shown beside the date on the event page and drives city filtering.'),
                 TextInput::make('venue')
                     ->label('Venue name')
                     ->required()
-                    ->placeholder('e.g. Quake Arena')
-                    ->columnSpanFull(),
+                    ->placeholder('e.g. Quake Arena'),
                 TextInput::make('location')
                     ->label('Area / address')
                     ->required()
                     ->placeholder('e.g. Kondapur, Hyderabad')
+                    ->columnSpanFull(),
+                TextInput::make('map_link')
+                    ->label('Google Maps link')
+                    ->url()
+                    ->maxLength(600)
+                    ->placeholder('https://maps.app.goo.gl/…')
+                    ->helperText('Open the venue in Google Maps → Share → Copy link, and paste it here. Powers the "Directions" button.')
                     ->columnSpanFull(),
             ]);
     }
@@ -235,11 +332,18 @@ class EventForm
                     ->helperText('Shown as a swipeable "Who takes the stage" carousel in the app.')
                     ->schema([
                         FileUpload::make('image')
-                            ->label('Photo')
+                            ->label('Photo — upload')
                             ->image()
                             ->disk('public')
                             ->directory('events/lineup')
                             ->imageEditor()
+                            ->helperText('Upload a square photo (600×600px, 1:1 · under 20MB), or paste an image URL below instead.')
+                            ->columnSpanFull(),
+                        TextInput::make('image_url')
+                            ->label('…or image URL')
+                            ->url()
+                            ->placeholder('https://…/artist.jpg')
+                            ->helperText('Used when no photo is uploaded above.')
                             ->columnSpanFull(),
                         TextInput::make('name')
                             ->required()
@@ -277,6 +381,26 @@ class EventForm
                     ->default(0)
                     ->prefix('₹')
                     ->helperText('Starting price. Add Gold / VIP / Early-Bird tiers after saving.'),
+                Select::make('convenience_fee_type')
+                    ->label('Convenience fee')
+                    ->options([
+                        'none'    => 'No fee',
+                        'flat'    => 'Flat ₹ amount',
+                        'percent' => 'Percentage of subtotal',
+                    ])
+                    ->default('none')
+                    ->native(false)
+                    ->live()
+                    ->helperText('Added on top of the ticket subtotal at checkout.'),
+                TextInput::make('convenience_fee_value')
+                    ->label(fn (Get $get): string => $get('convenience_fee_type') === 'percent' ? 'Fee percentage' : 'Fee amount')
+                    ->numeric()
+                    ->minValue(0)
+                    ->default(0)
+                    ->prefix(fn (Get $get): ?string => $get('convenience_fee_type') === 'flat' ? '₹' : null)
+                    ->suffix(fn (Get $get): ?string => $get('convenience_fee_type') === 'percent' ? '%' : null)
+                    ->visible(fn (Get $get): bool => in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
+                    ->helperText('Buyers see this as a "Convenience fee" line on the order summary.'),
                 Toggle::make('seat_selection')
                     ->label('Assigned seating (reserved seats)')
                     ->live()
@@ -303,14 +427,19 @@ class EventForm
             ->icon('heroicon-o-rocket-launch')
             ->schema([
                 FileUpload::make('images')
-                    ->label('Cover image(s)')
+                    ->label('Cover image(s) — upload')
                     ->image()
                     ->multiple()
                     ->reorderable()
                     ->disk('public')
                     ->directory('events')
                     ->imageEditor()
-                    ->helperText('The first image is used as the poster.')
+                    ->helperText('Upload files, OR paste image links below — use whichever you prefer (or both). The first image (uploaded, then pasted) is the poster. Recommended: portrait 1080×1350px (4:5) or landscape 1200×800px (3:2) · JPG or PNG · under 20MB.')
+                    ->columnSpanFull(),
+                TagsInput::make('image_urls')
+                    ->label('…or paste image URL(s)')
+                    ->placeholder('https://…/poster.jpg  — press Enter')
+                    ->helperText('Paste direct image links instead of (or in addition to) uploading. Each link must end in the image itself.')
                     ->columnSpanFull(),
                 Select::make('booking_format')
                     ->label('Format')
@@ -343,12 +472,37 @@ class EventForm
                     ->required()
                     ->native(false)
                     ->default('draft'),
+                Select::make('placements')
+                    ->label('Show in sections')
+                    ->multiple()
+                    ->options([
+                        'for_you'  => 'For You (featured hero)',
+                        'trending' => 'Trending',
+                        'nearby'   => 'Explore Nearby',
+                    ])
+                    ->default(['for_you', 'trending', 'nearby'])
+                    ->native(false)
+                    ->helperText('Which rails on the app\'s Events tab this event appears in. Leave all on to show it everywhere.'),
                 Select::make('partner_id')
                     ->label('Host / organizer')
                     ->relationship('partner', 'name')
                     ->searchable()
                     ->preload()
                     ->default(fn () => auth()->id()),
+                TextInput::make('rating')
+                    ->label('Rating')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(5)
+                    ->step(0.1)
+                    ->placeholder('e.g. 4.8')
+                    ->helperText('Shown on the event detail row. Leave blank to hide it.'),
+                TextInput::make('ratings_count')
+                    ->label('Number of ratings')
+                    ->numeric()
+                    ->minValue(0)
+                    ->default(0)
+                    ->helperText('How many people rated it (shown as "(123)" next to the star).'),
             ]);
     }
 }

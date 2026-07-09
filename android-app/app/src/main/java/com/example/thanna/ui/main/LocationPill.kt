@@ -56,23 +56,16 @@ fun LocationPill(
     val captionColor = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B)
 
     val locating = state is LocationState.Locating
-    val area = when (state) {
-        is LocationState.City -> state.area
-        is LocationState.Resolved -> state.area
-        else -> ""
-    }
+    val area = (state as? LocationState.Resolved)?.area ?: ""
     val city = when (state) {
-        is LocationState.City -> state.name
         is LocationState.Resolved -> state.city
         LocationState.Locating -> "Locating…"
+        LocationState.Denied -> "Enable location"
+        LocationState.Unavailable -> "Set location"
         else -> "Set location"
     }
-    val district = when (state) {
-        is LocationState.City -> state.district
-        is LocationState.Resolved -> state.district
-        else -> ""
-    }
-    val hasCity = state is LocationState.City || state is LocationState.Resolved
+    val district = (state as? LocationState.Resolved)?.district ?: ""
+    val hasCity = state is LocationState.Resolved
 
     fun radiusLabel() = radiusKm?.let { if (it == 0) "Any" else "$it km" }
 

@@ -19,16 +19,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.example.thanna.EventDetail
+import com.example.thanna.OrderSummary
 import com.example.thanna.data.EventDetailInfo
 import com.example.thanna.data.EventRepository
 import com.example.thanna.ui.main.eventdetail.*
+import com.example.thanna.ui.util.openMap
 import com.example.thanna.ui.theme.HaraanColors
 import com.example.thanna.ui.theme.HaraanRadius
 import com.example.thanna.ui.theme.HaraanSpacing
 import kotlinx.coroutines.delay
 
 @Composable
-fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
+fun EventDetailScreen(
+    event: EventDetail,
+    onBack: () -> Unit,
+    onCheckout: (OrderSummary) -> Unit = {},
+) {
     val scrollState = rememberScrollState()
 
     // Load full detail once: sellable ticket tiers for the booking bar plus the
@@ -127,10 +133,11 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                     .background(HaraanColors.Surface)
                     .padding(top = HaraanSpacing.Medium, bottom = 180.dp)
             ) {
-                // Identity Row — category, rating, attending, featured
+                // Identity Row — category pill + aggregate rating (from detail).
                 EventIdentityRow(
                     category = event.category,
-                    bookedThisWeek = event.bookedThisWeek
+                    rating = detail.rating,
+                    ratingsCount = detail.ratingsCount
                 )
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Compact))
@@ -138,7 +145,8 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                 // Title + rich date line ("Sun, 5 Jul, 8:00 PM")
                 EventHeader(
                     title = event.title,
-                    date = detail.fullDate.ifBlank { event.date }
+                    date = detail.fullDate.ifBlank { event.date },
+                    city = detail.city
                 )
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
@@ -155,12 +163,8 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                     venue = event.venue,
                     scheduleAvailable = detail.schedule.isNotEmpty(),
                     onVenueClick = {
-                        if (event.venue.isNotBlank()) {
-                            val uri = Uri.parse("geo:0,0?q=" + Uri.encode(event.venue))
-                            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            runCatching { context.startActivity(intent) }
+                        if (event.venue.isNotBlank() || detail.mapLink.isNotBlank()) {
+                            openMap(context, detail.mapLink, event.venue)
                         }
                     },
                     onScheduleClick = { showSchedule = true }
@@ -168,11 +172,12 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
-                // About Section — prose overview only
+                // About Section — the admin's real description from the detail API;
+                // the nav-key value is only a fallback for sample/offline events.
                 EventAboutSection(
                     title = event.title,
                     venue = event.venue,
-                    description = event.description
+                    description = detail.description.ifBlank { event.description }
                 )
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
@@ -194,7 +199,7 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
                 }
 
                 // Venue — name, address & a working "Get directions" action
-                EventVenueSection(venue = event.venue)
+                EventVenueSection(venue = event.venue, mapLink = detail.mapLink)
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
@@ -224,6 +229,21 @@ fun EventDetailScreen(event: EventDetail, onBack: () -> Unit) {
             barRise = barRise,
             eventId = eventIdInt,
             ticketTypes = ticketTypes,
+            onCheckout = { lines ->
+                onCheckout(
+                    OrderSummary(
+                        eventId = eventIdInt ?: -1,
+                        title = event.title,
+                        date = detail.fullDate.ifBlank { event.date },
+                        venue = event.venue,
+                        imageUrl = event.imageUrl,
+                        lines = lines,
+                        feeType = detail.feeType,
+                        feeValue = detail.feeValue,
+                        infoNotes = infoNotes,
+                    )
+                )
+            },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
     }

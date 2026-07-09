@@ -12,6 +12,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.example.thanna.data.TokenStore
 import com.example.thanna.ui.main.EventDetailScreen
 import com.example.thanna.ui.main.MainScreen
+import com.example.thanna.ui.main.OrderSummaryScreen
 import com.example.thanna.ui.main.PriceChartScreen
 import com.example.thanna.ui.main.SupportChatScreen
 import com.example.thanna.ui.main.VenueDetailScreen
@@ -33,6 +34,13 @@ fun MainNavigation() {
         entry<EventDetail> { event ->
           EventDetailScreen(
             event = event,
+            onBack = { backStack.removeLastOrNull() },
+            onCheckout = { order -> backStack.add(order) }
+          )
+        }
+        entry<OrderSummary> { order ->
+          OrderSummaryScreen(
+            order = order,
             onBack = { backStack.removeLastOrNull() }
           )
         }

@@ -17,6 +17,11 @@ class CouponsTable
             ->columns([
                 TextColumn::make('code')
                     ->searchable(),
+                TextColumn::make('event.title')
+                    ->label('Event')
+                    ->placeholder('All events')
+                    ->badge()
+                    ->searchable(),
                 TextColumn::make('discount')
                     ->numeric()
                     ->sortable(),

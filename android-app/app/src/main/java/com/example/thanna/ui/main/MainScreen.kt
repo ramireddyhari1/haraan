@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SportsFootball
 import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.material.icons.filled.SportsBasketball
+import androidx.compose.material.icons.filled.SportsVolleyball
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
@@ -451,6 +452,12 @@ internal fun MainAppContainer(
   // Common account profile (shared by Events + GameHub) + linked cricket profile.
   var showAccountProfile by remember { mutableStateOf(false) }
   var showCricketProfile by remember { mutableStateOf(false) }
+  // Header utility icons: bell → notifications, calendar → "My Schedule" agenda. Shared by both
+  // the Events and GameHub headers so the icons work wherever they appear.
+  var showNotifications by remember { mutableStateOf(false) }
+  var showSchedule by remember { mutableStateOf(false) }
+  // The booking whose entry-pass QR is currently open (null = none). Set from My Schedule taps.
+  var ticketPass by remember { mutableStateOf<com.example.thanna.data.BookingLite?>(null) }
   val accountRepository = remember { com.example.thanna.data.AccountRepository() }
   val playerProfileRepository = remember { com.example.thanna.data.ProfileRepository() }
 
@@ -477,6 +484,8 @@ internal fun MainAppContainer(
   var showLocationSheet by remember { mutableStateOf(false) }
   // Search radius for nearby content; 0 == "Any distance". (Phase 3)
   var searchRadiusKm by remember { mutableStateOf(10) }
+  // Pull the latest city catalog (cities.json) once so the picker + normaliser are current.
+  LaunchedEffect(Unit) { runCatching { locationRepository.refreshCatalog() } }
 
   fun detectLocation() {
     locationState = com.example.thanna.data.LocationState.Locating
@@ -516,7 +525,9 @@ internal fun MainAppContainer(
         locationState = locationRepository.selectCity(option)
         showLocationSheet = false
       },
-      onDismiss = { showLocationSheet = false }
+      onDismiss = { showLocationSheet = false },
+      popularCities = locationRepository.popularCities(),
+      allCities = locationRepository.allCities()
     )
   }
 
@@ -626,6 +637,8 @@ internal fun MainAppContainer(
               onAvatarClick = { showAccountProfile = true },
               onLocationClick = { showLocationSheet = true },
               onChatClick = { onItemClick(com.example.thanna.SupportChat) },
+              onNotificationClick = { showNotifications = true },
+              onCalendarClick = { showSchedule = true },
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -849,6 +862,7 @@ internal fun MainAppContainer(
             if (activeSubTab == "Events") {
               EventsTabScreen(
                 searchQuery = searchQuery,
+                currentCity = (locationState as? com.example.thanna.data.LocationState.Resolved)?.city?.trim().orEmpty(),
                 onEventClick = { event ->
                   onItemClick(
                     EventDetail(
@@ -887,6 +901,8 @@ internal fun MainAppContainer(
                 onLocateClick = { requestCurrentLocation() },
                 onMatchClick = { id -> onItemClick(com.example.thanna.MatchDetails(id)) },
                 onSupportClick = { onItemClick(com.example.thanna.SupportChat) },
+                onNotificationsClick = { showNotifications = true },
+                onCalendarClick = { showSchedule = true },
                 onVenueClick = { v ->
                   onItemClick(
                     com.example.thanna.VenueDetail(
@@ -924,6 +940,25 @@ internal fun MainAppContainer(
         modifier = Modifier.statusBarsPadding(),
       )
     }
+
+    // Header bell → notifications; header calendar → "My Schedule". Shared by both headers.
+    if (showNotifications) {
+      NotificationsSheet(onDismiss = { showNotifications = false })
+    }
+    if (showSchedule) {
+      ScheduleSheet(
+        onDismiss = { showSchedule = false },
+        fetchBookings = { accountRepository.fetchBookings(token) },
+        onBookingClick = { b ->
+          showSchedule = false
+          ticketPass = b
+        },
+      )
+    }
+    // Full-screen entry pass (QR) for a tapped booking — shown above everything else.
+    ticketPass?.let { b ->
+      TicketPassScreen(booking = b, onClose = { ticketPass = null })
+    }
   }
 }
 }
@@ -933,6 +968,7 @@ internal fun MainAppContainer(
 @Composable
 private fun EventsTabScreen(
   searchQuery: String,
+  currentCity: String = "",
   onEventClick: (EventItem) -> Unit
 ) {
   var selectedCategory by remember { mutableStateOf("All") }
@@ -1022,7 +1058,7 @@ private fun EventsTabScreen(
       val fetched = runCatching { eventRepo.getEvents() }.getOrNull().orEmpty()
       if (fetched.isNotEmpty()) {
         eventsData = fetched.map {
-          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast)
+          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast, it.rating, it.placements, it.city)
         }
       }
     }
@@ -1040,6 +1076,12 @@ private fun EventsTabScreen(
       else -> true
     }
     matchesSearch && matchesCategory
+  }.let { list ->
+    // Local-first: float events in the user's city to the top (stable — original
+    // order preserved within each group). Still shows every event. No-op when the
+    // user hasn't set a location.
+    if (currentCity.isBlank()) list
+    else list.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
   }
 
   // Sponsored ad from the Filament admin (GET /api/ads?placement=events);
@@ -1091,6 +1133,14 @@ private fun EventsTabScreen(
       )
     }
 
+    // Per-rail placement: an event shows in a rail when its admin-set `placements`
+    // include that rail's key. Empty placements (older/untagged events) show
+    // everywhere. The .ifEmpty guard keeps a rail from ever rendering blank.
+    fun showsIn(rail: String, e: EventItem) = e.placements.isEmpty() || rail in e.placements
+    val forYouEvents = filteredEvents.filter { showsIn("for_you", it) }.ifEmpty { filteredEvents }
+    val trendingEvents = filteredEvents.filter { showsIn("trending", it) }.ifEmpty { filteredEvents }
+    val nearbyEvents = filteredEvents.filter { showsIn("nearby", it) }.ifEmpty { filteredEvents }
+
     // 2. Hero Section: "Featured For You" with Infinite 3D Loop Pager
     item {
       SectionHeader(
@@ -1099,7 +1149,7 @@ private fun EventsTabScreen(
     }
 
     item {
-      InfiniteLoopBookPager(events = filteredEvents, onEventClick = onEventClick)
+      InfiniteLoopBookPager(events = forYouEvents, onEventClick = onEventClick)
     }
 
     // 3. Trending Section
@@ -1109,7 +1159,7 @@ private fun EventsTabScreen(
       )
     }
     item {
-      TrendingRowSection(events = filteredEvents, onEventClick = onEventClick)
+      TrendingRowSection(events = trendingEvents, onEventClick = onEventClick)
     }
 
     // 4. Categories Section (Concerts, Standup, All)
@@ -1164,7 +1214,7 @@ private fun EventsTabScreen(
       )
     }
 
-    if (filteredEvents.isEmpty()) {
+    if (nearbyEvents.isEmpty()) {
       item {
         Column(
           modifier = Modifier
@@ -1194,7 +1244,7 @@ private fun EventsTabScreen(
         }
       }
     } else {
-      val eventChunks = filteredEvents.chunked(2)
+      val eventChunks = nearbyEvents.chunked(2)
       items(eventChunks.size) { i ->
         val chunk = eventChunks[i]
         Row(
@@ -1298,7 +1348,10 @@ private data class EventItem(
   val price: String,
   val category: String,
   val imageUrl: String,
-  val isFillingFast: Boolean = false
+  val isFillingFast: Boolean = false,
+  val rating: Double = 0.0,
+  val placements: List<String> = emptyList(),
+  val city: String = ""
 )
 
 // Category-aware blurb so the detail page reads about THIS event instead of one
@@ -1498,6 +1551,8 @@ private fun GameHubTabScreen(
   onMatchClick: (String) -> Unit = {},
   onVenueClick: (VenueItem) -> Unit = {},
   onSupportClick: () -> Unit = {},
+  onNotificationsClick: () -> Unit = {},
+  onCalendarClick: () -> Unit = {},
   userName: String = "",
   avatarUrl: String = ""
 ) {
@@ -1543,7 +1598,7 @@ private fun GameHubTabScreen(
       venuesData = api?.map { c ->
         VenueItem(
           id = c.id, title = c.name, location = c.location, rating = c.rating,
-          category = c.category, price = c.price,
+          category = c.category, sports = c.sports, price = c.price,
           imageUrl = c.image ?: venueCategoryImage(c.category),
           tagline = c.tagline, distance = c.distance, availableTonight = true
         )
@@ -1672,7 +1727,8 @@ private fun GameHubTabScreen(
           onAvatarClick = onProfileClick,
           onLocationClick = onLocationClick,
           onChatClick = onSupportClick,
-          onNotificationClick = { /* Notifications */ },
+          onNotificationClick = onNotificationsClick,
+          onCalendarClick = onCalendarClick,
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -1735,7 +1791,9 @@ private fun GameHubTabScreen(
 
         // Hero ends after the switch — the dense ActionBoard moved out of the green band
         // (below) so the band stays a clean three-element backdrop, not a crammed slab.
-        Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+        // Tight gap here (the ActionBoard card overlaps 32dp up onto the seam anyway) so the
+        // green band doesn't leave a dead void under the switch.
+        Spacer(modifier = Modifier.height(HaraanSpacing.Small))
       }
       }
     }
@@ -1851,11 +1909,8 @@ private fun GameHubTabScreen(
     // 2. Leaderboard — sits right under the live ActionBoard (both are competitive/live in
     // flavor) so it no longer splits the two venue sections below.
     item {
-      val homeDistrict = when (val s = locationState) {
-        is com.example.thanna.data.LocationState.City -> s.district.ifBlank { s.name }
-        is com.example.thanna.data.LocationState.Resolved -> s.district.ifBlank { s.city }
-        else -> null
-      }
+      val homeDistrict = (locationState as? com.example.thanna.data.LocationState.Resolved)
+        ?.let { it.district.ifBlank { it.city } }
       LeaderboardHomeWidget(district = homeDistrict)
     }
 
@@ -1950,6 +2005,10 @@ private fun GameHubTabScreen(
 
     // 4. Header
     item {
+      // The header bonds to the sport-filter chips directly above (they filter these venues).
+      // overlapAbove reclaims most of the LazyColumn's 16dp inter-item spacing so there's no
+      // dead band between the chips and this title.
+      Box(modifier = Modifier.overlapAbove(12.dp)) {
       GameHubSectionHeader(
         title = "Popular Venues",
         // Contextual subtitle — carries a real venue count so the section feels inhabited.
@@ -1959,8 +2018,12 @@ private fun GameHubTabScreen(
           else -> "${filteredVenues.size} near you • top rated"
         },
         actionText = "View all",
-        onActionClick = { showSearch = true }
+        onActionClick = { showSearch = true },
+        // Bond to the sport-filter chips directly above (they filter these venues) — the default
+        // 12dp top pad on top of the list's 16dp spacing left the dead band flagged on GameHub.
+        topPadding = 2.dp,
       )
+      }
     }
 
     // 5. Highlight reel — skeleton while loading (null), honest empty note once loaded empty.
@@ -2021,7 +2084,13 @@ private fun GameHubTabScreen(
         "feed_section" -> {
           val cards = feedSections[block.config["section"] ?: "for_you"].orEmpty()
           if (cards.isNotEmpty()) {
-            item { GameHubSectionHeader(title = block.title ?: "For you") }
+            // overlapAbove trims the LazyColumn's inter-item spacing so "For you" sits closer
+            // to the venue reel above it instead of leaving a wide dead band.
+            item {
+              Box(modifier = Modifier.overlapAbove(10.dp)) {
+                GameHubSectionHeader(title = block.title ?: "For you")
+              }
+            }
             item {
               androidx.compose.foundation.lazy.LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -2123,7 +2192,9 @@ private fun GreetingHeader(
   onChatClick: () -> Unit = {},
   onNotificationClick: () -> Unit = {},
   onCalendarClick: () -> Unit = {},
-  hasUnread: Boolean = true,
+  // No per-user notifications feed exists yet, so don't show a fake unread dot. Flip to true
+  // (or wire to a real count) once the notifications API lands.
+  hasUnread: Boolean = false,
   modifier: Modifier = Modifier,
 ) {
   val ink = if (onDark) Color.White else HaraanColors.TextPrimary
@@ -2136,21 +2207,12 @@ private fun GreetingHeader(
 
   // Location line: "<PlusCode> <place>", mirroring the reference. Falls back gracefully.
   val city = when (locationState) {
-    is com.example.thanna.data.LocationState.City -> locationState.name
     is com.example.thanna.data.LocationState.Resolved -> locationState.city
     com.example.thanna.data.LocationState.Locating -> "Locating…"
     else -> "Set location"
   }
-  val area = when (locationState) {
-    is com.example.thanna.data.LocationState.City -> locationState.area
-    is com.example.thanna.data.LocationState.Resolved -> locationState.area
-    else -> ""
-  }
-  val plus = when (locationState) {
-    is com.example.thanna.data.LocationState.City -> locationState.plusCode
-    is com.example.thanna.data.LocationState.Resolved -> locationState.plusCode
-    else -> ""
-  }
+  val area = (locationState as? com.example.thanna.data.LocationState.Resolved)?.area ?: ""
+  val plus = (locationState as? com.example.thanna.data.LocationState.Resolved)?.plusCode ?: ""
   val place = area.ifBlank { city }
   val locationText = listOf(plus, place).filter { it.isNotBlank() }.joinToString(" ")
 
@@ -2168,19 +2230,20 @@ private fun GreetingHeader(
         .clickable { onAvatarClick() },
       contentAlignment = Alignment.Center
     ) {
+      // Initial-letter fallback always sits underneath, so a blank OR failed/loading photo
+      // still shows the letter instead of an empty circle (the "profile pic not showing" bug).
+      Text(
+        text = firstName.take(1).uppercase(),
+        color = ink,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp
+      )
       if (avatarUrl.isNotBlank()) {
         AsyncImage(
           model = avatarUrl,
           contentDescription = "Profile",
           contentScale = ContentScale.Crop,
           modifier = Modifier.fillMaxSize().clip(CircleShape)
-        )
-      } else {
-        Text(
-          text = firstName.take(1).uppercase(),
-          color = ink,
-          fontWeight = FontWeight.Bold,
-          fontSize = 18.sp
         )
       }
     }
@@ -2295,13 +2358,18 @@ private fun GameHubSectionHeader(
   subtitle: String? = null,
   actionText: String? = null,
   onActionClick: (() -> Unit)? = null,
+  // Space ABOVE the title. Defaults to 12dp (separates from an unrelated previous section);
+  // pass a smaller value when the header should BOND to what precedes it — e.g. the venues
+  // header sits right under the sport-filter chips that filter it, so the standard 12dp left a
+  // dead band there (the extra gap flagged on GameHub).
+  topPadding: androidx.compose.ui.unit.Dp = 12.dp,
 ) {
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      // Asymmetric padding: extra space ABOVE (separates from the previous section) and none
+      // Asymmetric padding: [topPadding] above (separates from the previous section) and none
       // below (bonds the title tightly to its own content) so sections read as groups.
-      .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp)
+      .padding(start = 16.dp, end = 16.dp, top = topPadding, bottom = 0.dp)
   ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -2350,7 +2418,10 @@ private fun FeedCardView(
   val feedCtx = LocalContext.current
   Card(
     modifier = Modifier
+      // Fixed footprint so every "For you" card is identical — a title-only card and a
+      // card with subtitle + rating no longer render at different heights in the row.
       .width(260.dp)
+      .height(228.dp)
       .premiumCardShadow(radius = UnifiedCornerRadius)
       .clickable {
         // Central deep-link routing: match → in-app, url → browser, unknown → no-op.
@@ -2360,7 +2431,7 @@ private fun FeedCardView(
     colors = CardDefaults.cardColors(containerColor = Color.White),
     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
   ) {
-    Column {
+    Column(modifier = Modifier.fillMaxSize()) {
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -2405,7 +2476,7 @@ private fun FeedCardView(
           )
         }
       }
-      Column(modifier = Modifier.padding(12.dp)) {
+      Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)) {
         Text(
           text = card.title,
           color = HaraanColors.TextPrimary,
@@ -2455,7 +2526,9 @@ private fun AdStripCard(ad: com.example.thanna.data.AdItem) {
   val adCtx = LocalContext.current
   Card(
     modifier = Modifier
-      .width(300.dp)
+      // Same width as the "For you" feed cards so the sponsored row lines up with them
+      // instead of reading as a differently-sized strip.
+      .width(260.dp)
       .premiumCardShadow(radius = UnifiedCornerRadius)
       .clickable { com.example.thanna.ui.openExternalUrl(adCtx, ad.ctaUrl) },
     shape = RoundedCornerShape(UnifiedCornerRadius),
@@ -2809,21 +2882,29 @@ private fun PopularArenaCard(
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.Bottom
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-              text = "₹${venue.price}",
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 15.sp
-            )
-            Text(
-              text = "/hr",
-              color = HaraanColors.TextSecondary,
-              fontSize = 11.sp,
-              modifier = Modifier.padding(bottom = 2.dp)
-            )
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Bottom) {
+              Text(
+                text = "₹${venue.price}",
+                color = HaraanColors.TextPrimary,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp
+              )
+              Text(
+                text = "/hr",
+                color = HaraanColors.TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 2.dp)
+              )
+            }
+            // Sports playable here — fills the gap between price and distance. Two icons max,
+            // then a "+N" pill, so a multi-sport turf reads at a glance without crowding.
+            if (venue.sports.isNotEmpty()) {
+              Spacer(modifier = Modifier.width(8.dp))
+              VenueSportsIcons(sports = venue.sports)
+            }
           }
           if (venue.distance.isNotBlank()) {
             // Neutral slate chip — distance is metadata, not an accent. (Was brand-blue,
@@ -2846,7 +2927,10 @@ private fun PopularArenaCard(
                 text = venue.distance,
                 color = HaraanColors.TextSecondary,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                // Never wrap — a wrapped "2.4 km" made this card taller than its neighbours.
+                maxLines = 1,
+                softWrap = false
               )
             }
           }
@@ -2856,12 +2940,66 @@ private fun PopularArenaCard(
   }
 }
 
+// Compact sport-availability row for a venue card: up to two sport icons, then a "+N" when the
+// venue offers more. Bare glyphs (no disc) so they stay light and take little width. De-duped by
+// glyph so two sports that share an icon (e.g. badminton/tennis) never render the same icon twice.
+@Composable
+private fun VenueSportsIcons(sports: List<String>) {
+  val distinct = sports.distinctBy { sportGlyphKey(it) }
+  if (distinct.isEmpty()) return
+  val shown = distinct.take(2)
+  val extra = (distinct.size - shown.size).coerceAtLeast(0)
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(4.dp)
+  ) {
+    shown.forEach { sport ->
+      Icon(
+        imageVector = venueSportIcon(sport),
+        contentDescription = sport,
+        tint = HaraanColors.GameHubDeep,
+        modifier = Modifier.size(16.dp)
+      )
+    }
+    if (extra > 0) {
+      Text(
+        text = "+$extra",
+        color = HaraanColors.TextSecondary,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold
+      )
+    }
+  }
+}
+
+// Sport name → glyph. Mirrors the sport-filter chips so a venue's icon matches its chip. Unknown
+// sports fall back to a generic ball rather than dropping the icon.
+private fun venueSportIcon(sport: String): androidx.compose.ui.graphics.vector.ImageVector = when (sportGlyphKey(sport)) {
+  "cricket" -> Icons.Default.SportsCricket
+  "football" -> Icons.Default.SportsFootball
+  "racket" -> Icons.Default.SportsTennis
+  "volleyball" -> Icons.Default.SportsVolleyball
+  else -> Icons.Default.SportsBasketball // basketball + generic fallback
+}
+
+// Canonical glyph bucket for a sport — used to de-dupe icons (badminton & tennis share the racket
+// glyph, so they collapse to one) and to pick the icon above.
+private fun sportGlyphKey(sport: String): String = when {
+  sport.contains("Cricket", true) -> "cricket"
+  sport.contains("Football", true) || sport.contains("Soccer", true) -> "football"
+  sport.contains("Badminton", true) || sport.contains("Tennis", true) -> "racket"
+  sport.contains("Volley", true) -> "volleyball"
+  else -> "basketball"
+}
+
 private data class VenueItem(
   val id: String,
   val title: String,
   val location: String,
   val rating: String,
   val category: String,
+  // All sports playable here (category first). Rendered as icons on the card.
+  val sports: List<String> = emptyList(),
   val price: Int,
   val imageUrl: String,
   val tagline: String,
@@ -7102,7 +7240,7 @@ private fun InfiniteLoopBookPager(
         price = event.price,
         category = event.category,
         imageUrl = event.imageUrl,
-        isFillingFast = event.isFillingFast,
+        rating = event.rating,
         onClick = { onEventClick(event) },
         modifier = Modifier.fillMaxWidth()
       )

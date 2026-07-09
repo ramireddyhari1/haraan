@@ -29,6 +29,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property array       $images
  * @property string      $status
  * @property int         $views
+ * @property float|null  $rating
+ * @property int         $ratings_count
  * @property int|null    $partner_id
  * @property int|null    $seat_rows
  * @property int|null    $seats_per_row
@@ -55,15 +57,21 @@ final class Event extends Model
         'visibility',
         'access_code',
         'location',
+        'map_link',
         'city',
         'venue',
         'date',
         'time',
         'price',
+        'convenience_fee_type',
+        'convenience_fee_value',
         'total_slots',
         'available_slots',
         'images',
         'status',
+        'placements',
+        'rating',
+        'ratings_count',
         'partner_id',
         'organization_id',
         'seat_rows',
@@ -89,10 +97,14 @@ final class Event extends Model
         return [
             'date'           => 'datetime',
             'price'          => 'float',
+            'convenience_fee_value' => 'float',
             'total_slots'    => 'integer',
             'available_slots'=> 'integer',
             'views'          => 'integer',
+            'rating'         => 'float',
+            'ratings_count'  => 'integer',
             'images'         => 'array',
+            'placements'     => 'array',
             'seat_selection' => 'boolean',
             'seat_rows'      => 'integer',
             'seats_per_row'  => 'integer',
@@ -202,5 +214,25 @@ final class Event extends Model
     public function ticketTypes(): HasMany
     {
         return $this->hasMany(TicketType::class)->orderBy('sort')->orderBy('id');
+    }
+
+    /**
+     * The host-set convenience fee for an order of the given ticket subtotal.
+     * `flat` is a fixed ₹ amount; `percent` is a share of the subtotal. Rounded to
+     * paise and never negative. Returns 0 when no fee is configured or the order is free.
+     */
+    public function convenienceFeeFor(float $subtotal): float
+    {
+        if ($subtotal <= 0) {
+            return 0.0;
+        }
+
+        $value = max(0.0, (float) $this->convenience_fee_value);
+
+        return match ($this->convenience_fee_type) {
+            'flat'    => round($value, 2),
+            'percent' => round($subtotal * $value / 100, 2),
+            default   => 0.0,
+        };
     }
 }

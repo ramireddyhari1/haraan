@@ -34,7 +34,7 @@ fun HaraanEventCard(
     price: String,
     category: String,
     imageUrl: String,
-    isFillingFast: Boolean,
+    rating: Double,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -70,12 +70,11 @@ fun HaraanEventCard(
                 )
         )
 
-        // 3. Category Tag & Live Badge (Top-Left)
+        // 3. Category Tag (Top-Left)
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
@@ -89,40 +88,35 @@ fun HaraanEventCard(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
-            if (isFillingFast) {
-                Surface(
-                    color = HaraanColors.GameHubGreen,
-                    shape = CircleShape
+        }
+
+        // 4. Rating Badge (Top-Right) — consistent star rating across every card.
+        // Shown only when the event actually has a rating (no fabricated star).
+        if (rating > 0.0) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(HaraanRadius.Small),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = "LIVE",
+                        text = "★",
+                        color = Color(0xFFF5A623),
+                        style = HaraanTypography.LabelSmall.copy(fontSize = 11.sp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "%.1f".format(rating),
                         color = Color.White,
-                        style = HaraanTypography.LabelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Black),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        style = HaraanTypography.LabelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     )
                 }
             }
-        }
-
-        // 4. Social Proof Layer (Top-Right)
-        val socialProof = when (title.hashCode() % 3) {
-            0 -> "🔥 120 booked this week"
-            1 -> "⏳ 8 seats left"
-            else -> "⭐ 4.8 rating"
-        }
-        Surface(
-            color = Color.Black.copy(alpha = 0.6f),
-            shape = RoundedCornerShape(HaraanRadius.Small),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-        ) {
-            Text(
-                text = socialProof,
-                color = Color.White,
-                style = HaraanTypography.LabelSmall.copy(fontSize = 9.sp),
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-            )
         }
 
         // 5. Foreground Content (Sits cleanly on bottom gradient)

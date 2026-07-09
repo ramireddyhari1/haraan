@@ -6,16 +6,28 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
 
+/** One row of an inventory-gated dynamic-pricing schedule (early bird → phase 2). */
+data class PricingPhase(
+    val label: String,
+    val price: Double,
+    val from: Int,          // first spot number at this price (1-based)
+    val to: Int,            // last spot number at this price
+    val current: Boolean,   // the phase a buyer pays now
+    val soldOut: Boolean,
+)
+
 /** One priced ticket tier for an event (GET /api/events/{id} → ticketTypes). */
 data class EventTicketType(
     val id: Int,
     val name: String,
     val kind: String,       // standard | addon | donation
-    val price: Double,
+    val price: Double,      // live price now (current phase, else flat)
+    val basePrice: Double,  // the tier's headline/flat price
     val admits: Int,        // people admitted per ticket (bundles); 1 = normal
     val minPrice: Double?,  // pay-what-you-want floor for donation tiers
     val remaining: Int?,    // null = unlimited (bounded by event slots)
     val onSale: Boolean,    // false when outside its sales window
+    val phases: List<PricingPhase> = emptyList(), // empty = flat price
 )
 
 /** One "Good to Know" row (icon key + label + value), assembled by the API. */
@@ -47,6 +59,13 @@ data class EventDetailInfo(
     val schedule: List<ScheduleEntry> = emptyList(),
     val lineup: List<LineupArtist> = emptyList(),
     val fullDate: String = "",   // "Sun, 5 Jul, 8:00 PM" built from date + time
+    val description: String = "", // the admin's real event description (Overview)
+    val city: String = "",       // e.g. "Hyderabad" — shown beside the date line
+    val mapLink: String = "",    // pasted Google Maps link; drives "Directions"
+    val feeType: String = "none", // convenience fee: none | flat | percent
+    val feeValue: Double = 0.0,   // ₹ amount (flat) or % of subtotal (percent)
+    val rating: Double = 0.0,     // aggregate rating; 0 = unrated (hide the star)
+    val ratingsCount: Int = 0,    // how many people rated it
 )
 
 /** Browse-card shape for an event, sourced from the real API rather than sample data. */
@@ -59,6 +78,9 @@ data class EventApiItem(
     val category: String,
     val imageUrl: String,
     val isFillingFast: Boolean,
+    val rating: Double,      // 0 = unrated (card hides the star badge)
+    val placements: List<String>, // curated rails: for_you | trending | nearby
+    val city: String,        // e.g. "Kadapa" — used to float local events first
 )
 
 /**
@@ -96,6 +118,11 @@ class EventRepository(
                     val avail = o.optInt("availableSlots", total)
                     total > 0 && avail.toDouble() / total <= 0.15
                 },
+                rating = if (o.isNull("rating")) 0.0 else o.optDouble("rating", 0.0),
+                placements = o.optJSONArray("placements")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
+                }.orEmpty(),
+                city = o.optString("city").takeIf { it.isNotBlank() && it != "null" } ?: "",
             )
         }
     }
@@ -114,15 +141,30 @@ class EventRepository(
         val tickets = d.optJSONArray("ticketTypes")?.let { arr ->
             (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
+                val price = o.optDouble("price", 0.0)
                 EventTicketType(
                     id = o.optInt("id"),
                     name = o.optString("name"),
                     kind = o.optString("kind", "standard"),
-                    price = o.optDouble("price", 0.0),
+                    price = price,
+                    basePrice = o.optDouble("basePrice", price),
                     admits = o.optInt("admits", 1).coerceAtLeast(1),
                     minPrice = if (o.isNull("minPrice")) null else o.optDouble("minPrice"),
                     remaining = if (o.isNull("remaining")) null else o.optInt("remaining"),
                     onSale = o.optBoolean("onSale", true),
+                    phases = o.optJSONArray("phases")?.let { ph ->
+                        (0 until ph.length()).mapNotNull { j ->
+                            val po = ph.optJSONObject(j) ?: return@mapNotNull null
+                            PricingPhase(
+                                label = po.optString("label"),
+                                price = po.optDouble("price", 0.0),
+                                from = po.optInt("from", 0),
+                                to = po.optInt("to", 0),
+                                current = po.optBoolean("current", false),
+                                soldOut = po.optBoolean("soldOut", false),
+                            )
+                        }
+                    }.orEmpty(),
                 )
             }.filter { it.onSale } // hide tiers outside their sales window
         }.orEmpty()
@@ -172,6 +214,8 @@ class EventRepository(
 
         val fullDate = formatFullDate(d.optString("date"), d.optString("time"))
 
+        val fee = d.optJSONObject("convenienceFee")
+
         EventDetailInfo(
             ticketTypes = tickets,
             infoNotes = notes,
@@ -179,6 +223,13 @@ class EventRepository(
             schedule = schedule,
             lineup = lineup,
             fullDate = fullDate,
+            description = d.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: "",
+            city = d.optString("city").takeIf { it.isNotBlank() && it != "null" } ?: "",
+            mapLink = d.optString("mapLink").takeIf { it.isNotBlank() && it != "null" } ?: "",
+            feeType = fee?.optString("type", "none") ?: "none",
+            feeValue = fee?.optDouble("value", 0.0) ?: 0.0,
+            rating = if (d.isNull("rating")) 0.0 else d.optDouble("rating", 0.0),
+            ratingsCount = d.optInt("ratingsCount", 0),
         )
     }
 

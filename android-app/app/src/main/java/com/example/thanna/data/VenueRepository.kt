@@ -15,6 +15,8 @@ data class VenueApiItem(
     val location: String,
     val rating: String,
     val category: String,
+    /** All sports playable at this venue (category first). Never empty. */
+    val sports: List<String>,
     val price: Int,
     val image: String?,
     val tagline: String,
@@ -76,6 +78,7 @@ data class VenueDetailData(
     val priceNote: String,
     val latitude: Double?,
     val longitude: Double?,
+    val mapLink: String,
     val slots: List<VenueSlotItem>,
     val reviews: List<VenueReviewItem>,
     val priceChart: List<VenuePriceVariant>,
@@ -99,12 +102,16 @@ class VenueRepository {
             ?: JSONArray()
         (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
+            val category = o.optString("category")
             VenueApiItem(
                 id = o.optString("id"),
                 name = o.optString("name"),
                 location = o.optString("location"),
                 rating = o.optString("rating"),
-                category = o.optString("category"),
+                category = category,
+                // Backend sends the full list (category-first); fall back to [category] for
+                // older servers that don't emit `sports` yet, so the card always has one icon.
+                sports = o.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(category.takeIf { it.isNotBlank() }) },
                 price = o.optInt("price", 0),
                 image = o.optString("image").takeIf { it.isNotBlank() && it != "null" },
                 tagline = o.optString("tagline"),
@@ -166,6 +173,7 @@ class VenueRepository {
             priceNote = d.optString("price_note"),
             latitude = if (d.isNull("latitude")) null else d.optDouble("latitude").takeIf { !it.isNaN() },
             longitude = if (d.isNull("longitude")) null else d.optDouble("longitude").takeIf { !it.isNaN() },
+            mapLink = d.optString("map_link").takeIf { it.isNotBlank() && it != "null" } ?: "",
             slots = (d.optJSONArray("slots") ?: JSONArray()).mapObjects { s ->
                 VenueSlotItem(
                     id = s.optInt("id"),

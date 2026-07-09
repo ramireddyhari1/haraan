@@ -1,7 +1,5 @@
 package com.example.thanna.ui.main.eventdetail
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -27,14 +25,17 @@ import com.example.thanna.ui.theme.HaraanColors
 import com.example.thanna.ui.theme.HaraanRadius
 import com.example.thanna.ui.theme.HaraanSpacing
 import com.example.thanna.ui.theme.HaraanTypography
+import com.example.thanna.ui.util.openMap
 
 /**
- * Venue block with an actionable "Get directions" that opens any maps app via a
- * geo: query. Uses the real venue string — no fabricated map tile.
+ * Venue block with an actionable "Get directions". Opens the admin's pasted
+ * Google Maps link when present, else falls back to a geo: query on the venue
+ * string — no fabricated map tile.
  */
 @Composable
 fun EventVenueSection(
     venue: String,
+    mapLink: String = "",
     modifier: Modifier = Modifier
 ) {
     if (venue.isBlank()) return
@@ -107,11 +108,7 @@ fun EventVenueSection(
                 Surface(
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        val uri = Uri.parse("geo:0,0?q=" + Uri.encode(venue))
-                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        runCatching { context.startActivity(intent) }
+                        openMap(context, mapLink, venue)
                     },
                     shape = RoundedCornerShape(HaraanRadius.Small),
                     color = HaraanColors.EventsBlue.copy(alpha = 0.10f)

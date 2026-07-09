@@ -15,7 +15,11 @@ sealed interface BookingResult {
     val quantity: Int,
     val totalAmount: String,
     val status: String,
-    val message: String
+    val message: String,
+    // Scannable entry-pass code — used to render the QR `haraan:ticket:<code>`.
+    val ticketCode: String? = null,
+    // Number of passes issued (one per tier line); >1 for a mixed cart.
+    val bookingCount: Int = 1
   ) : BookingResult
 
   data class Error(val message: String) : BookingResult
@@ -70,7 +74,8 @@ class BookingRepository(
           quantity = data.getInt("quantity"),
           totalAmount = data.optString("totalAmount", "0.00"),
           status = data.optString("status", "CONFIRMED"),
-          message = message
+          message = message,
+          ticketCode = data.optString("ticketCode").takeIf { it.isNotBlank() }
         )
       } else {
         val errorMessage = parseErrorMessage(body, "Booking failed (Status code: $code)")
@@ -78,6 +83,116 @@ class BookingRepository(
       }
     } catch (e: Exception) {
       BookingResult.Error(e.message ?: "Failed to connect to server. Please check your network connection.")
+    }
+  }
+
+  /**
+   * Place a multi-tier cart order (POST /api/bookings with `items[]`). Each line is
+   * a (ticketTypeId, quantity) pair; a null id books the flat event price. The server
+   * prices every line from its tier's live phase price and returns an aggregate plus
+   * one pass per line.
+   */
+  suspend fun createOrder(
+    token: String,
+    eventId: Int,
+    items: List<Pair<Int?, Int>>,
+    couponCode: String? = null,
+  ): BookingResult = withContext(Dispatchers.IO) {
+    try {
+      val jsonBody = JSONObject().apply {
+        put("eventId", eventId)
+        val arr = JSONArray()
+        items.filter { it.second > 0 }.forEach { (tierId, qty) ->
+          // A flat-price line (null tier) falls back to the legacy quantity field.
+          if (tierId != null) {
+            arr.put(JSONObject().apply {
+              put("ticketTypeId", tierId)
+              put("quantity", qty)
+            })
+          }
+        }
+        if (arr.length() > 0) {
+          put("items", arr)
+        } else {
+          // No tiers selected → flat-price event: send a plain quantity.
+          put("quantity", items.sumOf { it.second }.coerceAtLeast(1))
+        }
+        if (!couponCode.isNullOrBlank()) put("couponCode", couponCode)
+      }
+
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      connection.outputStream.use { it.write(jsonBody.toString().toByteArray(Charsets.UTF_8)) }
+
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+
+      if (code in 200..299) {
+        val json = JSONObject(body)
+        val data = json.getJSONObject("data")
+        BookingResult.Success(
+          bookingId = data.optInt("id"),
+          quantity = data.optInt("quantity"),
+          totalAmount = data.optString("totalAmount", "0.00"),
+          status = data.optString("status", "CONFIRMED"),
+          message = json.optString("message", "Booking confirmed."),
+          ticketCode = data.optString("ticketCode").takeIf { it.isNotBlank() },
+          bookingCount = data.optJSONArray("bookings")?.length() ?: 1,
+        )
+      } else {
+        BookingResult.Error(parseErrorMessage(body, "Booking failed (Status code: $code)"))
+      }
+    } catch (e: Exception) {
+      BookingResult.Error(e.message ?: "Failed to connect to server. Please check your network connection.")
+    }
+  }
+
+  /** Result of a coupon-code check (POST /api/bookings/validate-coupon). */
+  data class CouponResult(
+    val valid: Boolean,
+    val code: String?,
+    val discount: Double,
+    val message: String,
+  )
+
+  /**
+   * Validate a coupon for the checkout preview. The discount is a flat ₹ amount off.
+   * `eventId` scopes the check so an event-specific coupon is rejected on other events.
+   */
+  suspend fun validateCoupon(token: String, code: String, eventId: Int? = null): CouponResult = withContext(Dispatchers.IO) {
+    try {
+      val body = JSONObject().apply {
+        put("code", code)
+        if (eventId != null && eventId > 0) put("eventId", eventId)
+      }
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/validate-coupon").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+      val json = JSONObject(readBody(connection))
+      connection.disconnect()
+      CouponResult(
+        valid = json.optBoolean("valid", false),
+        code = json.optString("code").takeIf { it.isNotBlank() },
+        discount = json.optDouble("discount", 0.0),
+        message = json.optString("message", "This code isn’t valid."),
+      )
+    } catch (e: Exception) {
+      CouponResult(false, null, 0.0, e.message ?: "Couldn’t check that code.")
     }
   }
 

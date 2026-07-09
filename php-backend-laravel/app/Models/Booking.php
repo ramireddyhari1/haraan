@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 /**
  * @property int         $id
@@ -28,15 +29,35 @@ final class Booking extends Model
 {
     use HasFactory;
 
+    /**
+     * Every booking gets a unique, scannable ticket code the moment it's created — the app
+     * renders it as the entry-pass QR (`haraan:ticket:<code>`) and the partner check-in scanner
+     * resolves it. Matches the format the backfill migration used (24 upper-alnum chars).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Booking $booking): void {
+            if (empty($booking->ticket_code)) {
+                do {
+                    $code = Str::upper(Str::random(24));
+                } while (self::query()->where('ticket_code', $code)->exists());
+
+                $booking->ticket_code = $code;
+            }
+        });
+    }
+
     protected $fillable = [
         'quantity',
         'total_amount',
+        'convenience_fee',
         'status',
         'seat_numbers',
         'coupon_code',
         'discount',
         'user_id',
         'event_id',
+        'ticket_type_id',
         'organization_id',
         // Venue-slot bookings (Phase B)
         'booking_type',
@@ -50,9 +71,10 @@ final class Booking extends Model
     protected function casts(): array
     {
         return [
-            'quantity'     => 'integer',
-            'total_amount' => 'float',
-            'discount'     => 'float',
+            'quantity'        => 'integer',
+            'total_amount'    => 'float',
+            'convenience_fee' => 'float',
+            'discount'        => 'float',
             'seat_numbers' => 'array',
             'slot_date'    => 'date',
         ];
@@ -72,6 +94,12 @@ final class Booking extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    /** The ticket tier this booking was sold at (null for flat-price / venue bookings). */
+    public function ticketType(): BelongsTo
+    {
+        return $this->belongsTo(TicketType::class);
     }
 
     /** The venue this booking reserves a slot at (null for event bookings). */

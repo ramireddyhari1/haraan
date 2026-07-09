@@ -37,6 +37,7 @@ final class VenuesController extends Controller
             'images' => $venue->images ?? [],
             'latitude' => $venue->latitude,
             'longitude' => $venue->longitude,
+            'map_link' => $venue->map_link,
             'slots' => $venue->slots->map(fn ($s) => [
                 'id' => $s->id,
                 'day' => $s->day,
@@ -61,6 +62,7 @@ final class VenuesController extends Controller
             'id' => $v->id,
             'name' => $v->name,
             'category' => $v->category,
+            'sports' => $v->sportsList(),
             'location' => $v->location,
             'distance' => $v->distance,
             'price' => $v->price,
