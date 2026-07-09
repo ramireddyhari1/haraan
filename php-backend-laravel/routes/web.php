@@ -185,20 +185,9 @@ Route::middleware('erp.key')->group(function (): void {
         });
     });
 
-    // Partner auth and protected routes
-    Route::get('partner/login', [\App\Http\Controllers\Web\PartnerAuthController::class, 'showLogin'])->name('partner.login');
-    Route::post('partner/login', [\App\Http\Controllers\Web\PartnerAuthController::class, 'login'])->name('partner.login.submit');
-    Route::post('partner/logout', [\App\Http\Controllers\Web\PartnerAuthController::class, 'logout'])->name('partner.logout');
-    // Password reset for partner (shares same controller)
-    Route::get('partner/password/reset', [\App\Http\Controllers\Web\PasswordResetController::class, 'showLinkRequestForm'])->name('partner.password.request');
-    Route::post('partner/password/email', [\App\Http\Controllers\Web\PasswordResetController::class, 'sendResetLinkEmail'])->name('partner.password.email');
-    Route::get('partner/password/reset/{token}', [\App\Http\Controllers\Web\PasswordResetController::class, 'showResetForm'])->name('partner.password.reset');
-    Route::post('partner/password/reset', [\App\Http\Controllers\Web\PasswordResetController::class, 'reset'])->name('partner.password.update');
-
-    Route::prefix('partner')->name('partner.')->middleware(['auth', \App\Http\Middleware\EnsureRole::class . ':PARTNER'])->controller(PartnerDashboardController::class)->group(function (): void {
-        Route::get('/', 'home')->name('dashboard');
-        Route::get('/events', 'events')->name('events');
-        Route::get('/gamehub', 'gamehub')->name('gamehub');
-        Route::get('/workers', 'workers')->name('workers');
-    });
+    // NOTE: the legacy Blade partner stub (partner/login, partner dashboard,
+    // password reset) has been retired — the /partner console is now the
+    // Filament PartnerPanelProvider, which owns /partner/login, password-reset
+    // and profile. Keeping the old Blade routes here shadowed the Filament
+    // panel's own login and 404'd it, so they are intentionally removed.
 });
