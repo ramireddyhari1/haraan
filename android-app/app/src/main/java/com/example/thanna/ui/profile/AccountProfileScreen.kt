@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -280,21 +281,26 @@ private fun Content(
 
     // One identity, two lanes: "tickets" (what you've booked) vs "play" (your game).
     var lane by remember { mutableStateOf("tickets") }
-    // Which slice of the bookings the Tickets lane is showing.
-    var bucket by remember { mutableStateOf("upcoming") }
     var showVenueSheet by remember { mutableStateOf(false) }
+    var showBookings by remember { mutableStateOf(false) }
 
-    val shown = when (bucket) {
-        "past" -> past
-        "cancelled" -> cancelled
-        else -> upcoming
-    }
-
+    // Declared before the early return so the sheet still composes when the venue
+    // booking is started from the bookings page.
     if (showVenueSheet) {
         VenueBookingSheet(
             onDismiss = { showVenueSheet = false },
             onBooked = { showVenueSheet = false; onReload() },
         )
+    }
+
+    if (showBookings) {
+        MyBookingsScreen(
+            bookings = bookings,
+            onClose = { showBookings = false },
+            onOpenPass = onOpenPass,
+            onBookVenue = { showVenueSheet = true },
+        )
+        return
     }
 
     LazyColumn(
@@ -311,9 +317,8 @@ private fun Content(
         item { Spacer(Modifier.height(18.dp)); ProfileLaneSwitch(lane) { lane = it } }
 
         if (lane == "tickets") {
-            // The single home for everything booked — event tickets and venue slots.
-            // The counters double as the filter: three numbers you can act on beat
-            // three numbers you can only read.
+            // An at-a-glance count, not a second copy of the list — the bookings
+            // themselves live on one screen, reached from here or the Account row.
             item { Spacer(Modifier.height(18.dp)); SectionTitle("My bookings") }
             item {
                 Spacer(Modifier.height(12.dp))
@@ -321,32 +326,13 @@ private fun Content(
                     upcoming = upcoming.size,
                     past = past.size,
                     cancelled = cancelled.size,
-                    selected = bucket,
-                    onSelect = { bucket = it },
+                    selected = null,
+                    onSelect = { showBookings = true },
                 )
             }
-
-            if (shown.isNotEmpty()) {
-                val groups = shown.grouped()
-                item { Spacer(Modifier.height(12.dp)) }
-                items(groups.size) { i ->
-                    BookingGroupCard(groups[i], onOpenPass = onOpenPass)
-                    Spacer(Modifier.height(8.dp))
-                }
-            } else {
-                item {
-                    Spacer(Modifier.height(12.dp))
-                    when (bucket) {
-                        "past" -> EmptyLaneNote("Nothing here yet", "Events and slots you've already attended will move here.")
-                        "cancelled" -> EmptyLaneNote("No cancellations", "Bookings you cancel or that get refunded show up here.")
-                        else -> EmptyLaneNote("Nothing coming up", "Book an event or a venue slot and your entry pass lands here.")
-                    }
-                }
-            }
-
             item {
-                Spacer(Modifier.height(12.dp))
-                BookVenueButton(onClick = { showVenueSheet = true })
+                Spacer(Modifier.height(10.dp))
+                ViewAllBookingsRow(count = bookings.size, onClick = { showBookings = true })
             }
         } else {
             // Play = your competitive identity — the door into the ActionBoard player profile.
@@ -357,7 +343,15 @@ private fun Content(
 
         // ── Account settings ──
         item { Spacer(Modifier.height(24.dp)); SectionTitle("Account") }
-        item { Spacer(Modifier.height(12.dp)); SettingsList(soon, onEditPhoto = editPhoto) }
+        item {
+            Spacer(Modifier.height(12.dp))
+            SettingsList(
+                onTap = soon,
+                onEditPhoto = editPhoto,
+                bookingCount = bookings.size,
+                onOpenBookings = { showBookings = true },
+            )
+        }
 
         item {
             Spacer(Modifier.height(28.dp))
@@ -523,14 +517,16 @@ private fun StatDivider() {
 // ─────────────────────────────────────────────── Bookings summary ───────────────
 /**
  * The three counters are also the filter. Buckets are time-based (and cancellation),
- * never payment status — see [BookingLite.isPast].
+ * never payment status — see [BookingLite.isPast]. A null [selected] means nothing is
+ * filtered (the profile's read-only glance); tapping a cell there opens the bookings
+ * page instead.
  */
 @Composable
 private fun BookingsSummary(
     upcoming: Int,
     past: Int,
     cancelled: Int,
-    selected: String,
+    selected: String?,
     onSelect: (String) -> Unit,
 ) {
     Row(
@@ -542,11 +538,14 @@ private fun BookingsSummary(
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SummaryCell(Modifier.weight(1f), upcoming, "Upcoming", Green, selected == "upcoming") { onSelect("upcoming") }
+        // With no filter applied, every cell reads at full strength; the underline
+        // only appears once a cell is actually the active filter.
+        val filtering = selected != null
+        SummaryCell(Modifier.weight(1f), upcoming, "Upcoming", Green, !filtering || selected == "upcoming", filtering && selected == "upcoming") { onSelect("upcoming") }
         StatDivider()
-        SummaryCell(Modifier.weight(1f), past, "Past", Text2, selected == "past") { onSelect("past") }
+        SummaryCell(Modifier.weight(1f), past, "Past", Text2, !filtering || selected == "past", filtering && selected == "past") { onSelect("past") }
         StatDivider()
-        SummaryCell(Modifier.weight(1f), cancelled, "Cancelled", Danger, selected == "cancelled") { onSelect("cancelled") }
+        SummaryCell(Modifier.weight(1f), cancelled, "Cancelled", Danger, !filtering || selected == "cancelled", filtering && selected == "cancelled") { onSelect("cancelled") }
     }
 }
 
@@ -557,6 +556,7 @@ private fun SummaryCell(
     label: String,
     accent: Color,
     active: Boolean,
+    indicator: Boolean,
     onClick: () -> Unit,
 ) {
     Column(
@@ -583,10 +583,36 @@ private fun SummaryCell(
         Box(
             Modifier
                 .height(2.dp)
-                .width(if (active) 22.dp else 0.dp)
+                .width(if (indicator) 22.dp else 0.dp)
                 .clip(RoundedCornerShape(1.dp))
-                .background(if (active) accent else Color.Transparent),
+                .background(if (indicator) accent else Color.Transparent),
         )
+    }
+}
+
+/** The profile's doorway into the bookings page. */
+@Composable
+private fun ViewAllBookingsRow(count: Int, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.ConfirmationNumber, null, tint = BlueBright, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("View all bookings", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (count == 0) "Nothing booked yet" else "$count booking${if (count == 1) "" else "s"} · tap for your passes",
+                color = Text3, fontSize = 12.sp,
+            )
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -886,7 +912,12 @@ private fun ActionPoint(icon: ImageVector, text: String) {
 
 // ─────────────────────────────────────────────────────────── Settings ───────────
 @Composable
-private fun SettingsList(onTap: (String) -> Unit, onEditPhoto: () -> Unit) {
+private fun SettingsList(
+    onTap: (String) -> Unit,
+    onEditPhoto: () -> Unit,
+    bookingCount: Int,
+    onOpenBookings: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -894,6 +925,14 @@ private fun SettingsList(onTap: (String) -> Unit, onEditPhoto: () -> Unit) {
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp)),
     ) {
+        // Bookings are the thing people come back for, so they lead the list.
+        SettingRow(
+            Icons.Default.ConfirmationNumber,
+            "My bookings",
+            badge = bookingCount.takeIf { it > 0 }?.toString(),
+            onClick = onOpenBookings,
+        )
+        ThinDivider()
         // The only editable field on this account: the profile photo.
         SettingRow(Icons.Default.PhotoCamera, "Upload profile photo") { onEditPhoto() }
         ThinDivider()
@@ -906,7 +945,7 @@ private fun SettingsList(onTap: (String) -> Unit, onEditPhoto: () -> Unit) {
 }
 
 @Composable
-private fun SettingRow(icon: ImageVector, title: String, onClick: () -> Unit) {
+private fun SettingRow(icon: ImageVector, title: String, badge: String? = null, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -914,7 +953,89 @@ private fun SettingRow(icon: ImageVector, title: String, onClick: () -> Unit) {
         Icon(icon, null, tint = BlueBright, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(14.dp))
         Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        if (badge != null) {
+            Box(
+                Modifier.clip(RoundedCornerShape(7.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
+            ) { Text(badge, color = BlueBright, fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.width(8.dp))
+        }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
+ * The one place bookings live. Reached from the Account list; the header calendar
+ * icon lands here too. Kept in this file so it shares the profile's colour tokens
+ * and the booking row/group composables rather than duplicating them.
+ */
+@Composable
+private fun MyBookingsScreen(
+    bookings: List<BookingLite>,
+    onClose: () -> Unit,
+    onOpenPass: (BookingLite) -> Unit,
+    onBookVenue: () -> Unit,
+) {
+    val today = remember { todayIso() }
+    val cancelled = bookings.filter { it.isCancelled() }
+    val live = bookings.filterNot { it.isCancelled() }
+    val upcoming = live.filterNot { it.isPast(today) }
+    val past = live.filter { it.isPast(today) }
+
+    // Land on whichever bucket actually has something in it, so a user whose
+    // events have all happened doesn't open to an empty screen.
+    var bucket by remember { mutableStateOf(if (upcoming.isEmpty() && past.isNotEmpty()) "past" else "upcoming") }
+
+    val shown = when (bucket) {
+        "past" -> past
+        "cancelled" -> cancelled
+        else -> upcoming
+    }
+
+    Column(Modifier.fillMaxSize().background(Bg)) {
+        Row(
+            Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEFF2F7)).clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp)) }
+            Spacer(Modifier.width(12.dp))
+            Text("My bookings", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+            item {
+                BookingsSummary(
+                    upcoming = upcoming.size,
+                    past = past.size,
+                    cancelled = cancelled.size,
+                    selected = bucket,
+                    onSelect = { bucket = it },
+                )
+            }
+
+            if (shown.isNotEmpty()) {
+                val groups = shown.grouped()
+                item { Spacer(Modifier.height(12.dp)) }
+                items(groups.size) { i ->
+                    BookingGroupCard(groups[i], onOpenPass = onOpenPass)
+                    Spacer(Modifier.height(8.dp))
+                }
+            } else {
+                item {
+                    Spacer(Modifier.height(12.dp))
+                    when (bucket) {
+                        "past" -> EmptyLaneNote("Nothing here yet", "Events and slots you've already attended will move here.")
+                        "cancelled" -> EmptyLaneNote("No cancellations", "Bookings you cancel or that get refunded show up here.")
+                        else -> EmptyLaneNote("Nothing coming up", "Book an event or a venue slot and your entry pass lands here.")
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(12.dp)); BookVenueButton(onClick = onBookVenue) }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
     }
 }
 
