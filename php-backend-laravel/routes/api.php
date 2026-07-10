@@ -118,6 +118,20 @@ Route::get('/login-posters', static function () {
 });
 
 // -------------------------------------------------------------------------
+//  Legal copy (Terms & Conditions, Privacy Policy), admin-editable in /control.
+//  Public on purpose: the terms must be readable before you have an account.
+// -------------------------------------------------------------------------
+Route::get('/legal/{slug}', [\App\Http\Controllers\Api\LegalController::class, 'show']);
+
+// -------------------------------------------------------------------------
+//  The signed-in user's own privacy controls (Account → Privacy in the app).
+// -------------------------------------------------------------------------
+Route::middleware('auth.jwt')->prefix('account')->controller(\App\Http\Controllers\Api\PrivacyController::class)->group(function (): void {
+    Route::get('/privacy', 'show');
+    Route::put('/privacy', 'update');
+});
+
+// -------------------------------------------------------------------------
 //  In-app support chat — user <-> admin. Backed by SupportController; the
 //  admin side lives in the Filament "Support" resource. Requires a signed-in
 //  user (JWT); the app opens the thread and polls it while the chat is open.
