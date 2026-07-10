@@ -63,8 +63,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+// Aliased: the file-private palette already owns the name `Stroke` (a Color).
+import androidx.compose.ui.graphics.drawscope.Stroke as StrokeStyle
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -114,6 +118,39 @@ private val Danger    = Color(0xFFD23F57)
 // one halves the impact of both.
 private val HeroGradient   = Brush.linearGradient(listOf(Navy, NavyMid, Color(0xFF0A3D2A)))
 private val AvatarGradient = Brush.linearGradient(listOf(Color(0xFF2563EB), Green))
+
+/**
+ * The hero is a membership credential, not a banner, so it is printed like one:
+ * a glow lifting the avatar off the navy, and guilloché arcs — the concentric
+ * line-work of banknotes and passports — struck from a point past the
+ * bottom-right corner so only their shoulders cross the card.
+ *
+ * Arc alpha stays under 0.06: the member ID sits on top of these, and monospaced
+ * zeros are the first glyphs to go muddy against a moving line.
+ */
+private fun Modifier.identityCardSurface(): Modifier = this
+    .clip(RoundedCornerShape(24.dp))
+    .background(HeroGradient)
+    .drawWithCache {
+        val glow = Brush.radialGradient(
+            colors = listOf(Color(0xFF2563EB).copy(alpha = 0.30f), Color.Transparent),
+            center = Offset(size.width * 0.16f, size.height * 0.18f),
+            radius = size.minDimension * 1.15f,
+        )
+        val origin = Offset(size.width * 1.05f, size.height * 1.35f)
+        val arc = StrokeStyle(width = 1.dp.toPx())
+        onDrawBehind {
+            drawRect(glow)
+            repeat(7) { i ->
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.055f - i * 0.006f),
+                    radius = size.height * (0.55f + i * 0.28f),
+                    center = origin,
+                    style = arc,
+                )
+            }
+        }
+    }
 
 // One spacing scale instead of ad-hoc 14/18/24/28dp per item: air between
 // groups, a tighter beat from a heading to the card it labels.
@@ -461,8 +498,7 @@ private fun IdentityHero(a: AccountInfo, uploadingPhoto: Boolean, onEditPhoto: (
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(HeroGradient)
+            .identityCardSurface()
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
