@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Venues\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
@@ -69,10 +70,11 @@ class VenueForm
                     ->helperText('Open the venue in Google Maps → Share → Copy link, and paste it here. Powers "Show in Map" / "Get directions".')
                     ->columnSpanFull(),
                 TextInput::make('price')
+                    ->label('Price per hour')
                     ->required()
                     ->numeric()
                     ->default(0)
-                    ->prefix('$'),
+                    ->prefix('₹'),
                 TextInput::make('rating')
                     ->required()
                     ->default('4.5'),
@@ -84,12 +86,33 @@ class VenueForm
                     ->required()
                     ->numeric()
                     ->default(0),
-                TextInput::make('tagline'),
+                TextInput::make('tagline')
+                    ->placeholder('6 wooden indoor courts')
+                    ->helperText('Short one-liner shown under the venue name on the browse card.'),
+                TextInput::make('hours')
+                    ->label('Operating hours')
+                    ->placeholder('6:00 AM – 11:00 PM')
+                    ->helperText('Shown with a clock icon under the venue name.'),
                 Textarea::make('about')
                     ->columnSpanFull(),
-                Textarea::make('images')
+                TagsInput::make('images')
+                    ->label('Gallery image URLs')
+                    ->placeholder('Paste a URL, press Enter')
+                    ->helperText('Full https URLs. The first image is the hero; users swipe through the rest.')
                     ->columnSpanFull(),
-                Textarea::make('amenities')
+                TagsInput::make('amenities')
+                    ->placeholder('Floodlights, Parking, Washrooms…')
+                    ->helperText('One chip per amenity. Known names (wifi, parking, washroom, shower, cafe, water, floodlights, AC, security, seating, equipment) get their own icon on the venue page.')
+                    ->columnSpanFull(),
+                TagsInput::make('rules')
+                    ->label('Good to know')
+                    ->placeholder('Carry your own racket, Shoes mandatory…')
+                    ->helperText('House rules and policies — each chip is a bullet in the "Good to know" list.')
+                    ->columnSpanFull(),
+                TextInput::make('price_note')
+                    ->label('Pricing note')
+                    ->placeholder('Pricing is subject to change and is controlled by the venue')
+                    ->helperText('Disclaimer shown above the price chart.')
                     ->columnSpanFull(),
                 Toggle::make('is_bookable')
                     ->required(),

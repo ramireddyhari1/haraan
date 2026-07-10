@@ -32,6 +32,14 @@ final class VenuesController extends Controller
 
         return response()->json(['data' => [
             ...$this->card($venue),
+            // Full address + operating hours + policies + structured pricing. The app
+            // parses all of these; omitting them here is why admin-entered values never
+            // reached the venue page.
+            'address' => $venue->address,
+            'hours' => $venue->hours,
+            'rules' => $venue->rules ?? [],
+            'price_chart' => $venue->price_chart ?? [],
+            'price_note' => $venue->price_note,
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
             'images' => $venue->images ?? [],
@@ -44,6 +52,9 @@ final class VenuesController extends Controller
                 'time' => $s->time,
                 'available' => $s->is_available,
                 'filling_fast' => $s->filling_fast,
+                // Per-slot price + court capacity — the slot chips render both.
+                'price' => $s->price,
+                'capacity' => $s->capacity,
             ]),
             'reviews' => $venue->reviews->map(fn ($r) => [
                 'name' => $r->name,
