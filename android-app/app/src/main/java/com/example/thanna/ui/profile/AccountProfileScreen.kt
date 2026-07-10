@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,25 +30,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsCricket
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -62,7 +67,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,6 +82,9 @@ import com.example.thanna.data.ApiConfig
 import com.example.thanna.data.BookingLite
 import com.example.thanna.data.BookingRepository
 import com.example.thanna.data.BookingResult
+import com.example.thanna.data.PlayerProfile
+import com.example.thanna.data.PrivacyRepository
+import com.example.thanna.data.PrivacySettings
 import com.example.thanna.data.ProfileRepository
 import com.example.thanna.data.TokenStore
 import com.example.thanna.data.VenueApiItem
@@ -98,11 +109,11 @@ private val Stroke    = Color(0xFFE5E9F0)
 private val DangerBg  = Color(0xFFFDECEF)
 private val Danger    = Color(0xFFD23F57)
 
-// The hero — the screen's one "moment". Navy → blue → green, exactly as the brand reads.
+// The hero — the screen's ONE saturated moment. Navy → blue → green, exactly as the
+// brand reads. Nothing else on the page is allowed a full-bleed gradient; a second
+// one halves the impact of both.
 private val HeroGradient   = Brush.linearGradient(listOf(Navy, NavyMid, Color(0xFF0A3D2A)))
 private val AvatarGradient = Brush.linearGradient(listOf(Color(0xFF2563EB), Green))
-// Featured banner — bright, marketing-forward.
-private val BannerGradient = Brush.linearGradient(listOf(Color(0xFF0B7A3E), Green))
 
 // One spacing scale instead of ad-hoc 14/18/24/28dp per item: air between
 // groups, a tighter beat from a heading to the card it labels.
@@ -112,7 +123,17 @@ private val HeadingGap = 12.dp
 private sealed interface AccountState {
     data object Loading : AccountState
     data class Error(val message: String) : AccountState
-    data class Loaded(val account: AccountInfo, val bookings: List<BookingLite>) : AccountState
+
+    /**
+     * [player] is optional on purpose: the ActionBoard profile is a second endpoint,
+     * and a user who has never played should still get a complete account screen.
+     * Null simply means the Play lane invites instead of reporting.
+     */
+    data class Loaded(
+        val account: AccountInfo,
+        val bookings: List<BookingLite>,
+        val player: PlayerProfile?,
+    ) : AccountState
 }
 
 private val CANCELLED_STATUSES = setOf("CANCELLED", "REFUNDED", "FAILED")
@@ -151,31 +172,42 @@ private fun List<BookingLite>.grouped(): List<BookingGroup> =
         .values.map { BookingGroup(it) }
 
 /**
- * Unified Haraan account — shared by Events + GameHub. Built to read like a
- * dashboard for the user's relationship with the platform, not a settings page:
- * a gradient identity hero, a quick-stats strip, a bookings module, a featured
- * banner, and a doorway into the ActionBoard player profile. The gamified cricket
- * dashboard itself lives in [PlayerProfileScreen].
+ * Unified Haraan account — shared by Events + GameHub. It reads as a membership
+ * dashboard rather than a settings page: an identity hero carrying the member ID,
+ * the two lanes the platform actually offers (Tickets and Play), a standing strip
+ * of earned numbers, and a quiet utility list. The gamified cricket dashboard
+ * itself lives in [PlayerProfileScreen].
  */
 @Composable
 fun AccountProfileScreen(
     onClose: () -> Unit,
     fetchAccount: suspend () -> AccountInfo,
     fetchBookings: suspend () -> List<BookingLite>,
+    fetchPlayer: suspend () -> PlayerProfile?,
     onOpenPlayerProfile: () -> Unit,
     onOpenPass: (BookingLite) -> Unit,
+    onOpenSupport: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var state by remember { mutableStateOf<AccountState>(AccountState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
 
+    // Bookings is a full page, not a section: it owns its own header. Both it and
+    // the venue sheet are hoisted above the account chrome so the page replaces the
+    // "Account" bar instead of stacking a second header beneath it.
+    var showBookings by remember { mutableStateOf(false) }
+    var showVenueSheet by remember { mutableStateOf(false) }
+    var showPrivacy by remember { mutableStateOf(false) }
+    var legalSlug by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(reloadKey) {
         state = AccountState.Loading
         state = try {
             val account = fetchAccount()
             val bookings = runCatching { fetchBookings() }.getOrDefault(emptyList())
-            AccountState.Loaded(account, bookings)
+            val player = runCatching { fetchPlayer() }.getOrNull()
+            AccountState.Loaded(account, bookings, player)
         } catch (e: Exception) {
             AccountState.Error(e.message ?: "Unable to load account.")
         }
@@ -188,7 +220,38 @@ fun AccountProfileScreen(
     AutoRefresh(intervalMs = 30_000L) {
         val account = runCatching { fetchAccount() }.getOrNull() ?: return@AutoRefresh
         val bookings = runCatching { fetchBookings() }.getOrDefault(emptyList())
-        state = AccountState.Loaded(account, bookings)
+        val player = runCatching { fetchPlayer() }.getOrNull()
+        state = AccountState.Loaded(account, bookings, player)
+    }
+
+    if (showVenueSheet) {
+        VenueBookingSheet(
+            onDismiss = { showVenueSheet = false },
+            onBooked = { showVenueSheet = false; reloadKey++ },
+        )
+    }
+
+    // Full pages, each carrying its own header — never nested inside the account's.
+    legalSlug?.let { slug ->
+        LegalScreen(slug = slug, onClose = { legalSlug = null }, modifier = modifier)
+        return
+    }
+
+    if (showPrivacy) {
+        PrivacySettingsScreen(onClose = { showPrivacy = false }, modifier = modifier)
+        return
+    }
+
+    val loaded = state as? AccountState.Loaded
+    if (loaded != null && showBookings) {
+        MyBookingsScreen(
+            bookings = loaded.bookings,
+            onClose = { showBookings = false },
+            onOpenPass = onOpenPass,
+            onBookVenue = { showVenueSheet = true },
+            modifier = modifier,
+        )
+        return
     }
 
     Column(
@@ -224,7 +287,18 @@ fun AccountProfileScreen(
                     ) { Text("Sign out", color = Danger, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                 }
             }
-            is AccountState.Loaded -> Content(s.account, s.bookings, onOpenPlayerProfile, onOpenPass, onSignOut, onReload = { reloadKey++ })
+            is AccountState.Loaded -> Content(
+                account = s.account,
+                bookings = s.bookings,
+                player = s.player,
+                onOpenBookings = { showBookings = true },
+                onOpenPlayerProfile = onOpenPlayerProfile,
+                onOpenPrivacy = { showPrivacy = true },
+                onOpenLegal = { legalSlug = it },
+                onOpenSupport = onOpenSupport,
+                onSignOut = onSignOut,
+                onReload = { reloadKey++ },
+            )
         }
     }
 }
@@ -233,14 +307,17 @@ fun AccountProfileScreen(
 private fun Content(
     account: AccountInfo,
     bookings: List<BookingLite>,
+    player: PlayerProfile?,
+    onOpenBookings: () -> Unit,
     onOpenPlayerProfile: () -> Unit,
-    onOpenPass: (BookingLite) -> Unit,
+    onOpenPrivacy: () -> Unit,
+    onOpenLegal: (String) -> Unit,
+    onOpenSupport: () -> Unit,
     onSignOut: () -> Unit,
     onReload: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val soon: (String) -> Unit = { Toast.makeText(context, "$it coming soon.", Toast.LENGTH_SHORT).show() }
 
     // The only thing "edit" does here: pick a photo and upload it as the profile avatar.
     var uploadingPhoto by remember { mutableStateOf(false) }
@@ -276,27 +353,8 @@ private fun Content(
         photoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    var showVenueSheet by remember { mutableStateOf(false) }
-    var showBookings by remember { mutableStateOf(false) }
-
-    // Declared before the early return so the sheet still composes when the venue
-    // booking is started from the bookings page.
-    if (showVenueSheet) {
-        VenueBookingSheet(
-            onDismiss = { showVenueSheet = false },
-            onBooked = { showVenueSheet = false; onReload() },
-        )
-    }
-
-    if (showBookings) {
-        MyBookingsScreen(
-            bookings = bookings,
-            onClose = { showBookings = false },
-            onOpenPass = onOpenPass,
-            onBookVenue = { showVenueSheet = true },
-        )
-        return
-    }
+    val today = remember { todayIso() }
+    val upcomingCount = bookings.filterNot { it.isCancelled() }.count { !it.isPast(today) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -305,53 +363,83 @@ private fun Content(
         // ── Identity hero — the one moment that dominates the screen ──
         item { IdentityHero(account, uploadingPhoto, onEditPhoto = editPhoto) }
 
-        // ── Quick-stats strip — makes the account feel substantial ──
-        item { Spacer(Modifier.height(14.dp)); QuickStats(account, bookings.size) }
-
-        // Three groups, because these rows do three different jobs: destinations
-        // into your own stuff, preferences, and help. One undivided card made the
-        // page read as a list of gaps.
-        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Your activity") }
+        // ── The two lanes. This is the screen's whole proposition: one identity,
+        // two things to do with it. Each lane owns its accent and its own number,
+        // so neither repeats what the hero already said.
         item {
-            Spacer(Modifier.height(HeadingGap))
-            SettingsCard {
-                SettingRow(
-                    Icons.Default.ConfirmationNumber,
-                    "My bookings",
-                    badge = bookings.size.takeIf { it > 0 }?.toString(),
-                    onClick = { showBookings = true },
+            Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // A lane never buries what the user has. With nothing upcoming we
+                // still count the bookings they've made — the old screen's "7" badge
+                // must not vanish just because those events have happened.
+                LaneCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.ConfirmationNumber,
+                    accent = BlueBright,
+                    tint = BlueTint,
+                    label = "Tickets",
+                    value = when {
+                        upcomingCount > 0 -> upcomingCount.toString()
+                        bookings.isNotEmpty() -> bookings.size.toString()
+                        else -> null
+                    },
+                    caption = when {
+                        upcomingCount > 0 -> "upcoming"
+                        bookings.isNotEmpty() -> "past bookings"
+                        else -> "Book your first event"
+                    },
+                    onClick = onOpenBookings,
                 )
-                ThinDivider()
-                // The player profile is where match history and career stats live.
-                SettingRow(Icons.Default.SportsCricket, "My matches", onClick = onOpenPlayerProfile)
+                LaneCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.SportsCricket,
+                    accent = Green,
+                    tint = GreenTint,
+                    label = "Play",
+                    value = player?.careerMatches?.takeIf { it > 0 }?.toString(),
+                    caption = if (player != null && player.careerMatches > 0) "matches played" else "Join a local match",
+                    onClick = onOpenPlayerProfile,
+                )
             }
         }
 
-        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Preferences") }
+        // ── Standing — only earned numbers, and only once there are any. An
+        // all-zero strip would be decoration; absence is the honest state.
+        if (player != null && (player.rankedXp > 0 || player.careerMatches > 0)) {
+            item { Spacer(Modifier.height(12.dp)); StandingStrip(player) }
+        }
+
+        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Account") }
         item {
             Spacer(Modifier.height(HeadingGap))
             SettingsCard {
-                SettingRow(Icons.Default.Notifications, "Notifications") { soon("Notifications") }
+                SettingRow(Icons.Default.Shield, "Privacy", onClick = onOpenPrivacy)
                 ThinDivider()
-                SettingRow(Icons.Default.Shield, "Privacy") { soon("Privacy") }
+                SettingRow(Icons.Default.SupportAgent, "Support", onClick = onOpenSupport)
             }
         }
 
-        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Help") }
+        // Legal is its own group: these are documents you read, not settings you
+        // change, and they're the two links an app store review looks for.
+        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Legal") }
         item {
             Spacer(Modifier.height(HeadingGap))
             SettingsCard {
-                SettingRow(Icons.Default.Email, "Support") { soon("Support") }
+                SettingRow(Icons.AutoMirrored.Filled.Article, "Terms & Conditions") { onOpenLegal("terms") }
                 ThinDivider()
-                // The exit door belongs in the card with the rest of the rows, not
-                // floating in whitespace below it.
-                SignOutRow(onSignOut)
+                SettingRow(Icons.Default.PrivacyTip, "Privacy Policy") { onOpenLegal("privacy") }
             }
         }
 
-        // The one remaining door into the player profile — a marketing invitation,
-        // so it sits below the account's business, not above it.
-        item { Spacer(Modifier.height(GroupGap)); FeaturedBanner(onOpenPlayerProfile) }
+        // The destructive action gets its own container. It shouldn't share a card
+        // edge with a help link.
+        item {
+            Spacer(Modifier.height(GroupGap))
+            SettingsCard { SignOutRow(onSignOut) }
+        }
 
         item {
             Spacer(Modifier.height(20.dp))
@@ -417,92 +505,167 @@ private fun IdentityHero(a: AccountInfo, uploadingPhoto: Boolean, onEditPhoto: (
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(a.name.ifBlank { "Haraan user" }, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                // Always show the email the user logged in with.
+                Text(a.name.ifBlank { "Haraan user" }, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 a.email?.let {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(5.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Email, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, maxLines = 1)
-                    }
-                }
-                memberSinceYear(a.memberSince)?.let {
-                    Spacer(Modifier.height(3.dp))
-                    Text("Member since $it", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
-                }
-                a.playerId?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Box(
-                        Modifier.clip(RoundedCornerShape(7.dp)).background(Color.White.copy(alpha = 0.15f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp),
-                    ) {
+                        Icon(Icons.Default.Email, null, tint = Color.White.copy(alpha = 0.65f), modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            "ID  $it",
-                            color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                            maxLines = 1, softWrap = false,
+                            it, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
+                }
+                // Where you play and how long you've been here.
+                val since = memberSinceYear(a.memberSince)?.let { "Member since $it" }
+                val place = a.district?.takeIf { it.isNotBlank() }
+                val subtitle = listOfNotNull(place, since).joinToString(" · ")
+                if (subtitle.isNotBlank()) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        subtitle, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
-        Spacer(Modifier.height(14.dp))
-
-        // Ecosystem chips — make it unmistakable this is the Haraan platform. Sized so all
-        // three sit on one line (was overflowing → "ActionBoard" char-wrapped).
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            EcosystemChip(Icons.Default.ConfirmationNumber, "Events")
-            EcosystemChip(Icons.Default.SportsCricket, "GameHub")
-            EcosystemChip(Icons.Default.EmojiEvents, "ActionBoard")
+        // The member ID is the one genuinely distinctive thing on this screen, so
+        // it gets its own band rather than an 11sp chip: labelled, monospaced, and
+        // tappable to copy — the way an airline treats a frequent-flyer number.
+        a.playerId?.let { id ->
+            Spacer(Modifier.height(18.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+            Spacer(Modifier.height(14.dp))
+            MemberIdBand(id)
         }
     }
 }
 
 @Composable
-private fun EcosystemChip(icon: ImageVector, label: String) {
+private fun MemberIdBand(id: String) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     Row(
-        Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable {
+                clipboard.setText(AnnotatedString(id))
+                Toast.makeText(context, "Member ID copied.", Toast.LENGTH_SHORT).show()
+            }
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(12.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(
-            label, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, softWrap = false,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                "MEMBER ID",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                id,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.sp,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+        Icon(Icons.Default.ContentCopy, "Copy member ID", tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(17.dp))
     }
 }
 
-// ─────────────────────────────────────────────────── Quick-stats strip ──────────
+// ───────────────────────────────────────────────────────────── Lanes ────────────
+/**
+ * One identity, two lanes. A lane either reports a number it has earned or invites
+ * you in. A null [value] means there is nothing to count yet, and the caption is
+ * promoted to the headline: an empty lane should read as a door, not as a zero
+ * (or worse, a dash, which looks like a redaction).
+ */
 @Composable
-private fun QuickStats(a: AccountInfo, bookingCount: Int) {
+private fun RowScope.LaneCard(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    accent: Color,
+    tint: Color,
+    label: String,
+    value: String?,
+    caption: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+    ) {
+        Box(
+            Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(tint),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, tint = accent, modifier = Modifier.size(19.dp)) }
+        Spacer(Modifier.height(14.dp))
+        Text(label, color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        // Push the payload to the bottom so a counting lane and an inviting lane
+        // still share a baseline when they sit side by side.
+        Spacer(Modifier.weight(1f).height(6.dp))
+        if (value != null) {
+            Text(value, color = Text1, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Spacer(Modifier.height(3.dp))
+            Text(caption, color = Text3, fontSize = 11.5.sp, maxLines = 2)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    caption, color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = accent, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────── Standing (earned stats) ──────
+/** XP, district rank and trust — three numbers you can only get by playing. */
+@Composable
+private fun StandingStrip(p: PlayerProfile) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(16.dp))
-            .padding(vertical = 16.dp),
+            .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatCell(Modifier.weight(1f), bookingCount.toString(), "Bookings")
+        StatCell(Modifier.weight(1f), Icons.AutoMirrored.Filled.TrendingUp, BlueBright, p.rankedXp.formatted(), "Match XP")
         StatDivider()
-        StatCell(Modifier.weight(1f), a.district?.takeIf { it.isNotBlank() } ?: "—", "District")
+        StatCell(Modifier.weight(1f), Icons.Default.EmojiEvents, Green, p.rankDistrict?.let { "#$it" } ?: "—", "In district")
         StatDivider()
-        StatCell(Modifier.weight(1f), memberSinceYear(a.memberSince) ?: "2025", "Since")
+        StatCell(Modifier.weight(1f), Icons.Default.Shield, Text2, p.trustScore.toString(), "Trust")
     }
 }
 
+/** 1240 → "1,240". Big numbers should not be read digit by digit. */
+private fun Int.formatted(): String = java.text.NumberFormat.getInstance(java.util.Locale.US).format(this)
+
 @Composable
-private fun StatCell(modifier: Modifier, value: String, label: String) {
+private fun StatCell(modifier: Modifier, icon: ImageVector, accent: Color, value: String, label: String) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = accent, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.height(6.dp))
         Text(value, color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Spacer(Modifier.height(3.dp))
-        Text(label, color = Text3, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -763,41 +926,6 @@ private fun StatusPill(status: String) {
     ) { Text(status.uppercase(), color = c, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
 }
 
-// ─────────────────────────────────────────────── Featured banner ────────────────
-@Composable
-private fun FeaturedBanner(onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(BannerGradient)
-            .clickable(onClick = onClick)
-            .padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("PLAY CRICKET NEAR YOU", color = Color.White.copy(alpha = 0.85f), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Text("Join local matches", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("Track stats · climb the rankings", color = Color.White.copy(alpha = 0.85f), fontSize = 12.5.sp)
-            Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White).padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Explore", color = Color(0xFF0B7A3E), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(5.dp))
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Color(0xFF0B7A3E), modifier = Modifier.size(15.dp))
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Box(
-            Modifier.size(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Default.SportsCricket, null, tint = Color.White, modifier = Modifier.size(30.dp)) }
-    }
-}
-
 // ─────────────────────────────────────────────────────────── Settings ───────────
 @Composable
 private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
@@ -823,22 +951,229 @@ private fun SignOutRow(onSignOut: () -> Unit) {
     }
 }
 
+/**
+ * Utility rows are deliberately quiet: grey icons, no accent. Colour on this screen
+ * means "this is a lane" — spending it on Support too would flatten the hierarchy
+ * back into an undifferentiated list.
+ */
 @Composable
-private fun SettingRow(icon: ImageVector, title: String, badge: String? = null, onClick: () -> Unit) {
+private fun SettingRow(icon: ImageVector, title: String, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = BlueBright, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = Text2, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(14.dp))
         Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        if (badge != null) {
-            Box(
-                Modifier.clip(RoundedCornerShape(7.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
-            ) { Text(badge, color = BlueBright, fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
-            Spacer(Modifier.width(8.dp))
-        }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(20.dp))
+    }
+}
+
+// ──────────────────────────────────────────────────── Sub-pages (full screen) ───
+/** Shared chrome for the account's child pages: a back arrow and a title. */
+@Composable
+private fun PageHeader(title: String, onClose: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEFF2F7)).clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Text(title, color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Terms & Conditions / Privacy Policy, fetched from `/api/legal/{slug}` so an
+ * admin can republish the wording without an app release.
+ */
+@Composable
+private fun LegalScreen(slug: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    var doc by remember(slug) { mutableStateOf<com.example.thanna.data.LegalDocument?>(null) }
+    var error by remember(slug) { mutableStateOf<String?>(null) }
+    var attempt by remember(slug) { mutableStateOf(0) }
+
+    LaunchedEffect(slug, attempt) {
+        error = null
+        doc = null
+        runCatching { com.example.thanna.data.LegalRepository().fetch(slug) }
+            .onSuccess { doc = it }
+            .onFailure { error = it.message ?: "Couldn't load this document." }
+    }
+
+    // The title comes from the server, but the header must say something while the
+    // fetch is in flight — so fall back to the slug's known name.
+    val fallbackTitle = if (slug == "terms") "Terms & Conditions" else "Privacy Policy"
+
+    Column(modifier.fillMaxSize().background(Bg)) {
+        PageHeader(doc?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle, onClose)
+        when {
+            error != null -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error!!, color = Text2, fontSize = 14.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(BlueBright).clickable { attempt++ }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                    ) { Text("Retry", color = Color.White, fontWeight = FontWeight.Bold) }
+                }
+            }
+            doc == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = BlueBright) }
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                item {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surface)
+                            .border(1.dp, Stroke, RoundedCornerShape(18.dp)).padding(20.dp),
+                    ) {
+                        // Blank lines separate paragraphs; a short line ending in ":"
+                        // is a heading. That's the whole format — enough structure for
+                        // legal copy without shipping a markdown renderer.
+                        doc!!.body.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }.forEachIndexed { i, para ->
+                            if (i > 0) Spacer(Modifier.height(14.dp))
+                            val isHeading = para.endsWith(":") && para.length < 60 && !para.contains("\n")
+                            Text(
+                                para,
+                                color = if (isHeading) Text1 else Text2,
+                                fontSize = if (isHeading) 14.5.sp else 13.5.sp,
+                                fontWeight = if (isHeading) FontWeight.Bold else FontWeight.Normal,
+                                lineHeight = 21.sp,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Account → Privacy. Each toggle writes immediately (there is no Save button), so
+ * the switch flips optimistically and rolls back if the server refuses — a toggle
+ * that lies about what the server stored is worse than a slow one.
+ */
+@Composable
+private fun PrivacySettingsScreen(onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var settings by remember { mutableStateOf<PrivacySettings?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableStateOf(0) }
+
+    LaunchedEffect(attempt) {
+        error = null
+        settings = null
+        val token = TokenStore.getToken(context) ?: ""
+        runCatching { PrivacyRepository().fetch(token) }
+            .onSuccess { settings = it }
+            .onFailure { error = it.message ?: "Couldn't load your privacy settings." }
+    }
+
+    fun save(field: String, value: Boolean, apply: (PrivacySettings, Boolean) -> PrivacySettings) {
+        val before = settings ?: return
+        settings = apply(before, value)          // optimistic
+        scope.launch {
+            val token = TokenStore.getToken(context) ?: ""
+            runCatching { PrivacyRepository().update(token, field, value) }
+                .onSuccess { settings = it }     // trust the server's echo
+                .onFailure {
+                    settings = before            // roll back
+                    Toast.makeText(context, "Couldn't save that. Try again.", Toast.LENGTH_SHORT).show()
+                }
+        }
+    }
+
+    Column(modifier.fillMaxSize().background(Bg)) {
+        PageHeader("Privacy", onClose)
+        when {
+            error != null -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error!!, color = Text2, fontSize = 14.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(BlueBright).clickable { attempt++ }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                    ) { Text("Retry", color = Color.White, fontWeight = FontWeight.Bold) }
+                }
+            }
+            settings == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = BlueBright) }
+            else -> {
+                val s = settings!!
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                    item {
+                        Text(
+                            "Haraan is a public leaderboard. These controls decide how much of your play other people can see.",
+                            color = Text2, fontSize = 13.sp, lineHeight = 19.sp,
+                        )
+                        Spacer(Modifier.height(GroupGap))
+                    }
+                    item { SectionTitle("Your profile") }
+                    item {
+                        Spacer(Modifier.height(HeadingGap))
+                        SettingsCard {
+                            ToggleRow(
+                                "Public profile",
+                                "Anyone can open your player profile from a match or a leaderboard.",
+                                s.publicProfile,
+                            ) { save("publicProfile", it) { p, v -> p.copy(publicProfile = v) } }
+                            ThinDivider()
+                            ToggleRow(
+                                "Show career stats",
+                                "Your runs, wickets and matches appear on your profile.",
+                                s.showStats,
+                            ) { save("showStats", it) { p, v -> p.copy(showStats = v) } }
+                            ThinDivider()
+                            ToggleRow(
+                                "Show my district",
+                                "Your district and state are shown next to your name.",
+                                s.showDistrict,
+                            ) { save("showDistrict", it) { p, v -> p.copy(showDistrict = v) } }
+                        }
+                    }
+                    item { Spacer(Modifier.height(GroupGap)); SectionTitle("Discovery") }
+                    item {
+                        Spacer(Modifier.height(HeadingGap))
+                        SettingsCard {
+                            ToggleRow(
+                                "Findable in search",
+                                "Other players can find you by name or Member ID to add you to a squad.",
+                                s.discoverable,
+                            ) { save("discoverable", it) { p, v -> p.copy(discoverable = v) } }
+                        }
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
+                }
+            }
+        }
+    }
+}
+
+/** A switch row. The whole row is the target — a 32dp switch is a poor one. */
+@Composable
+private fun ToggleRow(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(3.dp))
+            Text(description, color = Text3, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Spacer(Modifier.width(14.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Green,
+                checkedBorderColor = Green,
+            ),
+        )
     }
 }
 
@@ -853,6 +1188,7 @@ private fun MyBookingsScreen(
     onClose: () -> Unit,
     onOpenPass: (BookingLite) -> Unit,
     onBookVenue: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val today = remember { todayIso() }
     val cancelled = bookings.filter { it.isCancelled() }
@@ -870,7 +1206,7 @@ private fun MyBookingsScreen(
         else -> upcoming
     }
 
-    Column(Modifier.fillMaxSize().background(Bg)) {
+    Column(modifier.fillMaxSize().background(Bg)) {
         Row(
             Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,

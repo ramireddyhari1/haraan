@@ -926,8 +926,12 @@ internal fun MainAppContainer(
         onClose = { showAccountProfile = false },
         fetchAccount = { accountRepository.fetchAccount(token) },
         fetchBookings = { accountRepository.fetchBookings(token) },
+        // Optional: the account screen degrades to an invitation when there's no
+        // ActionBoard profile yet, so a failure here must not fail the screen.
+        fetchPlayer = { runCatching { com.example.thanna.data.ProfileRepository().fetchMe(token) }.getOrNull() },
         onOpenPlayerProfile = { showCricketProfile = true },
         onOpenPass = { b -> ticketPass = b },
+        onOpenSupport = { showAccountProfile = false; onItemClick(com.example.thanna.SupportChat) },
         onSignOut = { showAccountProfile = false; onLogout() },
         modifier = Modifier.statusBarsPadding(),
       )
