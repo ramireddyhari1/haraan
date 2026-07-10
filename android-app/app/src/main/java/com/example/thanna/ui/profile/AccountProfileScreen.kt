@@ -273,14 +273,6 @@ private fun Content(
         photoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    val today = remember { todayIso() }
-    val cancelled = bookings.filter { it.isCancelled() }
-    val live = bookings.filterNot { it.isCancelled() }
-    val upcoming = live.filterNot { it.isPast(today) }
-    val past = live.filter { it.isPast(today) }
-
-    // One identity, two lanes: "tickets" (what you've booked) vs "play" (your game).
-    var lane by remember { mutableStateOf("tickets") }
     var showVenueSheet by remember { mutableStateOf(false) }
     var showBookings by remember { mutableStateOf(false) }
 
@@ -313,33 +305,13 @@ private fun Content(
         // ── Quick-stats strip — makes the account feel substantial ──
         item { Spacer(Modifier.height(14.dp)); QuickStats(account, bookings.size) }
 
-        // ── Lane switch — pick a world: Tickets (what you've booked) or Play (your game) ──
-        item { Spacer(Modifier.height(18.dp)); ProfileLaneSwitch(lane) { lane = it } }
-
-        if (lane == "tickets") {
-            // An at-a-glance count, not a second copy of the list — the bookings
-            // themselves live on one screen, reached from here or the Account row.
-            item { Spacer(Modifier.height(18.dp)); SectionTitle("My bookings") }
-            item {
-                Spacer(Modifier.height(12.dp))
-                BookingsSummary(
-                    upcoming = upcoming.size,
-                    past = past.size,
-                    cancelled = cancelled.size,
-                    selected = null,
-                    onSelect = { showBookings = true },
-                )
-            }
-            item {
-                Spacer(Modifier.height(10.dp))
-                ViewAllBookingsRow(count = bookings.size, onClick = { showBookings = true })
-            }
-        } else {
-            // Play = your competitive identity — the door into the ActionBoard player profile.
-            item { Spacer(Modifier.height(18.dp)); SectionTitle("Your game") }
-            item { Spacer(Modifier.height(12.dp)); ActionBoardEntryCard(onOpenPlayerProfile) }
-            item { Spacer(Modifier.height(12.dp)); FeaturedBanner(onOpenPlayerProfile) }
-        }
+        // Bookings are reached only from the "My bookings" row in the Account list
+        // below, so the profile no longer carries a Tickets lane — and a lane switch
+        // whose Tickets side is empty is worse than no switch at all.
+        // Play = your competitive identity — the door into the ActionBoard player profile.
+        item { Spacer(Modifier.height(18.dp)); SectionTitle("Your game") }
+        item { Spacer(Modifier.height(12.dp)); ActionBoardEntryCard(onOpenPlayerProfile) }
+        item { Spacer(Modifier.height(12.dp)); FeaturedBanner(onOpenPlayerProfile) }
 
         // ── Account settings ──
         item { Spacer(Modifier.height(24.dp)); SectionTitle("Account") }
@@ -590,32 +562,6 @@ private fun SummaryCell(
     }
 }
 
-/** The profile's doorway into the bookings page. */
-@Composable
-private fun ViewAllBookingsRow(count: Int, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 15.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Default.ConfirmationNumber, null, tint = BlueBright, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text("View all bookings", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                if (count == 0) "Nothing booked yet" else "$count booking${if (count == 1) "" else "s"} · tap for your passes",
-                color = Text3, fontSize = 12.sp,
-            )
-        }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(20.dp))
-    }
-}
-
 /** Booking a venue is a different job from reviewing what you've booked. */
 @Composable
 private fun BookVenueButton(onClick: () -> Unit) {
@@ -684,41 +630,6 @@ private fun BookingGroupCard(group: BookingGroup, onOpenPass: (BookingLite) -> U
                 }
             }
         }
-    }
-}
-
-// ─────────────────────────────────────────────── Lane switch (Tickets/Play) ──────
-@Composable
-private fun ProfileLaneSwitch(selected: String, onSelect: (String) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        LaneTab(Modifier.weight(1f), Icons.Default.ConfirmationNumber, "Tickets", selected == "tickets") { onSelect("tickets") }
-        LaneTab(Modifier.weight(1f), Icons.Default.SportsCricket, "Play", selected == "play") { onSelect("play") }
-    }
-}
-
-@Composable
-private fun LaneTab(modifier: Modifier, icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
-    val fg = if (active) Color.White else Text2
-    Row(
-        modifier
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (active) Text1 else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(vertical = 11.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = fg, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
     }
 }
 
