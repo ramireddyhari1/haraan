@@ -283,16 +283,17 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
               Text(hours, color = HaraanColors.TextPrimary, fontWeight = FontWeight.Medium, fontSize = 13.sp)
             }
           }
-          // Full address (falls back to the short area label), shown under the timing.
+          // Full address (falls back to the short area label), shown under the timing,
+          // with the "Show in Map" pill pulled up beside it.
           Spacer(Modifier.height(6.dp))
-          Row(verticalAlignment = Alignment.Top) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
               Icons.Default.LocationOn, null,
               tint = HaraanColors.TextSecondary,
-              modifier = Modifier.size(14.dp).padding(top = 2.dp)
+              modifier = Modifier.size(14.dp).align(Alignment.Top).padding(top = 2.dp)
             )
             Spacer(Modifier.width(4.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
               Text(
                 detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location,
                 color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 18.sp
@@ -302,26 +303,26 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                 Text("$dist away", color = HaraanColors.TextMuted, fontSize = 12.sp)
               }
             }
-          }
-          // Prominent "Show in Map" pill (mirrors Playo).
-          Spacer(Modifier.height(10.dp))
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-              .clip(RoundedCornerShape(50))
-              .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(50))
-              .clickable {
-                val lat = detail?.latitude; val lng = detail?.longitude
-                val addr = detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location
-                val q = if (lat != null && lng != null) "$lat,$lng($name)"
-                else "$name $addr"
-                openMap(ctx, detail?.mapLink, q)
-              }
-              .padding(horizontal = 14.dp, vertical = 8.dp)
-          ) {
-            Icon(Icons.Default.Place, null, tint = HaraanColors.GameHubGreen, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Show in Map", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.width(10.dp))
+            // Prominent "Show in Map" pill (mirrors Playo), beside the address.
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(50))
+                .clickable {
+                  val lat = detail?.latitude; val lng = detail?.longitude
+                  val addr = detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location
+                  val q = if (lat != null && lng != null) "$lat,$lng($name)"
+                  else "$name $addr"
+                  openMap(ctx, detail?.mapLink, q)
+                }
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+              Icon(Icons.Default.Place, null, tint = HaraanColors.GameHubGreen, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(6.dp))
+              Text("Show in Map", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, softWrap = false)
+            }
           }
 
           if (loading) {
