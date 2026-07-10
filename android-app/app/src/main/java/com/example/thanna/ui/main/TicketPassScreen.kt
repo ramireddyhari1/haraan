@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -128,10 +129,14 @@ fun TicketPassScreen(booking: BookingLite, onClose: () -> Unit) {
                         .padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // The wordmark is dark navy ink on transparency — the same navy as
+                    // this band. It's alpha art, so tint it white rather than shipping
+                    // a second asset.
                     Image(
                         painter = painterResource(id = R.drawable.haraan_logo),
                         contentDescription = "Haraan",
                         contentScale = ContentScale.Fit,
+                        colorFilter = ColorFilter.tint(Color.White),
                         modifier = Modifier.height(18.dp),
                     )
                     Spacer(Modifier.weight(1f))

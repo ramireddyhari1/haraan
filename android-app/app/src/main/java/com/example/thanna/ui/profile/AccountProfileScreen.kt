@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -110,6 +111,41 @@ private sealed interface AccountState {
     data class Loaded(val account: AccountInfo, val bookings: List<BookingLite>) : AccountState
 }
 
+private val CANCELLED_STATUSES = setOf("CANCELLED", "REFUNDED", "FAILED")
+
+/** Today as `yyyy-MM-dd`. SimpleDateFormat keeps this safe on minSdk 24 (no java.time). */
+private fun todayIso(): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+private fun BookingLite.isCancelled(): Boolean = status.uppercase() in CANCELLED_STATUSES
+
+/**
+ * Upcoming vs past is a question about *time*, not payment. The old summary
+ * counted CONFIRMED as "Active" and PENDING as "Upcoming", so a confirmed gig
+ * that happened last month read as Active forever and Upcoming only ever counted
+ * tickets you hadn't paid for. Dates are stored `yyyy-MM-dd…`, so a lexicographic
+ * compare against today is both correct and cheap. A booking with no date is
+ * treated as upcoming — better to over-show a live ticket than to bury it.
+ */
+private fun BookingLite.isPast(today: String): Boolean {
+    val day = eventDate?.take(10)?.takeIf { it.length == 10 } ?: return false
+    return day < today
+}
+
+/**
+ * Bookings for the same event on the same day, collapsed into one entry. Seven
+ * tickets to one concert is one row that says "7 tickets", not seven rows.
+ */
+private data class BookingGroup(val bookings: List<BookingLite>) {
+    val head: BookingLite get() = bookings.first()
+    val totalTickets: Int get() = bookings.sumOf { it.quantity }
+    val isGrouped: Boolean get() = bookings.size > 1
+}
+
+private fun List<BookingLite>.grouped(): List<BookingGroup> =
+    groupBy { Triple(it.type, it.eventTitle, it.eventDate?.take(10)) }
+        .values.map { BookingGroup(it) }
+
 /**
  * Unified Haraan account — shared by Events + GameHub. Built to read like a
  * dashboard for the user's relationship with the platform, not a settings page:
@@ -123,6 +159,7 @@ fun AccountProfileScreen(
     fetchAccount: suspend () -> AccountInfo,
     fetchBookings: suspend () -> List<BookingLite>,
     onOpenPlayerProfile: () -> Unit,
+    onOpenPass: (BookingLite) -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -183,7 +220,7 @@ fun AccountProfileScreen(
                     ) { Text("Sign out", color = Danger, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                 }
             }
-            is AccountState.Loaded -> Content(s.account, s.bookings, onOpenPlayerProfile, onSignOut, onReload = { reloadKey++ })
+            is AccountState.Loaded -> Content(s.account, s.bookings, onOpenPlayerProfile, onOpenPass, onSignOut, onReload = { reloadKey++ })
         }
     }
 }
@@ -193,6 +230,7 @@ private fun Content(
     account: AccountInfo,
     bookings: List<BookingLite>,
     onOpenPlayerProfile: () -> Unit,
+    onOpenPass: (BookingLite) -> Unit,
     onSignOut: () -> Unit,
     onReload: () -> Unit,
 ) {
@@ -234,14 +272,23 @@ private fun Content(
         photoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    val confirmed = bookings.count { it.status.equals("CONFIRMED", true) }
-    val pending = bookings.count { it.status.equals("PENDING", true) }
-    val completed = bookings.size - confirmed - pending
-    val eventBookings = bookings.filter { it.type != "venue" }
-    val venueBookings = bookings.filter { it.type == "venue" }
+    val today = remember { todayIso() }
+    val cancelled = bookings.filter { it.isCancelled() }
+    val live = bookings.filterNot { it.isCancelled() }
+    val upcoming = live.filterNot { it.isPast(today) }
+    val past = live.filter { it.isPast(today) }
+
     // One identity, two lanes: "tickets" (what you've booked) vs "play" (your game).
     var lane by remember { mutableStateOf("tickets") }
+    // Which slice of the bookings the Tickets lane is showing.
+    var bucket by remember { mutableStateOf("upcoming") }
     var showVenueSheet by remember { mutableStateOf(false) }
+
+    val shown = when (bucket) {
+        "past" -> past
+        "cancelled" -> cancelled
+        else -> upcoming
+    }
 
     if (showVenueSheet) {
         VenueBookingSheet(
@@ -264,28 +311,42 @@ private fun Content(
         item { Spacer(Modifier.height(18.dp)); ProfileLaneSwitch(lane) { lane = it } }
 
         if (lane == "tickets") {
-            // Tickets = everything booked: event tickets now, venue-slot bookings (coming).
-            item { Spacer(Modifier.height(18.dp)); SectionTitle("My tickets") }
-            item { Spacer(Modifier.height(12.dp)); BookingsSummary(active = confirmed, upcoming = pending, completed = completed) }
+            // The single home for everything booked — event tickets and venue slots.
+            // The counters double as the filter: three numbers you can act on beat
+            // three numbers you can only read.
+            item { Spacer(Modifier.height(18.dp)); SectionTitle("My bookings") }
             item {
                 Spacer(Modifier.height(12.dp))
-                BookingsModuleCard(
-                    eventsActive = eventBookings.size,
-                    venuesActive = venueBookings.size,
-                    onBookVenue = { showVenueSheet = true },
+                BookingsSummary(
+                    upcoming = upcoming.size,
+                    past = past.size,
+                    cancelled = cancelled.size,
+                    selected = bucket,
+                    onSelect = { bucket = it },
                 )
             }
-            if (bookings.isNotEmpty()) {
-                item { Spacer(Modifier.height(10.dp)) }
-                items(bookings.size) { i ->
-                    BookingRow(bookings[i])
+
+            if (shown.isNotEmpty()) {
+                val groups = shown.grouped()
+                item { Spacer(Modifier.height(12.dp)) }
+                items(groups.size) { i ->
+                    BookingGroupCard(groups[i], onOpenPass = onOpenPass)
                     Spacer(Modifier.height(8.dp))
                 }
             } else {
                 item {
                     Spacer(Modifier.height(12.dp))
-                    EmptyLaneNote("No tickets yet", "Your event tickets and venue-slot bookings will show up here.")
+                    when (bucket) {
+                        "past" -> EmptyLaneNote("Nothing here yet", "Events and slots you've already attended will move here.")
+                        "cancelled" -> EmptyLaneNote("No cancellations", "Bookings you cancel or that get refunded show up here.")
+                        else -> EmptyLaneNote("Nothing coming up", "Book an event or a venue slot and your entry pass lands here.")
+                    }
                 }
+            }
+
+            item {
+                Spacer(Modifier.height(12.dp))
+                BookVenueButton(onClick = { showVenueSheet = true })
             }
         } else {
             // Play = your competitive identity — the door into the ActionBoard player profile.
@@ -460,86 +521,142 @@ private fun StatDivider() {
 }
 
 // ─────────────────────────────────────────────── Bookings summary ───────────────
+/**
+ * The three counters are also the filter. Buckets are time-based (and cancellation),
+ * never payment status — see [BookingLite.isPast].
+ */
 @Composable
-private fun BookingsSummary(active: Int, upcoming: Int, completed: Int) {
+private fun BookingsSummary(
+    upcoming: Int,
+    past: Int,
+    cancelled: Int,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(16.dp))
-            .padding(vertical = 16.dp),
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SummaryCell(Modifier.weight(1f), active, "Active", Green)
+        SummaryCell(Modifier.weight(1f), upcoming, "Upcoming", Green, selected == "upcoming") { onSelect("upcoming") }
         StatDivider()
-        SummaryCell(Modifier.weight(1f), upcoming, "Upcoming", BlueBright)
+        SummaryCell(Modifier.weight(1f), past, "Past", Text2, selected == "past") { onSelect("past") }
         StatDivider()
-        SummaryCell(Modifier.weight(1f), completed, "Completed", Text2)
+        SummaryCell(Modifier.weight(1f), cancelled, "Cancelled", Danger, selected == "cancelled") { onSelect("cancelled") }
     }
 }
 
 @Composable
-private fun SummaryCell(modifier: Modifier, value: Int, label: String, accent: Color) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value.toString(), color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = Text3, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-// ─────────────────────────────────────────────── Bookings module card ───────────
-@Composable
-private fun BookingsModuleCard(eventsActive: Int, venuesActive: Int, onBookVenue: () -> Unit) {
+private fun SummaryCell(
+    modifier: Modifier,
+    value: Int,
+    label: String,
+    accent: Color,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
     Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(18.dp)),
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BookingModuleRow(Icons.Default.ConfirmationNumber, "Events", "Concerts, comedy & tickets", active = eventsActive)
-        ThinDivider()
-        // Venue-slot bookings (turf/court) are tickets too — tap to book one.
-        BookingModuleRow(
-            Icons.Default.SportsCricket, "Venues", "Turfs, nets & slot bookings",
-            active = venuesActive, action = "Book", onClick = onBookVenue,
+        Text(
+            value.toString(),
+            color = if (active) accent else Text3,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            label,
+            color = if (active) Text1 else Text3,
+            fontSize = 11.5.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+        )
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier
+                .height(2.dp)
+                .width(if (active) 22.dp else 0.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (active) accent else Color.Transparent),
         )
     }
 }
 
+/** Booking a venue is a different job from reviewing what you've booked. */
 @Composable
-private fun BookingModuleRow(
-    icon: ImageVector,
-    title: String,
-    sub: String,
-    active: Int,
-    action: String? = null,
-    onClick: (() -> Unit)? = null,
-) {
+private fun BookVenueButton(onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(16.dp),
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GradientIcon(icon)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(sub, color = Text3, fontSize = 12.sp)
-        }
-        if (active > 0) {
-            Box(
-                Modifier.clip(RoundedCornerShape(8.dp)).background(GreenTint).padding(horizontal = 10.dp, vertical = 6.dp),
-            ) { Text("$active Active", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-        }
-        if (action != null) {
-            if (active > 0) Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier.clip(RoundedCornerShape(8.dp)).background(BlueBright).padding(horizontal = 12.dp, vertical = 6.dp),
-            ) { Text(action, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+        Icon(Icons.Default.SportsCricket, null, tint = BlueBright, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Book a venue slot", color = BlueBright, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+// ─────────────────────────────────────────────── Booking group ──────────────────
+/**
+ * One entry per event-day. A single booking is just a tappable row that opens its
+ * pass; several bookings to the same event collapse into one row that expands to
+ * reveal a pass per booking — each has its own QR, so they can't be merged.
+ */
+@Composable
+private fun BookingGroupCard(group: BookingGroup, onOpenPass: (BookingLite) -> Unit) {
+    var expanded by remember(group.head.id) { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(14.dp)),
+    ) {
+        BookingRow(
+            b = group.head,
+            ticketsOverride = if (group.isGrouped) group.totalTickets else null,
+            trailing = if (group.isGrouped) "${group.bookings.size} passes" else null,
+            onClick = { if (group.isGrouped) expanded = !expanded else onOpenPass(group.head) },
+        )
+        if (expanded) {
+            group.bookings.forEach { b ->
+                ThinDivider()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenPass(b) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.ConfirmationNumber, null, tint = BlueBright, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${b.quantity} ticket${if (b.quantity == 1) "" else "s"}",
+                            color = Text1, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                        b.ticketCode?.takeIf { it.isNotBlank() }?.let {
+                            Text(it.take(8), color = Text3, fontSize = 11.sp)
+                        }
+                    }
+                    Text("View pass", color = BlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -612,37 +729,63 @@ private fun GradientIcon(icon: ImageVector) {
 }
 
 @Composable
-private fun BookingRow(b: BookingLite) {
+private fun BookingRow(
+    b: BookingLite,
+    ticketsOverride: Int? = null,
+    trailing: String? = null,
+    onClick: () -> Unit,
+) {
     val isVenue = b.type == "venue"
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // The real poster makes a row recognisable at a glance; the tinted icon
+        // tile is the fallback when there's no creative.
         Box(
             Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(if (isVenue) GreenTint else BlueTint),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                if (isVenue) Icons.Default.SportsCricket else Icons.Default.ConfirmationNumber,
-                null, tint = if (isVenue) Green else BlueBright, modifier = Modifier.size(20.dp),
-            )
+            if (!b.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = b.imageUrl,
+                    contentDescription = b.eventTitle,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)),
+                )
+            } else {
+                Icon(
+                    if (isVenue) Icons.Default.SportsCricket else Icons.Default.ConfirmationNumber,
+                    null, tint = if (isVenue) Green else BlueBright, modifier = Modifier.size(20.dp),
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(b.eventTitle, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(b.eventTitle, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val meta = listOfNotNull(b.eventVenue, b.eventDate?.take(10)).joinToString(" · ")
             if (meta.isNotBlank()) {
-                Text(meta, color = Text3, fontSize = 12.sp, maxLines = 1)
+                Text(meta, color = Text3, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            val line = if (isVenue) (b.slotLabel ?: "Venue slot") else "${b.quantity} ticket${if (b.quantity == 1) "" else "s"}"
+            val tickets = ticketsOverride ?: b.quantity
+            val line = if (isVenue) (b.slotLabel ?: "Venue slot") else "$tickets ticket${if (tickets == 1) "" else "s"}"
             Text(line, color = Text2, fontSize = 12.sp, maxLines = 1)
         }
-        StatusPill(b.status)
+        Spacer(Modifier.width(8.dp))
+        if (trailing != null) {
+            Text(trailing, color = Text3, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(18.dp))
+        } else if (b.isCancelled()) {
+            // Only alarm when there's something to alarm about; an upcoming ticket's
+            // "CONFIRMED" pill was noise on every single row.
+            StatusPill(b.status)
+        } else {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(18.dp))
+        }
     }
 }
 

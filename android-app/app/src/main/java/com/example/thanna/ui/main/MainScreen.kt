@@ -452,11 +452,10 @@ internal fun MainAppContainer(
   // Common account profile (shared by Events + GameHub) + linked cricket profile.
   var showAccountProfile by remember { mutableStateOf(false) }
   var showCricketProfile by remember { mutableStateOf(false) }
-  // Header utility icons: bell → notifications, calendar → "My Schedule" agenda. Shared by both
-  // the Events and GameHub headers so the icons work wherever they appear.
+  // Header utility icons: bell → notifications, calendar → the account's bookings.
+  // Shared by both the Events and GameHub headers so the icons work wherever they appear.
   var showNotifications by remember { mutableStateOf(false) }
-  var showSchedule by remember { mutableStateOf(false) }
-  // The booking whose entry-pass QR is currently open (null = none). Set from My Schedule taps.
+  // The booking whose entry-pass QR is currently open (null = none). Set from booking taps.
   var ticketPass by remember { mutableStateOf<com.example.thanna.data.BookingLite?>(null) }
   val accountRepository = remember { com.example.thanna.data.AccountRepository() }
   val playerProfileRepository = remember { com.example.thanna.data.ProfileRepository() }
@@ -638,7 +637,7 @@ internal fun MainAppContainer(
               onLocationClick = { showLocationSheet = true },
               onChatClick = { onItemClick(com.example.thanna.SupportChat) },
               onNotificationClick = { showNotifications = true },
-              onCalendarClick = { showSchedule = true },
+              onCalendarClick = { showAccountProfile = true },
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -902,7 +901,7 @@ internal fun MainAppContainer(
                 onMatchClick = { id -> onItemClick(com.example.thanna.MatchDetails(id)) },
                 onSupportClick = { onItemClick(com.example.thanna.SupportChat) },
                 onNotificationsClick = { showNotifications = true },
-                onCalendarClick = { showSchedule = true },
+                onCalendarClick = { showAccountProfile = true },
                 onVenueClick = { v ->
                   onItemClick(
                     com.example.thanna.VenueDetail(
@@ -928,6 +927,7 @@ internal fun MainAppContainer(
         fetchAccount = { accountRepository.fetchAccount(token) },
         fetchBookings = { accountRepository.fetchBookings(token) },
         onOpenPlayerProfile = { showCricketProfile = true },
+        onOpenPass = { b -> ticketPass = b },
         onSignOut = { showAccountProfile = false; onLogout() },
         modifier = Modifier.statusBarsPadding(),
       )
@@ -941,19 +941,11 @@ internal fun MainAppContainer(
       )
     }
 
-    // Header bell → notifications; header calendar → "My Schedule". Shared by both headers.
+    // Header bell → notifications. The calendar icon used to open a separate
+    // "My Schedule" sheet over the same /api/bookings data; bookings now live in
+    // exactly one place, so it opens the account's Tickets lane instead.
     if (showNotifications) {
       NotificationsSheet(onDismiss = { showNotifications = false })
-    }
-    if (showSchedule) {
-      ScheduleSheet(
-        onDismiss = { showSchedule = false },
-        fetchBookings = { accountRepository.fetchBookings(token) },
-        onBookingClick = { b ->
-          showSchedule = false
-          ticketPass = b
-        },
-      )
     }
     // Full-screen entry pass (QR) for a tapped booking — shown above everything else.
     ticketPass?.let { b ->
