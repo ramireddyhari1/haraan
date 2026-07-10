@@ -96,6 +96,8 @@ import com.example.thanna.data.ApiConfig
 import com.example.thanna.data.BookingRepository
 import com.example.thanna.data.BookingResult
 import com.example.thanna.data.FavoritesStore
+import com.example.thanna.data.LocationRepository
+import com.example.thanna.data.LocationState
 import com.example.thanna.data.TokenStore
 import com.example.thanna.data.ReviewResult
 import com.example.thanna.data.VenueDetailData
@@ -105,6 +107,21 @@ import com.example.thanna.data.VenueSlotItem
 import com.example.thanna.ui.theme.HaraanColors
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+
+/** Great-circle distance in km between two lat/lng points (haversine). */
+private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+  val r = 6371.0
+  val dLat = Math.toRadians(lat2 - lat1)
+  val dLng = Math.toRadians(lng2 - lng1)
+  val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/** "850 m" under a km, else "3.1 km" — the label the distance rows render. */
+private fun formatDistanceKm(km: Double): String =
+  if (km < 1.0) "${(km * 1000).toInt()} m" else "%.1f km".format(km)
 
 // Photo fallback when a venue has no uploaded images yet (mirrors the browse card behaviour).
 private fun detailCategoryImage(category: String): String = when {
@@ -148,6 +165,18 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
   val price = detail?.price ?: venue.price
   val images = detail?.images?.takeIf { it.isNotEmpty() }
     ?: listOf(venue.imageUrl.takeIf { it.isNotBlank() } ?: detailCategoryImage(category))
+
+  // Live distance: measured from the user's last-known location to the venue's
+  // coordinates (no GPS prompt — cached fix only). Falls back to the backend's
+  // static string when either side has no coordinates.
+  val userLoc = remember { LocationRepository(ctx).cached() as? LocationState.Resolved }
+  val liveDistance: String? = run {
+    val ulat = userLoc?.latitude; val ulng = userLoc?.longitude
+    val vlat = detail?.latitude; val vlng = detail?.longitude
+    if (ulat != null && ulng != null && vlat != null && vlng != null)
+      formatDistanceKm(haversineKm(ulat, ulng, vlat, vlng))
+    else null
+  }
 
   val scroll = rememberScrollState()
   Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFE9EEF4)) {
@@ -268,7 +297,7 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                 detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location,
                 color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 18.sp
               )
-              val dist = detail?.distance ?: venue.distance
+              val dist = liveDistance ?: detail?.distance ?: venue.distance
               if (dist.isNotBlank()) {
                 Text("$dist away", color = HaraanColors.TextMuted, fontSize = 12.sp)
               }
@@ -347,7 +376,8 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                 Text(
                   buildString {
                     append(d.address.takeIf { it.isNotBlank() } ?: d.location)
-                    if (d.distance.isNotBlank()) append("  ·  ${d.distance} away")
+                    val dist = liveDistance ?: d.distance.takeIf { it.isNotBlank() }
+                    if (!dist.isNullOrBlank()) append("  ·  $dist away")
                   },
                   color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 18.sp
                 )
