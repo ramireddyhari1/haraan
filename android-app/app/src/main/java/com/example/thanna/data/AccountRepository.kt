@@ -31,6 +31,8 @@ data class BookingLite(
   val slotLabel: String? = null, // venue bookings only: "Today · 06:00 AM"
   val ticketCode: String? = null,// scannable entry-pass code → QR `haraan:ticket:<code>`
   val imageUrl: String? = null,  // event poster / venue image for the schedule + pass
+  val tierName: String? = null,  // ticket tier bought ("Gold"); null for venue slots
+  val mapLink: String? = null,   // admin-set directions URL; null hides the pass's Directions button
 )
 
 /**
@@ -79,6 +81,8 @@ class AccountRepository(
             slotLabel = o.optString("slotLabel", null).clean(),
             ticketCode = o.optString("ticketCode", null).clean(),
             imageUrl = if (isVenue) venue?.optString("image", null).clean() else event?.optString("image", null).clean(),
+            tierName = o.optString("ticketTypeName", null).clean(),
+            mapLink = if (isVenue) venue?.optString("mapLink", null).clean() else event?.optString("mapLink", null).clean(),
           )
         )
       }

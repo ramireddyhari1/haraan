@@ -40,6 +40,8 @@ final class BookingResource extends JsonResource
                 'venue' => $this->event->venue,
                 'date'  => $this->event->date,
                 'image' => $this->event->images[0] ?? null,
+                // Drives the pass's "Directions" button; null when the admin left it blank.
+                'mapLink' => $this->event->map_link,
             ] : null),
             // Venue-slot booking fields (null for event bookings)
             'venueId'     => $this->venue_id,
@@ -49,6 +51,7 @@ final class BookingResource extends JsonResource
                 'name'     => $this->venue->name,
                 'location' => $this->venue->location,
                 'image'    => $this->venue->images[0] ?? null,
+                'mapLink'  => $this->venue->map_link,
             ] : null),
             'createdAt'   => $this->created_at,
         ];

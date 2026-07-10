@@ -31,7 +31,8 @@ final class BookingsController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        $query = Booking::query()->with(['event', 'venue'])->orderByDesc('created_at');
+        // ticketType is eager-loaded so the entry pass can show the tier the user bought.
+        $query = Booking::query()->with(['event', 'venue', 'ticketType'])->orderByDesc('created_at');
 
         if ($authUser->role !== 'ADMIN') {
             $query->where('user_id', $authUser->id);
