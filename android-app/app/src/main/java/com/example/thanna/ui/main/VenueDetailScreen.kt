@@ -235,32 +235,28 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
             .background(Color.White)
             .padding(16.dp)
         ) {
-          // Title + rating.
-          Text(
-            text = name,
-            color = HaraanColors.TextPrimary,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 22.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-          )
-          // Rating chip right under the title — the trust signal the eye scans for first,
-          // instead of making the user hunt for it in the summary card below.
-          rating.toFloatOrNull()?.takeIf { it > 0f }?.let { score ->
-            Spacer(Modifier.height(8.dp))
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(HaraanColors.RatingGold.copy(alpha = 0.14f))
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-              Icon(Icons.Default.Star, null, tint = HaraanColors.RatingGold, modifier = Modifier.size(14.dp))
-              Spacer(Modifier.width(4.dp))
-              Text("%.1f".format(score), color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-              (detail?.ratingsCount)?.takeIf { it > 0 }?.let { c ->
+          // Title on the left, rating pinned top-right on the same line — the trust
+          // signal sits where the eye lands, without a background pill.
+          Row(verticalAlignment = Alignment.Top) {
+            Text(
+              text = name,
+              color = HaraanColors.TextPrimary,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 22.sp,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f)
+            )
+            rating.toFloatOrNull()?.takeIf { it > 0f }?.let { score ->
+              Spacer(Modifier.width(12.dp))
+              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Icon(Icons.Default.Star, null, tint = HaraanColors.RatingGold, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("($c)", color = HaraanColors.TextSecondary, fontSize = 12.sp)
+                Text("%.1f".format(score), color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                (detail?.ratingsCount)?.takeIf { it > 0 }?.let { c ->
+                  Spacer(Modifier.width(3.dp))
+                  Text("($c)", color = HaraanColors.TextSecondary, fontSize = 12.sp)
+                }
               }
             }
           }
@@ -528,15 +524,7 @@ private fun AvailableSportsSection(d: VenueDetailData, onOpenPriceChart: () -> U
         .padding(horizontal = 16.dp, vertical = 16.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Box(
-        modifier = Modifier
-          .size(44.dp)
-          .clip(RoundedCornerShape(12.dp))
-          .background(HaraanColors.GameHubGreen.copy(alpha = 0.10f)),
-        contentAlignment = Alignment.Center
-      ) {
-        Icon(sportIcon(d.category), d.category, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(24.dp))
-      }
+      Icon(sportIcon(d.category), d.category, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(28.dp))
       Spacer(Modifier.width(14.dp))
       Column(Modifier.weight(1f)) {
         Text(d.category, color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
