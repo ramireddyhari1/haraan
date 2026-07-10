@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
@@ -101,6 +103,11 @@ private val HeroGradient   = Brush.linearGradient(listOf(Navy, NavyMid, Color(0x
 private val AvatarGradient = Brush.linearGradient(listOf(Color(0xFF2563EB), Green))
 // Featured banner — bright, marketing-forward.
 private val BannerGradient = Brush.linearGradient(listOf(Color(0xFF0B7A3E), Green))
+
+// One spacing scale instead of ad-hoc 14/18/24/28dp per item: air between
+// groups, a tighter beat from a heading to the card it labels.
+private val GroupGap = 24.dp
+private val HeadingGap = 12.dp
 
 private sealed interface AccountState {
     data object Loading : AccountState
@@ -301,39 +308,62 @@ private fun Content(
         // ── Quick-stats strip — makes the account feel substantial ──
         item { Spacer(Modifier.height(14.dp)); QuickStats(account, bookings.size) }
 
-        // Bookings are reached only from the "My bookings" row in the Account list
-        // below, so the profile no longer carries a Tickets lane.
-
-        // ── Account settings ──
-        item { Spacer(Modifier.height(24.dp)); SectionTitle("Account") }
+        // Three groups, because these rows do three different jobs: destinations
+        // into your own stuff, preferences, and help. One undivided card made the
+        // page read as a list of gaps.
+        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Your activity") }
         item {
-            Spacer(Modifier.height(12.dp))
-            SettingsList(
-                onTap = soon,
-                bookingCount = bookings.size,
-                onOpenBookings = { showBookings = true },
-                onOpenMatches = onOpenPlayerProfile,
-            )
+            Spacer(Modifier.height(HeadingGap))
+            SettingsCard {
+                SettingRow(
+                    Icons.Default.ConfirmationNumber,
+                    "My bookings",
+                    badge = bookings.size.takeIf { it > 0 }?.toString(),
+                    onClick = { showBookings = true },
+                )
+                ThinDivider()
+                // The player profile is where match history and career stats live.
+                SettingRow(Icons.Default.SportsCricket, "My matches", onClick = onOpenPlayerProfile)
+            }
         }
 
+        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Preferences") }
         item {
-            Spacer(Modifier.height(28.dp))
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(
-                    "Sign out",
-                    color = Danger.copy(alpha = 0.7f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onSignOut)
-                        .padding(horizontal = 24.dp, vertical = 10.dp),
-                )
+            Spacer(Modifier.height(HeadingGap))
+            SettingsCard {
+                SettingRow(Icons.Default.Notifications, "Notifications") { soon("Notifications") }
+                ThinDivider()
+                SettingRow(Icons.Default.Shield, "Privacy") { soon("Privacy") }
+            }
+        }
+
+        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Help") }
+        item {
+            Spacer(Modifier.height(HeadingGap))
+            SettingsCard {
+                SettingRow(Icons.Default.Email, "Support") { soon("Support") }
+                ThinDivider()
+                // The exit door belongs in the card with the rest of the rows, not
+                // floating in whitespace below it.
+                SignOutRow(onSignOut)
             }
         }
 
         // The one remaining door into the player profile — a marketing invitation,
         // so it sits below the account's business, not above it.
-        item { Spacer(Modifier.height(20.dp)); FeaturedBanner(onOpenPlayerProfile) }
-        item { Spacer(Modifier.height(20.dp)) }
+        item { Spacer(Modifier.height(GroupGap)); FeaturedBanner(onOpenPlayerProfile) }
+
+        item {
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Haraan v${com.example.thanna.BuildConfig.VERSION_NAME}",
+                color = Text3,
+                fontSize = 11.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(24.dp))
+        }
     }
 }
 
@@ -770,36 +800,26 @@ private fun FeaturedBanner(onClick: () -> Unit) {
 
 // ─────────────────────────────────────────────────────────── Settings ───────────
 @Composable
-private fun SettingsList(
-    onTap: (String) -> Unit,
-    bookingCount: Int,
-    onOpenBookings: () -> Unit,
-    onOpenMatches: () -> Unit,
-) {
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp)),
+        content = content,
+    )
+}
+
+@Composable
+private fun SignOutRow(onSignOut: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onSignOut).padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Bookings and matches are the two things people come back for.
-        SettingRow(
-            Icons.Default.ConfirmationNumber,
-            "My bookings",
-            badge = bookingCount.takeIf { it > 0 }?.toString(),
-            onClick = onOpenBookings,
-        )
-        ThinDivider()
-        // The player profile is where match history and career stats live. This is
-        // also the only door into it now that the ActionBoard card is gone.
-        SettingRow(Icons.Default.SportsCricket, "My matches", onClick = onOpenMatches)
-        ThinDivider()
-        SettingRow(Icons.Default.Notifications, "Notifications") { onTap("Notifications") }
-        ThinDivider()
-        SettingRow(Icons.Default.Shield, "Privacy") { onTap("Privacy") }
-        ThinDivider()
-        SettingRow(Icons.Default.CalendarMonth, "Support") { onTap("Support") }
+        Icon(Icons.AutoMirrored.Filled.Logout, null, tint = Danger, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Text("Sign out", color = Danger, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 
