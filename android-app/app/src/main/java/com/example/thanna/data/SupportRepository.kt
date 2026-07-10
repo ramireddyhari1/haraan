@@ -18,12 +18,15 @@ data class SupportMessageItem(
 
 /**
  * An issue topic offered before the chat starts. Admin-managed server-side, so
- * the app never hardcodes the list; [icon] is an emoji rendered as-is.
+ * the app never hardcodes the list. [iconKey] names one of a fixed vector set —
+ * an unknown key (a topic added after this build shipped) falls back to a chat
+ * bubble rather than rendering nothing.
  */
 data class SupportCategoryItem(
   val id: Long,
   val label: String,
-  val icon: String,
+  val iconKey: String,
+  val subtitle: String?,
 )
 
 /** The user's support conversation as returned by the API. */
@@ -54,7 +57,14 @@ class SupportRepository(
         val o = arr.getJSONObject(i)
         val label = o.optString("label", "")
         if (label.isNotBlank()) {
-          add(SupportCategoryItem(o.optLong("id", 0L), label, o.optString("icon", "")))
+          add(
+            SupportCategoryItem(
+              id = o.optLong("id", 0L),
+              label = label,
+              iconKey = o.optString("icon_key", "chat"),
+              subtitle = o.optString("subtitle", null).takeIf { !it.isNullOrBlank() && it != "null" },
+            )
+          )
         }
       }
     }

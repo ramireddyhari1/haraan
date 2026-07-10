@@ -52,9 +52,10 @@ final class SupportController extends Controller
     {
         $categories = SupportCategory::query()->active()->get()
             ->map(fn (SupportCategory $c): array => [
-                'id'    => $c->id,
-                'label' => $c->label,
-                'icon'  => $c->icon,
+                'id'       => $c->id,
+                'label'    => $c->label,
+                'icon_key' => $c->icon_key,
+                'subtitle' => $c->subtitle,
             ])->all();
 
         return response()->json(['categories' => $categories]);

@@ -10,20 +10,37 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * An issue topic the user picks before starting a support conversation.
- * Admin-managed from the control panel — see the create_support_categories
- * migration for why the icon is an emoji rather than a drawable key.
+ * Admin-managed from the control panel.
  *
  * @property int         $id
  * @property string      $label
- * @property string|null $icon
+ * @property string      $icon_key
+ * @property string|null $subtitle
  * @property int         $sort_order
  * @property bool        $is_active
  */
 class SupportCategory extends Model
 {
+    /**
+     * Keys the app knows how to draw, as label => admin-facing name. The app
+     * falls back to a chat bubble for anything it doesn't recognise, so adding a
+     * key here before the matching app build ships is safe.
+     */
+    public const ICON_KEYS = [
+        'ticket'  => 'Ticket',
+        'card'    => 'Payment card',
+        'cricket' => 'Cricket / sport',
+        'venue'   => 'Venue / location',
+        'account' => 'Account',
+        'partner' => 'Partner / business',
+        'event'   => 'Event / calendar',
+        'chat'    => 'Chat bubble (default)',
+    ];
+
     protected $fillable = [
         'label',
-        'icon',
+        'icon_key',
+        'subtitle',
         'sort_order',
         'is_active',
     ];

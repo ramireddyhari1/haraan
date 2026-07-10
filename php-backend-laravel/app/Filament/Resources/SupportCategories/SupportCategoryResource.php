@@ -9,6 +9,7 @@ use App\Filament\Resources\SupportCategories\Pages\EditSupportCategory;
 use App\Filament\Resources\SupportCategories\Pages\ListSupportCategories;
 use App\Models\SupportCategory;
 use BackedEnum;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
@@ -50,10 +51,15 @@ class SupportCategoryResource extends Resource
                 ->required()
                 ->maxLength(255)
                 ->helperText('What the user taps, e.g. "Payments & refunds".'),
-            TextInput::make('icon')
+            TextInput::make('subtitle')
+                ->maxLength(255)
+                ->helperText('One line of examples under the label — this is what stops users picking the wrong topic. e.g. "Failed payment, refund status".'),
+            Select::make('icon_key')
                 ->label('Icon')
-                ->maxLength(16)
-                ->helperText('A single emoji, shown on the card in the app. Leave blank for none.'),
+                ->required()
+                ->default('chat')
+                ->options(SupportCategory::ICON_KEYS)
+                ->helperText('Older app builds fall back to the chat bubble for icons they do not know yet.'),
             TextInput::make('sort_order')
                 ->numeric()
                 ->default(0)
@@ -69,8 +75,15 @@ class SupportCategoryResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('icon')->label('')->size('lg'),
-                TextColumn::make('label')->searchable()->weight('bold'),
+                TextColumn::make('label')
+                    ->searchable()
+                    ->weight('bold')
+                    ->description(fn (SupportCategory $r): ?string => $r->subtitle),
+                TextColumn::make('icon_key')
+                    ->label('Icon')
+                    ->badge()
+                    ->color('gray')
+                    ->formatStateUsing(fn (string $state): string => SupportCategory::ICON_KEYS[$state] ?? $state),
                 TextColumn::make('threads_count')
                     ->label('Conversations')
                     ->counts('threads')

@@ -4,11 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,8 +13,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.BusinessCenter
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -27,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -111,7 +119,8 @@ fun SupportChatScreen(
         .fillMaxWidth()
         .background(HaraanColors.GameHubDeep)
         .statusBarsPadding()
-        .padding(horizontal = 8.dp, vertical = 10.dp),
+        // Extra bottom padding is the green the content below straddles.
+        .padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 26.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
       IconButton(onClick = onClose) {
@@ -119,15 +128,35 @@ fun SupportChatScreen(
       }
       Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
         Text("Haraan Support", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        Text(
-          "We usually reply within a few hours",
-          color = Color.White.copy(alpha = 0.8f),
-          fontSize = 12.sp
-        )
+        Spacer(Modifier.height(2.dp))
+        // Cheapest trust signal in support UI: say someone is actually there.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Box(
+            modifier = Modifier
+              .size(6.dp)
+              .clip(RoundedCornerShape(3.dp))
+              .background(HaraanColors.GameHubGreen)
+          )
+          Spacer(Modifier.width(6.dp))
+          Text(
+            "Team online · replies in a few hours",
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 12.sp
+          )
+        }
       }
     }
 
-    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+    // Straddle the seam so the header reads as a band the sheet sits on, not a
+    // flat slab the content butts against.
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .fillMaxWidth()
+        .offset(y = (-16).dp)
+        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+        .background(HaraanColors.Background)
+    ) {
       when {
         loading -> CircularProgressIndicator(
           color = HaraanColors.GameHubDeep,
@@ -187,18 +216,17 @@ fun SupportChatScreen(
           modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
+          val (chipIcon, chipAccent) = topicIconFor(chosen.iconKey)
           Row(
             modifier = Modifier
               .clip(RoundedCornerShape(14.dp))
-              .background(HaraanColors.GameHubDeep.copy(alpha = 0.10f))
+              .background(chipAccent.copy(alpha = 0.10f))
               .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
-            if (chosen.icon.isNotBlank()) {
-              Text(chosen.icon, fontSize = 12.sp)
-              Spacer(Modifier.width(6.dp))
-            }
-            Text(chosen.label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = HaraanColors.GameHubDeep)
+            Icon(chipIcon, contentDescription = null, tint = chipAccent, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(chosen.label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = chipAccent)
           }
           Spacer(Modifier.weight(1f))
           Text(
@@ -260,9 +288,25 @@ fun SupportChatScreen(
 }
 
 /**
- * The pre-chat topic picker. Two taps at most: pick a card, or fall through to
- * "Something else" — the escape hatch matters, a user with an issue we didn't
- * anticipate must never be stuck staring at a grid.
+ * Vector + accent tint for an admin-chosen icon key. Unknown keys (a topic added
+ * after this build shipped) degrade to a neutral chat bubble instead of a gap.
+ */
+private fun topicIconFor(key: String): Pair<ImageVector, Color> = when (key) {
+  "ticket"  -> Icons.Filled.ConfirmationNumber to Color(0xFF2563EB)
+  "card"    -> Icons.Filled.CreditCard to Color(0xFF0F766E)
+  "cricket" -> Icons.Filled.SportsCricket to Color(0xFFB45309)
+  "venue"   -> Icons.Filled.LocationOn to Color(0xFFC2410C)
+  "account" -> Icons.Filled.Person to Color(0xFF6D28D9)
+  "partner" -> Icons.Filled.BusinessCenter to Color(0xFFBE185D)
+  "event"   -> Icons.Filled.CalendarMonth to Color(0xFF0891B2)
+  else      -> Icons.AutoMirrored.Filled.Chat to HaraanColors.TextSecondary
+}
+
+/**
+ * The pre-chat topic picker. A single-column list, not a grid: the row format
+ * earns its space by carrying a subtitle, and the subtitle is what stops users
+ * picking the wrong topic. "Something else" is a real row, not a bare link — a
+ * user whose issue we didn't anticipate must never feel stuck.
  */
 @Composable
 private fun TopicPicker(
@@ -270,19 +314,16 @@ private fun TopicPicker(
   onPick: (SupportCategoryItem) -> Unit,
   onSkip: () -> Unit,
 ) {
-  LazyVerticalGrid(
-    columns = GridCells.Fixed(2),
+  LazyColumn(
     modifier = Modifier.fillMaxSize(),
-    contentPadding = PaddingValues(16.dp),
-    horizontalArrangement = Arrangement.spacedBy(12.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
+    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 24.dp)
   ) {
-    item(span = { GridItemSpan(maxLineSpan) }) {
-      Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+    item {
+      Column(modifier = Modifier.padding(bottom = 14.dp)) {
         Text(
           "What do you need help with?",
           fontWeight = FontWeight.Bold,
-          fontSize = 18.sp,
+          fontSize = 20.sp,
           color = HaraanColors.TextPrimary
         )
         Spacer(Modifier.height(4.dp))
@@ -294,51 +335,107 @@ private fun TopicPicker(
       }
     }
 
-    gridItems(categories, key = { it.id }) { category ->
-      TopicCard(
-        icon = category.icon,
-        label = category.label,
-        onClick = { onPick(category) }
-      )
-    }
-
-    item(span = { GridItemSpan(maxLineSpan) }) {
-      Text(
-        "Something else",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = HaraanColors.EventsBlue,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    // One card, hairline-divided rows — a stack of six separate cards at this
+    // size reads as clutter, not as premium.
+    item {
+      Column(
         modifier = Modifier
           .fillMaxWidth()
-          .clip(RoundedCornerShape(14.dp))
+          .clip(RoundedCornerShape(18.dp))
+          .background(HaraanColors.Surface)
+      ) {
+        categories.forEachIndexed { index, category ->
+          TopicRow(category = category, onClick = { onPick(category) })
+          if (index != categories.lastIndex) {
+            HorizontalDivider(
+              color = HaraanColors.BorderLight,
+              thickness = 0.7.dp,
+              modifier = Modifier.padding(start = 68.dp)
+            )
+          }
+        }
+      }
+    }
+
+    item {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 16.dp)
+          .clip(RoundedCornerShape(16.dp))
+          .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
           .clickable { onSkip() }
-          .padding(vertical = 14.dp)
+          .padding(vertical = 15.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Icon(
+          Icons.AutoMirrored.Filled.Chat,
+          contentDescription = null,
+          tint = HaraanColors.TextSecondary,
+          modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+          "Something else",
+          fontSize = 14.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = HaraanColors.TextPrimary
+        )
+      }
+    }
+
+    item {
+      Text(
+        "Most issues are resolved the same day",
+        fontSize = 11.sp,
+        color = HaraanColors.TextMuted,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
       )
     }
   }
 }
 
 @Composable
-private fun TopicCard(icon: String, label: String, onClick: () -> Unit) {
-  Column(
+private fun TopicRow(category: SupportCategoryItem, onClick: () -> Unit) {
+  val (icon, accent) = topicIconFor(category.iconKey)
+  Row(
     modifier = Modifier
       .fillMaxWidth()
-      .heightIn(min = 104.dp)
-      .clip(RoundedCornerShape(16.dp))
-      .background(HaraanColors.Surface)
-      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
       .clickable { onClick() }
-      .padding(14.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp)
+      .padding(horizontal = 14.dp, vertical = 13.dp),
+    verticalAlignment = Alignment.CenterVertically
   ) {
-    if (icon.isNotBlank()) Text(icon, fontSize = 24.sp)
-    Text(
-      label,
-      fontSize = 14.sp,
-      fontWeight = FontWeight.SemiBold,
-      color = HaraanColors.TextPrimary,
-      lineHeight = 18.sp
+    // Tinted container: one stroke weight, one colour logic, brand-owned.
+    Box(
+      modifier = Modifier
+        .size(40.dp)
+        .clip(RoundedCornerShape(11.dp))
+        .background(accent.copy(alpha = 0.10f)),
+      contentAlignment = Alignment.Center
+    ) {
+      Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(21.dp))
+    }
+    Spacer(Modifier.width(14.dp))
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        category.label,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = HaraanColors.TextPrimary
+      )
+      category.subtitle?.let {
+        Spacer(Modifier.height(1.dp))
+        Text(it, fontSize = 12.sp, color = HaraanColors.TextSecondary, lineHeight = 16.sp)
+      }
+    }
+    Spacer(Modifier.width(8.dp))
+    Icon(
+      Icons.AutoMirrored.Filled.KeyboardArrowRight,
+      contentDescription = null,
+      tint = HaraanColors.TextMuted,
+      modifier = Modifier.size(20.dp)
     )
   }
 }
