@@ -30,6 +30,17 @@ data class FeedCard(
     val linkId: String?,
 )
 
+/**
+ * Read an optional string field.
+ *
+ * `optString` returns the four-character string "null" when the value is JSON null,
+ * not "" and not null — so a plain `isNotBlank()` check passes it straight through
+ * to the UI, where it renders as the word "null". Always read nullable strings
+ * through this.
+ */
+private fun JSONObject.optStringOrNull(key: String): String? =
+    optString(key).takeIf { it.isNotBlank() && it != "null" }
+
 class ContentRepository {
     suspend fun getAds(placement: String): List<AdItem> = withContext(Dispatchers.IO) {
         val url = "${ApiConfig.BASE_URL}/api/ads?placement=$placement"
@@ -43,12 +54,12 @@ class ContentRepository {
             AdItem(
                 id = o.optString("id"),
                 title = o.optString("title"),
-                subtitle = o.optString("subtitle").takeIf { it.isNotBlank() },
-                sponsor = o.optString("sponsor").takeIf { it.isNotBlank() },
-                ctaText = o.optString("cta_text").takeIf { it.isNotBlank() },
-                ctaUrl = o.optString("cta_url").takeIf { it.isNotBlank() },
-                image = o.optString("image").takeIf { it.isNotBlank() },
-                logo = o.optString("logo").takeIf { it.isNotBlank() },
+                subtitle = o.optStringOrNull("subtitle"),
+                sponsor = o.optStringOrNull("sponsor"),
+                ctaText = o.optStringOrNull("cta_text"),
+                ctaUrl = o.optStringOrNull("cta_url"),
+                image = o.optStringOrNull("image"),
+                logo = o.optStringOrNull("logo"),
                 placement = o.optString("placement"),
             )
         }
@@ -65,12 +76,12 @@ class ContentRepository {
                 FeedCard(
                     id = o.optString("id"),
                     title = o.optString("title"),
-                    subtitle = o.optString("subtitle").takeIf { it.isNotBlank() && it != "null" },
-                    image = o.optString("image").takeIf { it.isNotBlank() && it != "null" },
-                    badge = o.optString("badge").takeIf { it.isNotBlank() && it != "null" },
-                    rating = o.optString("rating").takeIf { it.isNotBlank() && it != "null" },
-                    linkType = o.optString("link_type").takeIf { it.isNotBlank() && it != "null" },
-                    linkId = o.optString("link_id").takeIf { it.isNotBlank() && it != "null" },
+                    subtitle = o.optStringOrNull("subtitle"),
+                    image = o.optStringOrNull("image"),
+                    badge = o.optStringOrNull("badge"),
+                    rating = o.optStringOrNull("rating"),
+                    linkType = o.optStringOrNull("link_type"),
+                    linkId = o.optStringOrNull("link_id"),
                 )
             }
         }

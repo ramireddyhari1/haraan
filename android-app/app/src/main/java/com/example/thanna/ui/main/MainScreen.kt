@@ -1087,13 +1087,17 @@ private fun EventsTabScreen(
   val liveAd by produceState(initialValue = sampleChatGptAd) {
     val ads = runCatching { com.example.thanna.data.ContentRepository().getAds("events") }.getOrNull()
     ads?.firstOrNull()?.let { a ->
-      value = sampleChatGptAd.copy(
+      // Build from the real ad rather than .copy()ing the sample: an admin ad with an
+      // empty field must not inherit the sample advertiser's copy or, worse, its
+      // click-through URL. Absent fields stay empty and the UI omits them.
+      value = AdCreative(
         advertiser = a.sponsor ?: a.title,
-        tagline = a.subtitle ?: sampleChatGptAd.tagline,
+        tagline = a.subtitle.orEmpty(),
         headline = a.title,
-        ctaLabel = a.ctaText ?: sampleChatGptAd.ctaLabel,
-        clickUrl = a.ctaUrl ?: sampleChatGptAd.clickUrl,
-        imageUrl = a.image ?: sampleChatGptAd.imageUrl,
+        ctaLabel = a.ctaText ?: "Learn more",
+        clickUrl = a.ctaUrl.orEmpty(),
+        logoRes = sampleChatGptAd.logoRes,
+        imageUrl = a.image.orEmpty(),
         promptText = a.title,
       )
     }
@@ -6984,14 +6988,16 @@ private fun AdSpaceBanner(
             overflow = TextOverflow.Ellipsis
           )
         }
-        Spacer(modifier = Modifier.height(1.dp))
-        Text(
-          creative.tagline,
-          color = Color(0xFFA8AEB4),
-          fontSize = 12.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
+        if (creative.tagline.isNotBlank()) {
+          Spacer(modifier = Modifier.height(1.dp))
+          Text(
+            creative.tagline,
+            color = Color(0xFFA8AEB4),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
       }
       Spacer(modifier = Modifier.width(10.dp))
       // CTA button — with its own press-scale feedback.
@@ -7062,7 +7068,9 @@ private fun AdCompactBanner(
       }
       Spacer(modifier = Modifier.height(2.dp))
       Text(creative.headline, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text(creative.tagline, color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      if (creative.tagline.isNotBlank()) {
+        Text(creative.tagline, color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      }
     }
     Spacer(modifier = Modifier.width(10.dp))
     Box(
@@ -7149,7 +7157,9 @@ private fun AdMediumBanner(
       }
       Spacer(modifier = Modifier.height(3.dp))
       Text(creative.headline, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text(creative.tagline, color = Color(0xFFA8AEB4), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      if (creative.tagline.isNotBlank()) {
+        Text(creative.tagline, color = Color(0xFFA8AEB4), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      }
     }
     // CTA pill.
     Box(
