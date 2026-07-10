@@ -209,21 +209,6 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                 )
               )
           )
-          // Badges bottom-left/right.
-          if (detail?.isFeatured == true) {
-            Box(
-              modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
-                .background(Color(0xFFF5A623), RoundedCornerShape(6.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) { Text("Featured", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
-          }
-          if (detail?.isBookable == true) {
-            Box(
-              modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-                .background(HaraanColors.GameHubGreen, RoundedCornerShape(6.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) { Text("Bookable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
-          }
         }
 
         // ── 2. Content sheet (laps 24dp over the hero) ─────────────────────────────
