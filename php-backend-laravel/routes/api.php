@@ -123,6 +123,7 @@ Route::get('/login-posters', static function () {
 //  user (JWT); the app opens the thread and polls it while the chat is open.
 // -------------------------------------------------------------------------
 Route::middleware('auth.jwt')->prefix('support')->controller(\App\Http\Controllers\Api\SupportController::class)->group(function (): void {
+    Route::get('/categories', 'categories');
     Route::get('/thread', 'thread');
     Route::post('/messages', 'send');
 });

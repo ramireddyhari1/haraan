@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Events\ContentUpdated;
 use App\Http\Controllers\Controller;
+use App\Models\SupportCategory;
 use App\Models\SupportMessage;
 use App\Models\SupportThread;
 use App\Models\User;
@@ -43,8 +44,25 @@ final class SupportController extends Controller
     }
 
     /**
+     * The issue topics shown as a picker before the chat starts. Admin-managed,
+     * so the app must never hardcode this list.
+     * GET /api/support/categories
+     */
+    public function categories(): JsonResponse
+    {
+        $categories = SupportCategory::query()->active()->get()
+            ->map(fn (SupportCategory $c): array => [
+                'id'    => $c->id,
+                'label' => $c->label,
+                'icon'  => $c->icon,
+            ])->all();
+
+        return response()->json(['categories' => $categories]);
+    }
+
+    /**
      * Post a message from the app. Creates the thread on first contact.
-     * POST /api/support/messages   { body: string }
+     * POST /api/support/messages   { body: string, category_id?: int }
      */
     public function send(Request $request): JsonResponse
     {
@@ -54,7 +72,8 @@ final class SupportController extends Controller
         }
 
         $data = $request->validate([
-            'body' => ['required', 'string', 'max:4000'],
+            'body'        => ['required', 'string', 'max:4000'],
+            'category_id' => ['nullable', 'integer', 'exists:support_categories,id'],
         ]);
 
         $body = trim($data['body']);
@@ -63,6 +82,13 @@ final class SupportController extends Controller
         }
 
         $thread = $this->threadFor($user);
+
+        // The picker only labels a thread that doesn't have a topic yet. Once an
+        // admin has (re)classified it, the user's next message can't overwrite
+        // that — users guess wrong often, admins correct them.
+        if ($thread->category_id === null && ($data['category_id'] ?? null) !== null) {
+            $thread->forceFill(['category_id' => (int) $data['category_id']])->save();
+        }
 
         SupportMessage::create([
             'thread_id'   => $thread->id,
@@ -125,6 +151,7 @@ final class SupportController extends Controller
                 'status'      => $thread->status,
                 'unread'      => $thread->user_unread_count,
                 'assigned_to' => $thread->assignee?->name,
+                'category'    => $thread->category?->label,
             ],
             'messages' => $messages,
         ];

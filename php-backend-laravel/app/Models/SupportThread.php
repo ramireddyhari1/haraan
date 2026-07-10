@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * @property int         $id
  * @property int         $user_id
+ * @property int|null    $category_id
  * @property string|null $subject
  * @property string      $status
  * @property int|null    $assigned_to
@@ -24,6 +25,7 @@ class SupportThread extends Model
 {
     protected $fillable = [
         'user_id',
+        'category_id',
         'subject',
         'status',
         'assigned_to',
@@ -44,6 +46,12 @@ class SupportThread extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /** The issue topic the user picked when opening the chat, if any. */
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(SupportCategory::class, 'category_id');
     }
 
     /** The admin/worker currently handling this thread, if any. */

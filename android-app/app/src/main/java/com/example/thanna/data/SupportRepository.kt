@@ -16,9 +16,20 @@ data class SupportMessageItem(
   val createdAt: String?,
 )
 
+/**
+ * An issue topic offered before the chat starts. Admin-managed server-side, so
+ * the app never hardcodes the list; [icon] is an emoji rendered as-is.
+ */
+data class SupportCategoryItem(
+  val id: Long,
+  val label: String,
+  val icon: String,
+)
+
 /** The user's support conversation as returned by the API. */
 data class SupportThreadData(
   val status: String,
+  val category: String?,
   val messages: List<SupportMessageItem>,
 )
 
@@ -34,10 +45,32 @@ class SupportRepository(
     parse(request("/api/support/thread", "GET", token, null))
   }
 
-  suspend fun sendMessage(token: String, body: String): SupportThreadData = withContext(Dispatchers.IO) {
-    val payload = JSONObject().put("body", body).toString()
-    parse(request("/api/support/messages", "POST", token, payload))
+  /** Topics for the picker. Empty on failure — the chat still works without them. */
+  suspend fun getCategories(token: String): List<SupportCategoryItem> = withContext(Dispatchers.IO) {
+    val arr = JSONObject(request("/api/support/categories", "GET", token, null))
+      .optJSONArray("categories") ?: return@withContext emptyList()
+    buildList {
+      for (i in 0 until arr.length()) {
+        val o = arr.getJSONObject(i)
+        val label = o.optString("label", "")
+        if (label.isNotBlank()) {
+          add(SupportCategoryItem(o.optLong("id", 0L), label, o.optString("icon", "")))
+        }
+      }
+    }
   }
+
+  /**
+   * Post a message. [categoryId] labels the conversation with the topic the user
+   * picked; the server only applies it to a thread that isn't classified yet.
+   */
+  suspend fun sendMessage(token: String, body: String, categoryId: Long? = null): SupportThreadData =
+    withContext(Dispatchers.IO) {
+      val payload = JSONObject().put("body", body)
+        .apply { if (categoryId != null) put("category_id", categoryId) }
+        .toString()
+      parse(request("/api/support/messages", "POST", token, payload))
+    }
 
   private fun parse(responseBody: String): SupportThreadData {
     val root = JSONObject(responseBody)
@@ -60,6 +93,7 @@ class SupportRepository(
     }
     return SupportThreadData(
       status = thread?.optString("status", "open") ?: "open",
+      category = thread?.optString("category", null).takeIf { !it.isNullOrBlank() && it != "null" },
       messages = messages,
     )
   }

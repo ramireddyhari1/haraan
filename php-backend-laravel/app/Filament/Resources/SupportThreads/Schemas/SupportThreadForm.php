@@ -15,6 +15,14 @@ class SupportThreadForm
                 TextInput::make('subject')
                     ->placeholder('General support')
                     ->maxLength(255),
+                // Users pick this in the app, but they guess wrong often — the
+                // team can reclassify so topic analytics stay honest.
+                Select::make('category_id')
+                    ->label('Topic')
+                    ->relationship('category', 'label')
+                    ->searchable()
+                    ->preload()
+                    ->placeholder('Unsorted'),
                 Select::make('status')
                     ->required()
                     ->options([
