@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
@@ -29,20 +31,34 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.EventSeat
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.LocalCafe
+import androidx.compose.material.icons.filled.LocalDrink
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Shower
 import androidx.compose.material.icons.filled.SportsBasketball
 import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Wc
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,8 +76,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -131,15 +149,24 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
   val images = detail?.images?.takeIf { it.isNotEmpty() }
     ?: listOf(venue.imageUrl.takeIf { it.isNotBlank() } ?: detailCategoryImage(category))
 
+  val scroll = rememberScrollState()
   Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFE9EEF4)) {
     Box(modifier = Modifier.fillMaxSize()) {
       Column(
         modifier = Modifier
           .fillMaxSize()
-          .verticalScroll(rememberScrollState())
+          .verticalScroll(scroll)
       ) {
         // ── 1. Hero gallery ────────────────────────────────────────────────────────
-        Box(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+        // Parallax: the hero rides up at ~0.6× the scroll speed so the content sheet
+        // laps over a still-visible image instead of a hard cut. translationY partially
+        // cancels the column's own upward shift.
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(280.dp)
+            .graphicsLayer { translationY = scroll.value * 0.4f }
+        ) {
           if (images.size > 1) {
             val pager = rememberPagerState(pageCount = { images.size })
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
@@ -199,10 +226,11 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
           }
         }
 
-        // ── 2. Content sheet (overlaps the hero) ───────────────────────────────────
+        // ── 2. Content sheet (laps 24dp over the hero) ─────────────────────────────
         Column(
           modifier = Modifier
             .fillMaxWidth()
+            .offset(y = (-24).dp)
             .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
             .background(Color.White)
             .padding(16.dp)
@@ -216,6 +244,26 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
           )
+          // Rating chip right under the title — the trust signal the eye scans for first,
+          // instead of making the user hunt for it in the summary card below.
+          rating.toFloatOrNull()?.takeIf { it > 0f }?.let { score ->
+            Spacer(Modifier.height(8.dp))
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(HaraanColors.RatingGold.copy(alpha = 0.14f))
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+              Icon(Icons.Default.Star, null, tint = HaraanColors.RatingGold, modifier = Modifier.size(14.dp))
+              Spacer(Modifier.width(4.dp))
+              Text("%.1f".format(score), color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              (detail?.ratingsCount)?.takeIf { it > 0 }?.let { c ->
+                Spacer(Modifier.width(4.dp))
+                Text("($c)", color = HaraanColors.TextSecondary, fontSize = 12.sp)
+              }
+            }
+          }
           // Operating hours (Playo-style clock row).
           (detail?.hours)?.takeIf { it.isNotBlank() }?.let { hours ->
             Spacer(Modifier.height(8.dp))
@@ -382,13 +430,15 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
       }
 
       // ── 8. Sticky book bar ───────────────────────────────────────────────────────
+      // A soft upward shadow lets the bar read as floating chrome over the content
+      // rather than just another row under a hairline.
       Column(
         modifier = Modifier
           .align(Alignment.BottomCenter)
           .fillMaxWidth()
+          .shadow(elevation = 14.dp, clip = false)
           .background(Color.White)
       ) {
-      SectionDivider()
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -398,8 +448,13 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
         Row(verticalAlignment = Alignment.Bottom) {
-          Text("₹$price", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
-          Text("/hr", color = HaraanColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 3.dp))
+          // Guard the zero-price case so the bar never shows a bare "₹0 /hr".
+          if (price > 0) {
+            Text("₹$price", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
+            Text("/hr", color = HaraanColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 3.dp))
+          } else {
+            Text("Tap to see slots", color = HaraanColors.TextSecondary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+          }
         }
         Button(
           onClick = { showBooking = true },
@@ -462,23 +517,33 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun AvailableSportsSection(d: VenueDetailData, onOpenPriceChart: () -> Unit) {
   SectionCard(title = "Available Sports") {
-    Text(
-      "(Tap on sport icon to see “Price Chart”)",
-      color = HaraanColors.TextSecondary, fontSize = 13.sp
-    )
-    Spacer(Modifier.height(14.dp))
-    Column(
+    // A full-width tappable row: sport identity on the left, an explicit "View pricing"
+    // affordance with a chevron on the right — no parenthetical instruction needed.
+    Row(
       modifier = Modifier
-        .width(120.dp)
+        .fillMaxWidth()
         .clip(RoundedCornerShape(14.dp))
         .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(14.dp))
         .clickable { onOpenPriceChart() }
-        .padding(vertical = 18.dp),
-      horizontalAlignment = Alignment.CenterHorizontally
+        .padding(horizontal = 16.dp, vertical = 16.dp),
+      verticalAlignment = Alignment.CenterVertically
     ) {
-      Icon(sportIcon(d.category), d.category, tint = HaraanColors.TextPrimary, modifier = Modifier.size(30.dp))
-      Spacer(Modifier.height(10.dp))
-      Text(d.category, color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+      Box(
+        modifier = Modifier
+          .size(44.dp)
+          .clip(RoundedCornerShape(12.dp))
+          .background(HaraanColors.GameHubGreen.copy(alpha = 0.10f)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(sportIcon(d.category), d.category, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(24.dp))
+      }
+      Spacer(Modifier.width(14.dp))
+      Column(Modifier.weight(1f)) {
+        Text(d.category, color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Spacer(Modifier.height(2.dp))
+        Text("View pricing", color = HaraanColors.TextSecondary, fontSize = 12.sp)
+      }
+      Icon(Icons.Default.KeyboardArrowRight, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(22.dp))
     }
   }
 }
@@ -583,7 +648,7 @@ private fun RatingCard(d: VenueDetailData, onRate: () -> Unit) {
               Icon(
                 if (i < score.toInt()) Icons.Default.Star else Icons.Default.StarBorder,
                 null,
-                tint = Color(0xFF2E9E4F),
+                tint = HaraanColors.RatingGold,
                 modifier = Modifier.size(16.dp)
               )
             }
@@ -647,7 +712,7 @@ private fun RatingDialog(venue: VenueDetailData, onDismiss: () -> Unit, onSubmit
             Icon(
               if (i <= stars) Icons.Default.Star else Icons.Default.StarBorder,
               "$i star",
-              tint = Color(0xFF2E9E4F),
+              tint = HaraanColors.RatingGold,
               modifier = Modifier
                 .size(38.dp)
                 .clip(CircleShape)
@@ -710,14 +775,55 @@ private fun RatingDialog(venue: VenueDetailData, onDismiss: () -> Unit, onSubmit
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AmenitiesGrid(amenities: List<String>) {
-  FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+  // Two-per-row grid; each amenity carries its own icon so the list reads as a
+  // real feature set, not a column of identical checkmarks.
+  FlowRow(
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+    maxItemsInEachRow = 2
+  ) {
     amenities.forEach { a ->
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Check, null, tint = HaraanColors.GameHubGreen, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(a, color = HaraanColors.TextSecondary, fontSize = 13.sp)
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.widthIn(min = 140.dp).weight(1f)
+      ) {
+        Box(
+          modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(HaraanColors.GameHubGreen.copy(alpha = 0.10f)),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(amenityIcon(a), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+          a, color = HaraanColors.TextPrimary, fontSize = 13.sp,
+          maxLines = 2, overflow = TextOverflow.Ellipsis
+        )
       }
     }
+  }
+}
+
+/** Map a free-text amenity label to the closest Material glyph; falls back to a check. */
+private fun amenityIcon(amenity: String): androidx.compose.ui.graphics.vector.ImageVector {
+  val a = amenity.lowercase()
+  return when {
+    "wifi" in a || "wi-fi" in a || "internet" in a -> Icons.Default.Wifi
+    "park" in a -> Icons.Default.DirectionsCar
+    "wash" in a || "toilet" in a || "restroom" in a || "rest room" in a -> Icons.Default.Wc
+    "shower" in a -> Icons.Default.Shower
+    "chang" in a || "locker" in a -> Icons.Default.Checkroom
+    "cafe" in a || "coffee" in a || "canteen" in a -> Icons.Default.LocalCafe
+    "food" in a || "restaurant" in a || "kitchen" in a -> Icons.Default.Restaurant
+    "water" in a || "drink" in a -> Icons.Default.LocalDrink
+    "light" in a || "flood" in a -> Icons.Default.Lightbulb
+    "ac" == a || "a/c" in a || "air" in a || "cool" in a -> Icons.Default.Air
+    "cctv" in a || "secur" in a || "guard" in a || "safe" in a -> Icons.Default.Security
+    "seat" in a || "seating" in a || "gallery" in a -> Icons.Default.EventSeat
+    "equip" in a || "gear" in a || "gym" in a || "kit" in a -> Icons.Default.FitnessCenter
+    else -> Icons.Default.Check
   }
 }
 
@@ -737,7 +843,7 @@ private fun ReviewRow(review: VenueReviewItem) {
         Text(review.ago, color = HaraanColors.TextSecondary, fontSize = 11.sp)
       }
       Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Star, null, tint = Color(0xFF2E9E4F), modifier = Modifier.size(13.dp))
+        Icon(Icons.Default.Star, null, tint = HaraanColors.RatingGold, modifier = Modifier.size(13.dp))
         Spacer(Modifier.width(3.dp))
         Text(review.rating.toString(), color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
       }
