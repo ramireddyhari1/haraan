@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -101,8 +99,6 @@ private val Danger    = Color(0xFFD23F57)
 // The hero — the screen's one "moment". Navy → blue → green, exactly as the brand reads.
 private val HeroGradient   = Brush.linearGradient(listOf(Navy, NavyMid, Color(0xFF0A3D2A)))
 private val AvatarGradient = Brush.linearGradient(listOf(Color(0xFF2563EB), Green))
-// ActionBoard gets its own deep, confident surface so it never blends with white cards.
-private val ActionGradient = Brush.linearGradient(listOf(Navy, NavyMid))
 // Featured banner — bright, marketing-forward.
 private val BannerGradient = Brush.linearGradient(listOf(Color(0xFF0B7A3E), Green))
 
@@ -306,12 +302,7 @@ private fun Content(
         item { Spacer(Modifier.height(14.dp)); QuickStats(account, bookings.size) }
 
         // Bookings are reached only from the "My bookings" row in the Account list
-        // below, so the profile no longer carries a Tickets lane — and a lane switch
-        // whose Tickets side is empty is worse than no switch at all.
-        // Play = your competitive identity — the door into the ActionBoard player profile.
-        item { Spacer(Modifier.height(18.dp)); SectionTitle("Your game") }
-        item { Spacer(Modifier.height(12.dp)); ActionBoardEntryCard(onOpenPlayerProfile) }
-        item { Spacer(Modifier.height(12.dp)); FeaturedBanner(onOpenPlayerProfile) }
+        // below, so the profile no longer carries a Tickets lane.
 
         // ── Account settings ──
         item { Spacer(Modifier.height(24.dp)); SectionTitle("Account") }
@@ -337,8 +328,12 @@ private fun Content(
                         .padding(horizontal = 24.dp, vertical = 10.dp),
                 )
             }
-            Spacer(Modifier.height(20.dp))
         }
+
+        // The one remaining door into the player profile — a marketing invitation,
+        // so it sits below the account's business, not above it.
+        item { Spacer(Modifier.height(20.dp)); FeaturedBanner(onOpenPlayerProfile) }
+        item { Spacer(Modifier.height(20.dp)) }
     }
 }
 
@@ -770,54 +765,6 @@ private fun FeaturedBanner(onClick: () -> Unit) {
             Modifier.size(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Default.SportsCricket, null, tint = Color.White, modifier = Modifier.size(30.dp)) }
-    }
-}
-
-// ─────────────────────────────────────────────── ActionBoard entry ──────────────
-@Composable
-private fun ActionBoardEntryCard(onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(ActionGradient)
-            .clickable(onClick = onClick)
-            .height(IntrinsicSize.Min)
-    ) {
-        // Green accent rail — signals "this is the live, gamified product".
-        Box(Modifier.width(4.dp).fillMaxHeight().background(Green))
-        Column(Modifier.weight(1f).padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(Color.White.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Default.EmojiEvents, null, tint = Green, modifier = Modifier.size(24.dp)) }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("ACTIONBOARD", color = Green, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(2.dp))
-                    Text("Cricket Profile", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.height(16.dp))
-            ActionPoint(Icons.AutoMirrored.Filled.TrendingUp, "Track every match stat")
-            Spacer(Modifier.height(8.dp))
-            ActionPoint(Icons.Default.Shield, "Build a verified reputation")
-            Spacer(Modifier.height(8.dp))
-            ActionPoint(Icons.Default.EmojiEvents, "Climb the local rankings")
-            Spacer(Modifier.height(16.dp))
-            Text("View Player Profile →", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-private fun ActionPoint(icon: ImageVector, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(text, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
     }
 }
 
