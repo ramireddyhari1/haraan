@@ -467,7 +467,9 @@ internal fun MainAppContainer(
     if (token.isNotBlank()) {
       runCatching { accountRepository.fetchAccount(token) }.getOrNull()?.let {
         accountName = it.name
-        accountAvatar = it.avatar ?: ""
+        // The API hands back a root-relative "/storage/…" path; Coil needs the host,
+        // or the header silently falls through to the initial-letter placeholder.
+        accountAvatar = com.example.thanna.data.ApiConfig.mediaUrl(it.avatar) ?: ""
       }
     }
   }
@@ -4808,7 +4810,7 @@ private fun CrexLeaderboardSection(
             primaryStat = "${row.xp} XP",
             secondaryStat = if (row.matches > 0) "${row.matches} matches" else "",
             rank = row.rank,
-            photoUrl = row.avatar ?: "",
+            photoUrl = com.example.thanna.data.ApiConfig.mediaUrl(row.avatar) ?: "",
             playerId = row.playerId,
           )
         }
@@ -7346,7 +7348,7 @@ private fun LeaderboardHomeWidget(district: String?) {
             .background(Color(0xFFFEF3C7)),
           contentAlignment = Alignment.Center
         ) {
-          val avatar = top?.avatar
+          val avatar = com.example.thanna.data.ApiConfig.mediaUrl(top?.avatar)
           if (!avatar.isNullOrBlank()) {
             AsyncImage(
               model = avatar,

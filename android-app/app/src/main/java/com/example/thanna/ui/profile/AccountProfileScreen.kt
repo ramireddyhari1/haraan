@@ -1307,11 +1307,7 @@ private fun SectionTitle(title: String, trailing: String? = null) {
 }
 
 /** Absolute avatar URL (backend may hand back a relative /storage path). */
-private fun avatarUrl(raw: String?): String? {
-    val s = raw?.trim().orEmpty()
-    if (s.isBlank() || s == "null") return null
-    return if (s.startsWith("http")) s else ApiConfig.BASE_URL.trimEnd('/') + "/" + s.trimStart('/')
-}
+private fun avatarUrl(raw: String?): String? = ApiConfig.mediaUrl(raw)
 
 /** Pull the year out of an ISO-ish createdAt string ("2025-06-01T…" → "2025"). */
 private fun memberSinceYear(raw: String?): String? {

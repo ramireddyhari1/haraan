@@ -14,4 +14,18 @@ import com.example.thanna.BuildConfig
  */
 object ApiConfig {
     val BASE_URL: String = BuildConfig.API_BASE_URL.trimEnd('/')
+
+    /**
+     * Resolve a server-supplied media path against [BASE_URL].
+     *
+     * Uploads are stored root-relative ("/storage/avatars/x.jpg"), which Coil cannot
+     * fetch on its own — it needs a scheme and a host. Anything already absolute is
+     * passed through untouched. Returns null for blank input and for the literal
+     * string "null", which JSON encoders occasionally hand us.
+     */
+    fun mediaUrl(raw: String?): String? {
+        val s = raw?.trim().orEmpty()
+        if (s.isBlank() || s == "null") return null
+        return if (s.startsWith("http")) s else BASE_URL + "/" + s.trimStart('/')
+    }
 }
