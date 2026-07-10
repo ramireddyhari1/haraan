@@ -310,9 +310,9 @@ private fun Content(
             Spacer(Modifier.height(12.dp))
             SettingsList(
                 onTap = soon,
-                onEditPhoto = editPhoto,
                 bookingCount = bookings.size,
                 onOpenBookings = { showBookings = true },
+                onOpenMatches = onOpenPlayerProfile,
             )
         }
 
@@ -772,9 +772,9 @@ private fun FeaturedBanner(onClick: () -> Unit) {
 @Composable
 private fun SettingsList(
     onTap: (String) -> Unit,
-    onEditPhoto: () -> Unit,
     bookingCount: Int,
     onOpenBookings: () -> Unit,
+    onOpenMatches: () -> Unit,
 ) {
     Column(
         Modifier
@@ -783,7 +783,7 @@ private fun SettingsList(
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp)),
     ) {
-        // Bookings are the thing people come back for, so they lead the list.
+        // Bookings and matches are the two things people come back for.
         SettingRow(
             Icons.Default.ConfirmationNumber,
             "My bookings",
@@ -791,8 +791,9 @@ private fun SettingsList(
             onClick = onOpenBookings,
         )
         ThinDivider()
-        // The only editable field on this account: the profile photo.
-        SettingRow(Icons.Default.PhotoCamera, "Upload profile photo") { onEditPhoto() }
+        // The player profile is where match history and career stats live. This is
+        // also the only door into it now that the ActionBoard card is gone.
+        SettingRow(Icons.Default.SportsCricket, "My matches", onClick = onOpenMatches)
         ThinDivider()
         SettingRow(Icons.Default.Notifications, "Notifications") { onTap("Notifications") }
         ThinDivider()
