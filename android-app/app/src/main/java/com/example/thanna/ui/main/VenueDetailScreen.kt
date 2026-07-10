@@ -44,8 +44,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.LocalDrink
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
@@ -62,6 +65,8 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -878,20 +883,35 @@ private fun CircleButton(
   }
 }
 
-// ── 9. Booking funnel — date → slot → confirm → POST /api/bookings/venue ──────────────
-@OptIn(ExperimentalLayoutApi::class)
+// ── 9. Booking form — sport → date → start time → duration → court → book ─────────────
+// A single-step form (no cart): the chosen start slot is booked directly via
+// POST /api/bookings/venue. Duration drives the price estimate; court is required
+// only when the venue lists courts.
 @Composable
 internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
   val ctx = LocalContext.current
   val scope = rememberCoroutineScope()
+
+  val sports = remember(venue) { venue.sports.ifEmpty { listOf(venue.category) }.filter { it.isNotBlank() } }
   val days = remember(venue) { venue.slots.map { it.day }.distinct().ifEmpty { listOf("Today") } }
+
+  var selectedSport by remember { mutableStateOf(sports.firstOrNull() ?: venue.category) }
   var selectedDay by remember { mutableStateOf(days.first()) }
   var selectedSlot by remember { mutableStateOf<VenueSlotItem?>(null) }
+  var duration by remember { mutableStateOf(1) }
+  var selectedCourt by remember { mutableStateOf<String?>(null) }
   var submitting by remember { mutableStateOf(false) }
   var result by remember { mutableStateOf<String?>(null) }
   var success by remember { mutableStateOf(false) }
 
-  val daySlots = venue.slots.filter { it.day == selectedDay }
+  // Bookable start times for the chosen day.
+  val startTimes = remember(venue, selectedDay) {
+    venue.slots.filter { it.day == selectedDay && it.available }
+  }
+  val perHour = (selectedSlot?.price?.takeIf { it > 0 } ?: venue.price)
+  val total = perHour * duration
+  val courtNeeded = venue.courts.isNotEmpty()
+  val canBook = selectedSlot != null && (!courtNeeded || selectedCourt != null) && !submitting
 
   Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -901,15 +921,16 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
           .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
           .background(Color.White)
           .navigationBarsPadding()
+          .verticalScroll(rememberScrollState())
           .padding(20.dp)
       ) {
         Text(
-          if (success) "Booking requested" else "Select a slot",
+          if (success) "Booking requested" else "Book a slot",
           color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp
         )
         Spacer(Modifier.height(4.dp))
         Text(venue.name, color = HaraanColors.TextSecondary, fontSize = 13.sp)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(18.dp))
 
         if (success) {
           Icon(Icons.Default.Check, null, tint = HaraanColors.GameHubGreen, modifier = Modifier.size(40.dp))
@@ -923,31 +944,48 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(50.dp)
           ) { Text("Done", color = Color.White, fontWeight = FontWeight.Bold) }
         } else {
-          // Date chips.
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            days.forEach { day ->
-              val sel = day == selectedDay
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(50))
-                  .background(if (sel) HaraanColors.GameHubDeep else Color(0xFFF1F5F9))
-                  .clickable { selectedDay = day; selectedSlot = null }
-                  .padding(horizontal = 16.dp, vertical = 8.dp)
-              ) {
-                Text(day, color = if (sel) Color.White else HaraanColors.TextSecondary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-              }
+          // Sport
+          FormField("Sport") {
+            FormDropdown(value = selectedSport, placeholder = "Select sport", options = sports) { selectedSport = it }
+          }
+          // Date
+          FormField("Date") {
+            FormDropdown(value = selectedDay, placeholder = "Select date", options = days) {
+              selectedDay = it; selectedSlot = null
             }
           }
-          Spacer(Modifier.height(16.dp))
-          // Slot grid.
-          if (daySlots.isEmpty()) {
-            Text("No slots for this day.", color = HaraanColors.TextSecondary, fontSize = 13.sp)
-          } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-              daySlots.forEach { slot -> SlotChip(slot, selectedSlot?.id == slot.id) { if (slot.available) selectedSlot = slot } }
+          // Start time
+          FormField("Start Time") {
+            FormDropdown(
+              value = selectedSlot?.time,
+              placeholder = if (startTimes.isEmpty()) "No slots for this day" else "Select time",
+              options = startTimes.map { it.time },
+              enabled = startTimes.isNotEmpty(),
+            ) { picked -> selectedSlot = startTimes.firstOrNull { it.time == picked } }
+          }
+          // Duration
+          FormField("Duration") {
+            DurationStepper(duration) { duration = it }
+          }
+          // Court — only when the venue lists them.
+          if (courtNeeded) {
+            FormField("Court") {
+              FormDropdown(value = selectedCourt, placeholder = "Select Court", options = venue.courts) { selectedCourt = it }
             }
           }
-          Spacer(Modifier.height(20.dp))
+
+          Spacer(Modifier.height(6.dp))
+          // Price summary.
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text("Total ($duration hr)", color = HaraanColors.TextSecondary, fontSize = 13.sp)
+            Text("₹$total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+          }
+
+          Spacer(Modifier.height(14.dp))
           result?.let {
             Text(it, color = HaraanColors.LiveRed, fontSize = 12.sp)
             Spacer(Modifier.height(8.dp))
@@ -964,15 +1002,15 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
                   submitting = false
                   return@launch
                 }
-                val date = when (slot.day.lowercase()) {
-                  "today" -> LocalDate.now()
+                val date = when (selectedDay.lowercase()) {
                   "tomorrow" -> LocalDate.now().plusDays(1)
                   else -> LocalDate.now()
                 }.toString()
                 when (val r = BookingRepository().bookVenueSlot(token, venue.id.toIntOrNull() ?: 0, slot.id, date)) {
                   is BookingResult.Success -> {
                     success = true
-                    result = r.message
+                    val court = selectedCourt?.let { " · $it" } ?: ""
+                    result = "${slot.time} · $duration hr$court — ${r.message}"
                     Toast.makeText(ctx, "Slot booked", Toast.LENGTH_SHORT).show()
                   }
                   is BookingResult.Error -> result = r.message
@@ -980,18 +1018,18 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
                 submitting = false
               }
             },
-            enabled = selectedSlot != null && !submitting,
-            colors = ButtonDefaults.buttonColors(containerColor = HaraanColors.GameHubGreen),
+            enabled = canBook,
+            colors = ButtonDefaults.buttonColors(
+              containerColor = HaraanColors.GameHubGreen,
+              disabledContainerColor = Color(0xFFBFC8D2),
+            ),
             shape = RoundedCornerShape(50),
             modifier = Modifier.fillMaxWidth().height(52.dp)
           ) {
             if (submitting) {
               CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
             } else {
-              Text(
-                selectedSlot?.let { "Confirm • ${it.time} · ₹${it.price.takeIf { p -> p > 0 } ?: venue.price}" } ?: "Select a slot",
-                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp
-              )
+              Text("Book now  ·  ₹$total", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
           }
         }
@@ -1000,50 +1038,83 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
   }
 }
 
+/** A labelled form row: caption above, the control below. */
 @Composable
-private fun SlotChip(slot: VenueSlotItem, selected: Boolean, onClick: () -> Unit) {
-  val bg = when {
-    !slot.available -> Color(0xFFF1F5F9)
-    selected -> HaraanColors.GameHubGreen
-    else -> Color.White
-  }
-  val border = when {
-    !slot.available -> BorderStroke(1.dp, HaraanColors.BorderLight)
-    selected -> BorderStroke(1.dp, HaraanColors.GameHubGreen)
-    else -> BorderStroke(1.dp, HaraanColors.BorderLight)
-  }
-  Column(
-    modifier = Modifier
-      .clip(RoundedCornerShape(12.dp))
-      .background(bg)
-      .then(Modifier.border(border, RoundedCornerShape(12.dp)))
-      .clickable(enabled = slot.available) { onClick() }
-      .padding(horizontal = 14.dp, vertical = 10.dp),
-    horizontalAlignment = Alignment.CenterHorizontally
-  ) {
-    Text(
-      slot.time,
-      color = when {
-        !slot.available -> HaraanColors.TextMuted
-        selected -> Color.White
-        else -> HaraanColors.TextPrimary
-      },
-      fontWeight = FontWeight.Bold,
-      fontSize = 13.sp
-    )
-    if (slot.price > 0) {
+private fun FormField(label: String, content: @Composable () -> Unit) {
+  Spacer(Modifier.height(14.dp))
+  Text(label, color = HaraanColors.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+  Spacer(Modifier.height(6.dp))
+  content()
+}
+
+/** Bordered dropdown that shows [value] (or [placeholder]) and opens a menu of [options]. */
+@Composable
+private fun FormDropdown(
+  value: String?,
+  placeholder: String,
+  options: List<String>,
+  enabled: Boolean = true,
+  onSelect: (String) -> Unit,
+) {
+  var open by remember { mutableStateOf(false) }
+  Box {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(12.dp))
+        .clickable(enabled = enabled && options.isNotEmpty()) { open = true }
+        .padding(horizontal = 14.dp, vertical = 14.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
       Text(
-        "₹${slot.price}",
-        color = when { !slot.available -> HaraanColors.TextMuted; selected -> Color.White; else -> HaraanColors.TextPrimary },
-        fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+        value ?: placeholder,
+        color = if (value != null) HaraanColors.TextPrimary else HaraanColors.TextMuted,
+        fontSize = 14.sp,
+        fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Normal,
+        maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f),
       )
+      Icon(Icons.Default.KeyboardArrowDown, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
     }
-    if (!slot.available) {
-      Text("Booked", color = HaraanColors.TextMuted, fontSize = 10.sp)
-    } else if (slot.fillingFast) {
-      Text("Filling fast", color = if (selected) Color.White else HaraanColors.LiveRed, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-    } else if (slot.capacity > 1) {
-      Text("${slot.capacity} courts", color = if (selected) Color.White.copy(alpha = 0.85f) else HaraanColors.TextMuted, fontSize = 10.sp)
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+      options.forEach { opt ->
+        DropdownMenuItem(
+          text = { Text(opt, fontSize = 14.sp, color = HaraanColors.TextPrimary) },
+          onClick = { onSelect(opt); open = false },
+        )
+      }
     }
+  }
+}
+
+/** −  N Hr  +  stepper, 1..12 hours. */
+@Composable
+private fun DurationStepper(value: Int, onChange: (Int) -> Unit) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(18.dp),
+  ) {
+    StepperButton(Icons.Default.Remove, enabled = value > 1) { onChange((value - 1).coerceAtLeast(1)) }
+    Text(
+      "$value Hr", color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp,
+      modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    )
+    StepperButton(Icons.Default.Add, enabled = value < 12) { onChange((value + 1).coerceAtMost(12)) }
+  }
+}
+
+@Composable
+private fun StepperButton(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean, onClick: () -> Unit) {
+  Box(
+    modifier = Modifier
+      .size(38.dp)
+      .clip(CircleShape)
+      .background(if (enabled) HaraanColors.GameHubGreen else Color(0xFFE2E8F0))
+      .clickable(enabled = enabled) { onClick() },
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
   }
 }

@@ -42,6 +42,7 @@ final class VenuesController extends Controller
             'price_note' => $venue->price_note,
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
+            'courts' => $venue->courts ?? [],
             'images' => $venue->images ?? [],
             'latitude' => $venue->latitude,
             'longitude' => $venue->longitude,

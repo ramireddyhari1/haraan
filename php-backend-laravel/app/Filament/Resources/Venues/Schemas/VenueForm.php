@@ -104,6 +104,11 @@ class VenueForm
                     ->placeholder('Floodlights, Parking, Washrooms…')
                     ->helperText('One chip per amenity. Known names (wifi, parking, washroom, shower, cafe, water, floodlights, AC, security, seating, equipment) get their own icon on the venue page.')
                     ->columnSpanFull(),
+                TagsInput::make('courts')
+                    ->label('Courts / pitches / lanes')
+                    ->placeholder('Court 1, Court 2, Lane A…')
+                    ->helperText('Bookable units inside the venue. These fill the "Court" dropdown in the app booking form.')
+                    ->columnSpanFull(),
                 TagsInput::make('rules')
                     ->label('Good to know')
                     ->placeholder('Carry your own racket, Shoes mandatory…')

@@ -54,8 +54,8 @@ data class VenuePriceVariant(val label: String, val groups: List<VenuePriceGroup
 
 /**
  * Rich venue detail backing the "view → trust → book" page. Assembled from
- * GET /api/venues/{id}. Fields the backend does not yet emit (hours, rules,
- * address, price chart) default to empty so the UI degrades gracefully.
+ * GET /api/venues/{id}. Any field the backend omits defaults to empty so the UI
+ * degrades gracefully.
  */
 data class VenueDetailData(
     val id: String,
@@ -72,6 +72,8 @@ data class VenueDetailData(
     val isFeatured: Boolean,
     val images: List<String>,
     val amenities: List<String>,
+    val courts: List<String>,
+    val sports: List<String>,
     val about: String,
     val hours: String,
     val rules: List<String>,
@@ -167,6 +169,8 @@ class VenueRepository {
             isFeatured = d.optBoolean("is_featured", false),
             images = images,
             amenities = d.optJSONArray("amenities").toStringList(),
+            courts = d.optJSONArray("courts").toStringList(),
+            sports = d.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(d.optString("category").takeIf { it.isNotBlank() }) },
             about = d.optString("about"),
             hours = d.optString("hours"),
             rules = d.optJSONArray("rules").toStringList(),
