@@ -35,12 +35,32 @@ class VenueForm
                     ])
                     ->helperText('All games playable here. Shown as icons on the venue card (first two + a count). The primary category is always included.'),
                 TextInput::make('location')
-                    ->required(),
-                TextInput::make('distance'),
+                    ->required()
+                    ->label('Area / locality')
+                    ->helperText('Short label shown on the venue card (e.g. "Bandra").'),
+                TextInput::make('address')
+                    ->label('Full address')
+                    ->maxLength(255)
+                    ->placeholder('123 MG Road, Bandra West, Mumbai, Maharashtra 400050')
+                    ->helperText('Street line, colony, city, state, PIN — shown in full under the timing on the venue page.')
+                    ->columnSpanFull(),
                 TextInput::make('latitude')
-                    ->numeric(),
+                    ->numeric()
+                    ->step('0.0000001')
+                    ->minValue(-90)
+                    ->maxValue(90)
+                    ->placeholder('19.0596')
+                    ->helperText('In Google Maps, right-click the exact spot → the first row is "lat, lng". Copy the first number here.'),
                 TextInput::make('longitude')
-                    ->numeric(),
+                    ->numeric()
+                    ->step('0.0000001')
+                    ->minValue(-180)
+                    ->maxValue(180)
+                    ->placeholder('72.8295')
+                    ->helperText('…and the second number here. Coordinates power the live "X km away" distance from each user.'),
+                TextInput::make('distance')
+                    ->label('Fallback distance')
+                    ->helperText('Only used when coordinates are missing. Leave blank once lat/lng are set — the app then computes real distance per user.'),
                 TextInput::make('map_link')
                     ->label('Google Maps link')
                     ->url()
