@@ -100,4 +100,10 @@ final class Venue extends Model
     {
         return $this->belongsTo(OrganizationUnit::class, 'organization_id');
     }
+
+    /** The partner (venue owner) who manages this venue in the partner console. Nullable. */
+    public function partner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'partner_id');
+    }
 }

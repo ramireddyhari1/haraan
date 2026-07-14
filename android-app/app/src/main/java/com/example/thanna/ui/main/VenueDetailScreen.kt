@@ -580,8 +580,9 @@ private fun sportIcon(category: String): androidx.compose.ui.graphics.vector.Ima
 }
 
 /**
- * The price-chart body used by the full-screen [PriceChartScreen]. Renders the admin-authored
- * structured chart (variants → day groups → time bands), falling back to slot-derived rows.
+ * The pricing body used by the full-screen [PriceChartScreen]. Lists each court and its hourly
+ * rate, grouped by sport (per-court pricing is the single source of truth). Falls back to
+ * slot-derived rows or a flat rate for venues that don't model courts yet.
  */
 @Composable
 internal fun PriceChartBody(d: VenueDetailData) {
@@ -599,26 +600,29 @@ internal fun PriceChartBody(d: VenueDetailData) {
   }
   Spacer(Modifier.height(18.dp))
 
-  if (d.priceChart.isNotEmpty()) {
-    d.priceChart.forEachIndexed { vi, variant ->
-      if (vi > 0) Spacer(Modifier.height(20.dp))
-      Text(variant.label, color = HaraanColors.EventsBlue, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-      variant.groups.forEach { group ->
-        Spacer(Modifier.height(14.dp))
-        Text(group.days, color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Spacer(Modifier.height(10.dp))
-        group.rows.forEachIndexed { ri, band ->
-          if (ri > 0) {
-            Spacer(Modifier.height(12.dp)); SectionDivider(); Spacer(Modifier.height(12.dp))
-          }
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text(band.time, color = HaraanColors.TextPrimary, fontSize = 14.sp)
-            Text("INR ${band.price} / hour", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-          }
+  if (d.courts.isNotEmpty()) {
+    // Per-court pricing, grouped by sport. A court appears under every sport it hosts, so a
+    // shared court shows under both — matching how it books. Price is the court's own rate.
+    val sports = d.sports.ifEmpty { listOf(d.category) }.filter { it.isNotBlank() }
+    var shown = 0
+    sports.forEach { sport ->
+      val courts = d.courts.filter { it.sports.isEmpty() || it.sports.any { s -> s.equals(sport, ignoreCase = true) } }
+      if (courts.isEmpty()) return@forEach
+      if (shown > 0) Spacer(Modifier.height(20.dp))
+      shown++
+      Text(sport, color = HaraanColors.EventsBlue, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+      Spacer(Modifier.height(10.dp))
+      courts.forEachIndexed { ci, court ->
+        if (ci > 0) {
+          Spacer(Modifier.height(12.dp)); SectionDivider(); Spacer(Modifier.height(12.dp))
+        }
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(court.name, color = HaraanColors.TextPrimary, fontSize = 14.sp)
+          Text("INR ${court.price.takeIf { it > 0 } ?: d.price} / hour", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
       }
     }
