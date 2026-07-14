@@ -13,6 +13,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ViewField;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
@@ -135,20 +136,27 @@ class VenueForm
                             ->placeholder('https://maps.app.goo.gl/…')
                             ->helperText('Maps → Share → Copy link. Powers "Show in Map" / "Get directions".')
                             ->columnSpanFull(),
+                        ViewField::make('map_picker')
+                            ->hiddenLabel()
+                            ->view('filament.venue-map-picker')
+                            ->dehydrated(false)
+                            ->columnSpanFull(),
                         TextInput::make('latitude')
                             ->numeric()
                             ->step('0.0000001')
                             ->minValue(-90)
                             ->maxValue(90)
+                            ->live()
                             ->placeholder('19.0596')
-                            ->helperText('In Google Maps, right-click the spot → the first row is "lat, lng". Copy the first number.'),
+                            ->helperText('Set by the pin above — or type it. Right-click the spot in Google Maps for "lat, lng".'),
                         TextInput::make('longitude')
                             ->numeric()
                             ->step('0.0000001')
                             ->minValue(-180)
                             ->maxValue(180)
+                            ->live()
                             ->placeholder('72.8295')
-                            ->helperText('…and the second number here.'),
+                            ->helperText('Set by the pin above — or type it.'),
                     ]),
 
                 Section::make('Operating hours')
