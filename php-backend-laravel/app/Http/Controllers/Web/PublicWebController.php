@@ -720,8 +720,18 @@ final class PublicWebController extends Controller
         // each slot by the selected court so a premium pitch costs more than a practice court.
         $basePrice = (int) ($v->price ?? 0);
         $courtPrices = [];
+        $courtPeak = [];
         foreach ($v->courts as $c) {
             $courtPrices[$c->name] = $c->price ?? $basePrice;
+            // Peak pricing for the scheduler: applied by time window (evenings cost more). The
+            // backend stays authoritative on weekday precision when a booking is actually made.
+            if ($c->peak_price !== null && $c->peak_start !== null && $c->peak_end !== null) {
+                $courtPeak[$c->name] = [
+                    'price' => (int) $c->peak_price,
+                    'start' => $c->peak_start,
+                    'end' => $c->peak_end,
+                ];
+            }
         }
 
         $reviewsList = $v->reviews->map(fn ($r) => (object) [
@@ -749,6 +759,7 @@ final class PublicWebController extends Controller
             'sports'       => $sports,
             'courts'       => $courts,
             'court_prices' => $courtPrices,
+            'court_peak'   => $courtPeak,
         ];
     }
 

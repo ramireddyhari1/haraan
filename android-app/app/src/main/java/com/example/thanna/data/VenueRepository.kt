@@ -62,6 +62,12 @@ data class VenueCourt(
     val name: String,
     val sports: List<String>,
     val price: Int,
+    // Optional peak pricing. [peakPrice] null = none; [peakDays] are 3-letter names (empty = every
+    // day); [peakStart]/[peakEnd] are "HH:MM" (null = all day). Clients apply peak when day+time match.
+    val peakPrice: Int? = null,
+    val peakDays: List<String> = emptyList(),
+    val peakStart: String? = null,
+    val peakEnd: String? = null,
 )
 
 /**
@@ -166,14 +172,17 @@ class VenueRepository {
 
     private fun parseDetail(d: JSONObject): VenueDetailData {
         val images = d.optJSONArray("images").toStringList()
+        // org.json's optString returns the literal "null" for a JSON null value, which then
+        // renders as "null" in the UI. Read display strings through this instead.
+        fun s(key: String): String = if (d.isNull(key)) "" else d.optString(key).let { if (it == "null") "" else it }
         return VenueDetailData(
-            id = d.optString("id"),
-            name = d.optString("name"),
-            category = d.optString("category"),
-            location = d.optString("location"),
-            address = d.optString("address"),
-            distance = d.optString("distance"),
-            rating = d.optString("rating"),
+            id = s("id"),
+            name = s("name"),
+            category = s("category"),
+            location = s("location"),
+            address = s("address"),
+            distance = s("distance"),
+            rating = s("rating"),
             price = d.optInt("price", 0),
             ratingsCount = d.optInt("ratings_count", 0),
             reviewsCount = d.optInt("reviews_count", 0),
@@ -187,13 +196,17 @@ class VenueRepository {
                     name = c.optString("name"),
                     sports = c.optJSONArray("sports").toStringList(),
                     price = c.optInt("price", 0),
+                    peakPrice = if (c.isNull("peak_price")) null else c.optInt("peak_price").takeIf { it > 0 },
+                    peakDays = c.optJSONArray("peak_days").toStringList(),
+                    peakStart = c.optString("peak_start").takeIf { it.isNotBlank() && it != "null" },
+                    peakEnd = c.optString("peak_end").takeIf { it.isNotBlank() && it != "null" },
                 )
             },
             sports = d.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(d.optString("category").takeIf { it.isNotBlank() }) },
-            about = d.optString("about"),
-            hours = d.optString("hours"),
+            about = s("about"),
+            hours = s("hours"),
             rules = d.optJSONArray("rules").toStringList(),
-            priceNote = d.optString("price_note"),
+            priceNote = s("price_note"),
             latitude = if (d.isNull("latitude")) null else d.optDouble("latitude").takeIf { !it.isNaN() },
             longitude = if (d.isNull("longitude")) null else d.optDouble("longitude").takeIf { !it.isNaN() },
             mapLink = d.optString("map_link").takeIf { it.isNotBlank() && it != "null" } ?: "",

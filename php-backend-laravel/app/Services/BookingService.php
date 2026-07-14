@@ -13,6 +13,7 @@ use App\Models\Venue;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -309,6 +310,11 @@ final class BookingService
                 $dayLabel = $slot->day;
                 $timeLabel = $slot->time;
                 $startMin = $this->timeToMinutes($slot->time);
+            }
+
+            // Per-court peak pricing wins when it applies (weekday/time window on the court).
+            if ($court !== null) {
+                $perHour = $court->rateFor(Carbon::parse($date), $timeLabel, (int) ($venue->price ?? 0));
             }
 
             $endMin = $startMin !== null ? $startMin + $duration * 60 : null;

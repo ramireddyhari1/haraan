@@ -9,6 +9,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
@@ -50,11 +51,36 @@ class CourtsRelationManager extends RelationManager
                     ])
                     ->helperText('Ticking two sports means the SAME court hosts both — a booking for one blocks the other at that time. Leave empty to allow every sport the venue offers.'),
                 TextInput::make('price')
-                    ->label('Price per hour')
+                    ->label('Base price per hour')
                     ->numeric()
                     ->prefix('₹')
                     ->placeholder('Leave blank to use the venue price')
-                    ->helperText('Optional per-court hourly rate (e.g. a cricket pitch may cost more than a badminton court).'),
+                    ->helperText('Off-peak / normal hourly rate (e.g. a cricket pitch may cost more than a badminton court).'),
+                TextInput::make('peak_price')
+                    ->label('Peak price per hour')
+                    ->numeric()
+                    ->prefix('₹')
+                    ->placeholder('Leave blank for no peak pricing')
+                    ->helperText('Higher rate for busy times. Only applies when you set the days and/or window below.'),
+                Select::make('peak_days')
+                    ->label('Peak days')
+                    ->multiple()
+                    ->options([
+                        'Mon' => 'Monday', 'Tue' => 'Tuesday', 'Wed' => 'Wednesday',
+                        'Thu' => 'Thursday', 'Fri' => 'Friday', 'Sat' => 'Saturday', 'Sun' => 'Sunday',
+                    ])
+                    ->helperText('Leave empty to apply peak pricing every day (within the window below).'),
+                TimePicker::make('peak_start')
+                    ->label('Peak from')
+                    ->seconds(false)
+                    ->format('H:i')
+                    ->displayFormat('h:i A')
+                    ->helperText('e.g. 6:00 PM. Leave both blank to apply all day on the peak days.'),
+                TimePicker::make('peak_end')
+                    ->label('Peak until')
+                    ->seconds(false)
+                    ->format('H:i')
+                    ->displayFormat('h:i A'),
                 TextInput::make('sort_order')
                     ->numeric()
                     ->default(0),
@@ -78,6 +104,10 @@ class CourtsRelationManager extends RelationManager
                 TextColumn::make('price')
                     ->label('₹/hr')
                     ->placeholder('Venue price')
+                    ->money('inr', divideBy: 1),
+                TextColumn::make('peak_price')
+                    ->label('Peak ₹/hr')
+                    ->placeholder('—')
                     ->money('inr', divideBy: 1),
                 IconColumn::make('is_active')
                     ->boolean(),

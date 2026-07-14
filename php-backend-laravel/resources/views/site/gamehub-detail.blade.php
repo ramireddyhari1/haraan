@@ -359,11 +359,36 @@
     const venueCourts = @json($venue->courts);
     const venueSports = @json($venue->sports);
     const courtPrices = @json($venue->court_prices ?? new \stdClass);
+    const courtPeak = @json($venue->court_peak ?? new \stdClass);
     const venueBasePrice = {{ (int) $venue->price }};
 
-    // Hourly rate for the currently-selected court (falls back to the venue base price).
+    // Base hourly rate for the currently-selected court (falls back to the venue base price).
     function currentRate() {
         return courtPrices[selectedCourt] ?? venueBasePrice;
+    }
+
+    // "06:00 AM" / "18:00" → minutes-from-midnight, or null.
+    function timeMin(label) {
+        if (!label) return null;
+        const m = String(label).trim().match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/);
+        if (!m) return null;
+        let h = parseInt(m[1], 10);
+        const ap = (m[3] || '').toUpperCase();
+        if (ap === 'PM' && h !== 12) h += 12;
+        if (ap === 'AM' && h === 12) h = 0;
+        return h * 60 + parseInt(m[2], 10);
+    }
+
+    // Rate for a specific slot on the selected court: peak when the slot's start time falls in
+    // the court's peak window, else the base rate.
+    function slotRate(slotStr) {
+        const base = currentRate();
+        const p = courtPeak[selectedCourt];
+        if (!p) return base;
+        const t = timeMin(String(slotStr).split(' - ')[0]);
+        const s = timeMin(p.start), e = timeMin(p.end);
+        if (t != null && s != null && e != null && t >= s && t < e) return p.price;
+        return base;
     }
     let selectedDate = 'Today';
     let selectedSport = venueSports[0];
@@ -486,14 +511,16 @@
                 const isBooked = isSlotBooked(selectedDate, selectedSport, selectedCourt, slot);
                 const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot}`;
                 const isSelected = selectedSlots.some(s => s.key === slotKey);
+                const r = slotRate(slot);
+                const isPeak = r > rate;
 
                 const slotClass = isBooked ? 'is-booked' : (isSelected ? 'is-selected' : '');
-                const onclickAttr = isBooked ? '' : `onclick="toggleSlot(this, '${slot}', ${rate})"`;
+                const onclickAttr = isBooked ? '' : `onclick="toggleSlot(this, '${slot}', ${r})"`;
 
                 groupHtml += `
                     <div ${onclickAttr} class="slot-item ${slotClass}" data-key="${slotKey}">
                         <div class="slot-item__time">${slot.split(' - ')[0]}</div>
-                        <div class="slot-item__price">${isBooked ? 'Reserved' : '₹' + rate.toLocaleString()}</div>
+                        <div class="slot-item__price">${isBooked ? 'Reserved' : '₹' + r.toLocaleString() + (isPeak ? ' <span style=\"color:#16a34a;font-weight:600\">peak</span>' : '')}</div>
                     </div>
                 `;
             });

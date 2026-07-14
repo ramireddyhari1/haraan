@@ -579,6 +579,63 @@ private fun sportIcon(category: String): androidx.compose.ui.graphics.vector.Ima
   else -> Icons.Default.SportsTennis // badminton / pickleball / racquet sports
 }
 
+// ── Per-court peak pricing (mirrors the backend VenueCourt::isPeak / rateFor) ─────────────
+
+/** Minutes-from-midnight for a time label like "7:00 PM" or "19:00", or null if unparseable. */
+private fun timeToMinutes(label: String?): Int? {
+  if (label.isNullOrBlank()) return null
+  val m = Regex("""(\d{1,2}):(\d{2})\s*([AaPp][Mm])?""").find(label.trim()) ?: return null
+  var h = m.groupValues[1].toIntOrNull() ?: return null
+  val min = m.groupValues[2].toIntOrNull() ?: return null
+  when (m.groupValues[3].uppercase()) {
+    "PM" -> if (h != 12) h += 12
+    "AM" -> if (h == 12) h = 0
+  }
+  return h * 60 + min
+}
+
+/** Whether a court's peak pricing applies for the given date + start time. */
+private fun isCourtPeak(court: VenueCourt, date: LocalDate, time: String?): Boolean {
+  court.peakPrice ?: return false
+  val hasWindow = court.peakStart != null && court.peakEnd != null
+  if (court.peakDays.isEmpty() && !hasWindow) return false
+  if (court.peakDays.isNotEmpty()) {
+    val day = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH) // "Sat"
+    if (court.peakDays.none { it.equals(day, ignoreCase = true) }) return false
+  }
+  if (hasWindow) {
+    val t = timeToMinutes(time) ?: return false
+    val s = timeToMinutes(court.peakStart) ?: return false
+    val e = timeToMinutes(court.peakEnd) ?: return false
+    if (t < s || t >= e) return false
+  }
+  return true
+}
+
+/** Effective hourly rate for a court at a date/time: peak when it applies, else base/venue price. */
+private fun courtRate(court: VenueCourt, date: LocalDate, time: String?, venuePrice: Int): Int {
+  if (isCourtPeak(court, date, time)) return court.peakPrice ?: venuePrice
+  return court.price.takeIf { it > 0 } ?: venuePrice
+}
+
+/** Human "when" for a court's peak pricing, e.g. "Sat, Sun · 6:00 PM–11:00 PM". */
+private fun courtPeakWhen(court: VenueCourt): String {
+  val days = if (court.peakDays.isNotEmpty()) court.peakDays.joinToString(", ") else "Every day"
+  val window = if (court.peakStart != null && court.peakEnd != null) {
+    " · ${to12h(court.peakStart)}–${to12h(court.peakEnd)}"
+  } else ""
+  return days + window
+}
+
+/** "18:00" → "6:00 PM"; passes through anything it can't parse. */
+private fun to12h(hhmm: String): String {
+  val mins = timeToMinutes(hhmm) ?: return hhmm
+  val h = mins / 60; val m = mins % 60
+  val ap = if (h < 12) "AM" else "PM"
+  val h12 = when { h == 0 -> 12; h > 12 -> h - 12; else -> h }
+  return "%d:%02d %s".format(h12, m, ap)
+}
+
 /**
  * The pricing body used by the full-screen [PriceChartScreen]. Lists each court and its hourly
  * rate, grouped by sport (per-court pricing is the single source of truth). Falls back to
@@ -619,10 +676,17 @@ internal fun PriceChartBody(d: VenueDetailData) {
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+          verticalAlignment = Alignment.Top
         ) {
-          Text(court.name, color = HaraanColors.TextPrimary, fontSize = 14.sp)
-          Text("INR ${court.price.takeIf { it > 0 } ?: d.price} / hour", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+          Text(court.name, color = HaraanColors.TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+          Column(horizontalAlignment = Alignment.End) {
+            Text("INR ${court.price.takeIf { it > 0 } ?: d.price} / hour", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            if (court.peakPrice != null) {
+              Spacer(Modifier.height(2.dp))
+              Text("Peak INR ${court.peakPrice} / hour", color = HaraanColors.GameHubDeep, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+              Text(courtPeakWhen(court), color = HaraanColors.TextMuted, fontSize = 11.sp)
+            }
+          }
         }
       }
     }
@@ -935,10 +999,12 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
   val startTimes = remember(venue, selectedDayLabel) {
     venue.slots.filter { it.day.equals(selectedDayLabel, ignoreCase = true) && it.available }
   }
-  // Per-court price wins over the slot/venue price when a court is chosen.
-  val perHour = selectedCourt?.price?.takeIf { it > 0 }
+  // Per-court price wins over the slot/venue price when a court is chosen, and peak pricing
+  // wins over that when the picked day/time falls in the court's peak window.
+  val perHour = selectedCourt?.let { courtRate(it, selectedDate, selectedSlot?.time, venue.price) }
     ?: selectedSlot?.price?.takeIf { it > 0 }
     ?: venue.price
+  val isPeakNow = selectedCourt?.let { isCourtPeak(it, selectedDate, selectedSlot?.time) } == true
   val total = perHour * duration
   val canBook = selectedSlot != null && (!courtNeeded || selectedCourt != null) && !submitting
   // The chosen window as "7:00 PM – 8:00 PM" (null when the time string can't be parsed).
@@ -1045,7 +1111,22 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column {
-              Text("Total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                if (isPeakNow) {
+                  Spacer(Modifier.width(8.dp))
+                  Text(
+                    "PEAK",
+                    color = HaraanColors.GameHubDeep,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(4.dp))
+                      .background(HaraanColors.GameHubGreen.copy(alpha = 0.15f))
+                      .padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+              }
               Text(
                 "₹$perHour × $duration hr",
                 color = HaraanColors.TextMuted, fontSize = 12.sp
