@@ -584,6 +584,9 @@ main.container {
 /* App-style mobile home is hidden by default; shown only ≤720px. */
 .mhome { display: none; }
 
+/* GameHub live strip is a mobile-only element; shown only ≤1024px (mobile overrides). */
+.gh-live { display: none; }
+
 @media (max-width: 720px) {
 	/* Swap desktop home sections for the app-style mobile home. */
 	.hero, .quick-grid, .section-shell { display: none; }

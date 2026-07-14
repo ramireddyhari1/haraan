@@ -241,71 +241,141 @@
         body.event-detail-page main.container { padding: 0 !important; }
         .district-event-page .container { padding: 0 !important; }
 
-        /* Full-bleed immersive hero */
-        .district-event-page .dr-card-body { padding: 0 0 96px !important; }
+        /* Poster hero — full colour; the title lives on the sheet, so no heavy scrim. */
+        .district-event-page .dr-card-body { padding: 0 !important; background: #F4F7FB; }
         .district-event-page .dr-hero-banner {
+            position: relative;
             margin: 0 !important;
-            height: 60vh !important; min-height: 360px; max-height: 520px;
+            height: 340px !important; min-height: 0; max-height: none;
             border: none !important; border-radius: 0 !important;
         }
         .district-event-page .dr-hero-banner img {
             border-radius: 0 !important; width: 100%; height: 100%; object-fit: cover;
         }
-        /* Legibility scrim so the overlaid title reads on any poster */
+        /* Subtle TOP scrim only — enough for the floating buttons; poster stays bright. */
         .district-event-page .dr-hero-banner::after {
             content: ''; position: absolute; inset: 0; pointer-events: none;
-            background: linear-gradient(180deg, rgba(4,8,15,0.30) 0%, rgba(4,8,15,0) 20%,
-                        rgba(4,8,15,0.12) 44%, rgba(4,8,15,0.42) 62%, rgba(4,8,15,0.70) 80%, rgba(4,8,15,0.95) 100%);
+            background: linear-gradient(180deg, rgba(4,8,15,0.32) 0%, rgba(4,8,15,0) 26%);
         }
 
-        /* Premium circular back button floating over the hero */
-        .floating-left-btn {
+        /* White content sheet overlaps the poster with a big rounded top curve. */
+        .district-event-page .dr-sheet {
+            position: relative; z-index: 4;
+            margin-top: -26px;
+            background: #ffffff;
+            border-radius: 28px 28px 0 0;
+            padding: 22px 0 96px;
+        }
+
+        /* Floating circular buttons over the poster (back left, share right). */
+        .floating-left-btn, .floating-right-btn {
             border-radius: 50% !important; width: 40px !important; height: 40px !important;
-            top: 16px !important; left: 16px !important;
+            top: 16px !important;
             background: rgba(255,255,255,0.92) !important; border: none !important;
             backdrop-filter: blur(6px);
             box-shadow: 0 4px 14px rgba(0,0,0,0.18) !important;
+            display: flex !important; align-items: center; justify-content: center;
+            color: #121620; z-index: 30;
         }
+        .floating-left-btn { left: 16px !important; }
+        .floating-right-btn { position: absolute !important; right: 16px !important; cursor: pointer; }
 
-        /* Pull the title/meta up onto the hero's dark gradient */
+        /* Identity row + title + date now sit on the white sheet (dark text). */
         .district-event-page .dr-info-row {
-            position: relative; z-index: 5;
-            margin: -162px 0 18px !important; padding: 0 20px !important;
+            position: relative; z-index: 2;
+            margin: 0 0 6px !important; padding: 0 20px !important;
             flex-direction: column; align-items: flex-start;
             border-bottom: none !important;
         }
+        .dr-idrow { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .dr-cat-pill {
+            font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+            color: #2563EB; background: rgba(37,99,235,0.10); padding: 5px 11px; border-radius: 999px;
+        }
+        .dr-rate-pill {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 12px; font-weight: 800; color: #0F172A;
+            background: #F4F7FB; border: 1px solid #E2E8F0; padding: 4px 9px; border-radius: 999px;
+        }
+        .dr-rate-pill i { color: #F5A623; font-style: normal; }
         body.event-detail-page .dr-main-title {
-            color: #ffffff !important;
-            font-size: 25px !important; line-height: 1.22 !important;
-            letter-spacing: -0.02em !important; margin-bottom: 10px !important;
-            text-shadow: 0 1px 12px rgba(0,0,0,0.35);
-            padding-bottom: 2px; /* room for descenders */
+            color: #121620 !important;
+            font-size: 24px !important; line-height: 1.24 !important;
+            letter-spacing: -0.02em !important; margin-bottom: 8px !important;
+            text-shadow: none;
         }
-        /* Meta chips (date / venue) instead of one flat line */
-        .district-event-page .dr-info-row .dr-meta-text { display: none !important; }
-        .dr-meta-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-        .dr-chip {
-            display: inline-flex; align-items: center; gap: 6px;
-            background: rgba(255,255,255,0.16); backdrop-filter: blur(6px);
-            border: 1px solid rgba(255,255,255,0.22);
-            color: #fff; font-size: 12.5px; font-weight: 600;
-            padding: 6px 11px; border-radius: 999px; max-width: 100%;
-        }
-        .dr-chip svg { width: 13px; height: 13px; flex-shrink: 0; opacity: 0.9; }
-        .dr-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        /* The inline CTA moves into the sticky bar on mobile */
+        .dr-date-line { display: block; margin: 0; font-size: 13px; font-weight: 600; color: #64748B; }
+        /* Old overlay meta is replaced by the sheet identity + date line. */
+        .district-event-page .dr-info-row .dr-meta-text,
+        .district-event-page .dr-info-row .dr-meta-chips { display: none !important; }
         .district-event-page .dr-info-row .dr-checkin-btn { display: none !important; }
 
-        /* Content: re-inset the sections the full-bleed hero un-padded */
-        .district-event-page .dr-tabs { padding: 0 20px !important; margin-top: 4px !important; gap: 20px !important; }
+        /* Single continuous scroll — drop the tabs, show both panes stacked (app parity). */
+        .district-event-page .dr-tabs { display: none !important; }
+        .district-event-page #pane-know { display: block !important; margin-top: 8px !important; }
         .district-event-page .dr-tab-pane { padding: 0 20px !important; }
-        .district-event-page .dr-tab { font-size: 13px !important; letter-spacing: 0 !important; white-space: nowrap; }
 
         /* Venue map card: stack (map on top, address below) instead of a cramped
            45/55 split that squeezes the address at 375px. */
         a[aria-label="Open venue location in Maps"] { flex-direction: column !important; height: auto !important; }
         a[aria-label="Open venue location in Maps"] > div { width: 100% !important; }
         a[aria-label="Open venue location in Maps"] > div:first-child { height: 132px !important; }
+
+        /* Kill horizontal overflow: the desktop 2-col grid + a fixed-layout
+           organizer card were forcing tracks wider than the viewport and
+           clipping body text. minmax(0,1fr) + min-width:0 lets everything shrink. */
+        .district-event-page .container,
+        .district-event-page .dr-card-body { max-width: 100%; overflow-x: clip; }
+        .district-event-page .dr-content-grid {
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 22px !important;
+        }
+        .district-event-page .dr-content-grid > div,
+        .district-event-page .dr-content-grid section { min-width: 0 !important; }
+        .district-event-page .dr-description { overflow-wrap: anywhere; min-width: 0; }
+
+        /* Info row: stretch children to full width so the title wraps instead of
+           shrink-wrapping to its longest line (flex-column + flex-start bug). */
+        .district-event-page .dr-info-row { align-items: stretch !important; }
+        .district-event-page .dr-info-row > div { width: 100%; min-width: 0; }
+        body.event-detail-page .dr-main-title { width: 100%; overflow-wrap: anywhere; }
+
+        /* Organizer card: stack on mobile (its desktop flex has fixed inner widths). */
+        .district-event-page .dr-organizer-card {
+            flex-direction: column !important; align-items: flex-start !important;
+            gap: 16px !important; min-height: 0 !important; padding: 18px !important;
+        }
+        .district-event-page .dr-organizer-card > * { min-width: 0 !important; max-width: 100% !important; }
+
+        /* App layout: date/venue live in the metadata cards below, not on the hero. */
+        .district-event-page .dr-info-row .dr-meta-chips { display: none !important; }
+
+        /* Trust strip + metadata cards (mirror the app EventTrustIndicators + EventMetadataCards) */
+        .dr-mmeta { padding: 0 20px; margin: 6px 0 20px; }
+        .dr-trust { display: flex; gap: 8px; margin-bottom: 10px; }
+        .dr-trust__chip {
+            flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            background: #F4F7FB; border-radius: 14px; padding: 9px 6px;
+            font-size: 12px; font-weight: 700; color: #0F172A; white-space: nowrap;
+        }
+        .dr-trust__chip svg { width: 15px; height: 15px; color: #64748B; flex-shrink: 0; }
+        .dr-mcards { display: flex; gap: 8px; }
+        .dr-mcard {
+            flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
+            background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px;
+            padding: 12px 6px; text-decoration: none; text-align: center;
+        }
+        .dr-mcard__ico {
+            width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+            background: rgba(37, 99, 235, 0.10);
+        }
+        .dr-mcard__ico svg { width: 18px; height: 18px; color: #2563EB; }
+        .dr-mcard strong {
+            font-size: 13.5px; font-weight: 700; color: #0F172A;
+            max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .dr-mcard small { font-size: 11px; color: #94A3B8; }
+        .dr-mcard__link { color: #2563EB !important; font-weight: 600; }
 
         /* Sticky booking bar */
         .dr-book-bar {
@@ -320,14 +390,25 @@
         .dr-book-bar__label { font-size: 11.5px; color: #8a8f98; font-weight: 600; }
         .dr-book-bar__btn {
             flex: 1; max-width: 62%;
-            background: var(--mi-accent, #0d6efd); color: #fff; border: none;
+            background: #2563EB; color: #fff; border: none;
             padding: 15px 24px; border-radius: 16px; font-size: 15.5px; font-weight: 700;
             letter-spacing: -0.01em; cursor: pointer;
-            box-shadow: 0 8px 20px rgba(13,110,253,0.28);
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
         }
     }
+    /* Good to Know — app-style card of icon-chip cells (EventGoodToKnowCard) */
+    .dr-gtk__card { background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; }
+    .dr-gtk__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; }
+    .dr-gtk__cell { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+    .dr-gtk__ico { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 10px; background: rgba(37, 99, 235, 0.10); display: grid; place-items: center; }
+    .dr-gtk__ico svg { width: 18px; height: 18px; color: #2563EB; }
+    .dr-gtk__txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .dr-gtk__txt small { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94A3B8; }
+    .dr-gtk__txt strong { font-size: 14px; font-weight: 600; color: #0F172A; line-height: 1.3; overflow-wrap: anywhere; }
+    @media (max-width: 430px) { .dr-gtk__grid { grid-template-columns: 1fr; gap: 16px; } }
+
     /* Mobile-only elements hidden on desktop */
-    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips { display: none !important; } }
+    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips, .dr-mmeta, .dr-idrow, .dr-date-line, .floating-right-btn { display: none !important; } }
 </style>
 
 <div class="district-event-page" style="position: relative;">
@@ -337,6 +418,12 @@
         <a href="/events" class="floating-left-btn">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
         </a>
+
+        {{-- Floating Share Button on the Right (mobile) --}}
+        <button type="button" class="floating-right-btn" aria-label="Share"
+            onclick="if(navigator.share){navigator.share({title:document.title,url:location.href}).catch(()=>{});}else{navigator.clipboard&&navigator.clipboard.writeText(location.href);}">
+            <svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
+        </button>
 
         <main class="dr-card-body">
             {{-- Hero Banner --}}
@@ -353,10 +440,20 @@
                 @if($countdown)<div class="dr-hero-badge">{{ $countdown }}</div>@endif
             </div>
 
+            {{-- Content sheet — overlaps the poster with a rounded top (mirrors the app) --}}
+            <div class="dr-sheet">
             {{-- Info Header --}}
             <div class="dr-info-row" style="margin-bottom: 16px; padding-bottom: 12px;">
                 <div>
+                    {{-- Mobile-only identity row: category pill + rating (on the white sheet) --}}
+                    <div class="dr-idrow">
+                        <span class="dr-cat-pill">{{ $event->category ?: 'Event' }}</span>
+                        @if(!empty($event->rating) && $event->rating > 0)
+                            <span class="dr-rate-pill"><i>★</i>{{ number_format($event->rating, 1) }}</span>
+                        @endif
+                    </div>
                     <h1 class="dr-main-title" style="margin-bottom: 8px;">{{ $event->title }}</h1>
+                    <p class="dr-date-line">{{ optional($event->date)->format('D, d M') }} • {{ optional($event->date)->format('g:i A') }}@if($event->city) • {{ $event->city }}@endif</p>
                     <p class="dr-meta-text">{{ optional($event->date)->format('D, d M Y') }} • {{ optional($event->date)->format('g:i A') }}</p>
                     {{-- Mobile-only glass meta chips overlaid on the hero --}}
                     <div class="dr-meta-chips">
@@ -377,6 +474,45 @@
                 <button class="dr-checkin-btn">
                     Book Tickets
                 </button>
+            </div>
+
+            {{-- Mobile-only: trust strip + metadata cards (mirrors the app detail) --}}
+            @php
+                $mDay = optional($event->date)->format('j');
+                $mMonth = optional($event->date)->format('M');
+                $mTime = optional($event->date)->format('g:i A');
+                $mVenueShort = $event->venue ? \Illuminate\Support\Str::before($event->venue, ',') : 'Venue';
+                $mMapsUrl = 'https://www.google.com/maps/search/?api=1&query='.urlencode(trim(($event->venue ?: '').' '.($event->city ?: 'India')));
+            @endphp
+            <div class="dr-mmeta">
+                <div class="dr-trust">
+                    <span class="dr-trust__chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verified
+                    </span>
+                    <span class="dr-trust__chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secure
+                    </span>
+                    <span class="dr-trust__chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Instant
+                    </span>
+                </div>
+                <div class="dr-mcards">
+                    <div class="dr-mcard">
+                        <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                        <strong>{{ $mDay ?: 'TBA' }}</strong>
+                        <small>{{ $mMonth ?: 'Date' }}</small>
+                    </div>
+                    <a class="dr-mcard" href="{{ $mMapsUrl }}" target="_blank" rel="noopener">
+                        <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+                        <strong>{{ $mVenueShort }}</strong>
+                        <small class="dr-mcard__link">Directions</small>
+                    </a>
+                    <div class="dr-mcard">
+                        <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
+                        <strong>{{ $mTime ?: 'On time' }}</strong>
+                        <small>Doors Open</small>
+                    </div>
+                </div>
             </div>
 
             {{-- Tabs --}}
@@ -529,6 +665,23 @@
                     fn ($n) => is_string($n) && trim($n) !== ''
                 ));
                 $hasAdminKnow = count($gtkRows) > 0 || count($infoNotes) > 0;
+                // Line icons keyed to the same taxonomy the app uses (EventGoodToKnowCard).
+                $gtkIcon = function (string $key): string {
+                    $a = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+                    $p = [
+                        'language' => '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/>',
+                        'duration' => '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+                        'age'      => '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
+                        'entry'    => '<path d="M4 9a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"/><line x1="14" y1="7" x2="14" y2="17" stroke-dasharray="1.5 2.5"/>',
+                        'layout'   => '<polygon points="12 2 22 8.5 12 15 2 8.5 12 2"/><polyline points="2 15.5 12 22 22 15.5"/>',
+                        'seating'  => '<path d="M6 10V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3"/><path d="M4 10h16v5H4z"/><line x1="6" y1="15" x2="6" y2="20"/><line x1="18" y1="15" x2="18" y2="20"/>',
+                        'kids'     => '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>',
+                        'pets'     => '<circle cx="11" cy="4" r="1.6"/><circle cx="18" cy="8" r="1.6"/><circle cx="6" cy="8" r="1.6"/><path d="M12 10c2.5 0 5 2.5 5 5s-2.5 4-5 4-5-1-5-4 2.5-5 5-5z"/>',
+                        'info'     => '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+                    ];
+                    $path = $p[$key] ?? $p['info'];
+                    return '<svg viewBox="0 0 24 24" '.$a.'>'.$path.'</svg>';
+                };
             @endphp
             <div id="pane-know" class="dr-tab-pane" style="display: none; margin-top: 24px;">
 
@@ -538,13 +691,18 @@
                     @if(count($gtkRows) > 0)
                         <section style="margin-bottom: 28px;">
                             <h3 class="dr-section-title" style="margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none; color: #121620;">Good to Know</h3>
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
-                                @foreach($gtkRows as $row)
-                                    <div style="border: 1px solid var(--dr-border); border-radius: 14px; background: #ffffff; padding: 16px 18px;">
-                                        <div style="font-size: 11px; font-weight: 800; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">{{ $row['label'] }}</div>
-                                        <div style="font-size: 15px; font-weight: 700; color: #121620; letter-spacing: -0.01em;">{{ $row['value'] }}</div>
-                                    </div>
-                                @endforeach
+                            <div class="dr-gtk__card">
+                                <div class="dr-gtk__grid">
+                                    @foreach($gtkRows as $row)
+                                        <div class="dr-gtk__cell">
+                                            <span class="dr-gtk__ico">{!! $gtkIcon($row['icon']) !!}</span>
+                                            <span class="dr-gtk__txt">
+                                                <small>{{ $row['label'] }}</small>
+                                                <strong>{{ $row['value'] }}</strong>
+                                            </span>
+                                        </div>
+                                    @endforeach
+                                </div>
                             </div>
                         </section>
                     @endif
@@ -602,6 +760,7 @@
                 @endif
             </div>
 
+            </div>{{-- /.dr-sheet --}}
         </main>
     </div>
 

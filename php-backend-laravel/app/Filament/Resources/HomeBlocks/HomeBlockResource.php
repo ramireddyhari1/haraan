@@ -28,9 +28,11 @@ class HomeBlockResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
 
-    protected static ?string $cluster = \App\Filament\Clusters\Marketing\MarketingCluster::class;
+    // Grouped with Login Posters under the top-level "App Content" section — both control
+    // what the app renders. Moved out of the Marketing cluster.
+    protected static string|\UnitEnum|null $navigationGroup = 'App Content';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 2;
 
     protected static ?string $recordTitleAttribute = 'title';
 

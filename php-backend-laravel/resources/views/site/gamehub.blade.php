@@ -55,6 +55,35 @@
         </a>
     </div>
 
+    {{-- Live now: real in-progress matches (mobile only; mirrors the app ActionboardLiveStrip) --}}
+    @if(!empty($liveMatches) && count($liveMatches))
+    <section class="gh-live" aria-label="Live matches">
+        <div class="gh-live__head">
+            <span class="gh-live__title"><span class="gh-live__dot"></span>Live now</span>
+            <a href="/gamehub/actionboard" class="gh-live__all">See all</a>
+        </div>
+        <div class="gh-live__scroll">
+            @foreach($liveMatches as $lm)
+                <a class="gh-live__card" href="/gamehub/actionboard/match/{{ $lm['id'] }}">
+                    <div class="gh-live__cardhead">
+                        <span class="gh-live__comp">{{ $lm['competition'] ?: 'Live match' }}</span>
+                        <span class="gh-live__badge">LIVE</span>
+                    </div>
+                    @foreach([$lm['home'], $lm['away']] as $team)
+                        <div class="gh-live__team {{ $team['batting'] ? 'is-batting' : '' }}">
+                            <span class="gh-live__logo">{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}</span>
+                            <span class="gh-live__abbr">{{ $team['abbr'] }}</span>
+                            <span class="gh-live__name">{{ $team['name'] }}</span>
+                            <span class="gh-live__score">{{ $team['score'] }}</span>
+                            @if($team['overs'])<span class="gh-live__ov">({{ $team['overs'] }})</span>@endif
+                        </div>
+                    @endforeach
+                </a>
+            @endforeach
+        </div>
+    </section>
+    @endif
+
     <section class="gamehub-hero">
         <div class="gamehub-hero__copy">
             <h1>Venues in {{ $selectedCity ?? 'All India' }}</h1>

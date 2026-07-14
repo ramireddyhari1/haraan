@@ -58,7 +58,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.thanna.R
 import kotlinx.coroutines.delay
@@ -140,17 +143,26 @@ fun LoginScreen(
         label = "posterZoom"
     )
 
-    // Poster images — fetched from admin API; falls back to local drawables if offline.
+    // Poster images — fetched from the admin API; falls back to local drawables if offline.
+    // Re-fetched every time the screen resumes (repeatOnLifecycle at RESUMED), so an admin
+    // change in /control shows up on the next foreground, not only on a cold app restart.
     val localPosters = listOf(R.drawable.poster1, R.drawable.poster2, R.drawable.poster3)
-    val remotePosters by produceState<List<String>>(initialValue = emptyList()) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val json = java.net.URL("${ApiConfig.BASE_URL}/api/login-posters").readText()
-                val arr = JSONArray(json)
-                (0 until arr.length()).mapNotNull { i ->
-                    arr.getJSONObject(i).optString("image").takeIf { it.isNotBlank() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var remotePosters by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = java.net.URL("${ApiConfig.BASE_URL}/api/login-posters").readText()
+                    val arr = JSONArray(json)
+                    (0 until arr.length()).mapNotNull { i ->
+                        arr.getJSONObject(i).optString("image").takeIf { it.isNotBlank() }
+                    }
                 }
-            }.getOrDefault(emptyList())
+            // Only overwrite on a successful fetch: a network failure keeps the posters we
+            // already have (no flicker to the local fallback), while an empty-but-successful
+            // response correctly reflects the admin having removed every poster.
+            }.onSuccess { remotePosters = it }
         }
     }
     val hasRemote = remotePosters.isNotEmpty()

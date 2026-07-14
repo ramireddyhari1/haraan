@@ -83,11 +83,77 @@ final class PublicWebController extends Controller
             ->groupBy('category')
             ->pluck('c', 'category');
 
+        // Live now: real in-progress matches for the mobile live strip (app parity).
+        $liveMatches = LiveMatch::where('status', 'Live')
+            ->orderByDesc('created_at')
+            ->limit(8)
+            ->get()
+            ->map(fn (LiveMatch $m) => $this->decorateLiveStrip($m))
+            ->all();
+
         return view('site.gamehub', [
             'title'       => 'GameHub',
             'venues'      => $venues,
             'sportCounts' => $sportCounts,
+            'liveMatches' => $liveMatches,
         ]);
+    }
+
+    /**
+     * Flatten a LiveMatch into a clean two-row scorecard for the GameHub live
+     * strip. Wickets are counted from over_summary (a "W" ball), avoiding the
+     * heavier inline parser the full ActionBoard page uses.
+     */
+    private function decorateLiveStrip(LiveMatch $m): array
+    {
+        $overs = is_array($m->over_summary)
+            ? $m->over_summary
+            : (json_decode((string) $m->over_summary, true) ?: []);
+
+        $wkts = static function (string $side) use ($overs): int {
+            $w = 0;
+            foreach ($overs as $o) {
+                if (($o['batting'] ?? 'home') !== $side) {
+                    continue;
+                }
+                foreach ((array) ($o['balls'] ?? []) as $b) {
+                    if (is_string($b) && strtoupper(trim($b)) === 'W') {
+                        $w++;
+                    }
+                }
+            }
+            return $w;
+        };
+
+        $battingHome = 'home';
+        if (! empty($overs)) {
+            $battingHome = ($overs[array_key_last($overs)]['batting'] ?? 'home');
+        }
+        $battingHome = $battingHome === 'home';
+
+        $homeWkts = $wkts('home');
+        $awayWkts = $wkts('away');
+        $homeBatted = $battingHome || (int) $m->home_score > 0 || $homeWkts > 0;
+        $awayBatted = ! $battingHome || (int) $m->away_score > 0 || $awayWkts > 0;
+
+        return [
+            'id'          => $m->id,
+            'competition' => $m->competition,
+            'home' => [
+                'abbr'    => $m->home,
+                'name'    => $m->home_full ?: $m->home,
+                'score'   => $homeBatted ? ($m->home_score . '/' . $homeWkts) : 'Yet to bat',
+                'overs'   => $battingHome ? $m->overs : '',
+                'batting' => $battingHome,
+            ],
+            'away' => [
+                'abbr'    => $m->away,
+                'name'    => $m->away_full ?: $m->away,
+                'score'   => $awayBatted ? ($m->away_score . '/' . $awayWkts) : 'Yet to bat',
+                'overs'   => $battingHome ? '' : $m->overs,
+                'batting' => ! $battingHome,
+            ],
+        ];
     }
 
     public function gamehubDetail(string $id): View

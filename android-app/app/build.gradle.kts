@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.thanna"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1"
         // Points at the deployed EC2 server (nginx -> Laravel on port 80) so the app works
         // on any device on any network without `adb reverse`. For local dev, switch back to
         // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000`.

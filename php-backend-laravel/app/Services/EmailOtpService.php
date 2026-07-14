@@ -13,8 +13,9 @@ use Symfony\Component\Mime\Email;
 
 /**
  * Sends OTP emails through the pool of {@see EmailSender} accounts managed in the /control
- * admin panel. Rotates round-robin across active, under-limit accounts and fails over to the
- * next account on error — so no single Gmail account hits its daily send cap or gets blocked.
+ * admin panel. Uses a *sticky primary* — always the same account until it's unhealthy or has
+ * hit today's cap — then fails over to the next one. A consistent sender is what lets a plain
+ * Gmail account build reputation and stay out of spam; see {@see send()} for the rationale.
  *
  * Laravel-native: each account's SMTP creds configure a Symfony mailer transport on the fly.
  * No external Node service is involved.
@@ -28,11 +29,16 @@ class EmailOtpService
      */
     public function send(string $to, string $subject, string $text, ?string $html = null): bool
     {
-        // Least-recently-used first so sends spread evenly across the pool.
+        // Sticky primary, NOT round-robin. Deliverability from consumer Gmail accounts depends on
+        // a *consistent* sender slowly building reputation with the receiving mailbox providers;
+        // rotating the From across accounts on every send is itself a spam signal and resets that
+        // reputation each time. So we always prefer the same account (lowest id = the first one the
+        // admin created) and only move on when it's unhealthy or has hit today's cap. Unhealthy
+        // accounts sort last so a dead primary fails over cleanly instead of being retried first.
         $accounts = EmailSender::query()
             ->sendable()
-            ->orderByRaw('last_used_at IS NULL DESC')
-            ->orderBy('last_used_at')
+            ->orderByRaw('healthy DESC')
+            ->orderBy('id')
             ->get();
 
         if ($accounts->isEmpty()) {

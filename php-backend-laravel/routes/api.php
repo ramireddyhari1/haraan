@@ -114,6 +114,16 @@ Route::get('/login-posters', static function () {
         ->orderBy('sort_order')
         ->orderBy('id')
         ->get(['id', 'title', 'subtitle', 'image', 'cta_url', 'sort_order']);
+
+    // The app loads `image` straight into Coil as a URL. Filament's FileUpload stores a
+    // *relative* path on the public disk (e.g. "login-posters/x.jpg"), while the older Blade
+    // admin stored an absolute URL — resolve either to an absolute URL so both render.
+    $posters->each(function (\App\Models\Ad $poster): void {
+        if ($poster->image && ! str_starts_with($poster->image, 'http')) {
+            $poster->image = \Illuminate\Support\Facades\Storage::disk('public')->url($poster->image);
+        }
+    });
+
     return response()->json($posters);
 });
 

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,7 +46,6 @@ import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.LocalDrink
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Remove
@@ -65,8 +65,6 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -112,6 +110,9 @@ import com.example.thanna.data.VenueSlotItem
 import com.example.thanna.ui.theme.HaraanColors
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Great-circle distance in km between two lat/lng points (haversine). */
 private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
@@ -904,13 +905,23 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
   var result by remember { mutableStateOf<String?>(null) }
   var success by remember { mutableStateOf(false) }
 
-  // Bookable start times for the chosen day.
-  val startTimes = remember(venue, selectedDay) {
-    venue.slots.filter { it.day == selectedDay && it.available }
+  // Every start time for the chosen day (available AND taken) — booked slots stay
+  // visible but disabled so availability is glanceable instead of hidden in a menu.
+  val daySlots = remember(venue, selectedDay) {
+    venue.slots.filter { it.day == selectedDay }
+  }
+  // Show a per-chip price only when it actually varies across the day (peak vs off-peak);
+  // otherwise the flat rate lives in the total and the chips stay clean.
+  val priceVaries = remember(daySlots) {
+    daySlots.map { it.price.takeIf { p -> p > 0 } ?: venue.price }.distinct().size > 1
   }
   val perHour = (selectedSlot?.price?.takeIf { it > 0 } ?: venue.price)
   val total = perHour * duration
   val courtNeeded = venue.courts.isNotEmpty()
+  // The chosen window as "7:00 PM – 8:00 PM" (null when the start time can't be parsed).
+  val endLabel = selectedSlot?.let { slotWindowLabel(it.time, duration) }
+  // Drives both the enabled state and the button's own label so a disabled button
+  // always says what's missing instead of sitting there greyed and silent.
   val canBook = selectedSlot != null && (!courtNeeded || selectedCourt != null) && !submitting
 
   Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -944,33 +955,44 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(50.dp)
           ) { Text("Done", color = Color.White, fontWeight = FontWeight.Bold) }
         } else {
-          // Sport
-          FormField("Sport") {
-            FormDropdown(value = selectedSport, placeholder = "Select sport", options = sports) { selectedSport = it }
+          // Sport — a segmented chip row; hidden entirely when the venue is single-sport.
+          if (sports.size > 1) {
+            FormField("Sport") {
+              ChipRow(options = sports, selected = selectedSport) { selectedSport = it }
+            }
           }
-          // Date
+          // Date — a horizontal strip of day chips (one tap, no menu).
           FormField("Date") {
-            FormDropdown(value = selectedDay, placeholder = "Select date", options = days) {
+            ChipRow(options = days, selected = selectedDay) {
               selectedDay = it; selectedSlot = null
             }
           }
-          // Start time
+          // Start time — availability-aware chip grid: taken slots are struck through and
+          // unselectable, so the user sees what's free at a glance.
           FormField("Start Time") {
-            FormDropdown(
-              value = selectedSlot?.time,
-              placeholder = if (startTimes.isEmpty()) "No slots for this day" else "Select time",
-              options = startTimes.map { it.time },
-              enabled = startTimes.isNotEmpty(),
-            ) { picked -> selectedSlot = startTimes.firstOrNull { it.time == picked } }
+            if (daySlots.isEmpty()) {
+              Text("No slots for this day", color = HaraanColors.TextMuted, fontSize = 13.sp)
+            } else {
+              TimeSlotGrid(
+                slots = daySlots,
+                selected = selectedSlot,
+                priceVaries = priceVaries,
+                flatPrice = venue.price,
+              ) { selectedSlot = it }
+            }
           }
-          // Duration
+          // Duration — stepper, with the resulting window spelled out ("7:00 PM – 8:00 PM").
           FormField("Duration") {
             DurationStepper(duration) { duration = it }
+            endLabel?.let {
+              Spacer(Modifier.height(8.dp))
+              Text(it, color = HaraanColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
           }
-          // Court — only when the venue lists them.
+          // Court — selectable chips with the surface tag, only when the venue lists courts.
           if (courtNeeded) {
             FormField("Court") {
-              FormDropdown(value = selectedCourt, placeholder = "Select Court", options = venue.courts) { selectedCourt = it }
+              ChipRow(options = venue.courts, selected = selectedCourt ?: "") { selectedCourt = it }
             }
           }
 
@@ -1029,7 +1051,12 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
             if (submitting) {
               CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
             } else {
-              Text("Book now  ·  ₹$total", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+              val label = when {
+                selectedSlot == null -> "Select a time to continue"
+                courtNeeded && selectedCourt == null -> "Select a court to continue"
+                else -> "Book now  ·  ₹$total"
+              }
+              Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
           }
         }
@@ -1047,45 +1074,143 @@ private fun FormField(label: String, content: @Composable () -> Unit) {
   content()
 }
 
-/** Bordered dropdown that shows [value] (or [placeholder]) and opens a menu of [options]. */
+/** A single-select pill. Filled green when active, bordered otherwise. */
 @Composable
-private fun FormDropdown(
-  value: String?,
-  placeholder: String,
-  options: List<String>,
-  enabled: Boolean = true,
-  onSelect: (String) -> Unit,
-) {
-  var open by remember { mutableStateOf(false) }
-  Box {
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(12.dp))
-        .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(12.dp))
-        .clickable(enabled = enabled && options.isNotEmpty()) { open = true }
-        .padding(horizontal = 14.dp, vertical = 14.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        value ?: placeholder,
-        color = if (value != null) HaraanColors.TextPrimary else HaraanColors.TextMuted,
-        fontSize = 14.sp,
-        fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Normal,
-        maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.weight(1f),
-      )
-      Icon(Icons.Default.KeyboardArrowDown, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-      options.forEach { opt ->
-        DropdownMenuItem(
-          text = { Text(opt, fontSize = 14.sp, color = HaraanColors.TextPrimary) },
-          onClick = { onSelect(opt); open = false },
-        )
-      }
+private fun SelectChip(label: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+  val bg = if (selected) HaraanColors.GameHubGreen else Color.White
+  val border = if (selected) HaraanColors.GameHubGreen else HaraanColors.BorderLight
+  Box(
+    modifier = Modifier
+      .clip(RoundedCornerShape(50))
+      .background(bg)
+      .border(BorderStroke(1.dp, border), RoundedCornerShape(50))
+      .clickable(enabled = enabled) { onClick() }
+      .padding(horizontal = 16.dp, vertical = 10.dp)
+  ) {
+    Text(
+      label,
+      color = if (selected) Color.White else HaraanColors.TextPrimary,
+      fontWeight = FontWeight.SemiBold,
+      fontSize = 13.sp,
+      maxLines = 1, softWrap = false,
+    )
+  }
+}
+
+/** A horizontally-scrolling row of single-select pills (sport / date / court). */
+@Composable
+private fun ChipRow(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .horizontalScroll(rememberScrollState()),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    options.forEach { opt ->
+      SelectChip(label = opt, selected = opt == selected) { onSelect(opt) }
     }
   }
+}
+
+/**
+ * The start-time picker: a wrapping grid of time chips. Available slots are tappable;
+ * taken slots are struck through and dimmed. A sub-line shows the per-slot price when
+ * pricing varies across the day, else a "Filling" nudge on nearly-full slots.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TimeSlotGrid(
+  slots: List<VenueSlotItem>,
+  selected: VenueSlotItem?,
+  priceVaries: Boolean,
+  flatPrice: Int,
+  onSelect: (VenueSlotItem) -> Unit,
+) {
+  FlowRow(
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    slots.forEach { slot ->
+      val isSelected = selected?.id == slot.id
+      val effPrice = slot.price.takeIf { it > 0 } ?: flatPrice
+      val sub = when {
+        priceVaries -> "₹$effPrice"
+        slot.available && slot.fillingFast -> "Filling"
+        else -> null
+      }
+      TimeSlotChip(slot = slot, selected = isSelected, subLabel = sub) { onSelect(slot) }
+    }
+  }
+}
+
+@Composable
+private fun TimeSlotChip(
+  slot: VenueSlotItem,
+  selected: Boolean,
+  subLabel: String?,
+  onClick: () -> Unit,
+) {
+  val available = slot.available
+  val bg = when {
+    selected -> HaraanColors.GameHubGreen
+    !available -> Color(0xFFF1F4F8)
+    else -> Color.White
+  }
+  val border = when {
+    selected -> HaraanColors.GameHubGreen
+    !available -> Color(0xFFF1F4F8)
+    else -> HaraanColors.BorderLight
+  }
+  val textColor = when {
+    selected -> Color.White
+    !available -> HaraanColors.TextMuted
+    else -> HaraanColors.TextPrimary
+  }
+  Column(
+    modifier = Modifier
+      .clip(RoundedCornerShape(12.dp))
+      .background(bg)
+      .border(BorderStroke(1.dp, border), RoundedCornerShape(12.dp))
+      .clickable(enabled = available) { onClick() }
+      .padding(horizontal = 14.dp, vertical = 8.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    Text(
+      slot.time,
+      color = textColor,
+      fontWeight = FontWeight.SemiBold,
+      fontSize = 13.sp,
+      maxLines = 1, softWrap = false,
+      textDecoration = if (!available) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+    )
+    subLabel?.let {
+      Text(
+        it,
+        color = if (selected) Color.White.copy(alpha = 0.9f)
+        else if (it == "Filling") Color(0xFFE8890C) else HaraanColors.TextSecondary,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1, softWrap = false,
+      )
+    }
+  }
+}
+
+/**
+ * "7:00 PM – 8:00 PM" for a start-time string plus a duration in hours. Tries the common
+ * clock formats; returns null (caller hides the line) when the string can't be parsed.
+ */
+private fun slotWindowLabel(start: String, hours: Int): String? {
+  val out = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
+  val patterns = listOf("h:mm a", "hh:mm a", "H:mm", "HH:mm", "h a", "ha")
+  val cleaned = start.trim().uppercase(Locale.ENGLISH)
+  for (p in patterns) {
+    try {
+      val t = LocalTime.parse(cleaned, DateTimeFormatter.ofPattern(p, Locale.ENGLISH))
+      return "${t.format(out)} – ${t.plusHours(hours.toLong()).format(out)}"
+    } catch (_: Exception) { /* try the next pattern */ }
+  }
+  return null
 }
 
 /** −  N Hr  +  stepper, 1..12 hours. */
