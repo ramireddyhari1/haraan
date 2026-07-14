@@ -371,11 +371,17 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
               }
             }
 
-            // ── 5b. Rules & policies (admin-authored checklist) ─────────────────
-            if (d.rules.isNotEmpty()) {
+            // ── 5b. Rules & policies (cancellation policy + admin-authored checklist) ──
+            val goodToKnow = remember(d) {
+              buildList {
+                if (d.cancellation.isNotBlank()) add(d.cancellation)
+                addAll(d.rules)
+              }
+            }
+            if (goodToKnow.isNotEmpty()) {
               SectionCard(title = "Good to know") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                  d.rules.forEach { rule ->
+                  goodToKnow.forEach { rule ->
                     Row(verticalAlignment = Alignment.Top) {
                       Icon(
                         Icons.Default.Check, null,
@@ -1251,11 +1257,10 @@ private fun FormDropdown(
 }
 
 /** Human label for a date relative to today, matched against the slot rows' free-text "day". */
-private fun dayLabelFor(date: LocalDate): String = when (date) {
-  LocalDate.now() -> "Today"
-  LocalDate.now().plusDays(1) -> "Tomorrow"
-  else -> date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
-}
+// Slots are generated per weekday (Monday…Sunday) from the venue's structured hours, so we
+// always match a date to its full weekday name rather than a relative "Today"/"Tomorrow" label.
+private fun dayLabelFor(date: LocalDate): String =
+  date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
 
 /**
  * A bordered field that reads "Today · 14 Jul" and opens a Material date picker on tap.

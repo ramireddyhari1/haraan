@@ -6,10 +6,12 @@ use App\Filament\Forms\OrganizationSelect;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -103,10 +105,6 @@ class VenueForm
                         TextInput::make('tagline')
                             ->placeholder('6 wooden indoor courts')
                             ->helperText('Short one-liner under the venue name on the browse card.'),
-                        TextInput::make('hours')
-                            ->label('Operating hours')
-                            ->placeholder('6:00 AM – 11:00 PM')
-                            ->helperText('Shown with a clock icon under the venue name.'),
                         Textarea::make('about')
                             ->label('About this venue')
                             ->rows(3)
@@ -151,6 +149,57 @@ class VenueForm
                             ->maxValue(180)
                             ->placeholder('72.8295')
                             ->helperText('…and the second number here.'),
+                    ]),
+
+                Section::make('Operating hours')
+                    ->description('Add a row per open day. Days you don\'t list are treated as closed. Bookable start-times are generated from these hours.')
+                    ->schema([
+                        Repeater::make('hours_rows')
+                            ->hiddenLabel()
+                            ->schema([
+                                Select::make('day')
+                                    ->options([
+                                        'Mon' => 'Monday', 'Tue' => 'Tuesday', 'Wed' => 'Wednesday',
+                                        'Thu' => 'Thursday', 'Fri' => 'Friday', 'Sat' => 'Saturday', 'Sun' => 'Sunday',
+                                    ])
+                                    ->required()
+                                    ->native(false),
+                                TimePicker::make('open')
+                                    ->label('Opens')
+                                    ->seconds(false)->format('H:i')->displayFormat('h:i A')
+                                    ->required(),
+                                TimePicker::make('close')
+                                    ->label('Closes')
+                                    ->seconds(false)->format('H:i')->displayFormat('h:i A')
+                                    ->required(),
+                            ])
+                            ->columns(3)
+                            ->addActionLabel('Add a day')
+                            ->reorderable(false)
+                            ->defaultItems(0),
+                        Select::make('slot_minutes')
+                            ->label('Slot length')
+                            ->options([30 => '30 minutes', 60 => '1 hour', 90 => '1.5 hours', 120 => '2 hours'])
+                            ->default(60)
+                            ->native(false)
+                            ->helperText('Start-times are generated every this-many minutes between open and close.'),
+                    ]),
+
+                Section::make('Cancellation policy')
+                    ->description('Shown in the app\'s "Good to know". Leave blank if you don\'t offer refunds.')
+                    ->columns(2)
+                    ->schema([
+                        TextInput::make('cancel_free_hours')
+                            ->label('Free cancellation window (hours before)')
+                            ->numeric()
+                            ->suffix('hrs')
+                            ->placeholder('e.g. 24'),
+                        TextInput::make('cancel_refund_percent')
+                            ->label('Refund after that (%)')
+                            ->numeric()
+                            ->suffix('%')
+                            ->minValue(0)->maxValue(100)
+                            ->placeholder('e.g. 50'),
                     ]),
 
                 Section::make('Pricing')
@@ -424,6 +473,55 @@ class VenueForm
 
         $data['rules_known'] = array_values(array_unique($known));
         $data['rules_other'] = array_values(array_unique($other));
+
+        return $data;
+    }
+
+    /**
+     * Fold the hours repeater (`hours_rows`) into the `hours_json` map keyed by weekday.
+     * Rows without a full day/open/close are dropped; days not listed are treated as closed.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function mergeHours(array $data): array
+    {
+        $map = [];
+        foreach ((array) ($data['hours_rows'] ?? []) as $row) {
+            $day = $row['day'] ?? null;
+            $open = $row['open'] ?? null;
+            $close = $row['close'] ?? null;
+            if ($day && $open && $close) {
+                $map[$day] = ['open' => substr((string) $open, 0, 5), 'close' => substr((string) $close, 0, 5)];
+            }
+        }
+
+        $data['hours_json'] = $map === [] ? null : $map;
+        unset($data['hours_rows']);
+
+        return $data;
+    }
+
+    /**
+     * Split the stored `hours_json` map into repeater rows (one per open weekday, in order).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function splitHours(array $data): array
+    {
+        $hours = is_array($data['hours_json'] ?? null) ? $data['hours_json'] : [];
+        $order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        $rows = [];
+
+        foreach ($order as $key) {
+            $day = $hours[$key] ?? null;
+            if (is_array($day) && empty($day['closed']) && ! empty($day['open']) && ! empty($day['close'])) {
+                $rows[] = ['day' => $key, 'open' => $day['open'], 'close' => $day['close']];
+            }
+        }
+
+        $data['hours_rows'] = $rows;
 
         return $data;
     }

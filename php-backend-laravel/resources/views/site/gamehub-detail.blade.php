@@ -209,9 +209,13 @@
                     </button>
                     <div id="cancel-body" class="accordion-body">
                         <ul>
-                            <li>Free cancellation up to 6 hours before the booked slot time.</li>
-                            <li>50% refund for cancellations done between 6 hours and 2 hours of the slot.</li>
-                            <li>No refunds allowed for cancellations within 2 hours of the slot.</li>
+                            @if (!empty($venue->cancellation))
+                                <li>{{ $venue->cancellation }}</li>
+                            @else
+                                <li>Free cancellation up to 6 hours before the booked slot time.</li>
+                                <li>50% refund for cancellations done between 6 hours and 2 hours of the slot.</li>
+                                <li>No refunds allowed for cancellations within 2 hours of the slot.</li>
+                            @endif
                         </ul>
                     </div>
                 </div>

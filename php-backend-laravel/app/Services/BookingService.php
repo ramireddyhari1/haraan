@@ -274,6 +274,11 @@ final class BookingService
                 throw new ConflictHttpException('This venue is closed on that date');
             }
 
+            // Structured operating hours: refuse bookings on a day the venue isn't open.
+            if (! $venue->isOpenOn(Carbon::parse($date))) {
+                throw new ConflictHttpException('This venue is closed on that day');
+            }
+
             // Resolve the court (physical unit) — the thing that can only hold one booking
             // at a time. Its own price wins over the venue base price when set.
             $court = null;

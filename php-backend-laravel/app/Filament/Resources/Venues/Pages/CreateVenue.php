@@ -24,7 +24,15 @@ class CreateVenue extends CreateRecord
 
         $data = VenueForm::mergeImageSources($data);
         $data = VenueForm::mergeAmenities($data);
+        $data = VenueForm::mergeRules($data);
 
-        return VenueForm::mergeRules($data);
+        return VenueForm::mergeHours($data);
+    }
+
+    /** Derive the display hours string and (re)generate bookable slots from the structured hours. */
+    protected function afterCreate(): void
+    {
+        $this->record->update(['hours' => $this->record->displayHours()]);
+        $this->record->regenerateSlotsFromHours();
     }
 }

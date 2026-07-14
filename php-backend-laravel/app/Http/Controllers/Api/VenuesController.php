@@ -36,7 +36,9 @@ final class VenuesController extends Controller
             // parses all of these; omitting them here is why admin-entered values never
             // reached the venue page.
             'address' => $venue->address,
-            'hours' => $venue->hours,
+            'hours' => $venue->displayHours(),
+            'hours_json' => $venue->hours_json ?? (object) [],
+            'cancellation' => $venue->cancellationText(),
             'rules' => $venue->rules ?? [],
             'price_chart' => $venue->price_chart ?? [],
             'price_note' => $venue->price_note,
