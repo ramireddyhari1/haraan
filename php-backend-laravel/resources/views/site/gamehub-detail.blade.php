@@ -283,7 +283,7 @@
                 <div class="price-row">
                     <span class="price-row__label">Rate per hour</span>
                     <div class="price-row__value">
-                        <strong>₹{{ number_format($venue->price) }}</strong>
+                        <strong id="rate-per-hour">₹{{ number_format($venue->price) }}</strong>
                         <span>/ hr</span>
                     </div>
                 </div>
@@ -358,6 +358,13 @@
 <script>
     const venueCourts = @json($venue->courts);
     const venueSports = @json($venue->sports);
+    const courtPrices = @json($venue->court_prices ?? new \stdClass);
+    const venueBasePrice = {{ (int) $venue->price }};
+
+    // Hourly rate for the currently-selected court (falls back to the venue base price).
+    function currentRate() {
+        return courtPrices[selectedCourt] ?? venueBasePrice;
+    }
     let selectedDate = 'Today';
     let selectedSport = venueSports[0];
     let selectedCourt = venueCourts[selectedSport][0];
@@ -462,6 +469,11 @@
         if (!container) return;
 
         let html = '';
+        const rate = currentRate();
+
+        // Reflect the selected court's rate in the sticky booking card header.
+        const rateEl = document.getElementById('rate-per-hour');
+        if (rateEl) rateEl.innerText = '₹' + rate.toLocaleString();
 
         const renderGroup = (title, slots) => {
             let groupHtml = `
@@ -476,12 +488,12 @@
                 const isSelected = selectedSlots.some(s => s.key === slotKey);
 
                 const slotClass = isBooked ? 'is-booked' : (isSelected ? 'is-selected' : '');
-                const onclickAttr = isBooked ? '' : `onclick="toggleSlot(this, '${slot}', {{ $venue->price }})"`;
+                const onclickAttr = isBooked ? '' : `onclick="toggleSlot(this, '${slot}', ${rate})"`;
 
                 groupHtml += `
                     <div ${onclickAttr} class="slot-item ${slotClass}" data-key="${slotKey}">
                         <div class="slot-item__time">${slot.split(' - ')[0]}</div>
-                        <div class="slot-item__price">${isBooked ? 'Reserved' : '₹{{ number_format($venue->price) }}'}</div>
+                        <div class="slot-item__price">${isBooked ? 'Reserved' : '₹' + rate.toLocaleString()}</div>
                     </div>
                 `;
             });

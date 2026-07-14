@@ -47,6 +47,7 @@ class VenueResource extends Resource
     public static function getRelations(): array
     {
         return [
+            \App\Filament\Resources\Venues\RelationManagers\CourtsRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\SlotsRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\ReviewsRelationManager::class,
         ];

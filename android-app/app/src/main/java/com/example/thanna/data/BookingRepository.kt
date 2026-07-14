@@ -196,18 +196,26 @@ class BookingRepository(
     }
   }
 
-  /** Reserve a venue slot for a date (POST /api/bookings/venue). */
+  /**
+   * Reserve a court for a time window on a date (POST /api/bookings/venue).
+   * [courtId] locks the physical court across every sport it hosts; [duration] is in hours
+   * and drives both the reserved window and the price. The backend is authoritative on both.
+   */
   suspend fun bookVenueSlot(
     token: String,
     venueId: Int,
     slotId: Int?,
     date: String,
+    courtId: Int? = null,
+    duration: Int = 1,
   ): BookingResult = withContext(Dispatchers.IO) {
     try {
       val jsonBody = JSONObject().apply {
         put("venueId", venueId)
         put("date", date)
         if (slotId != null) put("slotId", slotId)
+        if (courtId != null) put("courtId", courtId)
+        put("duration", duration)
       }
 
       val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/venue").openConnection() as HttpURLConnection).apply {

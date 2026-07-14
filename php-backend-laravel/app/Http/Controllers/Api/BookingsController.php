@@ -142,9 +142,11 @@ final class BookingsController extends Controller
         }
 
         $data = $request->validate([
-            'venueId' => ['required', 'integer'],
-            'slotId'  => ['nullable', 'integer'],
-            'date'    => ['required', 'date'],
+            'venueId'  => ['required', 'integer'],
+            'slotId'   => ['nullable', 'integer'],
+            'courtId'  => ['nullable', 'integer'],
+            'date'     => ['required', 'date'],
+            'duration' => ['nullable', 'integer', 'min:1', 'max:12'],
         ]);
 
         $booking = $this->bookings->createVenueBooking(
@@ -152,6 +154,8 @@ final class BookingsController extends Controller
             (int) $data['venueId'],
             isset($data['slotId']) ? (int) $data['slotId'] : null,
             (string) $data['date'],
+            isset($data['courtId']) ? (int) $data['courtId'] : null,
+            isset($data['duration']) ? (int) $data['duration'] : 1,
         );
 
         return response()->json([

@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.DirectionsCar
@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.LocalDrink
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Remove
@@ -65,10 +66,18 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,15 +112,19 @@ import com.example.thanna.data.LocationRepository
 import com.example.thanna.data.LocationState
 import com.example.thanna.data.TokenStore
 import com.example.thanna.data.ReviewResult
+import com.example.thanna.data.VenueCourt
 import com.example.thanna.data.VenueDetailData
 import com.example.thanna.data.VenueRepository
 import com.example.thanna.data.VenueReviewItem
 import com.example.thanna.data.VenueSlotItem
 import com.example.thanna.ui.theme.HaraanColors
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 
 /** Great-circle distance in km between two lat/lng points (haversine). */
@@ -894,35 +907,45 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
   val scope = rememberCoroutineScope()
 
   val sports = remember(venue) { venue.sports.ifEmpty { listOf(venue.category) }.filter { it.isNotBlank() } }
-  val days = remember(venue) { venue.slots.map { it.day }.distinct().ifEmpty { listOf("Today") } }
 
   var selectedSport by remember { mutableStateOf(sports.firstOrNull() ?: venue.category) }
-  var selectedDay by remember { mutableStateOf(days.first()) }
+  var selectedDate by remember { mutableStateOf(LocalDate.now()) }
   var selectedSlot by remember { mutableStateOf<VenueSlotItem?>(null) }
   var duration by remember { mutableStateOf(1) }
-  var selectedCourt by remember { mutableStateOf<String?>(null) }
+  var selectedCourt by remember { mutableStateOf<VenueCourt?>(null) }
   var submitting by remember { mutableStateOf(false) }
   var result by remember { mutableStateOf<String?>(null) }
   var success by remember { mutableStateOf(false) }
 
-  // Every start time for the chosen day (available AND taken) — booked slots stay
-  // visible but disabled so availability is glanceable instead of hidden in a menu.
-  val daySlots = remember(venue, selectedDay) {
-    venue.slots.filter { it.day == selectedDay }
+  // Only the courts that can host the chosen sport. A court with no sports listed hosts any.
+  // One physical court shared by two sports appears under both — booking it blocks the other.
+  val courtsForSport = remember(venue, selectedSport) {
+    venue.courts.filter { it.sports.isEmpty() || it.sports.any { s -> s.equals(selectedSport, ignoreCase = true) } }
   }
-  // Show a per-chip price only when it actually varies across the day (peak vs off-peak);
-  // otherwise the flat rate lives in the total and the chips stay clean.
-  val priceVaries = remember(daySlots) {
-    daySlots.map { it.price.takeIf { p -> p > 0 } ?: venue.price }.distinct().size > 1
+  val courtNeeded = courtsForSport.isNotEmpty()
+
+  // The slot rows are keyed by a free-text "day" label (Today / Tomorrow / weekday), so we
+  // map the calendar date back to that label to find its availability.
+  val selectedDayLabel = dayLabelFor(selectedDate)
+  // Bookable start times for the chosen date.
+  val startTimes = remember(venue, selectedDayLabel) {
+    venue.slots.filter { it.day.equals(selectedDayLabel, ignoreCase = true) && it.available }
   }
-  val perHour = (selectedSlot?.price?.takeIf { it > 0 } ?: venue.price)
+  // Per-court price wins over the slot/venue price when a court is chosen.
+  val perHour = selectedCourt?.price?.takeIf { it > 0 }
+    ?: selectedSlot?.price?.takeIf { it > 0 }
+    ?: venue.price
   val total = perHour * duration
-  val courtNeeded = venue.courts.isNotEmpty()
-  // The chosen window as "7:00 PM – 8:00 PM" (null when the start time can't be parsed).
-  val endLabel = selectedSlot?.let { slotWindowLabel(it.time, duration) }
-  // Drives both the enabled state and the button's own label so a disabled button
-  // always says what's missing instead of sitting there greyed and silent.
   val canBook = selectedSlot != null && (!courtNeeded || selectedCourt != null) && !submitting
+  // The chosen window as "7:00 PM – 8:00 PM" (null when the time string can't be parsed).
+  val endLabel = selectedSlot?.let { slotWindowLabel(it.time, duration) }
+  // What the primary button should say — a disabled button always names the next step
+  // instead of leaving the user guessing why it's greyed out.
+  val bookLabel = when {
+    selectedSlot == null -> "Select a start time"
+    courtNeeded && selectedCourt == null -> "Select a court"
+    else -> "Book now  ·  ₹$total"
+  }
 
   Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -943,6 +966,14 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
         Text(venue.name, color = HaraanColors.TextSecondary, fontSize = 13.sp)
         Spacer(Modifier.height(18.dp))
 
+        if (!success) {
+          Text(
+            "Pick a time and how long you'll play — we'll reserve it for you.",
+            color = HaraanColors.TextMuted, fontSize = 12.sp, lineHeight = 16.sp
+          )
+          Spacer(Modifier.height(14.dp))
+        }
+
         if (success) {
           Icon(Icons.Default.Check, null, tint = HaraanColors.GameHubGreen, modifier = Modifier.size(40.dp))
           Spacer(Modifier.height(8.dp))
@@ -955,56 +986,68 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(50.dp)
           ) { Text("Done", color = Color.White, fontWeight = FontWeight.Bold) }
         } else {
-          // Sport — a segmented chip row; hidden entirely when the venue is single-sport.
-          if (sports.size > 1) {
-            FormField("Sport") {
-              ChipRow(options = sports, selected = selectedSport) { selectedSport = it }
-            }
+          // Sport — each option carries its sport icon so it's recognisable at a glance.
+          // Changing sport clears the court, since courts are filtered to the chosen sport.
+          FormField("Sport") {
+            FormDropdown(
+              value = selectedSport, placeholder = "Select sport", options = sports,
+              leadingIcon = { sportIcon(it) },
+            ) { picked -> selectedSport = picked; selectedCourt = null }
           }
-          // Date — a horizontal strip of day chips (one tap, no menu).
+          // Date — opens a calendar (no past dates).
           FormField("Date") {
-            ChipRow(options = days, selected = selectedDay) {
-              selectedDay = it; selectedSlot = null
-            }
+            DateField(selected = selectedDate) { selectedDate = it; selectedSlot = null }
           }
-          // Start time — availability-aware chip grid: taken slots are struck through and
-          // unselectable, so the user sees what's free at a glance.
+          // Start time
           FormField("Start Time") {
-            if (daySlots.isEmpty()) {
-              Text("No slots for this day", color = HaraanColors.TextMuted, fontSize = 13.sp)
-            } else {
-              TimeSlotGrid(
-                slots = daySlots,
-                selected = selectedSlot,
-                priceVaries = priceVaries,
-                flatPrice = venue.price,
-              ) { selectedSlot = it }
-            }
+            FormDropdown(
+              value = selectedSlot?.time,
+              placeholder = if (startTimes.isEmpty()) "No slots for this day" else "Select time",
+              options = startTimes.map { it.time },
+              enabled = startTimes.isNotEmpty(),
+            ) { picked -> selectedSlot = startTimes.firstOrNull { it.time == picked } }
           }
-          // Duration — stepper, with the resulting window spelled out ("7:00 PM – 8:00 PM").
+          // Duration
           FormField("Duration") {
             DurationStepper(duration) { duration = it }
             endLabel?.let {
               Spacer(Modifier.height(8.dp))
-              Text(it, color = HaraanColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Schedule, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(it, color = HaraanColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+              }
             }
           }
-          // Court — selectable chips with the surface tag, only when the venue lists courts.
+          // Court — only when the chosen sport has bookable courts. Each label shows its own
+          // price when it differs from the venue price, so the choice is never a surprise.
           if (courtNeeded) {
             FormField("Court") {
-              ChipRow(options = venue.courts, selected = selectedCourt ?: "") { selectedCourt = it }
+              FormDropdown(
+                value = selectedCourt?.name,
+                placeholder = "Select Court",
+                options = courtsForSport.map { it.name },
+              ) { picked -> selectedCourt = courtsForSport.firstOrNull { it.name == picked } }
             }
           }
 
-          Spacer(Modifier.height(6.dp))
-          // Price summary.
+          Spacer(Modifier.height(16.dp))
+          SectionDivider()
+          Spacer(Modifier.height(12.dp))
+          // Price summary — show the math (rate × hours) so the total is never a surprise.
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text("Total ($duration hr)", color = HaraanColors.TextSecondary, fontSize = 13.sp)
-            Text("₹$total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+            Column {
+              Text("Total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+              Text(
+                "₹$perHour × $duration hr",
+                color = HaraanColors.TextMuted, fontSize = 12.sp
+              )
+            }
+            Text("₹$total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp)
           }
 
           Spacer(Modifier.height(14.dp))
@@ -1024,14 +1067,14 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
                   submitting = false
                   return@launch
                 }
-                val date = when (selectedDay.lowercase()) {
-                  "tomorrow" -> LocalDate.now().plusDays(1)
-                  else -> LocalDate.now()
-                }.toString()
-                when (val r = BookingRepository().bookVenueSlot(token, venue.id.toIntOrNull() ?: 0, slot.id, date)) {
+                val date = selectedDate.toString()
+                when (val r = BookingRepository().bookVenueSlot(
+                  token, venue.id.toIntOrNull() ?: 0, slot.id, date,
+                  courtId = selectedCourt?.id, duration = duration,
+                )) {
                   is BookingResult.Success -> {
                     success = true
-                    val court = selectedCourt?.let { " · $it" } ?: ""
+                    val court = selectedCourt?.let { " · ${it.name}" } ?: ""
                     result = "${slot.time} · $duration hr$court — ${r.message}"
                     Toast.makeText(ctx, "Slot booked", Toast.LENGTH_SHORT).show()
                   }
@@ -1051,12 +1094,7 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
             if (submitting) {
               CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
             } else {
-              val label = when {
-                selectedSlot == null -> "Select a time to continue"
-                courtNeeded && selectedCourt == null -> "Select a court to continue"
-                else -> "Book now  ·  ₹$total"
-              }
-              Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+              Text(bookLabel, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
           }
         }
@@ -1074,143 +1112,117 @@ private fun FormField(label: String, content: @Composable () -> Unit) {
   content()
 }
 
-/** A single-select pill. Filled green when active, bordered otherwise. */
+/**
+ * Bordered dropdown that shows [value] (or [placeholder]) and opens a menu of [options].
+ * When [leadingIcon] is supplied, the icon for the current value (and for each option) is
+ * shown before its label — used to make the Sport list recognisable at a glance.
+ */
 @Composable
-private fun SelectChip(label: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
-  val bg = if (selected) HaraanColors.GameHubGreen else Color.White
-  val border = if (selected) HaraanColors.GameHubGreen else HaraanColors.BorderLight
-  Box(
-    modifier = Modifier
-      .clip(RoundedCornerShape(50))
-      .background(bg)
-      .border(BorderStroke(1.dp, border), RoundedCornerShape(50))
-      .clickable(enabled = enabled) { onClick() }
-      .padding(horizontal = 16.dp, vertical = 10.dp)
-  ) {
-    Text(
-      label,
-      color = if (selected) Color.White else HaraanColors.TextPrimary,
-      fontWeight = FontWeight.SemiBold,
-      fontSize = 13.sp,
-      maxLines = 1, softWrap = false,
-    )
+private fun FormDropdown(
+  value: String?,
+  placeholder: String,
+  options: List<String>,
+  enabled: Boolean = true,
+  leadingIcon: ((String) -> androidx.compose.ui.graphics.vector.ImageVector)? = null,
+  onSelect: (String) -> Unit,
+) {
+  var open by remember { mutableStateOf(false) }
+  Box {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(12.dp))
+        .clickable(enabled = enabled && options.isNotEmpty()) { open = true }
+        .padding(horizontal = 14.dp, vertical = 14.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      if (leadingIcon != null && value != null) {
+        Icon(leadingIcon(value), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+      }
+      Text(
+        value ?: placeholder,
+        color = if (value != null) HaraanColors.TextPrimary else HaraanColors.TextMuted,
+        fontSize = 14.sp,
+        fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Normal,
+        maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f),
+      )
+      Icon(Icons.Default.KeyboardArrowDown, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+      options.forEach { opt ->
+        DropdownMenuItem(
+          text = { Text(opt, fontSize = 14.sp, color = HaraanColors.TextPrimary) },
+          leadingIcon = leadingIcon?.let { icon ->
+            { Icon(icon(opt), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(20.dp)) }
+          },
+          onClick = { onSelect(opt); open = false },
+        )
+      }
+    }
   }
 }
 
-/** A horizontally-scrolling row of single-select pills (sport / date / court). */
+/** Human label for a date relative to today, matched against the slot rows' free-text "day". */
+private fun dayLabelFor(date: LocalDate): String = when (date) {
+  LocalDate.now() -> "Today"
+  LocalDate.now().plusDays(1) -> "Tomorrow"
+  else -> date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+}
+
+/**
+ * A bordered field that reads "Today · 14 Jul" and opens a Material date picker on tap.
+ * Past dates are disabled — you can only book today onward.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChipRow(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+private fun DateField(selected: LocalDate, onPick: (LocalDate) -> Unit) {
+  var open by remember { mutableStateOf(false) }
+  val label = "${dayLabelFor(selected)}  ·  ${selected.format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))}"
+
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .horizontalScroll(rememberScrollState()),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    options.forEach { opt ->
-      SelectChip(label = opt, selected = opt == selected) { onSelect(opt) }
-    }
-  }
-}
-
-/**
- * The start-time picker: a wrapping grid of time chips. Available slots are tappable;
- * taken slots are struck through and dimmed. A sub-line shows the per-slot price when
- * pricing varies across the day, else a "Filling" nudge on nearly-full slots.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TimeSlotGrid(
-  slots: List<VenueSlotItem>,
-  selected: VenueSlotItem?,
-  priceVaries: Boolean,
-  flatPrice: Int,
-  onSelect: (VenueSlotItem) -> Unit,
-) {
-  FlowRow(
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    slots.forEach { slot ->
-      val isSelected = selected?.id == slot.id
-      val effPrice = slot.price.takeIf { it > 0 } ?: flatPrice
-      val sub = when {
-        priceVaries -> "₹$effPrice"
-        slot.available && slot.fillingFast -> "Filling"
-        else -> null
-      }
-      TimeSlotChip(slot = slot, selected = isSelected, subLabel = sub) { onSelect(slot) }
-    }
-  }
-}
-
-@Composable
-private fun TimeSlotChip(
-  slot: VenueSlotItem,
-  selected: Boolean,
-  subLabel: String?,
-  onClick: () -> Unit,
-) {
-  val available = slot.available
-  val bg = when {
-    selected -> HaraanColors.GameHubGreen
-    !available -> Color(0xFFF1F4F8)
-    else -> Color.White
-  }
-  val border = when {
-    selected -> HaraanColors.GameHubGreen
-    !available -> Color(0xFFF1F4F8)
-    else -> HaraanColors.BorderLight
-  }
-  val textColor = when {
-    selected -> Color.White
-    !available -> HaraanColors.TextMuted
-    else -> HaraanColors.TextPrimary
-  }
-  Column(
-    modifier = Modifier
       .clip(RoundedCornerShape(12.dp))
-      .background(bg)
-      .border(BorderStroke(1.dp, border), RoundedCornerShape(12.dp))
-      .clickable(enabled = available) { onClick() }
-      .padding(horizontal = 14.dp, vertical = 8.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
+      .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(12.dp))
+      .clickable { open = true }
+      .padding(horizontal = 14.dp, vertical = 14.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
+    Icon(Icons.Default.CalendarMonth, null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(20.dp))
+    Spacer(Modifier.width(10.dp))
     Text(
-      slot.time,
-      color = textColor,
-      fontWeight = FontWeight.SemiBold,
-      fontSize = 13.sp,
-      maxLines = 1, softWrap = false,
-      textDecoration = if (!available) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+      label, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+      maxLines = 1, modifier = Modifier.weight(1f),
     )
-    subLabel?.let {
-      Text(
-        it,
-        color = if (selected) Color.White.copy(alpha = 0.9f)
-        else if (it == "Filling") Color(0xFFE8890C) else HaraanColors.TextSecondary,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1, softWrap = false,
-      )
+    Icon(Icons.Default.KeyboardArrowDown, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
+  }
+
+  if (open) {
+    val todayUtc = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    val state = rememberDatePickerState(
+      initialSelectedDateMillis = selected.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+      selectableDates = object : SelectableDates {
+        override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis >= todayUtc
+      },
+    )
+    DatePickerDialog(
+      onDismissRequest = { open = false },
+      confirmButton = {
+        TextButton(onClick = {
+          state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+          open = false
+        }) { Text("OK", color = HaraanColors.GameHubDeep, fontWeight = FontWeight.Bold) }
+      },
+      dismissButton = {
+        TextButton(onClick = { open = false }) { Text("Cancel", color = HaraanColors.TextSecondary) }
+      },
+    ) {
+      DatePicker(state = state, showModeToggle = false)
     }
   }
-}
-
-/**
- * "7:00 PM – 8:00 PM" for a start-time string plus a duration in hours. Tries the common
- * clock formats; returns null (caller hides the line) when the string can't be parsed.
- */
-private fun slotWindowLabel(start: String, hours: Int): String? {
-  val out = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
-  val patterns = listOf("h:mm a", "hh:mm a", "H:mm", "HH:mm", "h a", "ha")
-  val cleaned = start.trim().uppercase(Locale.ENGLISH)
-  for (p in patterns) {
-    try {
-      val t = LocalTime.parse(cleaned, DateTimeFormatter.ofPattern(p, Locale.ENGLISH))
-      return "${t.format(out)} – ${t.plusHours(hours.toLong()).format(out)}"
-    } catch (_: Exception) { /* try the next pattern */ }
-  }
-  return null
 }
 
 /** −  N Hr  +  stepper, 1..12 hours. */
@@ -1242,4 +1254,21 @@ private fun StepperButton(icon: androidx.compose.ui.graphics.vector.ImageVector,
   ) {
     Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
   }
+}
+
+/**
+ * "7:00 PM – 8:00 PM" for a start-time string plus a duration in hours. Tries the common
+ * clock formats; returns null (caller hides the line) when the string can't be parsed.
+ */
+private fun slotWindowLabel(start: String, hours: Int): String? {
+  val out = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
+  val patterns = listOf("h:mm a", "hh:mm a", "H:mm", "HH:mm", "h a", "ha")
+  val cleaned = start.trim().uppercase(Locale.ENGLISH)
+  for (p in patterns) {
+    try {
+      val t = LocalTime.parse(cleaned, DateTimeFormatter.ofPattern(p, Locale.ENGLISH))
+      return "${t.format(out)} – ${t.plusHours(hours.toLong()).format(out)}"
+    } catch (_: Exception) { /* try the next pattern */ }
+  }
+  return null
 }

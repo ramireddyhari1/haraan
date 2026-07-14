@@ -10,6 +10,8 @@ use App\Models\Event;
 use App\Models\TicketType;
 use App\Models\User;
 use App\Models\Venue;
+use App\Models\VenueBlockedDate;
+use App\Models\VenueCourt;
 use App\Models\VenueSlot;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -185,17 +187,72 @@ final class BookingService
 
 
     /**
-     * Create a confirmed venue-slot booking. Validates the venue is bookable, the slot
-     * (if given) belongs to the venue and is available, and that the same slot+date isn't
-     * already taken. Price is the venue's listed price.
+     * Create a confirmed venue booking for a customer (online / app).
      *
-     * @throws NotFoundHttpException  When the venue or slot does not exist.
-     * @throws ConflictHttpException  When the venue isn't bookable or the slot is taken.
+     * The booking reserves a physical {@see VenueCourt} for a time window; because a court
+     * can host several sports, the overlap check locks it across every sport, so the same
+     * ground shared by football and cricket can't be double-booked. Price is the court's own
+     * hourly rate (or the venue price) times the duration in hours.
+     *
+     * @throws NotFoundHttpException  When the venue, slot or court does not exist.
+     * @throws ConflictHttpException  When the venue isn't bookable or the window is taken.
      */
-    public function createVenueBooking(User $user, int $venueId, ?int $slotId, string $date): Booking
+    public function createVenueBooking(
+        User $user,
+        int $venueId,
+        ?int $slotId,
+        string $date,
+        ?int $courtId = null,
+        int $duration = 1,
+    ): Booking {
+        return $this->reserveVenue($venueId, $slotId, $courtId, $date, $duration, [
+            'user_id'     => $user->id,
+            'channel'     => 'online',
+            'guest_name'  => null,
+            'guest_phone' => null,
+        ]);
+    }
+
+    /**
+     * Create a walk-in (offline) venue booking at the partner desk. The customer has no app
+     * account, so their contact details ride on the booking and `user_id` holds the partner
+     * who took it. Same court + time-window conflict rules as the online path.
+     *
+     * @throws NotFoundHttpException  When the venue, slot or court does not exist.
+     * @throws ConflictHttpException  When the venue isn't bookable or the window is taken.
+     */
+    public function createOfflineVenueBooking(
+        User $partner,
+        int $venueId,
+        ?int $slotId,
+        string $date,
+        ?string $guestName,
+        ?string $guestPhone,
+        ?int $courtId = null,
+        int $duration = 1,
+    ): Booking {
+        return $this->reserveVenue($venueId, $slotId, $courtId, $date, $duration, [
+            'user_id'     => $partner->id,
+            'channel'     => 'offline',
+            'guest_name'  => $guestName,
+            'guest_phone' => $guestPhone,
+        ]);
+    }
+
+    /**
+     * Shared reservation routine behind the online and offline venue-booking paths.
+     * Validates the venue/slot/court, rejects blocked dates, enforces the court+window
+     * overlap rule, and writes the confirmed booking — all inside one locked transaction.
+     *
+     * @param array{user_id:int,channel:string,guest_name:?string,guest_phone:?string} $meta
+     */
+    private function reserveVenue(int $venueId, ?int $slotId, ?int $courtId, string $date, int $duration, array $meta): Booking
     {
+        $duration = max(1, $duration);
+        $date = date('Y-m-d', strtotime($date) ?: time());
+
         /** @var Booking $booking */
-        $booking = DB::transaction(static function () use ($user, $venueId, $slotId, $date): Booking {
+        $booking = DB::transaction(function () use ($venueId, $slotId, $courtId, $date, $duration, $meta): Booking {
             $venue = Venue::query()->lockForUpdate()->find($venueId);
 
             if ($venue === null || ! $venue->is_active) {
@@ -206,7 +263,33 @@ final class BookingService
                 throw new ConflictHttpException('This venue is not open for booking');
             }
 
-            $label = null;
+            // Owner-blocked day (holiday / maintenance) — no bookings taken.
+            $blocked = VenueBlockedDate::query()
+                ->where('venue_id', $venue->id)
+                ->whereDate('date', $date)
+                ->exists();
+
+            if ($blocked) {
+                throw new ConflictHttpException('This venue is closed on that date');
+            }
+
+            // Resolve the court (physical unit) — the thing that can only hold one booking
+            // at a time. Its own price wins over the venue base price when set.
+            $court = null;
+            if ($courtId !== null) {
+                $court = VenueCourt::query()->where('venue_id', $venueId)->find($courtId);
+
+                if ($court === null || ! $court->is_active) {
+                    throw new NotFoundHttpException('Court not found');
+                }
+            }
+
+            // Resolve the slot (start-time template) and per-hour price.
+            $slot = null;
+            $perHour = (int) ($court->price ?? $venue->price ?? 0);
+            $startMin = null;
+            $dayLabel = null;
+            $timeLabel = null;
 
             if ($slotId !== null) {
                 $slot = VenueSlot::query()->where('venue_id', $venueId)->find($slotId);
@@ -219,39 +302,133 @@ final class BookingService
                     throw new ConflictHttpException('That slot is not available');
                 }
 
-                $label = trim(($slot->day ?? '').' · '.($slot->time ?? ''), " ·\t");
-
-                $taken = Booking::query()
-                    ->where('booking_type', 'venue')
-                    ->where('venue_id', $venueId)
-                    ->where('venue_slot_id', $slotId)
-                    ->whereDate('slot_date', $date)
-                    // Case-insensitive: bookings made via Filament store lowercase
-                    // 'confirmed'; an exact 'CONFIRMED' match would miss them and
-                    // allow a double-booking of the same slot.
-                    ->whereRaw('lower(status) = ?', ['confirmed'])
-                    ->exists();
-
-                if ($taken) {
-                    throw new ConflictHttpException('That slot is already booked for this date');
+                if ($court === null && (int) $slot->price > 0) {
+                    $perHour = (int) $slot->price;
                 }
+
+                $dayLabel = $slot->day;
+                $timeLabel = $slot->time;
+                $startMin = $this->timeToMinutes($slot->time);
             }
 
+            $endMin = $startMin !== null ? $startMin + $duration * 60 : null;
+            $startHm = $startMin !== null ? $this->minutesToHm($startMin) : null;
+            $endHm = $endMin !== null ? $this->minutesToHm($endMin) : null;
+
+            $this->assertWindowFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
+
             return Booking::query()->create([
-                'quantity'      => 1,
-                'total_amount'  => (float) ($venue->price ?? 0),
-                'status'        => 'CONFIRMED',
-                'booking_type'  => 'venue',
-                'user_id'       => $user->id,
-                'event_id'      => null,
-                'venue_id'      => $venue->id,
-                'venue_slot_id' => $slotId,
-                'slot_date'     => $date,
-                'slot_label'    => $label,
+                'quantity'       => 1,
+                'total_amount'   => (float) ($perHour * $duration),
+                'status'         => 'CONFIRMED',
+                'booking_type'   => 'venue',
+                'user_id'        => $meta['user_id'],
+                'event_id'       => null,
+                'venue_id'       => $venue->id,
+                'venue_slot_id'  => $slotId,
+                'venue_court_id' => $courtId,
+                'slot_date'      => $date,
+                'start_time'     => $startHm,
+                'end_time'       => $endHm,
+                'slot_label'     => $this->bookingLabel($court?->name, $dayLabel, $timeLabel, $endHm),
+                'channel'        => $meta['channel'],
+                'guest_name'     => $meta['guest_name'],
+                'guest_phone'    => $meta['guest_phone'],
             ]);
         });
 
         return $booking;
+    }
+
+    /**
+     * Reject the reservation if it clashes with an existing confirmed booking.
+     *
+     * When a court is chosen, two bookings conflict if they share that court on the date and
+     * their [start,end) windows overlap — the sport is irrelevant, which is exactly what stops
+     * one physical court being sold to football and cricket at the same time. When no court is
+     * chosen (venues that don't model courts), we fall back to the legacy one-booking-per-slot
+     * rule so those venues keep working unchanged.
+     *
+     * @throws ConflictHttpException  When the window (or slot) is already taken.
+     */
+    private function assertWindowFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    {
+        if ($courtId !== null) {
+            $existing = Booking::query()
+                ->where('booking_type', 'venue')
+                ->where('venue_id', $venueId)
+                ->where('venue_court_id', $courtId)
+                ->whereDate('slot_date', $date)
+                // Filament-created bookings store lowercase 'confirmed'; match case-insensitively.
+                ->whereRaw('lower(status) = ?', ['confirmed'])
+                ->get(['start_time', 'end_time']);
+
+            foreach ($existing as $b) {
+                $es = $this->timeToMinutes($b->start_time);
+                $ee = $this->timeToMinutes($b->end_time);
+
+                // A booking with no window (or ours has none) coarsely blocks the whole day —
+                // safer than silently allowing a possible clash we can't reason about.
+                if ($startMin === null || $endMin === null || $es === null || $ee === null) {
+                    throw new ConflictHttpException('That court is already booked for this date');
+                }
+
+                if ($startMin < $ee && $endMin > $es) {
+                    throw new ConflictHttpException('That court is already booked for this time');
+                }
+            }
+
+            return;
+        }
+
+        if ($slotId !== null) {
+            $taken = Booking::query()
+                ->where('booking_type', 'venue')
+                ->where('venue_id', $venueId)
+                ->where('venue_slot_id', $slotId)
+                ->whereDate('slot_date', $date)
+                ->whereRaw('lower(status) = ?', ['confirmed'])
+                ->exists();
+
+            if ($taken) {
+                throw new ConflictHttpException('That slot is already booked for this date');
+            }
+        }
+    }
+
+    /** Human-readable booking label, e.g. "Court 1 · Today · 7:00 PM – 8:00 PM". */
+    private function bookingLabel(?string $court, ?string $day, ?string $time, ?string $endHm): string
+    {
+        $window = trim(($day ?? '').' · '.($time ?? ''), " ·\t");
+        if ($time !== null && $endHm !== null) {
+            $endLabel = date('g:i A', strtotime($endHm) ?: 0);
+            $window = trim(($day ?? '').' · '.$time.' – '.$endLabel, " ·\t");
+        }
+
+        return trim(($court !== null ? $court.' · ' : '').$window, " ·\t");
+    }
+
+    /** Parse a time label ("7:00 PM", "07:00", "19:00") to minutes-from-midnight, or null. */
+    private function timeToMinutes(?string $label): ?int
+    {
+        if ($label === null || trim($label) === '') {
+            return null;
+        }
+
+        $ts = strtotime(trim($label));
+        if ($ts === false) {
+            return null;
+        }
+
+        return (int) date('G', $ts) * 60 + (int) date('i', $ts);
+    }
+
+    /** Format minutes-from-midnight as 24h "HH:MM", clamped to a single day. */
+    private function minutesToHm(int $minutes): string
+    {
+        $minutes = max(0, min(24 * 60, $minutes));
+
+        return sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
     }
 
     /**
@@ -293,6 +470,43 @@ final class BookingService
             $booking->status = 'CANCELLED';
             $booking->save();
         });
+
+        return $booking;
+    }
+
+    /**
+     * Cancel a venue booking on behalf of the partner who owns it (desk / partner app).
+     * The booking's venue must belong to the acting partner (admins may cancel anything).
+     * Idempotent: an already-cancelled booking is returned unchanged.
+     *
+     * @throws NotFoundHttpException      When the booking does not exist.
+     * @throws AccessDeniedHttpException  When the venue isn't the partner's.
+     */
+    public function cancelAsPartner(User $partner, string $bookingId): Booking
+    {
+        $booking = Booking::query()->with('venue')->find($bookingId);
+
+        if ($booking === null) {
+            throw new NotFoundHttpException('Booking not found');
+        }
+
+        if ($partner->role !== 'ADMIN') {
+            $partnerId = $partner->effectivePartnerId();
+            $ownsVenue = $partnerId !== null
+                && $booking->venue !== null
+                && (int) $booking->venue->partner_id === (int) $partnerId;
+
+            if (! $ownsVenue) {
+                throw new AccessDeniedHttpException('This booking is not on your venue');
+            }
+        }
+
+        if (strtolower((string) $booking->status) === 'cancelled') {
+            return $booking;
+        }
+
+        $booking->status = 'CANCELLED';
+        $booking->save();
 
         return $booking;
     }

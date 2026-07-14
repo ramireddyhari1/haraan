@@ -63,8 +63,15 @@ final class Booking extends Model
         'booking_type',
         'venue_id',
         'venue_slot_id',
+        'venue_court_id',
         'slot_date',
+        'start_time',
+        'end_time',
         'slot_label',
+        // Walk-in / offline bookings created at the partner desk.
+        'channel',
+        'guest_name',
+        'guest_phone',
     ];
 
     /** @return array<string, string> */
@@ -112,6 +119,12 @@ final class Booking extends Model
     public function venueSlot(): BelongsTo
     {
         return $this->belongsTo(VenueSlot::class);
+    }
+
+    /** The physical court this booking locks for its time window (nullable). */
+    public function venueCourt(): BelongsTo
+    {
+        return $this->belongsTo(VenueCourt::class);
     }
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */

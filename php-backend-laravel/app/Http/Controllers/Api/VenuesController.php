@@ -26,7 +26,7 @@ final class VenuesController extends Controller
     /** GET /api/venues/{id} — full detail incl. slots, reviews, amenities. */
     public function show(int $id): JsonResponse
     {
-        $venue = Venue::with(['slots', 'reviews' => fn ($q) => $q->where('is_active', true)])
+        $venue = Venue::with(['slots', 'courts' => fn ($q) => $q->where('is_active', true), 'reviews' => fn ($q) => $q->where('is_active', true)])
             ->where('is_active', true)
             ->findOrFail($id);
 
@@ -42,7 +42,15 @@ final class VenuesController extends Controller
             'price_note' => $venue->price_note,
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
-            'courts' => $venue->courts ?? [],
+            // Courts are physical bookable units, each carrying the sports it can host and its
+            // own hourly price (falls back to the venue price). The app filters by the chosen
+            // sport, then locks the court across the picked time window.
+            'courts' => $venue->courts->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'sports' => $c->sportsList() ?: $venue->sportsList(),
+                'price' => $c->price ?? $venue->price,
+            ])->values(),
             'images' => $venue->images ?? [],
             'latitude' => $venue->latitude,
             'longitude' => $venue->longitude,

@@ -19,7 +19,7 @@ final class Venue extends Model
     protected $fillable = [
         'name', 'category', 'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link',
         'price', 'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
-        'about', 'rules', 'images', 'amenities', 'courts', 'is_bookable', 'is_active', 'is_featured',
+        'about', 'rules', 'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
     ];
 
@@ -28,7 +28,6 @@ final class Venue extends Model
         'amenities' => 'array',
         'sports' => 'array',
         'rules' => 'array',
-        'courts' => 'array',
         'price_chart' => 'array',
         'is_bookable' => 'boolean',
         'is_active' => 'boolean',
@@ -54,6 +53,35 @@ final class Venue extends Model
     public function slots(): HasMany
     {
         return $this->hasMany(VenueSlot::class)->orderBy('sort_order');
+    }
+
+    /** Bookable physical units (courts / pitches / lanes) inside this venue. */
+    public function courts(): HasMany
+    {
+        return $this->hasMany(VenueCourt::class)->orderBy('sort_order');
+    }
+
+    /**
+     * Courts grouped by the sport they host: `['Football' => [VenueCourt, …], …]`.
+     * A court that lists no sports (or the venue's own sports) appears under every sport
+     * the venue offers. Drives the app/web "pick sport → pick court" booking flow.
+     */
+    public function courtsBySport(): array
+    {
+        $sports = $this->sportsList();
+        $grouped = array_fill_keys($sports, []);
+
+        foreach ($this->courts as $court) {
+            $hosts = $court->sportsList() ?: $sports;
+            foreach ($hosts as $sport) {
+                if (! array_key_exists($sport, $grouped)) {
+                    $grouped[$sport] = [];
+                }
+                $grouped[$sport][] = $court;
+            }
+        }
+
+        return $grouped;
     }
 
     public function reviews(): HasMany

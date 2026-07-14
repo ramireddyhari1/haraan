@@ -288,7 +288,9 @@ class PartnerController extends Controller
     {
         $data = $request->validate([
             'slotId'     => ['nullable', 'integer'],
+            'courtId'    => ['nullable', 'integer'],
             'date'       => ['required', 'date'],
+            'duration'   => ['nullable', 'integer', 'min:1', 'max:12'],
             'guestName'  => ['nullable', 'string', 'max:120'],
             'guestPhone' => ['nullable', 'string', 'max:30'],
         ]);
@@ -300,6 +302,8 @@ class PartnerController extends Controller
             (string) $data['date'],
             $data['guestName'] ?? null,
             $data['guestPhone'] ?? null,
+            isset($data['courtId']) ? (int) $data['courtId'] : null,
+            isset($data['duration']) ? (int) $data['duration'] : 1,
         );
 
         return response()->json(['status' => 'ok', 'booking' => $this->slotBooking($booking)], 201);

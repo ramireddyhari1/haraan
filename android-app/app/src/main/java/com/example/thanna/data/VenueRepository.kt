@@ -53,6 +53,18 @@ data class VenuePriceGroup(val days: String, val rows: List<VenuePriceBand>)
 data class VenuePriceVariant(val label: String, val groups: List<VenuePriceGroup>)
 
 /**
+ * A bookable physical unit inside a venue (court / pitch / lane). [sports] are the games it
+ * can host — the booking form filters courts by the chosen sport. [price] is its own hourly
+ * rate (already resolved by the backend to the venue price when the court sets none).
+ */
+data class VenueCourt(
+    val id: Int,
+    val name: String,
+    val sports: List<String>,
+    val price: Int,
+)
+
+/**
  * Rich venue detail backing the "view → trust → book" page. Assembled from
  * GET /api/venues/{id}. Any field the backend omits defaults to empty so the UI
  * degrades gracefully.
@@ -72,7 +84,7 @@ data class VenueDetailData(
     val isFeatured: Boolean,
     val images: List<String>,
     val amenities: List<String>,
-    val courts: List<String>,
+    val courts: List<VenueCourt>,
     val sports: List<String>,
     val about: String,
     val hours: String,
@@ -169,7 +181,14 @@ class VenueRepository {
             isFeatured = d.optBoolean("is_featured", false),
             images = images,
             amenities = d.optJSONArray("amenities").toStringList(),
-            courts = d.optJSONArray("courts").toStringList(),
+            courts = (d.optJSONArray("courts") ?: JSONArray()).mapObjects { c ->
+                VenueCourt(
+                    id = c.optInt("id"),
+                    name = c.optString("name"),
+                    sports = c.optJSONArray("sports").toStringList(),
+                    price = c.optInt("price", 0),
+                )
+            },
             sports = d.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(d.optString("category").takeIf { it.isNotBlank() }) },
             about = d.optString("about"),
             hours = d.optString("hours"),

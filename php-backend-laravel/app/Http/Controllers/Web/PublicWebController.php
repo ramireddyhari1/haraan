@@ -695,9 +695,34 @@ final class PublicWebController extends Controller
         $amenities = is_array($v->amenities) ? $v->amenities : [];
 
         // The detail scheduler needs at least one sport, each with a bookable court.
-        $sport  = $v->category ?: 'Cricket';
-        $sports = [$sport];
-        $courts = [$sport => ['Court 1', 'Court 2', 'Court 3']];
+        // Courts are real, sport-aware units now: group them by the sports each hosts so the
+        // scheduler's "pick sport → pick court" flow matches what the venue actually has.
+        $sports = $v->sportsList();
+        if ($sports === []) {
+            $sports = [$v->category ?: 'Cricket'];
+        }
+
+        $courts = [];
+        foreach ($v->courtsBySport() as $sport => $list) {
+            $names = array_map(fn ($c) => $c->name, $list);
+            if ($names !== []) {
+                $courts[$sport] = array_values($names);
+            }
+        }
+        // Every offered sport must resolve to at least one court or the scheduler breaks.
+        foreach ($sports as $sport) {
+            if (empty($courts[$sport])) {
+                $courts[$sport] = ['Court 1'];
+            }
+        }
+
+        // Per-court hourly rate keyed by court name (null → venue price). The scheduler prices
+        // each slot by the selected court so a premium pitch costs more than a practice court.
+        $basePrice = (int) ($v->price ?? 0);
+        $courtPrices = [];
+        foreach ($v->courts as $c) {
+            $courtPrices[$c->name] = $c->price ?? $basePrice;
+        }
 
         $reviewsList = $v->reviews->map(fn ($r) => (object) [
             'user'    => $r->name,
@@ -723,6 +748,7 @@ final class PublicWebController extends Controller
             'amenities'    => $amenities,
             'sports'       => $sports,
             'courts'       => $courts,
+            'court_prices' => $courtPrices,
         ];
     }
 
