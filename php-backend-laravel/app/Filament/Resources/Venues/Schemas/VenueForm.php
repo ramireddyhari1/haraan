@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Venues\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
@@ -24,6 +25,42 @@ class VenueForm
         'Basketball' => 'Basketball',
         'Tennis' => 'Tennis',
         'Volleyball' => 'Volleyball',
+    ];
+
+    /**
+     * The canonical amenities the app has an icon for. The label is what's stored; the keyword
+     * list matches legacy/free-text values back onto the canonical label on edit (so old data
+     * like "Washrooms" ticks the "Washroom" box and normalises on the next save). Mirrors the
+     * app's amenityIcon() matcher so every ticked amenity is guaranteed an icon.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private const AMENITIES = [
+        'Parking' => ['park'],
+        'Washroom' => ['wash', 'toilet', 'restroom'],
+        'Shower' => ['shower'],
+        'Changing room' => ['chang', 'locker'],
+        'Café' => ['cafe', 'coffee', 'canteen'],
+        'Restaurant' => ['food', 'restaurant', 'kitchen'],
+        'Drinking water' => ['water', 'drink'],
+        'Floodlights' => ['light', 'flood'],
+        'AC' => ['a/c', ' ac ', 'air-con', 'aircon', 'air cond', 'conditioner', 'conditioning', 'cooling'],
+        'WiFi' => ['wifi', 'wi-fi', 'internet'],
+        'CCTV / Security' => ['cctv', 'secur', 'guard'],
+        'Seating' => ['seat', 'gallery'],
+        'Equipment rental' => ['equip', 'gear', 'kit', 'rental'],
+    ];
+
+    /** Common "Good to know" presets offered as quick-tick chips (plus free-text for the rest). */
+    private const RULE_PRESETS = [
+        'Non-marking shoes mandatory',
+        'Carry your own racket / gear',
+        'No smoking',
+        'No alcohol',
+        'No outside food',
+        'No pets',
+        'ID proof required',
+        'Advance booking recommended',
     ];
 
     public static function configure(Schema $schema): Schema
@@ -156,16 +193,34 @@ class VenueForm
                             ->columnSpanFull(),
                     ]),
 
-                Section::make('Amenities & rules')
+                Section::make('Amenities')
+                    ->description('Tick what this venue has — each gets its own icon on the venue page.')
                     ->schema([
-                        TagsInput::make('amenities')
-                            ->placeholder('Floodlights, Parking, Washrooms…')
-                            ->helperText('One chip per amenity. Known names (parking, washroom, shower, cafe, water, floodlights, AC, wifi, security, seating, equipment) get their own icon.')
+                        CheckboxList::make('amenities_known')
+                            ->hiddenLabel()
+                            ->options(array_combine(array_keys(self::AMENITIES), array_keys(self::AMENITIES)))
+                            ->columns(3)
+                            ->gridDirection('row')
+                            ->bulkToggleable(),
+                        TagsInput::make('amenities_other')
+                            ->label('Other amenities')
+                            ->placeholder('Anything not listed above — press Enter')
+                            ->helperText('Free-form extras. These show without a dedicated icon.')
                             ->columnSpanFull(),
-                        TagsInput::make('rules')
-                            ->label('Good to know')
-                            ->placeholder('Carry your own racket, Shoes mandatory…')
-                            ->helperText('House rules — each chip is a bullet in the "Good to know" list.')
+                    ]),
+
+                Section::make('Good to know')
+                    ->description('House rules & policies — each becomes a bullet on the venue page.')
+                    ->schema([
+                        CheckboxList::make('rules_known')
+                            ->hiddenLabel()
+                            ->options(array_combine(self::RULE_PRESETS, self::RULE_PRESETS))
+                            ->columns(2)
+                            ->gridDirection('row')
+                            ->bulkToggleable(),
+                        TagsInput::make('rules_other')
+                            ->label('Other rules')
+                            ->placeholder('Anything specific to this venue — press Enter')
                             ->columnSpanFull(),
                     ]),
 
@@ -264,5 +319,131 @@ class VenueForm
         ));
 
         return $data;
+    }
+
+    /**
+     * Fold the amenities checklist (`amenities_known`) + free-text extras (`amenities_other`)
+     * into the `amenities` column. Ticked canonical labels come first (they carry icons),
+     * extras after. Helper keys are removed so they never reach the model.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function mergeAmenities(array $data): array
+    {
+        $known = array_values((array) ($data['amenities_known'] ?? []));
+        $other = array_values(array_filter(
+            array_map(static fn ($a) => trim((string) $a), (array) ($data['amenities_other'] ?? [])),
+            static fn ($a): bool => $a !== '',
+        ));
+
+        $data['amenities'] = array_values(array_unique(array_merge($known, $other)));
+        unset($data['amenities_known'], $data['amenities_other']);
+
+        return $data;
+    }
+
+    /**
+     * Split the stored `amenities` into ticked canonical labels + free-text extras for the form.
+     * Legacy/free values are matched onto a canonical label by keyword (so "Washrooms" ticks
+     * "Washroom"); anything unrecognised falls to the extras box.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function splitAmenities(array $data): array
+    {
+        $known = [];
+        $other = [];
+
+        foreach ((array) ($data['amenities'] ?? []) as $value) {
+            $value = trim((string) $value);
+            if ($value === '') {
+                continue;
+            }
+
+            $canonical = self::canonicalAmenity($value);
+            if ($canonical !== null) {
+                $known[$canonical] = true;
+            } else {
+                $other[] = $value;
+            }
+        }
+
+        $data['amenities_known'] = array_keys($known);
+        $data['amenities_other'] = array_values(array_unique($other));
+
+        return $data;
+    }
+
+    /**
+     * Fold the rule presets (`rules_known`) + free-text extras (`rules_other`) into `rules`.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function mergeRules(array $data): array
+    {
+        $known = array_values((array) ($data['rules_known'] ?? []));
+        $other = array_values(array_filter(
+            array_map(static fn ($r) => trim((string) $r), (array) ($data['rules_other'] ?? [])),
+            static fn ($r): bool => $r !== '',
+        ));
+
+        $data['rules'] = array_values(array_unique(array_merge($known, $other)));
+        unset($data['rules_known'], $data['rules_other']);
+
+        return $data;
+    }
+
+    /**
+     * Split stored `rules` into ticked presets + free-text extras. Exact preset matches tick
+     * their box; everything else goes to the extras box.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function splitRules(array $data): array
+    {
+        $presets = self::RULE_PRESETS;
+        $known = [];
+        $other = [];
+
+        foreach ((array) ($data['rules'] ?? []) as $value) {
+            $value = trim((string) $value);
+            if ($value === '') {
+                continue;
+            }
+
+            if (in_array($value, $presets, true)) {
+                $known[] = $value;
+            } else {
+                $other[] = $value;
+            }
+        }
+
+        $data['rules_known'] = array_values(array_unique($known));
+        $data['rules_other'] = array_values(array_unique($other));
+
+        return $data;
+    }
+
+    /** Map a free-text amenity onto a canonical label by keyword, or null when unrecognised. */
+    private static function canonicalAmenity(string $value): ?string
+    {
+        $needle = ' '.strtolower($value).' ';
+
+        foreach (self::AMENITIES as $label => $keywords) {
+            if (strtolower($label) === strtolower($value)) {
+                return $label;
+            }
+            foreach ($keywords as $kw) {
+                if (str_contains($needle, $kw)) {
+                    return $label;
+                }
+            }
+        }
+
+        return null;
     }
 }

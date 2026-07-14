@@ -18,15 +18,21 @@ class EditVenue extends EditRecord
         ];
     }
 
-    /** Split stored images into the upload + URL fields so the FileUpload doesn't choke on URLs. */
+    /** Split stored images/amenities/rules into their form helper fields for editing. */
     protected function mutateFormDataBeforeFill(array $data): array
     {
-        return VenueForm::splitImageSources($data);
+        $data = VenueForm::splitImageSources($data);
+        $data = VenueForm::splitAmenities($data);
+
+        return VenueForm::splitRules($data);
     }
 
-    /** Re-merge uploads + pasted URLs back into the `images` column on save. */
+    /** Re-merge the helper fields back into their columns on save. */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        return VenueForm::mergeImageSources($data);
+        $data = VenueForm::mergeImageSources($data);
+        $data = VenueForm::mergeAmenities($data);
+
+        return VenueForm::mergeRules($data);
     }
 }

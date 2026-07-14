@@ -22,6 +22,9 @@ class CreateVenue extends CreateRecord
             $data['partner_id'] = auth()->user()?->effectivePartnerId();
         }
 
-        return VenueForm::mergeImageSources($data);
+        $data = VenueForm::mergeImageSources($data);
+        $data = VenueForm::mergeAmenities($data);
+
+        return VenueForm::mergeRules($data);
     }
 }
