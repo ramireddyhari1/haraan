@@ -29,14 +29,48 @@ class UserResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    protected static ?string $navigationLabel = 'Staff & users';
+
+    /** Super-admins and Operations can manage staff. */
+    public static function canManageStaff(): bool
+    {
+        $user = auth()->user();
+
+        return $user !== null && ($user->isSuperAdmin() || $user->hasRoleEither(['OPS']));
+    }
+
     public static function canAccess(): bool
     {
-        return auth()->user()?->isSuperAdmin() ?? false;
+        return static::canManageStaff();
     }
 
     public static function canViewAny(): bool
     {
-        return auth()->user()?->isSuperAdmin() ?? false;
+        return static::canManageStaff();
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canManageStaff();
+    }
+
+    /** Only a super-admin may edit/delete another super-admin — no privilege escalation. */
+    public static function canEdit($record): bool
+    {
+        if ($record->isSuperAdmin() && ! (auth()->user()?->isSuperAdmin() ?? false)) {
+            return false;
+        }
+
+        return static::canManageStaff();
+    }
+
+    public static function canDelete($record): bool
+    {
+        if ($record->isSuperAdmin() && ! (auth()->user()?->isSuperAdmin() ?? false)) {
+            return false;
+        }
+
+        return static::canManageStaff();
     }
 
     public static function form(Schema $schema): Schema
