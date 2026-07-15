@@ -868,8 +868,12 @@
         z-index: 1;
     }
 
-    /* The hero poster, at the app's size: fillMaxWidth(0.72f) of the page's padded
-       content — i.e. 0.72 × (screen − 32 − 48 − 12), NOT 0.72 of the screen.
+    /* The hero poster, at the app's real size: the FULL page width (screen − 80 − 12).
+       NB the app's card reads `.fillMaxWidth(0.72f)`, but the pager hands it
+       `Modifier.fillMaxWidth()` first — and Compose's fillMaxWidth(fraction) coerces
+       into the incoming constraints, which are already pinned to min = max = page
+       width. So the 0.72 is dead code and the card fills the page. Porting the 0.72
+       literally made this card 54% of the screen against the app's ~75%.
 
        Shape is 9:16 story format rather than the app's 0.75, so it needs PORTRAIT
        artwork: a landscape banner center-crops to ~32% here. The admin's image field
@@ -877,7 +881,7 @@
     .mfy {
         position: relative;
         display: block;
-        width: 72%;
+        width: 100%;
         aspect-ratio: 9 / 16;
         border-radius: 32px;                /* HaraanRadius.Hero */
         overflow: hidden;
