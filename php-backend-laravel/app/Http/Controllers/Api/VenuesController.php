@@ -59,7 +59,7 @@ final class VenuesController extends Controller
                 'peak_start' => $c->peak_start,
                 'peak_end' => $c->peak_end,
             ])->values(),
-            'images' => $venue->images ?? [],
+            'images' => \App\Support\MediaUrl::resolveMany($venue->images),
             'latitude' => $venue->latitude,
             'longitude' => $venue->longitude,
             'map_link' => $venue->map_link,
@@ -98,7 +98,7 @@ final class VenuesController extends Controller
             'ratings_count' => $v->ratings_count,
             'reviews_count' => $v->reviews_count,
             'tagline' => $v->tagline,
-            'image' => $v->images[0] ?? null,
+            'image' => \App\Support\MediaUrl::resolve(is_array($v->images) ? ($v->images[0] ?? null) : null),
             'is_bookable' => $v->is_bookable,
             'is_featured' => $v->is_featured,
         ];
