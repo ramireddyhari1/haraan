@@ -159,6 +159,46 @@ class LoginViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Exchange a Google ID token (obtained by the screen via Credential Manager) for an app
+     * JWT. No profile step — the backend creates the account from the Google profile.
+     */
+    fun signInWithGoogle(idToken: String, onSuccess: (String) -> Unit) {
+        if (_uiState.value.isLoading) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
+            runCatching { authRepository.googleSignIn(idToken) }
+                .onSuccess { result ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            token = result.token,
+                            stage = LoginStage.Success,
+                            successMessage = result.message
+                        )
+                    }
+                    onSuccess(result.token)
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = throwable.message ?: "Google sign-in failed. Please try again."
+                        )
+                    }
+                }
+        }
+    }
+
+    /** The screen calls this when Credential Manager itself fails (cancelled, no accounts, etc.). */
+    fun onGoogleError(message: String) {
+        _uiState.update { it.copy(isLoading = false, errorMessage = message) }
+    }
+
+    fun setLoading(loading: Boolean) {
+        _uiState.update { it.copy(isLoading = loading, errorMessage = null) }
+    }
+
     fun completeProfile(onSuccess: (String) -> Unit) {
         val state = _uiState.value
         val verificationToken = state.verificationToken

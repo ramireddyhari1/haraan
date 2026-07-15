@@ -28,6 +28,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // Google Sign-In. `client_id` is the OAuth **Web application** client ID from the
+    // Google Cloud Console — it's the audience the mobile ID token is minted for, and
+    // GoogleAuthController rejects any token whose `aud` doesn't match it.
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

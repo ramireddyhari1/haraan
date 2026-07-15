@@ -18,6 +18,10 @@ android {
         // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000` (and temporarily allow
         // cleartext in the manifest).
         buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
+        // Google Sign-In: the OAuth **Web application** client ID (serverClientId) from the
+        // Google Cloud Console. The backend uses the same value as the token audience. Empty
+        // until configured — the "Continue with Google" button hides itself when blank.
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
     }
 
     buildTypes {
@@ -60,6 +64,11 @@ dependencies {
 
   // Fused location (fresh GPS fix instead of the flaky LocationManager last-known)
   implementation("com.google.android.gms:play-services-location:21.3.0")
+
+  // "Continue with Google" — Credential Manager + Sign in with Google
+  implementation("androidx.credentials:credentials:1.3.0")
+  implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)

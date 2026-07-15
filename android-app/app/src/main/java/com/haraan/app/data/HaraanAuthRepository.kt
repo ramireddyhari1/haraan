@@ -151,6 +151,27 @@ class HaraanAuthRepository(
       )
     }
 
+  /**
+   * "Continue with Google": exchange a Google ID token (from Credential Manager) for an app
+   * JWT. The backend verifies the token with Google and creates the account on first sign-in,
+   * so there's no separate profile step — the name comes from the Google account.
+   */
+  suspend fun googleSignIn(idToken: String): VerifyOtpResult = withContext(Dispatchers.IO) {
+    val response = postJson(path = "/api/auth/google", jsonBody = JSONObject().put("id_token", idToken))
+
+    if (response.code !in 200..299) {
+      throw IllegalStateException(parseErrorMessage(response.body, "Google sign-in failed. Please try again."))
+    }
+
+    val json = JSONObject(response.body)
+    val user = json.getJSONObject("user")
+    VerifyOtpResult(
+      token = json.getString("token"),
+      userName = user.optString("name", "Haraan user"),
+      message = json.optString("message", "Welcome to Haraan!"),
+    )
+  }
+
   private fun postJson(path: String, jsonBody: JSONObject): HttpResult {
     val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"

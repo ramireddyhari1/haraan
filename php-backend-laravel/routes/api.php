@@ -61,6 +61,9 @@ Route::prefix('auth/email')->controller(EmailAuthController::class)->group(funct
     Route::post('/complete', 'completeProfile'); // new user: name + date of birth after verify
 });
 
+// "Continue with Google" — the app posts a Google ID token; we verify it and log in.
+Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login']);
+
 // -------------------------------------------------------------------------
 //  Users (admin-only)
 // -------------------------------------------------------------------------

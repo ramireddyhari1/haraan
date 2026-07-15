@@ -65,6 +65,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.haraan.app.R
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 
 @Composable
@@ -75,6 +76,8 @@ fun LoginRoute(
     viewModel: LoginViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LoginScreen(
         uiState = uiState,
@@ -87,6 +90,22 @@ fun LoginRoute(
         onCompleteProfileClick = { viewModel.completeProfile(onLoginSuccess) },
         onBackToEmailClick = viewModel::resetToEmail,
         onSkipClick = onSkipClick,
+        // "Continue with Google": drive Credential Manager here (needs an Activity context),
+        // then hand the ID token to the VM. Only offered when a Web client ID is configured.
+        googleEnabled = com.haraan.app.data.GoogleSignInHelper.isConfigured,
+        onGoogleClick = {
+            viewModel.setLoading(true)
+            scope.launch {
+                when (val r = com.haraan.app.data.GoogleSignInHelper.signIn(context)) {
+                    is com.haraan.app.data.GoogleSignInResult.Success ->
+                        viewModel.signInWithGoogle(r.idToken, onLoginSuccess)
+                    is com.haraan.app.data.GoogleSignInResult.Cancelled ->
+                        viewModel.setLoading(false)
+                    is com.haraan.app.data.GoogleSignInResult.Error ->
+                        viewModel.onGoogleError(r.message)
+                }
+            }
+        },
         modifier = modifier
     )
 }
@@ -117,6 +136,8 @@ fun LoginScreen(
     onCompleteProfileClick: () -> Unit,
     onBackToEmailClick: () -> Unit,
     onSkipClick: () -> Unit = {},
+    googleEnabled: Boolean = false,
+    onGoogleClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isDetailsInputVisible by remember { mutableStateOf(false) }
@@ -487,6 +508,45 @@ fun LoginScreen(
                                         fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
                                         maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
                                     )
+                                }
+
+                                // "Continue with Google" — only when a Web client ID is configured.
+                                if (googleEnabled) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Box(Modifier.weight(1f).height(1.dp).background(Stroke))
+                                        Text("  or  ", color = Text3, fontSize = 12.sp)
+                                        Box(Modifier.weight(1f).height(1.dp).background(Stroke))
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    val gi = remember { MutableInteractionSource() }
+                                    OutlinedButton(
+                                        onClick = {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                            onGoogleClick()
+                                        },
+                                        interactionSource = gi,
+                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(gi),
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Stroke),
+                                        enabled = !uiState.isLoading
+                                    ) {
+                                        Text("G", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color(0xFF4285F4))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            "Continue with Google",
+                                            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Text1,
+                                            maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                if (!uiState.errorMessage.isNullOrEmpty()) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                 }
                             } else {
                                 OutlinedTextField(
