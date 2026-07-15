@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
-use App\Events\ContentUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\SupportCategory;
 use App\Models\SupportMessage;
 use App\Models\SupportThread;
 use App\Models\User;
+use App\Services\SupportChat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -19,9 +19,16 @@ use Illuminate\Validation\ValidationException;
  * with the Haraan support team; admins/assigned workers reply from the Filament
  * control panel. The app opens {@see thread()} and polls it while the chat
  * screen is visible.
+ *
+ * The conversation rules themselves live in {@see SupportChat}, shared with the
+ * website's session-authenticated chat.
  */
 final class SupportController extends Controller
 {
+    public function __construct(private readonly SupportChat $chat)
+    {
+    }
+
     /**
      * The current user's conversation + messages. Opening the thread marks the
      * admin's replies as read (clears the user's unread badge).
@@ -34,13 +41,7 @@ final class SupportController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        $thread = $this->threadFor($user);
-
-        if ($thread->user_unread_count !== 0) {
-            $thread->forceFill(['user_unread_count' => 0])->save();
-        }
-
-        return response()->json($this->present($thread));
+        return response()->json($this->present($this->chat->openForUser($user)));
     }
 
     /**
@@ -64,6 +65,8 @@ final class SupportController extends Controller
     /**
      * Post a message from the app. Creates the thread on first contact.
      * POST /api/support/messages   { body: string, category_id?: int }
+     *
+     * @see SupportChat::postUserMessage() for the thread rules.
      */
     public function send(Request $request): JsonResponse
     {
@@ -82,34 +85,9 @@ final class SupportController extends Controller
             throw ValidationException::withMessages(['body' => 'Message cannot be empty.']);
         }
 
-        $thread = $this->threadFor($user);
+        $thread = $this->chat->postUserMessage($user, $body, isset($data['category_id']) ? (int) $data['category_id'] : null);
 
-        // The picker only labels a thread that doesn't have a topic yet. Once an
-        // admin has (re)classified it, the user's next message can't overwrite
-        // that — users guess wrong often, admins correct them.
-        if ($thread->category_id === null && ($data['category_id'] ?? null) !== null) {
-            $thread->forceFill(['category_id' => (int) $data['category_id']])->save();
-        }
-
-        SupportMessage::create([
-            'thread_id'   => $thread->id,
-            'sender_type' => 'user',
-            'sender_id'   => $user->id,
-            'body'        => $body,
-        ]);
-
-        // A new user message reopens a closed thread and flags it for the team.
-        $thread->forceFill([
-            'status'             => 'open',
-            'last_message_at'    => now(),
-            'admin_unread_count' => $thread->admin_unread_count + 1,
-            'user_unread_count'  => 0,
-        ])->save();
-
-        // Nudge any listening admin dashboards to refresh (no payload).
-        ContentUpdated::dispatch('support');
-
-        return response()->json($this->present($thread->fresh()), 201);
+        return response()->json($this->present($thread), 201);
     }
 
     // -------------------------------------------------------------------------
@@ -119,21 +97,6 @@ final class SupportController extends Controller
         $user = $request->attributes->get('auth_user');
 
         return $user instanceof User ? $user : null;
-    }
-
-    /** Get the user's live (non-closed) thread, or create a fresh one. */
-    private function threadFor(User $user): SupportThread
-    {
-        return SupportThread::query()
-            ->where('user_id', $user->id)
-            ->where('status', '!=', 'closed')
-            ->latest('id')
-            ->first()
-            ?? SupportThread::create([
-                'user_id'         => $user->id,
-                'status'          => 'open',
-                'last_message_at' => now(),
-            ]);
     }
 
     /** @return array<string, mixed> */

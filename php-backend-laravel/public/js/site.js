@@ -15,7 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const locationModal    = document.getElementById('locationModal');
     const locationCard     = locationModal?.querySelector('.location-modal__card');
-    const locationToggle   = document.getElementById('locationToggle');
+    // Two triggers open the picker: the desktop pill and the mobile greeting's
+    // location line. Bind by attribute so either can open it.
+    const locationToggles  = document.querySelectorAll('[data-location-toggle]');
     const locationBackdrop = document.getElementById('locationBackdrop');
     const closeLocationBtn = document.getElementById('closeLocation');
     const locationSearch   = document.getElementById('locationSearch');
@@ -199,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Location modal event wiring ---
-    locationToggle?.addEventListener('click', (e) => {
+    locationToggles.forEach((toggle) => toggle.addEventListener('click', (e) => {
         e.preventDefault();
         if (cachedCities.length) {
             renderCities(cachedCities);
@@ -207,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             fetchCities().then(() => openLocationModal());
         }
-    });
+    }));
 
     locationBackdrop?.addEventListener('click', closeLocationModal);
     closeLocationBtn?.addEventListener('click', closeLocationModal);
@@ -534,6 +536,11 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         openLoginModal();
     });
+    // Guest taps on the mobile greeting's avatar / icons route into the same modal.
+    document.querySelectorAll('[data-login-open]').forEach((el) => el.addEventListener('click', (e) => {
+        e.preventDefault();
+        openLoginModal();
+    }));
     loginBackdrop?.addEventListener('click', closeLoginModal);
     closeLoginBtn?.addEventListener('click', closeLoginModal);
 

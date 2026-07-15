@@ -131,13 +131,137 @@
         grid-template-columns: 1fr auto;
         grid-template-rows: auto auto auto;
         grid-template-areas:
-            "location icons"
+            "greet greet"
             "search search"
             "buttons buttons";
         align-items: center;
         row-gap: 8px;
         column-gap: 10px;
-        padding: 6px 12px;
+        /* No horizontal padding of its own — the .container's 16px already matches
+           the app's 16dp header inset. The extra 12px here pushed the content to
+           28px and squeezed the name column ~20px narrower than on device. */
+        padding: 6px 0;
+    }
+
+    /* --- APP-MATCHED GREETING HEADER ---------------------------------------
+       Mirrors the Android GreetingHeader (MainScreen.kt): 44px avatar with a
+       ring, "Hey <first name>!" over a tappable location line, utility icons
+       right. Values below track the app's tokens — ink #0F172A, sub #64748B,
+       border #E2E8F0 — so the two headers read as one product. */
+    .app-greet {
+        grid-area: greet;
+        /* The grid sets justify-items:start, which would shrink-wrap this row and
+           strand the icons mid-header — stretch it so they sit at the far edge. */
+        justify-self: stretch;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+    }
+
+    /* The old pill and the account icon are replaced by the lockup above. */
+    .topbar .location-pill,
+    .topbar__actions { display: none; }
+
+    .app-greet__avatar {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: #E2E8F0;
+        border: 1.5px solid #E2E8F0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        text-decoration: none;
+    }
+    .app-greet__initial {
+        font-size: 18px;
+        font-weight: 700;
+        color: #0F172A;
+        line-height: 1;
+    }
+    .app-greet__photo {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 50%;
+    }
+
+    .app-greet__lockup {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .app-greet__hey {
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.2;
+        color: #0F172A;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .app-greet__loc {
+        display: inline-flex;
+        align-items: center;
+        align-self: flex-start;
+        max-width: 100%;
+        gap: 2px;
+        border-radius: 6px;
+        color: #64748B;
+        text-decoration: none;
+    }
+    .app-greet__loc-text {
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.2;
+        max-width: 180px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .app-greet__chevron { flex-shrink: 0; }
+
+    .app-greet__icons {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    /* 40px circular tap target around a 24px glyph — the app sizes these for
+       the accessibility minimum rather than leaving a bare 24px hit box. */
+    .app-greet__icon {
+        position: relative;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(15, 23, 42, 0.85);
+        text-decoration: none;
+    }
+    .app-greet__icon:active { background: rgba(15, 23, 42, 0.06); }
+
+    /* Unread dot: the app's 8dp LiveRed pip, ringed in the header background so
+       it separates from the glyph. Only rendered when a real count is non-zero. */
+    .app-greet__dot {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #D32F2F;
+        box-shadow: 0 0 0 1.5px var(--surface, #fff);
     }
 
     /* Brand (Haraan logo): hidden on mobile — the app header shows only the
@@ -166,94 +290,37 @@
     }
     .brand__text { display: none; }
 
-    /* Location pill: far left, row 1 */
-    .location-pill {
-        grid-area: location;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        text-decoration: none;
-        color: inherit;
-        padding: 0 4px 0 0;
-        justify-self: start;
-    }
-    .location-pill__pin {
-        display: flex;
-        align-items: center;
-        width: 18px;
-        height: 18px;
-        flex-shrink: 0;
-        margin-right: 6px;
-    }
-    .location-pill__pin lord-icon { width: 18px !important; height: 18px !important; }
-    .location-pill__label { font-size: 12px; }
-    .location-pill__label strong { font-size: 12px; font-weight: 600; line-height: 1; color: #1a1d21; }
-    .location-pill__label small { color: #8a8f98; }
-
-    /* Location is a secondary control — keep it neutral so the search bar and
-       the Events/GameHub switch stay the primary focal points. The mode accent
-       lives on the pin icon only, not the whole label. */
-    body.mode-events .location-pill__pin { color: #2563EB; }
-    body.mode-gamehub .location-pill__pin { color: #00C853; }
-
-    /* Hide login button */
-    .topbar__actions .btn { display: none; }
-
-    /* Icons: right side, row 1 */
-    .topbar__actions {
-        grid-area: icons;
-        display: flex;
-        gap: 16px;
-        align-items: center;
-        justify-content: flex-end;
-        justify-self: end;
-        padding-left: 6px;
-    }
-
-    /* Remove pseudo icons; use real image for profile */
-    .topbar__actions::before,
-    .topbar__actions::after { display: none; }
-
-    .topbar__account {
-        width: 34px;
-        height: 34px;
-        border-radius: 50%;
-        object-fit: cover;
-        box-shadow: 0 1px 0 rgba(0,0,0,0.06);
-        background: #ffffff; /* neutral fallback */
-        border: 1px solid rgba(0,0,0,0.06);
-        filter: grayscale(100%) contrast(0.95) brightness(1);
-        display: inline-block;
-        margin-left: 4px;
-    }
-
+    /* Search bar: the app's 44dp white field — 20dp corners, #E2E8F0 hairline,
+       soft ambient shadow (MainScreen.kt). */
     .topbar__search {
         grid-area: search;
         display: flex;
         align-items: center;
         gap: 10px;
-        min-height: 50px;
+        min-height: 44px;
         background: #ffffff;
-        border-radius: 12px;
-        padding: 10px 14px;
-        border: 1px solid rgba(0,0,0,0.14);
-        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+        border-radius: 20px;
+        padding: 0 14px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         width: 100%;
         max-width: none;
         z-index: 8;
-        margin-top: 4px;
+        margin-top: 2px;
     }
     .topbar__search:focus-within {
-        border-color: rgba(0,0,0,0.14);
+        border-color: #CBD5E1;
         box-shadow: 0 6px 18px rgba(0,0,0,0.06);
         background: #fff;
     }
-    .search-icon { 
-        display: flex; 
+    /* Matches site.css's `.topbar__search .search-icon` specificity — a bare
+       `.search-icon` here loses to it and the glyph stays 28px. */
+    .topbar__search .search-icon {
+        display: flex;
         align-items: center;
         color: #9aa3b2;
-        width: 28px;
-        height: 28px;
+        width: 20px;
+        height: 20px;
         flex-shrink: 0;
         justify-content: center;
     }

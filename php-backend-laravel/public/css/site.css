@@ -269,6 +269,7 @@ a {
 	#mobileNav,
 	#mobileNavBackdrop,
 	.mobile-nav__close,
+	.app-greet,
 	.mobile-action-btn {
 		display: none !important;
 	}
@@ -2646,4 +2647,33 @@ body.mode-events .section-shell__header h2 {
 
 .theme-minimal .legal-pill .copyright {
     color: #999999 !important;
+}
+
+/* Desktop header utility icons — the chat + bell lanes the mobile greeting
+   lockup shows. Hidden on mobile with the rest of .topbar__actions. */
+.topbar__util {
+	position: relative;
+	width: 36px;
+	height: 36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	color: var(--muted);
+	text-decoration: none;
+	transition: background 160ms ease, color 160ms ease;
+}
+.topbar__util:hover {
+	background: #F1F5F9;
+	color: var(--foreground);
+}
+.topbar__util-dot {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #D32F2F;
+	box-shadow: 0 0 0 1.5px var(--surface-strong);
 }

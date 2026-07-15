@@ -59,6 +59,16 @@ Route::middleware('auth')->group(function() {
     Route::post('/profile/setup', [\App\Http\Controllers\Web\PublicWebController::class, 'saveProfileSetup'])->name('site.profile.setup.save');
 });
 
+// Header inbox lanes — the web twins of the app's chat + bell icons. Both read the
+// same tables the JWT API serves the app, so a conversation or a notification looks
+// the same wherever the user opens it.
+Route::middleware('auth')->group(function (): void {
+    Route::get('/support', [\App\Http\Controllers\Web\SupportChatController::class, 'show'])->name('site.support');
+    Route::post('/support/messages', [\App\Http\Controllers\Web\SupportChatController::class, 'send'])->name('site.support.send');
+    Route::get('/support/poll', [\App\Http\Controllers\Web\SupportChatController::class, 'poll'])->name('site.support.poll');
+    Route::get('/notifications', [\App\Http\Controllers\Web\NotificationsController::class, 'index'])->name('site.notifications');
+});
+
 // WhatsApp Auth Routes
 Route::controller(\App\Http\Controllers\Auth\WhatsAppAuthController::class)->group(function (): void {
     Route::post('/auth/whatsapp/request', 'requestOtp')->name('whatsapp.request');
