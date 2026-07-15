@@ -22,6 +22,11 @@ data class VenueApiItem(
     val tagline: String,
     val distance: String,
     val isBookable: Boolean = false,
+    // Coordinates for real GPS-distance ranking + radius filtering. Null when the
+    // admin hasn't pinned the venue yet (older rows) — such venues fall back to the
+    // static [distance] string and are never radius-filtered out.
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )
 
 /** One bookable slot template for a venue (GET /api/venues/{id} → slots). */
@@ -138,6 +143,8 @@ class VenueRepository {
                 tagline = o.optString("tagline"),
                 distance = o.optString("distance"),
                 isBookable = o.optBoolean("is_bookable", false),
+                latitude = if (o.isNull("latitude")) null else o.optDouble("latitude").takeIf { !it.isNaN() },
+                longitude = if (o.isNull("longitude")) null else o.optDouble("longitude").takeIf { !it.isNaN() },
             )
         }
     }

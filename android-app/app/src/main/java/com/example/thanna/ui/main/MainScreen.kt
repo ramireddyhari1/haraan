@@ -1602,7 +1602,8 @@ private fun GameHubTabScreen(
           id = c.id, title = c.name, location = c.location, rating = c.rating,
           category = c.category, sports = c.sports, price = c.price,
           imageUrl = c.image ?: venueCategoryImage(c.category),
-          tagline = c.tagline, distance = c.distance, availableTonight = true
+          tagline = c.tagline, distance = c.distance, availableTonight = true,
+          latitude = c.latitude, longitude = c.longitude,
         )
       } ?: emptyList()
     }
@@ -1655,14 +1656,39 @@ private fun GameHubTabScreen(
     (selectedSport == "All" || it.category == selectedSport) &&
     (searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.location.contains(searchQuery, ignoreCase = true))
   }
-  // Surface venues in the chosen city first; never hide everything if none match
-  // (backend locations are neighbourhoods, so a city mismatch shouldn't empty the screen).
-  val selectedCity = (locationState as? com.example.thanna.data.LocationState.Resolved)?.city
-  val filteredVenues = if (selectedCity.isNullOrBlank()) {
-    sportSearchVenues
+  // Location-aware ordering. Preference order:
+  //  1. If we have a GPS fix AND the venue is pinned → real haversine distance: radius-filter
+  //     (searchRadiusKm, 0 = Any) and sort nearest-first, with a live "1.2 km"/"800 m" label.
+  //  2. Venues without coordinates (unpinned) are never radius-dropped — they fall to the end,
+  //     city-first, keeping their static distance string.
+  //  3. No GPS fix at all → old behaviour: chosen city floated to the top, nothing hidden.
+  val resolvedLoc = locationState as? com.example.thanna.data.LocationState.Resolved
+  val selectedCity = resolvedLoc?.city
+  val userLat = resolvedLoc?.latitude
+  val userLng = resolvedLoc?.longitude
+
+  fun cityFirst(list: List<VenueItem>): List<VenueItem> =
+    if (selectedCity.isNullOrBlank()) list
+    else list.partition { it.location.contains(selectedCity, ignoreCase = true) }.let { it.first + it.second }
+
+  val filteredVenues = if (userLat == null || userLng == null) {
+    cityFirst(sportSearchVenues)
   } else {
-    val (near, rest) = sportSearchVenues.partition { it.location.contains(selectedCity, ignoreCase = true) }
-    near + rest
+    // Pair each venue with its real distance (null when unpinned).
+    val (pinned, unpinned) = sportSearchVenues
+      .map { v ->
+        val km = if (v.latitude != null && v.longitude != null)
+          haversineKm(userLat, userLng, v.latitude, v.longitude) else null
+        v to km
+      }
+      .partition { it.second != null }
+
+    val nearby = pinned
+      .filter { searchRadiusKm <= 0 || it.second!! <= searchRadiusKm } // 0 = Any distance
+      .sortedBy { it.second }
+      .map { (v, km) -> v.copy(distance = formatKm(km!!)) }
+
+    nearby + cityFirst(unpinned.map { it.first })
   }
 
   androidx.compose.foundation.lazy.LazyColumn(
@@ -2016,8 +2042,12 @@ private fun GameHubTabScreen(
         // Contextual subtitle — carries a real venue count so the section feels inhabited.
         subtitle = when {
           isVenuesLoading -> "Finding venues near you…"
-          filteredVenues.isEmpty() -> "Top rated near you"
-          else -> "${filteredVenues.size} near you • top rated"
+          filteredVenues.isEmpty() && userLat != null && searchRadiusKm > 0 ->
+            "None within ${searchRadiusKm} km — widen the radius"
+          filteredVenues.isEmpty() -> "No venues yet"
+          // Only claim "near you" when we actually ranked by GPS distance.
+          userLat != null -> "${filteredVenues.size} venues • nearest first"
+          else -> "${filteredVenues.size} venues • top rated"
         },
         actionText = "View all",
         onActionClick = { showSearch = true },
@@ -3006,8 +3036,29 @@ private data class VenueItem(
   val imageUrl: String,
   val tagline: String,
   val distance: String,
-  val availableTonight: Boolean = true
+  val availableTonight: Boolean = true,
+  // Coordinates for real GPS-distance ranking + radius filtering. Null when the venue
+  // isn't pinned yet — it then keeps the static [distance] string and dodges the radius cut.
+  val latitude: Double? = null,
+  val longitude: Double? = null,
 )
+
+/** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */
+private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+  val dLat = Math.toRadians(lat2 - lat1)
+  val dLng = Math.toRadians(lng2 - lng1)
+  val a = kotlin.math.sin(dLat / 2).let { it * it } +
+    kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+    kotlin.math.sin(dLng / 2).let { it * it }
+  return 6371.0 * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+}
+
+/** Human distance: "800 m" under 1 km, "1.2 km" under 10, "12 km" beyond. */
+private fun formatKm(km: Double): String = when {
+  km < 1.0 -> "${(km * 1000).toInt().coerceAtLeast(50)} m"
+  km < 10.0 -> "%.1f km".format(km)
+  else -> "${km.toInt()} km"
+}
 
 // Fallback photo when an admin-created venue has no image uploaded yet.
 private fun venueCategoryImage(category: String): String = when {
@@ -6616,13 +6667,13 @@ private fun CrexBottomBar(
   onOthersClick: () -> Unit = {}
 ) {
   // (label, filled icon, outlined icon) — outline when idle, filled when active, one
-  // coherent family; "Others" gets a proper apps/grid metaphor instead of a play arrow.
+  // coherent family; "Player" opens the player's own profile (Person metaphor).
   val items = listOf(
     Triple("Home", Icons.Filled.Home, Icons.Outlined.Home),
     Triple("Cricket", Icons.Filled.SportsCricket, Icons.Outlined.SportsCricket),
     Triple("Badminton", Icons.Filled.SportsTennis, Icons.Outlined.SportsTennis),
     Triple("Football", Icons.Filled.SportsFootball, Icons.Outlined.SportsFootball),
-    Triple("Others", Icons.Filled.Apps, Icons.Outlined.Apps),
+    Triple("Player", Icons.Filled.Person, Icons.Outlined.Person),
   )
 
   NavigationBar(
@@ -6649,7 +6700,7 @@ private fun CrexBottomBar(
         onClick = {
           when (label) {
             "Home" -> onHomeClick()
-            "Others" -> onOthersClick()
+            "Player" -> onOthersClick()
             else -> onSportSelected(label)
           }
         },

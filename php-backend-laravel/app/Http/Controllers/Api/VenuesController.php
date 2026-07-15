@@ -93,6 +93,11 @@ final class VenuesController extends Controller
             'sports' => $v->sportsList(),
             'location' => $v->location,
             'distance' => $v->distance,
+            // Coordinates travel with the card so the client can compute real GPS
+            // distance and radius-filter the list (the static `distance` string above
+            // is admin copy, identical for every viewer).
+            'latitude' => $v->latitude,
+            'longitude' => $v->longitude,
             'price' => $v->price,
             'rating' => $v->rating,
             'ratings_count' => $v->ratings_count,
