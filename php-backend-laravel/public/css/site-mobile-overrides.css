@@ -860,24 +860,28 @@
        puts graphicsLayer on this Box, and sizes translationX by the Box's width). */
     .mfy__page {
         position: relative;
-        flex: 0 0 calc(100vw - 80px);
-        padding: 4px 6px 8px;              /* the Box's top4 / bottom8 / start6 / end6 */
+        flex: 0 0 calc(100vw - 80px);       /* contentPadding 32 + 48, as in the app */
+        padding: 4px 6px 8px;               /* the Box's top4 / bottom8 / start6 / end6 */
         scroll-snap-align: start;
         transform-origin: center center;    /* Compose graphicsLayer default */
         will-change: transform;
         z-index: 1;
     }
 
-    /* Card = fillMaxWidth(0.72f) of the page's padded content, aligned to its start
-       (Compose Box defaults to TopStart). Not 72% of the screen. */
+    /* The hero poster, at the app's size: fillMaxWidth(0.72f) of the page's padded
+       content — i.e. 0.72 × (screen − 32 − 48 − 12), NOT 0.72 of the screen.
+
+       Shape is 9:16 story format rather than the app's 0.75, so it needs PORTRAIT
+       artwork: a landscape banner center-crops to ~32% here. The admin's image field
+       asks for 1080×1920. */
     .mfy {
         position: relative;
         display: block;
         width: 72%;
-        aspect-ratio: 3 / 4;               /* Compose aspectRatio(0.75f) */
+        aspect-ratio: 9 / 16;
         border-radius: 32px;                /* HaraanRadius.Hero */
         overflow: hidden;
-        background: #000;                   /* the card's Color.Black backing */
+        background: #0F172A;                /* backing while the poster loads */
         text-decoration: none;
         color: inherit;
     }
@@ -887,17 +891,19 @@
         object-fit: cover;                  /* ContentScale.Crop */
         display: block;
     }
-    /* Brush.verticalGradient(Transparent, Black 15%, Black 85%) starting 180px down. */
+    /* Scrim. Ramps late and lands deep: a tall poster has room, and the art above the
+       text stays untouched while the copy below stays legible on any poster. */
     .mfy__grad {
         position: absolute; inset: 0;
         background: linear-gradient(to bottom,
-            rgba(0,0,0,0) 180px,
-            rgba(0,0,0,0.15) 60%,
-            rgba(0,0,0,0.85) 100%);
+            rgba(0,0,0,0) 52%,
+            rgba(0,0,0,0.35) 74%,
+            rgba(0,0,0,0.92) 100%);
     }
-    /* Category tag: top-start, 16dp inset, black 45%, pill. */
+    /* Category tag: top-start, 12px inset (the art is shorter than the old portrait
+       card, so the app's 16dp crowded it), black 45%, pill. */
     .mfy__cat {
-        position: absolute; top: 16px; left: 16px; z-index: 2;
+        position: absolute; top: 12px; left: 12px; z-index: 2;
         background: rgba(0,0,0,0.45);
         color: #fff;
         font-size: 10px;
@@ -906,9 +912,9 @@
         padding: 6px 12px;
         border-radius: 999px;
     }
-    /* Rating badge: top-end, 16dp inset, black 60%, 12dp radius. */
+    /* Rating badge: top-end, 12px inset, black 60%, 12dp radius. */
     .mfy__rating {
-        position: absolute; top: 16px; right: 16px; z-index: 2;
+        position: absolute; top: 12px; right: 12px; z-index: 2;
         display: inline-flex; align-items: center; gap: 4px;
         background: rgba(0,0,0,0.6);
         border-radius: 12px;                /* HaraanRadius.Small */
@@ -922,49 +928,46 @@
         color: #fff; font-size: 10px; font-weight: 700;
         letter-spacing: 0.05em;
     }
-    /* Foreground row: bottom, 16dp (HaraanSpacing.Medium), space-between. */
+    /* Facts, on the poster's scrim. 16dp inset (HaraanSpacing.Medium), stacked. */
     .mfy__foot {
         position: absolute; inset: auto 0 0 0; z-index: 2;
-        display: flex; align-items: center; justify-content: space-between;
+        display: block;
         padding: 16px;
     }
-    .mfy__text { min-width: 0; flex: 1; display: block; }
     .mfy__date {
         display: block;
         font-size: 10px; font-weight: 700;
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: rgba(255,255,255,0.9);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .mfy__title {
         display: -webkit-box;
         -webkit-line-clamp: 2; -webkit-box-orient: vertical;
         overflow: hidden;
         margin-top: 4px;
-        font-size: 16px;
-        font-weight: 600;                   /* TitleMedium = SemiBold */
+        font-size: 16px;                    /* TitleMedium, as in the app's card */
+        font-weight: 700;
         line-height: 20px;
-        letter-spacing: -0.0125em;          /* -0.2sp at 16sp */
+        letter-spacing: -0.015em;
         color: #fff;
     }
-    .mfy__meta {
+    .mfy__venue {
         display: block;
         margin-top: 6px;
         font-size: 12px;
-        font-weight: 400;                   /* BodyMedium = Normal */
         color: rgba(255,255,255,0.65);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    /* Book button: 44dp white circle, 4dp elevation, EventsBlue ticket glyph. */
-    .mfy__book {
-        flex: 0 0 44px;
-        width: 44px; height: 44px;
-        margin-left: 12px;
-        border-radius: 999px;
-        background: #fff;
-        color: #2563EB;
-        display: grid; place-items: center;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.20);
+    /* The fact that decides the tap — its own line, full white, never clipped. */
+    .mfy__price {
+        display: block;
+        margin-top: 3px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #fff;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     /* --- Poster card — used by /home (site/home.blade.php), which still renders

@@ -77,6 +77,10 @@
                     $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
                 @endphp
                 <div class="mfy__page" data-mpager-page>
+                {{-- 9:16 story-format poster. NB this only looks right with PORTRAIT
+                     artwork: a 1600×900 banner center-crops to ~32% in this shape (the
+                     app's 3:4 keeps 42%, a 16:9 card keeps 100%). Upload portrait art
+                     per event — the admin's image field spells out the target size. --}}
                 <a class="mfy" href="/events/{{ $ev->id }}">
                     {{-- The first poster is the hero of the page — lazy-loading it would
                          delay the largest paint. The rest of the rail can wait. --}}
@@ -90,16 +94,20 @@
                     @if(!empty($ev->rating) && $ev->rating > 0)
                         <span class="mfy__rating"><i>★</i><b>{{ number_format($ev->rating, 1) }}</b></span>
                     @endif
+
+                    {{-- Facts over the art: a tall poster has room for a scrim, and it
+                         keeps the card compact. No ticket button — the app's sits INSIDE
+                         its own card link and fires the same onClick, a decorative
+                         affordance that ate 27% of the width and truncated the price
+                         ("Quake Arena • ₹59…"). The whole card is the tap target. --}}
                     <span class="mfy__foot">
-                        <span class="mfy__text">
-                            <span class="mfy__date">{{ $whenLine }}</span>
-                            <span class="mfy__title">{{ $ev->title }}</span>
-                            <span class="mfy__meta">{{ $venueLabel }} • {{ $priceLabel }}</span>
-                        </span>
-                        <span class="mfy__book" aria-label="Book tickets">
-                            {{-- Material's confirmation_number — the app's Icons.Default.ConfirmationNumber --}}
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-9 7.5h-2v-2h2v2zm0-4.5h-2v-2h2v2zm0-4.5h-2v-2h2v2z"/></svg>
-                        </span>
+                        <span class="mfy__date">{{ $whenLine }}</span>
+                        <span class="mfy__title">{{ $ev->title }}</span>
+                        <span class="mfy__venue">{{ $venueLabel }}</span>
+                        {{-- Its own line. At the app's card width (204px at 375) the
+                             text column is 172px, and "venue · price" needs 183 — one
+                             line would ellipsise the venue away. --}}
+                        <span class="mfy__price">{{ $priceLabel }}</span>
                     </span>
                 </a>
                 </div>
