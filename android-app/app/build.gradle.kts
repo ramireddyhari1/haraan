@@ -5,10 +5,10 @@ plugins {
 }
 
 android {
-    namespace = "com.example.thanna"
+    namespace = "com.haraan.app"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.thanna"
+        applicationId = "com.haraan.app"
         minSdk = 24
         targetSdk = 36
         versionCode = 2
