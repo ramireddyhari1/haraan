@@ -413,9 +413,27 @@
         // Compose: pageOffset = (currentPage - page) + currentPageOffsetFraction,
         // which is exactly (scrollLeft / pageWidth) - index.
         const scrolled = pager.scrollLeft / p;
+        const padLeft = parseFloat(getComputedStyle(pager).paddingLeft) || 0;
+        const port = pager.clientWidth;
 
         pages.forEach((page, i) => {
             const pageOffset = scrolled - i;
+
+            /* Cull anything whose LAYOUT box is off screen — the pager only ever shows
+               the previous sliver, the focal card, and the one stacked behind it.
+
+               This is not an optimisation, it's the effect. Compose composes only the
+               pages whose layout box intersects the viewport, so distant pages simply
+               don't exist; here they all do, and the pull-left below would drag every
+               one of them into the stack — six cards fanned across the poster instead
+               of one peeking. Hidden rather than removed: the boxes still have to hold
+               the scroll width open. */
+            const naturalLeft = padLeft - pageOffset * p;
+            if (naturalLeft > port || naturalLeft + p < 0) {
+                page.style.visibility = 'hidden';
+                return;
+            }
+            page.style.visibility = '';
 
             if (pageOffset < 0) {
                 // Upcoming: pull left into the stack and scale down with distance.
