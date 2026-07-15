@@ -153,6 +153,17 @@ Route::middleware('auth.jwt')->prefix('support')->controller(\App\Http\Controlle
 });
 
 // -------------------------------------------------------------------------
+//  Bell inbox — broadcast notifications from the admin/Haraan team. The admin
+//  side lives in the Filament "Notifications" resource; open apps refetch live
+//  via the Reverb `notifications` signal, closed apps get FCM (Phase 2).
+// -------------------------------------------------------------------------
+Route::middleware('auth.jwt')->controller(\App\Http\Controllers\Api\NotificationsController::class)->group(function (): void {
+    Route::get('/notifications', 'index');
+    Route::post('/notifications/read', 'markRead');
+    Route::post('/devices/register', 'registerDevice');
+});
+
+// -------------------------------------------------------------------------
 //  Live match detail (public, read-only) — feeds the app's Match Details screen
 // -------------------------------------------------------------------------
 
