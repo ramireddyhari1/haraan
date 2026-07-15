@@ -373,13 +373,39 @@
 (() => {
     const pager = document.querySelector('[data-mpager]');
     if (!pager) return;
-    const pages = [...pager.querySelectorAll('[data-mpager-page]')];
-    if (!pages.length) return;
+    const originals = [...pager.querySelectorAll('[data-mpager-page]')];
+    if (!originals.length) return;
+    const N = originals.length;
+    const loops = N > 1;
 
+    /* A real loop, the way the app fakes one with Int.MAX_VALUE virtual pages.
+       Clone the strip either side and park the viewer on the middle copy, so there is
+       always a page to slide into in both directions; once a slide settles in a copy,
+       shift scrollLeft by one strip — the content there is identical, so the jump is
+       invisible.
+
+       This replaces a rewind that smooth-scrolled from the last card all the way back
+       across every card, which was the worst moment in the rail. The leading copy also
+       restores the sliver of the previous poster in the left gutter, which the app
+       shows and a hard stop at scrollLeft 0 could not. */
+    if (loops) {
+        const lead = originals.map(p => p.cloneNode(true));
+        const tail = originals.map(p => p.cloneNode(true));
+        for (const c of [...lead, ...tail]) {
+            c.setAttribute('aria-hidden', 'true');
+            c.querySelectorAll('a').forEach(a => a.setAttribute('tabindex', '-1'));
+        }
+        lead.reverse().forEach(c => pager.prepend(c));
+        tail.forEach(c => pager.append(c));
+    }
+
+    const pages = [...pager.querySelectorAll('[data-mpager-page]')];
     const clamp01 = (v) => Math.min(1, Math.max(0, v));
     // A page is (screen − contentPadding) wide; read it off the element so the
     // maths survives a resize rather than assuming a viewport width.
     const pageWidth = () => pages[0].getBoundingClientRect().width || 1;
+    // Where the real (non-clone) strip starts.
+    const home = () => (loops ? N * pageWidth() : 0);
 
     let raf = null;
     const layout = () => {
@@ -410,30 +436,51 @@
     };
 
     pager.addEventListener('scroll', onScroll, {passive: true});
-    window.addEventListener('resize', layout);
+    window.addEventListener('resize', () => { recentre(true); layout(); });
 
-    // Auto-scroll every 3s, as in the pager's LaunchedEffect. Pauses while the
-    // reader is touching it (the app checks isScrollInProgress) or the tab is
-    // hidden, and stays put for anyone who prefers reduced motion.
-    const still = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let held = false;
-    for (const e of ['pointerdown', 'touchstart']) {
-        pager.addEventListener(e, () => { held = true; }, {passive: true});
+    /* Hop back to the middle copy once a slide has settled in one of the outer ones.
+       Identical content on both sides, so nothing moves on screen. */
+    const recentre = (force = false) => {
+        if (!loops) return;
+        const strip = N * pageWidth();
+        const x = pager.scrollLeft;
+        if (force) { pager.scrollLeft = strip + (((x - strip) % strip) + strip) % strip; }
+        else if (x >= strip * 2 - 1) { pager.scrollLeft = x - strip; }
+        else if (x < strip - 1) { pager.scrollLeft = x + strip; }
+        else { return; }
+        layout();
+    };
+    if ('onscrollend' in window) {
+        pager.addEventListener('scrollend', () => recentre());
     }
-    for (const e of ['pointerup', 'touchend', 'mouseleave']) {
-        pager.addEventListener(e, () => { held = false; }, {passive: true});
+
+    // Auto-scroll every 3s, as in the pager's LaunchedEffect. Skipped for anyone who
+    // prefers reduced motion, and for a hidden tab.
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    /* Hands off for a beat after a touch. The old code resumed the instant a finger
+       lifted, so the rail could yank the card away mid-read. */
+    let lastTouch = 0;
+    const touched = () => { lastTouch = Date.now(); };
+    for (const e of ['pointerdown', 'touchstart', 'wheel']) {
+        pager.addEventListener(e, touched, {passive: true});
     }
 
     setInterval(() => {
-        if (held || still.matches || document.hidden || pages.length < 2) return;
+        if (still.matches || document.hidden || !loops) return;
+        if (Date.now() - lastTouch < 6000) return;
+
         const p = pageWidth();
+        // Round off the settled position, never a scrollLeft caught mid-animation.
         const next = Math.round(pager.scrollLeft / p) + 1;
-        pager.scrollTo({
-            left: (next >= pages.length ? 0 : next) * p,
-            behavior: 'smooth',
-        });
+        pager.scrollTo({left: next * p, behavior: 'smooth'});
+
+        // Browsers without scrollend (Safari < 17) still need the hop.
+        if (!('onscrollend' in window)) setTimeout(() => recentre(), 700);
     }, 3000);
 
+    // Start on the real strip, not the leading copy.
+    if (loops) pager.scrollLeft = home();
     layout();
 })();
 </script>
