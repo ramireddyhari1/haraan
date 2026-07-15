@@ -358,148 +358,83 @@
 
 <script>
 /**
- * "For You" rail — a port of the app's InfiniteLoopBookPager (MainScreen.kt).
+ * "For You" rail.
  *
- * The stacked "book" look isn't decoration, it's the pager's graphicsLayer: pages
- * to the RIGHT of the focal one are dragged back left by 85% of a page width and
- * scaled down toward 0.88, so they pack into a stack with only a sliver showing;
- * pages already swiped past are left alone to slide away. That maths is reproduced
- * here 1:1 — pageOffset included — because approximating it reads visibly different
- * from the app (evenly-spaced cards with a wide peek, rather than a tight stack).
+ * Deliberately NOT a port of the app's InfiniteLoopBookPager. Its look — upcoming
+ * pages dragged left 0.85×page and scaled toward 0.88 — comes from a graphicsLayer
+ * recomputed on every scroll frame. Compose runs that on the same frame as the
+ * scroll; the web can't. Touch scrolling is driven on the compositor thread while
+ * script runs on the main one, so the stacked card lagged the card under your finger
+ * and the rail stuttered. The effect was the cause, so the effect is gone.
  *
- * Divergence: the app fakes infinity with Int.MAX_VALUE virtual pages. This wraps
- * back to the first page instead, which is equivalent for a rail this size.
+ * What's left is a native scroll-snap carousel: the browser owns every frame of the
+ * motion. No scroll listener, nothing per-frame — the only script here runs once the
+ * rail has already come to rest.
  */
 (() => {
     const pager = document.querySelector('[data-mpager]');
     if (!pager) return;
     const originals = [...pager.querySelectorAll('[data-mpager-page]')];
-    if (!originals.length) return;
     const N = originals.length;
-    const loops = N > 1;
+    if (N < 2) return;
 
-    /* A real loop, the way the app fakes one with Int.MAX_VALUE virtual pages.
-       Clone the strip either side and park the viewer on the middle copy, so there is
-       always a page to slide into in both directions; once a slide settles in a copy,
-       shift scrollLeft by one strip — the content there is identical, so the jump is
-       invisible.
-
-       This replaces a rewind that smooth-scrolled from the last card all the way back
-       across every card, which was the worst moment in the rail. The leading copy also
-       restores the sliver of the previous poster in the left gutter, which the app
-       shows and a hard stop at scrollLeft 0 could not. */
-    if (loops) {
-        const lead = originals.map(p => p.cloneNode(true));
-        const tail = originals.map(p => p.cloneNode(true));
-        for (const c of [...lead, ...tail]) {
-            c.setAttribute('aria-hidden', 'true');
-            c.querySelectorAll('a').forEach(a => a.setAttribute('tabindex', '-1'));
-        }
-        lead.reverse().forEach(c => pager.prepend(c));
-        tail.forEach(c => pager.append(c));
+    /* A real loop, the way the app fakes one with Int.MAX_VALUE virtual pages: clone
+       the strip either side and park the viewer on the middle copy, so there's always
+       a card to swipe into in both directions. Once a swipe settles in a copy, shift
+       scrollLeft by one strip — identical content there, so nothing moves on screen.
+       Replaces a rewind that smooth-scrolled from the last card back across every
+       card, which was the worst moment in the rail. */
+    const lead = originals.map(p => p.cloneNode(true));
+    const tail = originals.map(p => p.cloneNode(true));
+    for (const c of [...lead, ...tail]) {
+        c.setAttribute('aria-hidden', 'true');
+        c.querySelectorAll('a').forEach(a => a.setAttribute('tabindex', '-1'));
     }
+    lead.reverse().forEach(c => pager.prepend(c));
+    tail.forEach(c => pager.append(c));
 
     const pages = [...pager.querySelectorAll('[data-mpager-page]')];
-    const clamp01 = (v) => Math.min(1, Math.max(0, v));
-    // A page is (screen − contentPadding) wide; read it off the element so the
-    // maths survives a resize rather than assuming a viewport width.
-    const pageWidth = () => pages[0].getBoundingClientRect().width || 1;
-    // Where the real (non-clone) strip starts.
-    const home = () => (loops ? N * pageWidth() : 0);
-
-    let raf = null;
-    const layout = () => {
-        const p = pageWidth();
-        // Compose: pageOffset = (currentPage - page) + currentPageOffsetFraction,
-        // which is exactly (scrollLeft / pageWidth) - index.
-        const scrolled = pager.scrollLeft / p;
-        const padLeft = parseFloat(getComputedStyle(pager).paddingLeft) || 0;
-        const port = pager.clientWidth;
-
-        pages.forEach((page, i) => {
-            const pageOffset = scrolled - i;
-
-            /* Cull anything whose LAYOUT box is off screen — the pager only ever shows
-               the previous sliver, the focal card, and the one stacked behind it.
-
-               This is not an optimisation, it's the effect. Compose composes only the
-               pages whose layout box intersects the viewport, so distant pages simply
-               don't exist; here they all do, and the pull-left below would drag every
-               one of them into the stack — six cards fanned across the poster instead
-               of one peeking. Hidden rather than removed: the boxes still have to hold
-               the scroll width open. */
-            const naturalLeft = padLeft - pageOffset * p;
-            if (naturalLeft > port || naturalLeft + p < 0) {
-                page.style.visibility = 'hidden';
-                return;
-            }
-            page.style.visibility = '';
-
-            if (pageOffset < 0) {
-                // Upcoming: pull left into the stack and scale down with distance.
-                const tx = pageOffset * p * 0.85;
-                const scale = 0.88 + (1.0 - 0.88) * clamp01(1 - Math.abs(pageOffset));
-                page.style.transform = `translateX(${tx}px) scale(${scale})`;
-            } else {
-                // Swiped past: let it slide away natively.
-                page.style.transform = 'translateX(0px) scale(1)';
-            }
-            // The focal card stays on top of the stack.
-            page.style.zIndex = Math.abs(pageOffset) < 0.5 ? '2' : '1';
-        });
+    // Snap pitch = card + gap. Measured off the DOM so a resize can't stale it.
+    const pitch = () => {
+        const a = pages[0].getBoundingClientRect();
+        const b = pages[1].getBoundingClientRect();
+        return Math.round(b.left - a.left) || Math.round(a.width);
     };
-    const onScroll = () => {
-        if (raf) return;
-        raf = requestAnimationFrame(() => { raf = null; layout(); });
-    };
+    const home = () => N * pitch();
 
-    pager.addEventListener('scroll', onScroll, {passive: true});
-    window.addEventListener('resize', () => { recentre(true); layout(); });
-
-    /* Hop back to the middle copy once a slide has settled in one of the outer ones.
-       Identical content on both sides, so nothing moves on screen. */
-    const recentre = (force = false) => {
-        if (!loops) return;
-        const strip = N * pageWidth();
+    /* Hop back to the middle copy once a swipe has settled in an outer one. Fires on
+       scrollend — never mid-gesture, so it can't fight the finger. */
+    const recentre = () => {
+        const strip = home();
         const x = pager.scrollLeft;
-        if (force) { pager.scrollLeft = strip + (((x - strip) % strip) + strip) % strip; }
-        else if (x >= strip * 2 - 1) { pager.scrollLeft = x - strip; }
-        else if (x < strip - 1) { pager.scrollLeft = x + strip; }
-        else { return; }
-        layout();
+        if (x >= strip * 2 - 1) pager.scrollLeft = x - strip;
+        else if (x < strip - 1) pager.scrollLeft = x + strip;
     };
-    if ('onscrollend' in window) {
-        pager.addEventListener('scrollend', () => recentre());
-    }
+    const hasScrollEnd = 'onscrollend' in window;
+    if (hasScrollEnd) pager.addEventListener('scrollend', recentre);
 
-    // Auto-scroll every 3s, as in the pager's LaunchedEffect. Skipped for anyone who
-    // prefers reduced motion, and for a hidden tab.
+    window.addEventListener('resize', () => { pager.scrollLeft = home(); });
+
+    // Auto-advance, as in the pager's LaunchedEffect. scrollTo({behavior:'smooth'}) is
+    // the browser's own animation, so this stays off the main thread too.
     const still = window.matchMedia('(prefers-reduced-motion: reduce)');
-
-    /* Hands off for a beat after a touch. The old code resumed the instant a finger
-       lifted, so the rail could yank the card away mid-read. */
     let lastTouch = 0;
-    const touched = () => { lastTouch = Date.now(); };
     for (const e of ['pointerdown', 'touchstart', 'wheel']) {
-        pager.addEventListener(e, touched, {passive: true});
+        pager.addEventListener(e, () => { lastTouch = Date.now(); }, {passive: true});
     }
 
     setInterval(() => {
-        if (still.matches || document.hidden || !loops) return;
+        if (still.matches || document.hidden) return;
+        // Hands off for a beat after a touch: the rail must never yank a card away
+        // from someone who is reading it.
         if (Date.now() - lastTouch < 6000) return;
 
-        const p = pageWidth();
-        // Round off the settled position, never a scrollLeft caught mid-animation.
-        const next = Math.round(pager.scrollLeft / p) + 1;
-        pager.scrollTo({left: next * p, behavior: 'smooth'});
-
-        // Browsers without scrollend (Safari < 17) still need the hop.
-        if (!('onscrollend' in window)) setTimeout(() => recentre(), 700);
+        const p = pitch();
+        pager.scrollTo({left: (Math.round(pager.scrollLeft / p) + 1) * p, behavior: 'smooth'});
+        if (!hasScrollEnd) setTimeout(recentre, 700);   // Safari < 17
     }, 3000);
 
-    // Start on the real strip, not the leading copy.
-    if (loops) pager.scrollLeft = home();
-    layout();
+    pager.scrollLeft = home();
 })();
 </script>
 @endsection

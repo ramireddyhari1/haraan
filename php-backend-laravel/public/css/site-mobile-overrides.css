@@ -838,42 +838,47 @@
        HaraanEventCard (MainScreen.kt / HaraanEventCard.kt). Every number below is
        the app's: card 72% of the page and aspectRatio 0.75, 32dp Hero radius, 16dp
        insets, 44dp book button. If the app's card changes, change these too. ===== */
-    /* The pager itself. contentPadding start 32dp / end 48dp, pageSpacing 0 — so a
-       page is exactly (screen − 80) wide, which the JS relies on for its page math. */
+    /* The rail. Plain scroll-snap: the browser owns the motion end to end, on the
+       compositor, so a swipe is as smooth as the page itself.
+
+       This deliberately drops the app's book-stack (InfiniteLoopBookPager's
+       graphicsLayer, where upcoming pages are dragged left 0.85×page and scaled).
+       That effect needs a transform recomputed on every scroll frame; on the web
+       that work lands on the main thread while the scroll itself runs on the
+       compositor, so the stacked card visibly lagged the one under your finger.
+       Compose drives both on the same frame and has no such split. A faithful port
+       of the effect cannot be smooth here — so the effect goes, not the smoothness. */
     .mpager {
         display: flex;
+        gap: 12px;
         overflow-x: auto;
+        overscroll-behavior-x: contain;
         scroll-snap-type: x mandatory;
-        scroll-padding-left: 32px;
+        scroll-padding-left: 16px;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
-        /* Full-bleed to the screen edges, so the 32/48 contentPadding measures from
-           the screen exactly as the app's does. Cancels every ancestor gutter at
-           once (.mhome's 16px and main.container's) instead of guessing at them. */
+        /* Full-bleed: cancels every ancestor gutter at once (.mhome's 16px and
+           main.container's) instead of guessing at them. */
         margin-left: calc(50% - 50vw);
         margin-right: calc(50% - 50vw);
-        padding: 0 48px 0 32px;
+        padding: 4px 16px 8px;
     }
     .mpager::-webkit-scrollbar { display: none; }
 
-    /* One page = the pager's Box. The book-stack transform is applied HERE (the app
-       puts graphicsLayer on this Box, and sizes translationX by the Box's width). */
+    /* One page = one card. Narrower than the screen so the next poster peeks, which
+       is what tells you the rail scrolls. */
     .mfy__page {
         position: relative;
-        flex: 0 0 calc(100vw - 80px);       /* contentPadding 32 + 48, as in the app */
-        padding: 4px 6px 8px;               /* the Box's top4 / bottom8 / start6 / end6 */
+        flex: 0 0 calc(100vw - 92px);
         scroll-snap-align: start;
-        transform-origin: center center;    /* Compose graphicsLayer default */
-        will-change: transform;
-        z-index: 1;
     }
 
-    /* The hero poster, at the app's real size: the FULL page width (screen − 80 − 12).
-       NB the app's card reads `.fillMaxWidth(0.72f)`, but the pager hands it
-       `Modifier.fillMaxWidth()` first — and Compose's fillMaxWidth(fraction) coerces
-       into the incoming constraints, which are already pinned to min = max = page
-       width. So the 0.72 is dead code and the card fills the page. Porting the 0.72
-       literally made this card 54% of the screen against the app's ~75%.
+    /* The hero poster, at the app's real size — 283px at 375 (the page is
+       screen − 92). NB the app's card reads `.fillMaxWidth(0.72f)`, but the pager
+       hands it `Modifier.fillMaxWidth()` first, and Compose's fillMaxWidth(fraction)
+       coerces into the incoming constraints, which are already pinned to min = max.
+       So the 0.72 is dead code and the card fills its page; porting it literally made
+       this card 54% of the screen against the app's ~75%.
 
        Shape is the app's aspectRatio(0.75f). 9:16 was tried and reverted: at that
        height the card read tall-and-narrow, and a landscape banner center-cropped to
