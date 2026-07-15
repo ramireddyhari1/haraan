@@ -57,7 +57,7 @@ final class EmailAuthController extends Controller
             'otp_verified' => false,
         ], self::OTP_TTL_SECONDS);
 
-        $subject = 'Your Haraan login code';
+        $subject = "{$otp} is your Haraan verification code";
         $text = "Your Haraan login code is: {$otp}\n\nThis code will expire in 5 minutes.\n\nIf you didn't request this, you can ignore this email.";
         $html = $this->otpHtml($otp);
         $sent = $this->emailService->send($email, $subject, $text, $html);
