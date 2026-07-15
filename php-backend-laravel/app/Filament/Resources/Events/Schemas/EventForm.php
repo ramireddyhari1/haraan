@@ -434,7 +434,7 @@ class EventForm
                     ->disk('public')
                     ->directory('events')
                     ->imageEditor()
-                    ->helperText('Upload files, OR paste image links below — use whichever you prefer (or both). The first image (uploaded, then pasted) is the poster. Use portrait 1080×1920px (9:16) — that is the shape of the "For You" hero, and a landscape banner loses about two-thirds of itself to the crop there. JPG or PNG · under 20MB.')
+                    ->helperText('Upload files, OR paste image links below — use whichever you prefer (or both). The first image (uploaded, then pasted) is the poster. Use portrait 1080×1440px (3:4) — that is the shape of the "For You" hero, so a landscape banner loses its sides to the crop there. Keep the subject centred. JPG or PNG · under 20MB.')
                     ->columnSpanFull(),
                 TagsInput::make('image_urls')
                     ->label('…or paste image URL(s)')

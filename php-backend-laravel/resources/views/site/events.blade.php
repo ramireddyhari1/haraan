@@ -77,10 +77,9 @@
                     $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
                 @endphp
                 <div class="mfy__page" data-mpager-page>
-                {{-- 9:16 story-format poster. NB this only looks right with PORTRAIT
-                     artwork: a 1600×900 banner center-crops to ~32% in this shape (the
-                     app's 3:4 keeps 42%, a 16:9 card keeps 100%). Upload portrait art
-                     per event — the admin's image field spells out the target size. --}}
+                {{-- The app's card, 1:1 on geometry: full page width (the app's own
+                     0.72f is dead code — see the CSS) at aspectRatio 0.75. Portrait
+                     3:4 artwork suits it best; a landscape banner loses its sides. --}}
                 <a class="mfy" href="/events/{{ $ev->id }}">
                     {{-- The first poster is the hero of the page — lazy-loading it would
                          delay the largest paint. The rest of the rail can wait. --}}
