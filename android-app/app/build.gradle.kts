@@ -13,10 +13,11 @@ android {
         targetSdk = 36
         versionCode = 2
         versionName = "1.0.1"
-        // Points at the deployed EC2 server (nginx -> Laravel on port 80) so the app works
+        // Points at the deployed server over HTTPS (nginx TLS -> Laravel) so the app works
         // on any device on any network without `adb reverse`. For local dev, switch back to
-        // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000`.
-        buildConfigField("String", "API_BASE_URL", "\"http://13.204.63.181\"")
+        // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000` (and temporarily allow
+        // cleartext in the manifest).
+        buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
     }
 
     buildTypes {
