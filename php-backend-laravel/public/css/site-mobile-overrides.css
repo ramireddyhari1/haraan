@@ -809,6 +809,21 @@
     .mhome__head h3 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: #0F172A; }
     .mhome__head a { font-size: 13px; font-weight: 700; color: #2563EB; text-decoration: none; }
 
+    /* The app's SectionHeader: titleLarge (20sp Bold, lineHeight 26sp, -0.5sp
+       tracking) with 16dp/12dp padding, and no "See all" unless a rail passes an
+       action. Used by the For You rail so it matches the app exactly. */
+    .mhome__head--bare {
+        margin: 0;
+        padding: 12px 0;
+    }
+    .mhome__head--bare h3 {
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 26px;
+        letter-spacing: -0.025em;
+        color: #0F172A;
+    }
+
     /* --- Horizontal scrollers --- */
     .mhome__scroll {
         display: flex; gap: 14px;
@@ -819,7 +834,142 @@
     }
     .mhome__scroll::-webkit-scrollbar { display: none; }
 
-    /* --- Poster card ("For You") — full-bleed hero, mirrors HaraanEventCard --- */
+    /* ===== "For You" rail — a 1:1 port of the app's InfiniteLoopBookPager +
+       HaraanEventCard (MainScreen.kt / HaraanEventCard.kt). Every number below is
+       the app's: card 72% of the page and aspectRatio 0.75, 32dp Hero radius, 16dp
+       insets, 44dp book button. If the app's card changes, change these too. ===== */
+    /* The pager itself. contentPadding start 32dp / end 48dp, pageSpacing 0 — so a
+       page is exactly (screen − 80) wide, which the JS relies on for its page math. */
+    .mpager {
+        display: flex;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scroll-padding-left: 32px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        /* Full-bleed to the screen edges, so the 32/48 contentPadding measures from
+           the screen exactly as the app's does. Cancels every ancestor gutter at
+           once (.mhome's 16px and main.container's) instead of guessing at them. */
+        margin-left: calc(50% - 50vw);
+        margin-right: calc(50% - 50vw);
+        padding: 0 48px 0 32px;
+    }
+    .mpager::-webkit-scrollbar { display: none; }
+
+    /* One page = the pager's Box. The book-stack transform is applied HERE (the app
+       puts graphicsLayer on this Box, and sizes translationX by the Box's width). */
+    .mfy__page {
+        position: relative;
+        flex: 0 0 calc(100vw - 80px);
+        padding: 4px 6px 8px;              /* the Box's top4 / bottom8 / start6 / end6 */
+        scroll-snap-align: start;
+        transform-origin: center center;    /* Compose graphicsLayer default */
+        will-change: transform;
+        z-index: 1;
+    }
+
+    /* Card = fillMaxWidth(0.72f) of the page's padded content, aligned to its start
+       (Compose Box defaults to TopStart). Not 72% of the screen. */
+    .mfy {
+        position: relative;
+        display: block;
+        width: 72%;
+        aspect-ratio: 3 / 4;               /* Compose aspectRatio(0.75f) */
+        border-radius: 32px;                /* HaraanRadius.Hero */
+        overflow: hidden;
+        background: #000;                   /* the card's Color.Black backing */
+        text-decoration: none;
+        color: inherit;
+    }
+    .mfy__img {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;                  /* ContentScale.Crop */
+        display: block;
+    }
+    /* Brush.verticalGradient(Transparent, Black 15%, Black 85%) starting 180px down. */
+    .mfy__grad {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom,
+            rgba(0,0,0,0) 180px,
+            rgba(0,0,0,0.15) 60%,
+            rgba(0,0,0,0.85) 100%);
+    }
+    /* Category tag: top-start, 16dp inset, black 45%, pill. */
+    .mfy__cat {
+        position: absolute; top: 16px; left: 16px; z-index: 2;
+        background: rgba(0,0,0,0.45);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;                   /* LabelSmall = Bold */
+        letter-spacing: 0.05em;             /* 0.5sp at 10sp */
+        padding: 6px 12px;
+        border-radius: 999px;
+    }
+    /* Rating badge: top-end, 16dp inset, black 60%, 12dp radius. */
+    .mfy__rating {
+        position: absolute; top: 16px; right: 16px; z-index: 2;
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(0,0,0,0.6);
+        border-radius: 12px;                /* HaraanRadius.Small */
+        padding: 5px 9px;
+    }
+    .mfy__rating i {
+        color: #F5A623; font-style: normal;
+        font-size: 11px; font-weight: 700;
+    }
+    .mfy__rating b {
+        color: #fff; font-size: 10px; font-weight: 700;
+        letter-spacing: 0.05em;
+    }
+    /* Foreground row: bottom, 16dp (HaraanSpacing.Medium), space-between. */
+    .mfy__foot {
+        position: absolute; inset: auto 0 0 0; z-index: 2;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px;
+    }
+    .mfy__text { min-width: 0; flex: 1; display: block; }
+    .mfy__date {
+        display: block;
+        font-size: 10px; font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.9);
+    }
+    .mfy__title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-top: 4px;
+        font-size: 16px;
+        font-weight: 600;                   /* TitleMedium = SemiBold */
+        line-height: 20px;
+        letter-spacing: -0.0125em;          /* -0.2sp at 16sp */
+        color: #fff;
+    }
+    .mfy__meta {
+        display: block;
+        margin-top: 6px;
+        font-size: 12px;
+        font-weight: 400;                   /* BodyMedium = Normal */
+        color: rgba(255,255,255,0.65);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* Book button: 44dp white circle, 4dp elevation, EventsBlue ticket glyph. */
+    .mfy__book {
+        flex: 0 0 44px;
+        width: 44px; height: 44px;
+        margin-left: 12px;
+        border-radius: 999px;
+        background: #fff;
+        color: #2563EB;
+        display: grid; place-items: center;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.20);
+    }
+
+    /* --- Poster card — used by /home (site/home.blade.php), which still renders
+       this markup. The /events rail moved to the app-matched .mfy pager above;
+       these rules stay so /home keeps rendering as it did. --- */
     .mposter {
         position: relative; display: block;
         scroll-snap-align: start;

@@ -11,7 +11,17 @@
     @php
         // Cache-bust assets by file mtime: browsers can cache them, but a new
         // deploy (changed file) yields a new URL. Beats ?v=time() which never caches.
-        $assetVer = fn (string $p) => asset($p) . '?v=' . (is_file(public_path($p)) ? filemtime(public_path($p)) : '1');
+        //
+        // clearstatcache() is load-bearing in dev: `php artisan serve` is one
+        // long-lived process and PHP caches stat results, so without this the mtime
+        // goes stale, ?v= stops changing, and edits silently don't reach the browser
+        // — which reads exactly like a CSS specificity bug. Costs one stat per asset.
+        $assetVer = function (string $p): string {
+            $abs = public_path($p);
+            clearstatcache(true, $abs);
+
+            return asset($p) . '?v=' . (is_file($abs) ? filemtime($abs) : '1');
+        };
     @endphp
     <link rel="stylesheet" href="{{ $assetVer('css/site.css') }}">
     <link rel="stylesheet" href="{{ $assetVer('css/site-theme-overrides.css') }}">

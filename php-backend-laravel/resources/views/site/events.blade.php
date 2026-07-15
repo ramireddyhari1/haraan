@@ -33,49 +33,63 @@
         </div>
     </div>
 
-    {{-- For You: poster carousel --}}
-    <div class="mhome__head">
+    {{-- For You — a 1:1 port of the app's rail (MainScreen.kt InfiniteLoopBookPager
+         + HaraanEventCard). No "See all": the app passes SectionHeader no action, so
+         it doesn't render one. Card values track the app's tokens — change both together.
+
+         Deliberate divergence: the app's pager early-returns on an empty list and
+         leaves the header stranded above a gap. Here the whole section goes, rather
+         than shipping an orphan heading. --}}
+    @if($forYou->count())
+    <div class="mhome__head mhome__head--bare">
         <h3>For You</h3>
-        <a href="/events">See all</a>
     </div>
-    <div class="mhome__scroll">
-        @forelse($mEvents as $ev)
-            @php
-                $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
-                $soon = optional($ev->date)->between(now(), now()->addDays(7)) ?? false;
-            @endphp
-            @php $priceLabel = $ev->price ? '₹'.number_format($ev->price) : 'Free'; @endphp
-            <a class="mposter" href="/events/{{ $ev->id }}" style="background-image:url('{{ $img }}')">
-                <span class="mposter__cat">{{ $ev->category ?? 'Event' }}</span>
-                @if(!empty($ev->rating) && $ev->rating > 0)
-                    <span class="mposter__rating"><i>★</i>{{ number_format($ev->rating, 1) }}</span>
-                @elseif($soon)
-                    <span class="mposter__rating mposter__rating--soon">This week</span>
-                @endif
-                <div class="mposter__grad"></div>
-                <div class="mposter__overlay">
-                    <div class="mposter__text">
-                        <p class="mposter__date">{{ optional($ev->date)->format('D, M j • g:i A') }}</p>
-                        <h4>{{ $ev->title }}</h4>
-                        <p class="mposter__meta">{{ $ev->venue }} &nbsp;•&nbsp; {{ $priceLabel }}</p>
-                    </div>
-                    <span class="mposter__book" aria-label="Book tickets">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 1.8 1.8 0 0 0 0 3.5 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 1.8 1.8 0 0 0 0-3.5Z"/><path d="M14 6.5v11" stroke-dasharray="1.5 2"/></svg>
+    <div class="mpager" data-mpager>
+            @foreach($forYou as $ev)
+                @php
+                    $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
+                    // Mirrors EventRepository.formatWhen(): "27 Jun • 12:00 AM", then
+                    // uppercased by the card. Not the site's old "Sat, Jun 27" shape.
+                    $whenParts = array_filter([
+                        optional($ev->date)?->format('j M'),
+                        trim((string) $ev->time) ?: null,
+                    ]);
+                    $whenLine = implode(' • ', $whenParts);
+                    // Mirrors EventRepository.formatPrice(): "₹249 onwards" / "Free".
+                    $priceLabel = ($ev->price > 0) ? '₹' . number_format((float) $ev->price) . ' onwards' : 'Free';
+                    // Mirrors the app: venue, falling back to location.
+                    $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
+                @endphp
+                <div class="mfy__page" data-mpager-page>
+                <a class="mfy" href="/events/{{ $ev->id }}">
+                    {{-- The first poster is the hero of the page — lazy-loading it would
+                         delay the largest paint. The rest of the rail can wait. --}}
+                    <img class="mfy__img" src="{{ $img }}" alt=""
+                         loading="{{ $loop->first ? 'eager' : 'lazy' }}"
+                         @if($loop->first) fetchpriority="high" @endif>
+                    <span class="mfy__grad"></span>
+                    <span class="mfy__cat">{{ $ev->category ?? 'Event' }}</span>
+                    {{-- Star only when the event genuinely has a rating — the app
+                         fabricates nothing here, and neither does this. --}}
+                    @if(!empty($ev->rating) && $ev->rating > 0)
+                        <span class="mfy__rating"><i>★</i><b>{{ number_format($ev->rating, 1) }}</b></span>
+                    @endif
+                    <span class="mfy__foot">
+                        <span class="mfy__text">
+                            <span class="mfy__date">{{ $whenLine }}</span>
+                            <span class="mfy__title">{{ $ev->title }}</span>
+                            <span class="mfy__meta">{{ $venueLabel }} • {{ $priceLabel }}</span>
+                        </span>
+                        <span class="mfy__book" aria-label="Book tickets">
+                            {{-- Material's confirmation_number — the app's Icons.Default.ConfirmationNumber --}}
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-9 7.5h-2v-2h2v2zm0-4.5h-2v-2h2v2zm0-4.5h-2v-2h2v2z"/></svg>
+                        </span>
                     </span>
+                </a>
                 </div>
-            </a>
-        @empty
-            <a class="mposter" href="/events" style="background:linear-gradient(135deg,#2563EB,#1e40af)">
-                <div class="mposter__grad"></div>
-                <div class="mposter__overlay">
-                    <div class="mposter__text">
-                        <h4>Live nights &amp; shows</h4>
-                        <p class="mposter__meta">Near you &nbsp;•&nbsp; Explore</p>
-                    </div>
-                </div>
-            </a>
-        @endforelse
+            @endforeach
     </div>
+    @endif
 
     {{-- Categories --}}
     <div class="mhome__head"><h3>Categories</h3></div>
@@ -296,4 +310,86 @@
     });
     </script>
 </section>
+
+<script>
+/**
+ * "For You" rail — a port of the app's InfiniteLoopBookPager (MainScreen.kt).
+ *
+ * The stacked "book" look isn't decoration, it's the pager's graphicsLayer: pages
+ * to the RIGHT of the focal one are dragged back left by 85% of a page width and
+ * scaled down toward 0.88, so they pack into a stack with only a sliver showing;
+ * pages already swiped past are left alone to slide away. That maths is reproduced
+ * here 1:1 — pageOffset included — because approximating it reads visibly different
+ * from the app (evenly-spaced cards with a wide peek, rather than a tight stack).
+ *
+ * Divergence: the app fakes infinity with Int.MAX_VALUE virtual pages. This wraps
+ * back to the first page instead, which is equivalent for a rail this size.
+ */
+(() => {
+    const pager = document.querySelector('[data-mpager]');
+    if (!pager) return;
+    const pages = [...pager.querySelectorAll('[data-mpager-page]')];
+    if (!pages.length) return;
+
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    // A page is (screen − contentPadding) wide; read it off the element so the
+    // maths survives a resize rather than assuming a viewport width.
+    const pageWidth = () => pages[0].getBoundingClientRect().width || 1;
+
+    let raf = null;
+    const layout = () => {
+        const p = pageWidth();
+        // Compose: pageOffset = (currentPage - page) + currentPageOffsetFraction,
+        // which is exactly (scrollLeft / pageWidth) - index.
+        const scrolled = pager.scrollLeft / p;
+
+        pages.forEach((page, i) => {
+            const pageOffset = scrolled - i;
+
+            if (pageOffset < 0) {
+                // Upcoming: pull left into the stack and scale down with distance.
+                const tx = pageOffset * p * 0.85;
+                const scale = 0.88 + (1.0 - 0.88) * clamp01(1 - Math.abs(pageOffset));
+                page.style.transform = `translateX(${tx}px) scale(${scale})`;
+            } else {
+                // Swiped past: let it slide away natively.
+                page.style.transform = 'translateX(0px) scale(1)';
+            }
+            // The focal card stays on top of the stack.
+            page.style.zIndex = Math.abs(pageOffset) < 0.5 ? '2' : '1';
+        });
+    };
+    const onScroll = () => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => { raf = null; layout(); });
+    };
+
+    pager.addEventListener('scroll', onScroll, {passive: true});
+    window.addEventListener('resize', layout);
+
+    // Auto-scroll every 3s, as in the pager's LaunchedEffect. Pauses while the
+    // reader is touching it (the app checks isScrollInProgress) or the tab is
+    // hidden, and stays put for anyone who prefers reduced motion.
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let held = false;
+    for (const e of ['pointerdown', 'touchstart']) {
+        pager.addEventListener(e, () => { held = true; }, {passive: true});
+    }
+    for (const e of ['pointerup', 'touchend', 'mouseleave']) {
+        pager.addEventListener(e, () => { held = false; }, {passive: true});
+    }
+
+    setInterval(() => {
+        if (held || still.matches || document.hidden || pages.length < 2) return;
+        const p = pageWidth();
+        const next = Math.round(pager.scrollLeft / p) + 1;
+        pager.scrollTo({
+            left: (next >= pages.length ? 0 : next) * p,
+            behavior: 'smooth',
+        });
+    }, 3000);
+
+    layout();
+})();
+</script>
 @endsection

@@ -46,6 +46,7 @@ final class PublicWebController extends Controller
         return view('site.events', [
             'title' => 'Events',
             'events' => $events,
+            'forYou' => $this->forYouFeed(),
             'trending' => $trending,
             'bannerEvents' => $bannerEvents,
             'categories' => ['All', 'Concerts', 'Workshops', 'Nightlife', 'Comedy', 'Sports', 'Festivals'],
@@ -790,6 +791,47 @@ final class PublicWebController extends Controller
             ->orderByDesc('tickets_sold')
             ->take($limit)
             ->get();
+    }
+
+    /**
+     * The "For You" rail, mirroring the app's rule (MainScreen.kt `forYouEvents`):
+     * take the same base list the app reads from /api/events (newest first), float
+     * the viewer's city to the top WITHOUT filtering other cities out, then narrow
+     * to the `for_you` placement — untagged events show everywhere, and an empty
+     * rail falls back to the full list rather than rendering blank.
+     *
+     * NB this deliberately does NOT reuse {@see eventFeed()}, which hard-filters to
+     * the selected city — the app floats, it doesn't filter, and the rail has to
+     * match it.
+     *
+     * One deliberate divergence from the app: `published` only. /api/events applies
+     * no status filter, so the app would surface a draft; the public site must not.
+     */
+    private function forYouFeed(int $limit = 20): Collection
+    {
+        $city = CityResolver::selected();
+
+        $events = Event::query()
+            ->where('status', 'published')
+            ->orderByDesc('created_at')
+            ->take($limit)
+            ->get();
+
+        // Local-first. PHP 8's sort is stable, so the newest-first order survives
+        // inside each group — same as the app's sortedByDescending.
+        if ($city !== null) {
+            $events = $events
+                ->sortByDesc(fn (Event $e): int => strcasecmp((string) $e->city, $city) === 0 ? 1 : 0)
+                ->values();
+        }
+
+        $tagged = $events->filter(function (Event $e): bool {
+            $placements = $e->placements;
+
+            return empty($placements) || in_array('for_you', $placements, true);
+        })->values();
+
+        return $tagged->isNotEmpty() ? $tagged : $events;
     }
 
     private function eventFeed(int $limit = 6): Collection
