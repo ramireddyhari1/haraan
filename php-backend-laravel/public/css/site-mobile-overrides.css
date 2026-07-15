@@ -1065,7 +1065,9 @@
     /* --- Categories — left-aligned cards (mirrors HaraanCategoryCard) --- */
     /* Categories — the app's HaraanCategoryCard row (16dp radius = HaraanRadius.Medium,
        10dp gaps), line icons rather than emoji, active card accented in EventsBlue. */
-    .mhome__cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    /* Columns follow the card count — the row is built from categories that actually
+       have events, so it can be 2 or 3 wide. A fixed repeat(3) left a hole. */
+    .mhome__cats { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
     .mcat {
         display: flex; flex-direction: column; align-items: flex-start;
         justify-content: space-between; gap: 12px; height: 96px;
