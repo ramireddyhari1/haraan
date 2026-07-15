@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use App\Models\Ad;
 use App\Models\Event;
 use App\Models\LiveMatch;
 use App\Models\User;
@@ -39,14 +40,21 @@ final class PublicWebController extends Controller
 
     public function events(): View
     {
-        $events = $this->eventFeed(8);
-        $trending = $this->trendingFeed(8);
+        // The Categories row used to be decorative — ?category= highlighted a card and
+        // filtered nothing. The app filters every rail off its selected category
+        // (MainScreen.kt `filteredEvents`), so each feed below takes it too.
+        $category = $this->selectedCategory();
+
+        $events = $this->eventFeed(8, $category);
+        $trending = $this->trendingFeed(8, $category);
         $bannerEvents = app(EventService::class)->getBannerEvents();
 
         return view('site.events', [
             'title' => 'Events',
             'events' => $events,
-            'forYou' => $this->forYouFeed(),
+            'forYou' => $this->forYouFeed(20, $category),
+            'eventsAd' => $this->usableAd('events'),
+            'catRow' => $this->categoryCards(),
             'trending' => $trending,
             'bannerEvents' => $bannerEvents,
             'categories' => ['All', 'Concerts', 'Workshops', 'Nightlife', 'Comedy', 'Sports', 'Festivals'],
@@ -776,7 +784,7 @@ final class PublicWebController extends Controller
      *
      * @return Collection<int, Event>
      */
-    private function trendingFeed(int $limit = 8): Collection
+    private function trendingFeed(int $limit = 8, ?string $category = null): Collection
     {
         $city = CityResolver::selected();
         $notSold = ['cancelled', 'refunded', 'pending', 'failed'];
@@ -784,6 +792,7 @@ final class PublicWebController extends Controller
         return Event::query()
             ->whereRaw('lower(status) = ?', ['published'])
             ->when($city, fn ($q) => $q->where('city', $city))
+            ->when($category, fn ($q) => $q->where('category', $category))
             ->whereHas('bookings', fn ($q) => $q
                 ->whereRaw('lower(status) not in (?, ?, ?, ?)', $notSold))
             ->withSum(['bookings as tickets_sold' => fn ($q) => $q
@@ -791,6 +800,88 @@ final class PublicWebController extends Controller
             ->orderByDesc('tickets_sold')
             ->take($limit)
             ->get();
+    }
+
+    /** The category the viewer picked, or null for "All" (= no filter). */
+    private function selectedCategory(): ?string
+    {
+        $category = trim((string) request()->query('category', ''));
+
+        return ($category === '' || strcasecmp($category, 'All') === 0) ? null : $category;
+    }
+
+    /**
+     * The sponsored slot at the top of the Events feed — the app's AdSpaceBanner.
+     *
+     * Returns the creative only if it can actually carry the slot: a bare title with
+     * no image and no link renders as a dead "Shop Now" and is worse than an empty
+     * space. The app falls back to a bundled sample ad when the API has nothing; the
+     * public site must not, because that invents an advertiser.
+     */
+    private function usableAd(string $placement): ?Ad
+    {
+        $ad = Ad::query()
+            ->where('placement', $placement)
+            ->where('is_active', true)
+            ->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))
+            ->where(fn ($q) => $q->whereNull('ends_at')->orWhere('ends_at', '>=', now()))
+            ->orderBy('sort_order')
+            ->first();
+
+        if ($ad === null || trim((string) $ad->title) === '') {
+            return null;
+        }
+
+        // Needs something to look at or somewhere to go — otherwise it's just noise.
+        $hasImage = trim((string) $ad->image_url) !== '';
+        $hasLink  = trim((string) $ad->link_url) !== '';
+
+        return ($hasImage || $hasLink) ? $ad : null;
+    }
+
+    /**
+     * The Categories cards — "All" plus the categories that actually have events,
+     * biggest first, with real counts.
+     *
+     * Built from the data rather than hardcoded like the app's row, which names
+     * Concerts / Standup and shows "245 Events" / "54 Shows". Neither is real: the
+     * admin's events are categorised "Music" and "GENERAL", so those cards read
+     * "0 events" on the web and filter to an empty list in the app. A row that
+     * advertises zero is worse than no row — this one can only show what exists.
+     *
+     * @return list<array{title: string, href: string, stat: string, on: bool}>
+     */
+    private function categoryCards(int $limit = 2): array
+    {
+        $active = (string) request()->query('category', 'All');
+
+        $cards = [[
+            'title' => 'All',
+            'href'  => '/events',
+            'stat'  => Event::query()->where('status', 'published')->count() . ' Total',
+            'on'    => $active === 'All',
+        ]];
+
+        $top = Event::query()
+            ->where('status', 'published')
+            ->whereNotNull('category')
+            ->where('category', '!=', '')
+            ->selectRaw('category, count(*) as total')
+            ->groupBy('category')
+            ->orderByDesc('total')
+            ->limit($limit)
+            ->get();
+
+        foreach ($top as $row) {
+            $cards[] = [
+                'title' => ucfirst(strtolower((string) $row->category)),
+                'href'  => '/events?category=' . urlencode((string) $row->category),
+                'stat'  => $row->total . ' ' . ($row->total === 1 ? 'Event' : 'Events'),
+                'on'    => strcasecmp($active, (string) $row->category) === 0,
+            ];
+        }
+
+        return $cards;
     }
 
     /**
@@ -807,12 +898,13 @@ final class PublicWebController extends Controller
      * One deliberate divergence from the app: `published` only. /api/events applies
      * no status filter, so the app would surface a draft; the public site must not.
      */
-    private function forYouFeed(int $limit = 20): Collection
+    private function forYouFeed(int $limit = 20, ?string $category = null): Collection
     {
         $city = CityResolver::selected();
 
         $events = Event::query()
             ->where('status', 'published')
+            ->when($category, fn ($q) => $q->where('category', $category))
             ->orderByDesc('created_at')
             ->take($limit)
             ->get();
@@ -825,6 +917,11 @@ final class PublicWebController extends Controller
                 ->values();
         }
 
+        // A poster-less event renders the bv-white placeholder — a logo on black. One
+        // of those in the hero rail undoes the whole section, so For You requires a
+        // real image. The event still appears in Trending / Explore Nearby.
+        $events = $events->filter(fn (Event $e): bool => is_array($e->images) && count($e->images) > 0)->values();
+
         $tagged = $events->filter(function (Event $e): bool {
             $placements = $e->placements;
 
@@ -834,19 +931,26 @@ final class PublicWebController extends Controller
         return $tagged->isNotEmpty() ? $tagged : $events;
     }
 
-    private function eventFeed(int $limit = 6): Collection
+    private function eventFeed(int $limit = 6, ?string $category = null): Collection
     {
         $city = CityResolver::selected();
 
         $events = Event::query()
             ->where('status', 'published')
             ->when($city, fn ($q) => $q->where('city', $city))
+            ->when($category, fn ($q) => $q->where('category', $category))
             ->orderBy('date', 'desc')
             ->take($limit)
             ->get();
 
         if ($events->isNotEmpty()) {
             return $events;
+        }
+
+        // A filtered-to-empty result is a real answer ("no Comedy in Hyderabad"), not
+        // a reason to fall through to the sample data below.
+        if ($category !== null) {
+            return collect();
         }
 
         // When a city is selected but has no events, show its empty state

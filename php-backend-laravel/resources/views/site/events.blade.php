@@ -26,12 +26,28 @@
 {{-- MOBILE APP-STYLE EVENTS HOME (mirrors the Android app; ≤720px) --}}
 {{-- ============================================================= --}}
 <div class="mhome">
-    <div class="mhome__greet">
-        <div>
-            <p class="mhome__hi">Hello 👋</p>
-            <h2 class="mhome__title">Discover in {{ $selectedCity ?? 'All India' }}</h2>
-        </div>
-    </div>
+    {{-- The app's feed opens with the sponsored slot (AdSpaceBanner), NOT a greeting —
+         the header already says hello, and a second "Hello 👋 / Discover in <city>" was
+         spending the most valuable space on the page saying it twice.
+
+         Rendered only when the admin's creative is actually usable: the app falls back
+         to a bundled sample ad, which on the web would be inventing an advertiser. An
+         empty slot is honest; a fake one isn't. --}}
+    @if($eventsAd)
+        <a class="mad" @if($eventsAd->link_url) href="{{ $eventsAd->link_url }}" rel="sponsored noopener" @endif>
+            @if($eventsAd->image_url)
+                <img class="mad__img" src="{{ $eventsAd->image_url }}" alt="" fetchpriority="high">
+            @endif
+            <span class="mad__body">
+                <span class="mad__label">Sponsored</span>
+                <strong class="mad__title">{{ $eventsAd->title }}</strong>
+                @if($eventsAd->subtitle)<span class="mad__sub">{{ $eventsAd->subtitle }}</span>@endif
+            </span>
+            @if($eventsAd->cta_text && $eventsAd->link_url)
+                <span class="mad__cta">{{ $eventsAd->cta_text }}</span>
+            @endif
+        </a>
+    @endif
 
     {{-- For You — a 1:1 port of the app's rail (MainScreen.kt InfiniteLoopBookPager
          + HaraanEventCard). No "See all": the app passes SectionHeader no action, so
@@ -91,24 +107,8 @@
     </div>
     @endif
 
-    {{-- Categories --}}
-    <div class="mhome__head"><h3>Categories</h3></div>
-    <div class="mhome__cats">
-        <a href="/events?category=Concerts" class="mcat mcat--blue">
-            <span class="mcat__ico">🎵</span>
-            <span class="mcat__txt"><strong>Concerts</strong><small>{{ $catCount('Concerts') ?: 0 }} events</small></span>
-        </a>
-        <a href="/events?category=Comedy" class="mcat mcat--blue">
-            <span class="mcat__ico">🎤</span>
-            <span class="mcat__txt"><strong>Comedy</strong><small>{{ $catCount('Comedy') ?: 0 }} shows</small></span>
-        </a>
-        <a href="/gamehub" class="mcat mcat--green">
-            <span class="mcat__ico">🏏</span>
-            <span class="mcat__txt"><strong>GameHub</strong><small>Turf & slots</small></span>
-        </a>
-    </div>
-
-    {{-- Trending: real, ranked by actual ticket sales (from the controller) --}}
+    {{-- Trending: real, ranked by actual ticket sales (from the controller).
+         Sits BEFORE Categories, as in the app's feed. --}}
     @if($mTrending->count())
     <div class="mhome__head"><h3>Trending</h3><a href="/events">See all</a></div>
     <div class="mhome__scroll mhome__scroll--sm">
@@ -125,6 +125,44 @@
                     @if($sold > 0)<span class="mtrend__sold">🎟 {{ number_format($sold) }} booked</span>@endif
                 </div>
                 <p>{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
+            </a>
+        @endforeach
+    </div>
+    @endif
+
+    {{-- Categories — the app's HaraanCategoryCard row (icons, stat line, active card
+         in EventsBlue), but built from categories that actually have events. Never
+         emoji: they re-render per OS and read as a template.
+
+         The app hardcodes "Concerts / 245 Events" and "Standup / 54 Shows"; no event
+         is categorised either, so that row advertises stock it doesn't have. See
+         PublicWebController::categoryCards(). --}}
+    @if(count($catRow) > 1)
+    <div class="mhome__head mhome__head--bare"><h3>Categories</h3></div>
+    <div class="mhome__cats">
+        @php
+            // Line icons keyed by category. Unknown categories get the neutral ticket.
+            $catIcons = [
+                'all'      => '<rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect>',
+                'music'    => '<path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle>',
+                'concerts' => '<path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle>',
+                'comedy'   => '<path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line>',
+                'standup'  => '<path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line>',
+                'nightlife'=> '<path d="M5 4h14l-7 8z"></path><line x1="12" y1="12" x2="12" y2="20"></line><line x1="8" y1="20" x2="16" y2="20"></line>',
+                'workshops'=> '<path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4l-2.6 2.6 2 2 2.6-2.6z"></path>',
+                'festivals'=> '<path d="M12 2v20"></path><path d="M12 4l8 4-8 4"></path>',
+                'sports'   => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 1 0 18M3 12h18"></path>',
+                'default'  => '<path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H5a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"></path><line x1="14" y1="7" x2="14" y2="17" stroke-dasharray="1.5 2"></line>',
+            ];
+        @endphp
+        @foreach($catRow as $c)
+            @php $icon = $catIcons[strtolower($c['title'])] ?? $catIcons['default']; @endphp
+            <a href="{{ $c['href'] }}" class="mcat {{ $c['on'] ? 'is-on' : '' }}">
+                <span class="mcat__ico">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $icon !!}</svg>
+                </span>
+                <strong class="mcat__name">{{ $c['title'] }}</strong>
+                <small class="mcat__stat">{{ $c['stat'] }}</small>
             </a>
         @endforeach
     </div>

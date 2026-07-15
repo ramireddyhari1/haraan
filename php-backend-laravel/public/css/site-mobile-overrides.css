@@ -1063,22 +1063,79 @@
     .mtrend > p { margin: 10px 2px 0; font-size: 13px; font-weight: 800; color: #2563EB; }
 
     /* --- Categories — left-aligned cards (mirrors HaraanCategoryCard) --- */
+    /* Categories — the app's HaraanCategoryCard row (16dp radius = HaraanRadius.Medium,
+       10dp gaps), line icons rather than emoji, active card accented in EventsBlue. */
     .mhome__cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .mcat {
         display: flex; flex-direction: column; align-items: flex-start;
-        justify-content: space-between; gap: 14px; height: 96px;
+        justify-content: space-between; gap: 12px; height: 96px;
         background: #fff; border: 1px solid #E2E8F0; border-radius: 16px;
         padding: 12px; text-decoration: none; text-align: left;
+        transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
     }
     .mcat__ico {
-        font-size: 20px; width: 36px; height: 36px; border-radius: 10px;
+        width: 36px; height: 36px; border-radius: 10px;
         display: grid; place-items: center;
+        background: rgba(37, 99, 235, 0.10);
+        color: #2563EB;
     }
-    .mcat--blue .mcat__ico { background: rgba(37, 99, 235, 0.10); }
-    .mcat--green .mcat__ico { background: rgba(0, 200, 83, 0.12); }
-    .mcat__txt { display: block; }
-    .mcat strong { display: block; font-size: 13px; font-weight: 700; color: #0F172A; }
-    .mcat small { display: block; font-size: 11px; color: #94A3B8; margin-top: 1px; }
+    .mcat__name { display: block; font-size: 13px; font-weight: 700; color: #0F172A; line-height: 1.2; }
+    .mcat__stat { display: block; font-size: 11px; color: #94A3B8; margin-top: 2px; }
+
+    /* Selected state, as in the app's `selected` + activeColor. */
+    .mcat.is-on {
+        background: #2563EB;
+        border-color: #2563EB;
+    }
+    .mcat.is-on .mcat__ico { background: rgba(255, 255, 255, 0.18); color: #fff; }
+    .mcat.is-on .mcat__name { color: #fff; }
+    .mcat.is-on .mcat__stat { color: rgba(255, 255, 255, 0.75); }
+
+    /* --- Sponsored slot (the app's AdSpaceBanner), only rendered for a real creative --- */
+    .mad {
+        display: flex; align-items: center; gap: 12px;
+        margin-bottom: 4px; padding: 12px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 20px;
+        text-decoration: none;
+        transition: transform 120ms ease;
+    }
+    .mad__img { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; flex-shrink: 0; }
+    .mad__body { min-width: 0; flex: 1; }
+    .mad__label {
+        display: block; font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #94A3B8;
+    }
+    .mad__title {
+        display: block; font-size: 14px; font-weight: 700; color: #0F172A; margin-top: 2px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mad__sub {
+        display: block; font-size: 12px; color: #64748B;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mad__cta {
+        flex-shrink: 0; padding: 8px 14px; border-radius: 999px;
+        background: #2563EB; color: #fff; font-size: 12px; font-weight: 700;
+    }
+
+    /* --- TOUCH FEEDBACK ------------------------------------------------------
+       The app ripples on every tappable surface; before this the whole mobile
+       stylesheet had one :active rule, so taps felt dead. A press-in is the web's
+       honest equivalent — no ripple, but the surface acknowledges the thumb. */
+    .mfy:active,
+    .mcat:active,
+    .mad:active,
+    .mtrend:active,
+    .mcard:active,
+    .mposter:active {
+        transform: scale(0.975);
+    }
+    /* Safe on the pager: its per-frame transform lives on .mfy__page, so the card's
+       own press composes with it rather than fighting it. */
+    .mfy, .mtrend, .mcard, .mposter {
+        transition: transform 120ms ease;
+        -webkit-tap-highlight-color: transparent;
+    }
 
     /* --- Explore Nearby: 2-col grid of vertical cards (mirrors EventListCard) --- */
     .mhome__head--stack { flex-direction: column; align-items: flex-start; gap: 2px; }
