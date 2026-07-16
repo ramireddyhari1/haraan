@@ -801,17 +801,27 @@
     }
 
     /* Centered brand lockup at the top of the feed (user-placed: between the
-       Events/GameHub tabs and "For You") — wordmark over the tagline. */
+       Events/GameHub tabs and "For You") — black wordmark with the blue
+       calligraphy flourish BESIDE it, dropped slightly below the baseline
+       like a signature (user: beside + a bit down, not underneath). */
+    /* The wordmark itself is centred on the page; the calligraphy accent hangs
+       off its right edge (absolute) so it can't pull the lockup off-centre. */
     .mbrandmark {
-        display: flex; flex-direction: column; align-items: center; gap: 5px;
-        padding: 16px 0 6px;
+        position: relative;
+        display: flex; align-items: flex-end; justify-content: center;
+        padding: 16px 0 10px;
     }
-    /* Wordmark rendered pure black (the PNG is navy); tagline is calligraphy. */
-    .mbrandmark img { height: 22px; width: auto; display: block; filter: brightness(0); }
+    /* Wordmark rendered pure black (the PNG is navy). */
+    .mbrandmark img { height: 30px; width: auto; display: block; filter: brightness(0); }
+    /* The script tucks in close against the wordmark's tail — user picked this
+       over a wider, fully-clearing gap. Keep the offset. */
     .mbrandmark span {
+        position: absolute; left: 50%; bottom: 4px;
+        margin-left: 52px; white-space: nowrap;
         font-family: 'Great Vibes', 'Segoe Script', cursive;
-        font-size: 19px; line-height: 1.2; letter-spacing: 0.01em;
-        color: #334155;
+        font-size: 26px; line-height: 1; letter-spacing: 0.01em;
+        color: #2563EB;
+        transform: rotate(-2deg);
     }
 
     /* --- Mobile footer: brand-gradient sheet (EventsBlue → GameHubGreen —
