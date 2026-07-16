@@ -82,8 +82,14 @@
                      3:4 artwork suits it best; a landscape banner loses its sides. --}}
                 <a class="mfy" href="/events/{{ $ev->id }}">
                     {{-- The first poster is the hero of the page — lazy-loading it would
-                         delay the largest paint. The rest of the rail can wait. --}}
+                         delay the largest paint. The rest of the rail can wait.
+
+                         decoding="async" is load-bearing, not a nicety: these posters are
+                         1600×900 landing in a 283px slot (5.7× oversized), and a synchronous
+                         decode of one costs tens of ms on the main thread — landing right in
+                         the middle of a swipe. That was the stutter. --}}
                     <img class="mfy__img" src="{{ $img }}" alt=""
+                         decoding="async"
                          loading="{{ $loop->first ? 'eager' : 'lazy' }}"
                          @if($loop->first) fetchpriority="high" @endif>
                     <span class="mfy__grad"></span>
@@ -378,20 +384,28 @@
     const N = originals.length;
     if (N < 2) return;
 
-    /* A real loop, the way the app fakes one with Int.MAX_VALUE virtual pages: clone
-       the strip either side and park the viewer on the middle copy, so there's always
-       a card to swipe into in both directions. Once a swipe settles in a copy, shift
-       scrollLeft by one strip — identical content there, so nothing moves on screen.
-       Replaces a rewind that smooth-scrolled from the last card back across every
-       card, which was the worst moment in the rail. */
-    const lead = originals.map(p => p.cloneNode(true));
-    const tail = originals.map(p => p.cloneNode(true));
-    for (const c of [...lead, ...tail]) {
+    /* A real loop, the way the app fakes one with Int.MAX_VALUE virtual pages — but
+       with TWO clones, not two strips.
+
+       Since the rail snaps a card at a time you can only ever be one card past either
+       end, so one spare each side is enough: [last', R0…Rn, first']. Sit on R0, and
+       when a swipe settles on a spare, hop one strip — identical content, so nothing
+       moves on screen. Cloning the whole strip (the first attempt) put NINE 1600×900
+       posters in this rail for three events; each is 5.7× oversized for its 283px slot,
+       and decoding one costs real main-thread time mid-swipe. Two clones, not eight. */
+    const lead = originals[N - 1].cloneNode(true);
+    const tail = originals[0].cloneNode(true);
+    for (const c of [lead, tail]) {
         c.setAttribute('aria-hidden', 'true');
         c.querySelectorAll('a').forEach(a => a.setAttribute('tabindex', '-1'));
+        // A spare is never the LCP candidate; let the real hero win the priority.
+        c.querySelectorAll('img').forEach(i => {
+            i.setAttribute('loading', 'lazy');
+            i.removeAttribute('fetchpriority');
+        });
     }
-    lead.reverse().forEach(c => pager.prepend(c));
-    tail.forEach(c => pager.append(c));
+    pager.prepend(lead);
+    pager.append(tail);
 
     const pages = [...pager.querySelectorAll('[data-mpager-page]')];
     // Snap pitch = card + gap. Measured off the DOM so a resize can't stale it.
@@ -400,15 +414,16 @@
         const b = pages[1].getBoundingClientRect();
         return Math.round(b.left - a.left) || Math.round(a.width);
     };
-    const home = () => N * pitch();
+    // The real cards start at index 1, after the leading spare.
+    const home = () => pitch();
 
-    /* Hop back to the middle copy once a swipe has settled in an outer one. Fires on
-       scrollend — never mid-gesture, so it can't fight the finger. */
+    /* Hop off a spare once a swipe has settled on it. Fires on scrollend — never
+       mid-gesture, so it can't fight the finger. */
     const recentre = () => {
-        const strip = home();
+        const p = pitch();
         const x = pager.scrollLeft;
-        if (x >= strip * 2 - 1) pager.scrollLeft = x - strip;
-        else if (x < strip - 1) pager.scrollLeft = x + strip;
+        if (x >= (N + 1) * p - 1) pager.scrollLeft = x - N * p;   // past the end
+        else if (x < p - 1) pager.scrollLeft = x + N * p;          // before the start
     };
     const hasScrollEnd = 'onscrollend' in window;
     if (hasScrollEnd) pager.addEventListener('scrollend', recentre);

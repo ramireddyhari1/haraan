@@ -866,11 +866,20 @@
     .mpager::-webkit-scrollbar { display: none; }
 
     /* One page = one card. Narrower than the screen so the next poster peeks, which
-       is what tells you the rail scrolls. */
+       is what tells you the rail scrolls.
+
+       content-visibility keeps the off-screen cards out of every frame. The loop
+       clones the strip, so nine 1600×900 posters live in this rail — 13 megapixels of
+       decode and resample if the browser paints them all. Skipping the ones nobody can
+       see is the difference between a swipe that glides and one that hitches.
+       contain-intrinsic-size keeps their boxes the right size while skipped, so the
+       scroll width and the snap points don't move. */
     .mfy__page {
         position: relative;
         flex: 0 0 calc(100vw - 92px);
         scroll-snap-align: start;
+        content-visibility: auto;
+        contain-intrinsic-size: calc(100vw - 92px) calc((100vw - 92px) * 4 / 3);
     }
 
     /* The hero poster, at the app's real size — 283px at 375 (the page is
