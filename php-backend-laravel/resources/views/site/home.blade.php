@@ -127,11 +127,6 @@
     </div>
     @endif
 
-    {{-- End-of-feed brand sign-off (phone-only, see layout's ≥721px hide) --}}
-    <div class="mbrandend" aria-hidden="true">
-        <img src="{{ asset('images/haraan-logo.png') }}" alt="">
-        <span>Discover. Book. Play.</span>
-    </div>
 </div>
 
 <div class="home-desktop-only">

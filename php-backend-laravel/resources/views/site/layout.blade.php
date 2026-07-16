@@ -33,10 +33,10 @@
         /* NB: the desktop mobile-UI-hide safety rules live in site.css
            (@media min-width:1025px) — not duplicated here. */
 
-        /* Brand strip + end-of-feed sign-off are phone-only (styled in the
-           mobile overrides ≤720px); everywhere else they must not render. */
+        /* Brand strip, end-of-feed sign-off and mobile footer are phone-only
+           (styled in the mobile overrides ≤720px); never render elsewhere. */
         @media (min-width: 721px) {
-            .mbrand, .mbrandend { display: none !important; }
+            .mbrand, .mbrandend, .mfoot { display: none !important; }
         }
 
         /* Event-section header accent, applied only on /events pages.
@@ -255,6 +255,42 @@
     <main class="{{ request()->is('gamehub/actionboard/match/*') ? '' : 'container' }}" role="main">
         @yield('content')
     </main>
+
+    {{-- Mobile footer (≤720px, main tabs only): app download + links + brand base.
+         The Play badge targets the final package id — the link goes live the day
+         the listing publishes; until then the direct-APK line below it works. --}}
+    @if(request()->is('/', 'events', 'gamehub'))
+    <footer class="mfoot">
+        <div class="mfoot__app">
+            <div>
+                <strong>Take Haraan with you</strong>
+                <p>Book faster, follow live scores, and keep your tickets in your pocket.</p>
+            </div>
+            <a class="mfoot__play" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#00E3A5" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
+                    <path fill="#3DDCFF" d="M17.7 9.1 5.6 2l9 8.7z"/>
+                    <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
+                    <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
+                </svg>
+                <span><small>Get it on</small><b>Google Play</b></span>
+            </a>
+            <a class="mfoot__apk" href="/haraan.apk">or download the Android APK directly</a>
+        </div>
+        <nav class="mfoot__links" aria-label="Footer">
+            <a href="/events">Events</a>
+            <a href="/gamehub">GameHub</a>
+            <a href="/support">Support</a>
+            <a href="/notifications">Notifications</a>
+            <a href="/profile">My profile</a>
+        </nav>
+        <div class="mfoot__base">
+            <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+            <span>Discover. Book. Play.</span>
+            <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
+        </div>
+    </footer>
+    @endif
 
     <!-- Premium Login Modal -->
     <div id="loginModal" class="auth-modal" aria-hidden="true">
