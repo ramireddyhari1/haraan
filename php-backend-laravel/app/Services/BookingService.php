@@ -13,6 +13,8 @@ use App\Models\Venue;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
+use App\Support\ContactPrefill;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -78,7 +80,12 @@ final class BookingService
      * @throws NotFoundHttpException  When the event or a referenced tier is missing.
      * @throws ConflictHttpException  When the event or a tier lacks inventory.
      */
-    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null): Collection
+    /**
+     * @param  array{name?: string|null, email?: string|null, phone?: string|null}  $contact
+     *         Who the ticket is for, captured at checkout. Optional so older callers
+     *         (and venue bookings) keep working; stored on every row of the order.
+     */
+    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = []): Collection
     {
         // Collapse duplicate tier lines and drop non-positive quantities up front.
         $normalised = [];
@@ -100,7 +107,16 @@ final class BookingService
 
         $totalTickets = array_sum(array_column($normalised, 'quantity'));
 
-        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode): Collection {
+        // Fall back to the account for anything checkout didn't supply, so a booking
+        // always carries a contact even from a caller that doesn't collect one.
+        $attendee = [
+            'attendee_name' => self::clean($contact['name'] ?? null) ?? (trim((string) $user->name) ?: null),
+            'attendee_email' => self::clean($contact['email'] ?? null)
+                ?? (ContactPrefill::isRealEmail($user->email) ? trim((string) $user->email) : null),
+            'attendee_phone' => self::clean($contact['phone'] ?? null) ?? (trim((string) $user->phone) ?: null),
+        ];
+
+        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee): Collection {
             $event = Event::query()->lockForUpdate()->find($eventId);
 
             if ($event === null) {
@@ -111,7 +127,11 @@ final class BookingService
                 throw new ConflictHttpException('Not enough seats available');
             }
 
-            $bookings = collect();
+            // Eloquent's collection, not collect(): callers relation-load the result
+            // (BookingsController does `->load('ticketType')`), and a plain Support
+            // collection has no load() — that threw AFTER this transaction committed,
+            // so the app's booking succeeded in the DB and still returned a 500.
+            $bookings = new EloquentCollection();
 
             foreach ($normalised as $line) {
                 $qty      = (int) $line['quantity'];
@@ -155,6 +175,7 @@ final class BookingService
                     'user_id'        => $user->id,
                     'event_id'       => $event->id,
                     'ticket_type_id' => $tier?->id,
+                    ...$attendee,
                 ]));
             }
 
@@ -613,5 +634,13 @@ final class BookingService
         if (! $allowed) {
             throw new AccessDeniedHttpException('You are not allowed to check in tickets');
         }
+    }
+
+    /** Trim to null: an empty string must fall through to the account, not store "". */
+    private static function clean(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
     }
 }

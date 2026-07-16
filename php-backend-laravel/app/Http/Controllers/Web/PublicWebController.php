@@ -224,25 +224,6 @@ final class PublicWebController extends Controller
         return view('site.profile', ['title' => 'My Profile']);
     }
 
-    public function updateProfile(\Illuminate\Http\Request $request)
-    {
-        $user = auth()->user();
-        if (!$user) {
-            return redirect()->route('site.login');
-        }
-
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
-            'phone' => 'nullable|string|max:20',
-            'player_role' => 'nullable|string|max:50',
-            'playing_style' => 'nullable|string|max:50',
-        ]);
-
-        $user->update($validated);
-
-        return redirect()->back()->with('success', 'Profile updated successfully.');
-    }
 
     public function getPlayerDetails($playerId)
     {

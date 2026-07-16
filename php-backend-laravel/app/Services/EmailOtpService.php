@@ -42,8 +42,10 @@ class EmailOtpService
             ->get();
 
         if ($accounts->isEmpty()) {
-            // No pool configured. In local dev this is fine — the master code 000000 still
-            // logs you in (see EmailAuthController::verifyOtp).
+            // No pool configured. In local dev the sign-up still proceeds (the send failure
+            // is ignored outside production), but there is NO master code for email — unlike
+            // WhatsAppAuthController, EmailAuthController::verifyOtp only accepts the real
+            // one, so local email login needs the code from the sender pool or the cache.
             Log::warning("Email OTP: no sendable accounts configured (to {$to}).");
 
             return false;

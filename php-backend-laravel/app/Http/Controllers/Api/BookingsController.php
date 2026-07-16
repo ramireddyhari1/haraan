@@ -72,6 +72,7 @@ final class BookingsController extends Controller
             (int) $request->validated('eventId'),
             $request->orderLines(),
             $request->validated('couponCode'),
+            $request->contact(),
         )->load('ticketType');
 
         $primary  = $bookings->first();

@@ -37,8 +37,9 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/api/search/suggest', 'searchSuggest')->name('api.search.suggest');
     Route::get('/login', 'login')->name('site.login');
     Route::get('/register', 'register')->name('site.register');
-    Route::get('/profile', 'profile')->name('site.profile');
-    Route::put('/profile', 'updateProfile')->name('site.profile.update');
+    // NB: /profile lives in Web\AccountController (auth-gated) — the account screen is
+    // the app's twin now. The old PUT /profile name/email/phone editor went with the
+    // page that posted to it; nothing referenced it afterwards.
 });
 
 // New Live Match Routes
@@ -59,6 +60,13 @@ Route::middleware('auth')->group(function() {
     Route::post('/profile/setup', [\App\Http\Controllers\Web\PublicWebController::class, 'saveProfileSetup'])->name('site.profile.setup.save');
 });
 
+// Event ticket booking — the web twin of the app's checkout (same BookingService).
+Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingController::class)->group(function (): void {
+    Route::get('/events/{id}/book', 'checkout')->whereNumber('id')->name('site.booking.checkout');
+    Route::post('/events/{id}/book', 'store')->whereNumber('id')->name('site.booking.store');
+    Route::get('/bookings/{id}/pass', 'pass')->whereNumber('id')->name('site.booking.pass');
+});
+
 // Header inbox lanes — the web twins of the app's chat + bell icons. Both read the
 // same tables the JWT API serves the app, so a conversation or a notification looks
 // the same wherever the user opens it.
@@ -76,6 +84,22 @@ Route::controller(\App\Http\Controllers\Auth\WhatsAppAuthController::class)->gro
     Route::post('/auth/whatsapp/verify', 'verifyOtp')->name('whatsapp.verify.submit');
     Route::get('/auth/whatsapp/cancel', 'cancel')->name('whatsapp.cancel');
 });
+
+// Account — the web twin of the app's AccountProfileScreen (hero, lanes, settings).
+// /profile itself is declared with the public site routes above; these are the rows
+// and lanes it opens, plus the sign-out it always needed.
+Route::middleware('auth')->controller(\App\Http\Controllers\Web\AccountController::class)->group(function (): void {
+    Route::get('/profile', 'profile')->name('site.profile');
+    Route::get('/bookings', 'bookings')->name('site.bookings');
+    Route::get('/account/privacy', 'privacy')->name('site.account.privacy');
+    Route::post('/account/privacy', 'updatePrivacy')->name('site.account.privacy.save');
+    Route::post('/profile/avatar', 'uploadAvatar')->name('site.profile.avatar');
+    Route::post('/logout', 'logout')->name('site.logout');
+});
+
+// Terms & Conditions / Privacy Policy — public documents, readable signed out.
+Route::get('/legal/{slug}', [\App\Http\Controllers\Web\AccountController::class, 'legal'])
+    ->name('site.legal');
 
 // "Continue with Google" on the website — the login modal posts the GIS ID token here.
 Route::post('/auth/google', [\App\Http\Controllers\Auth\GoogleWebAuthController::class, 'login'])

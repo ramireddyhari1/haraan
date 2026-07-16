@@ -72,6 +72,11 @@ final class Booking extends Model
         'channel',
         'guest_name',
         'guest_phone',
+        // Who the ticket is for, captured at checkout (see the add_attendee_contact
+        // migration). The account is who paid; these are the order's contact details.
+        'attendee_name',
+        'attendee_email',
+        'attendee_phone',
     ];
 
     /** @return array<string, string> */

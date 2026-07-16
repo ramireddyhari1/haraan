@@ -243,6 +243,19 @@
         </div>
     </header>
 
+    {{-- Account pages are their own place, not a stop on the feed: the app gives them
+         a PageHeader (back + title) instead of the greeting/search/tabs, so the phone
+         does too. Desktop keeps the topbar — it's the only nav a wide screen has, and
+         CSS decides which of the two shows (see .pagebar). --}}
+    @if(request()->is('profile', 'bookings', 'account/*', 'legal/*'))
+        <header class="pagebar">
+            <button type="button" class="pagebar__back" aria-label="Back" data-back>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+            </button>
+            <h1 class="pagebar__title">{{ $title ?? 'Account' }}</h1>
+        </header>
+    @endif
+
     <main class="{{ request()->is('gamehub/actionboard/match/*') ? '' : 'container' }}" role="main">
         @yield('content')
     </main>

@@ -2095,6 +2095,631 @@ main.container {
     font-weight: 600;
 }
 
+/* --- Page header (back + title) --------------------------------------
+   The app's PageHeader, for account pages. Hidden by default: on desktop the
+   topbar is the only navigation there is, so the phone-style back header only
+   takes over at the mobile breakpoint (see site-mobile-overrides.css). */
+.pagebar { display: none; }
+
+.pagebar__back {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #EFF2F7;
+    color: #0F172A;
+    cursor: pointer;
+}
+
+.pagebar__back svg { width: 18px; height: 18px; }
+.pagebar__back:hover { background: #E2E8F0; }
+
+.pagebar__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0F172A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* =====================================================================
+   Account screen (/profile) — the web twin of the app's AccountProfileScreen.
+   Tokens are the app's, verbatim: Navy #07111F, NavyMid #102B52, BlueBright
+   #2563EB, Green #00B140, Text1/2/3, Stroke #E5E9F0. The app is a phone, so the
+   column is capped and centred rather than stretched across a desktop.
+   ===================================================================== */
+.aprof {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 16px 16px 40px;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+}
+
+/* --- Identity hero ---------------------------------------------------- */
+/* The screen's ONE saturated moment: navy -> blue -> green, exactly as the brand
+   reads. Nothing else on the page gets a full-bleed gradient; a second one halves
+   the impact of both. The radial glow lifts the avatar off the navy. */
+.aprof-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 24px;
+    padding: 20px;
+    color: #fff;
+    background:
+        radial-gradient(120% 120% at 16% 18%, rgba(37, 99, 235, 0.30) 0%, rgba(37, 99, 235, 0) 60%),
+        linear-gradient(135deg, #07111F 0%, #102B52 55%, #0A3D2A 100%);
+}
+
+/* Guilloché arcs — the concentric line-work of banknotes and passports, struck
+   from a point past the bottom-right so only their shoulders cross the card.
+   Alpha stays under 0.06: the monospaced member ID sits on top of these. */
+.aprof-hero::after {
+    content: '';
+    position: absolute;
+    right: -55%;
+    bottom: -125%;
+    width: 220%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    pointer-events: none;
+    background: repeating-radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.055) 0 1px,
+        rgba(255, 255, 255, 0) 1px 26px
+    );
+}
+
+.aprof-hero__row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.aprof-avatar {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 68px;
+    height: 68px;
+    flex: 0 0 68px;
+    border-radius: 50%;
+    cursor: pointer;
+    background: linear-gradient(135deg, #2563EB, #00B140);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+
+.aprof-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.aprof-avatar__initial {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+}
+
+/* Camera badge signals the avatar is editable. */
+.aprof-avatar__badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #2563EB;
+    border: 2px solid #07111F;
+}
+
+.aprof-avatar__badge svg {
+    width: 12px;
+    height: 12px;
+    color: #fff;
+}
+
+.aprof-hero__id {
+    min-width: 0; /* let the email ellipsis instead of stretching the row */
+    flex: 1;
+}
+
+.aprof-hero__name {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.aprof-hero__email {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 5px 0 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    min-width: 0;
+}
+
+.aprof-hero__email svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.aprof-hero__email span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.aprof-hero__sub {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.aprof-hero__rule {
+    position: relative;
+    height: 1px;
+    margin: 18px 0 14px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* Labelled, monospaced, tap to copy — the way an airline treats a
+   frequent-flyer number. */
+.aprof-memberid {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 2px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: #fff;
+    cursor: pointer;
+    text-align: left;
+}
+
+.aprof-memberid small {
+    display: block;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.aprof-memberid b {
+    display: block;
+    margin-top: 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    white-space: nowrap;
+}
+
+.aprof-memberid svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.aprof-memberid.is-copied svg {
+    color: #00E3A5;
+}
+
+/* --- The two lanes ---------------------------------------------------- */
+.aprof-lanes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.aprof-lane {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    border: 1px solid #E5E9F0;
+    border-radius: 18px;
+    background: #fff;
+    text-decoration: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.aprof-lane:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.aprof-lane__icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+}
+
+.aprof-lane__icon svg {
+    width: 19px;
+    height: 19px;
+}
+
+.aprof-lane__icon--blue { background: #EAF1FE; color: #2563EB; }
+.aprof-lane__icon--green { background: #E7F7EE; color: #00B140; }
+
+.aprof-lane__label {
+    margin-top: 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #5A6473;
+}
+
+/* Push the payload to the bottom so a counting lane and an inviting lane still
+   share a baseline when they sit side by side. */
+.aprof-lane__value {
+    margin-top: auto;
+    padding-top: 6px;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #0F172A;
+}
+
+.aprof-lane__caption {
+    margin-top: 3px;
+    font-size: 11.5px;
+    color: #9AA3B2;
+}
+
+.aprof-lane__invite {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: auto;
+    padding-top: 6px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.aprof-lane__invite svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+}
+
+.aprof-lane__invite--blue { color: #2563EB; }
+.aprof-lane__invite--green { color: #00B140; }
+
+/* --- Standing --------------------------------------------------------- */
+.aprof-standing {
+    display: flex;
+    align-items: center;
+    margin-top: 12px;
+    padding: 14px 0;
+    border: 1px solid #E5E9F0;
+    border-radius: 16px;
+    background: #fff;
+}
+
+.aprof-stat {
+    flex: 1;
+    text-align: center;
+}
+
+.aprof-stat__icon {
+    width: 15px;
+    height: 15px;
+}
+
+.aprof-stat b {
+    display: block;
+    margin-top: 6px;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0F172A;
+    font-variant-numeric: tabular-nums;
+}
+
+.aprof-stat small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #9AA3B2;
+}
+
+.aprof-stat__divider {
+    width: 1px;
+    height: 30px;
+    background: #E5E9F0;
+}
+
+/* --- Groups, rows ----------------------------------------------------- */
+/* One spacing scale instead of ad-hoc values: air between groups (24px), a
+   tighter beat from a heading to the card it labels (12px). */
+.aprof-heading {
+    margin: 24px 0 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0F172A;
+}
+
+.aprof-card {
+    border: 1px solid #E5E9F0;
+    border-radius: 16px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.aprof-card--signout {
+    margin-top: 24px;
+}
+
+.aprof-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 15px 16px;
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    color: #0F172A;
+    text-decoration: none;
+    cursor: pointer;
+    text-align: left;
+}
+
+.aprof-row:hover { background: #F8FAFC; }
+
+.aprof-row > span { flex: 1; }
+
+.aprof-row__icon {
+    width: 19px;
+    height: 19px;
+    flex: 0 0 19px;
+    color: #5A6473;
+}
+
+.aprof-row__chev {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    color: #9AA3B2;
+}
+
+.aprof-row--signout { color: #D23F57; }
+.aprof-row--signout .aprof-row__icon { color: #D23F57; }
+.aprof-row--signout:hover { background: #FDECEF; }
+
+.aprof-hr {
+    display: block;
+    height: 1px;
+    margin-left: 47px; /* start past the icon column, as the app's ThinDivider does */
+    background: #E5E9F0;
+}
+
+.aprof-flash {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    background: #ECFDF5;
+    color: #047857;
+    border: 1px solid #A7F3D0;
+}
+
+.aprof-flash--err {
+    background: #FEF2F2;
+    color: #B91C1C;
+    border-color: #FECACA;
+}
+
+.aprof-version {
+    margin: 20px 0 0;
+    text-align: center;
+    font-size: 11px;
+    color: #9AA3B2;
+}
+
+/* --- Sub-pages: legal, privacy, bookings ------------------------------ */
+.aprof-doc__title {
+    margin: 8px 0 0;
+    font-size: 24px;
+    font-weight: 800;
+    color: #0F172A;
+}
+
+.aprof-doc__meta,
+.aprof-doc__lede {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: #9AA3B2;
+}
+
+.aprof-doc__lede {
+    margin-bottom: 4px;
+    font-size: 14px;
+    color: #5A6473;
+    line-height: 1.5;
+}
+
+.aprof-doc__body {
+    margin-top: 16px;
+    padding: 18px;
+}
+
+.aprof-doc__body p {
+    margin: 0 0 14px;
+    font-size: 14.5px;
+    line-height: 1.65;
+    color: #5A6473;
+}
+
+.aprof-doc__body p:last-child { margin-bottom: 0; }
+.aprof-doc__empty { color: #9AA3B2; font-style: italic; }
+
+.aprof-doc__back {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.aprof-doc__back a {
+    color: #5A6473;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.aprof-doc__back a:hover { color: #2563EB; }
+
+/* Privacy toggles */
+.aprof-toggle {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    cursor: pointer;
+}
+
+.aprof-toggle__text { flex: 1; }
+
+.aprof-toggle__text b {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    color: #0F172A;
+}
+
+.aprof-toggle__text small {
+    display: block;
+    margin-top: 3px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #9AA3B2;
+}
+
+/* The checkbox stays in the DOM (it's what posts), but the track/thumb is the
+   visible switch. Focus is mirrored onto the track for keyboard users. */
+.aprof-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.aprof-toggle__track {
+    position: relative;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: #E5E9F0;
+    transition: background 0.18s;
+}
+
+.aprof-toggle__thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+    transition: transform 0.18s;
+}
+
+.aprof-toggle input:checked ~ .aprof-toggle__track { background: #2563EB; }
+.aprof-toggle input:checked ~ .aprof-toggle__track .aprof-toggle__thumb { transform: translateX(18px); }
+.aprof-toggle input:focus-visible ~ .aprof-toggle__track { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
+
+.aprof-save { margin-top: 24px; }
+
+/* Bookings list */
+.aprof-booking {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    text-decoration: none;
+}
+
+.aprof-booking:hover { background: #F8FAFC; }
+
+.aprof-booking__icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 11px;
+}
+
+.aprof-booking__icon svg { width: 18px; height: 18px; }
+.aprof-booking__icon.is-event { background: #EAF1FE; color: #2563EB; }
+.aprof-booking__icon.is-venue { background: #E7F7EE; color: #00B140; }
+
+.aprof-booking__text { flex: 1; min-width: 0; }
+
+.aprof-booking__text b {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0F172A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.aprof-booking__text small {
+    display: block;
+    margin-top: 2px;
+    font-size: 12.5px;
+    color: #9AA3B2;
+}
+
+.aprof-booking__status {
+    font-size: 11px;
+    font-weight: 700;
+    color: #5A6473;
+    background: #F1F5F9;
+    border-radius: 999px;
+    padding: 4px 9px;
+    white-space: nowrap;
+}
+
+.aprof-empty {
+    margin-top: 16px;
+    padding: 32px 20px;
+    text-align: center;
+}
+
+.aprof-empty p { margin: 0 0 6px; font-size: 14px; color: #9AA3B2; }
+.aprof-empty p b { font-size: 16px; color: #0F172A; }
+.aprof-empty .btn { margin-top: 14px; }
+
 .site-footer {
     background: #1a1a1c;
     color: #fff;

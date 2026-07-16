@@ -40,6 +40,26 @@ final class StoreBookingRequest extends FormRequest
             'seatNumbers'          => ['nullable', 'array'],
             'couponCode'           => ['nullable', 'string'],
             'discount'             => ['nullable', 'numeric', 'min:0'],
+            // Who the ticket is for. Nullable so older app builds don't 422 — the
+            // service falls back to the account when a field is absent.
+            'contact'              => ['nullable', 'array'],
+            'contact.name'         => ['nullable', 'string', 'max:120'],
+            'contact.email'        => ['nullable', 'email', 'max:255'],
+            'contact.phone'        => ['nullable', 'string', 'max:32'],
+        ];
+    }
+
+    /**
+     * The order's contact details, as the service expects them.
+     *
+     * @return array{name: string|null, email: string|null, phone: string|null}
+     */
+    public function contact(): array
+    {
+        return [
+            'name'  => $this->input('contact.name'),
+            'email' => $this->input('contact.email'),
+            'phone' => $this->input('contact.phone'),
         ];
     }
 

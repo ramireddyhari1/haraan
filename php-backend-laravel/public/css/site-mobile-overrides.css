@@ -1316,3 +1316,28 @@
     .mcard__price { margin: 0 2px; font-size: 14px; font-weight: 800; color: #2563EB; letter-spacing: -0.01em; }
     .mcard__price span { font-size: 11px; font-weight: 500; color: rgba(37, 99, 235, 0.8); }
 }
+
+/* --- Account pages: back header instead of the feed's topbar ------------
+   /profile is a place you went, not a stop on the feed — the greeting, search
+   and Events/GameHub tabs are noise there, exactly as they're absent from the
+   app's AccountProfileScreen. Swap the topbar for the app's PageHeader on the
+   phone; desktop (≥1025px) keeps the topbar since it's the only nav it has. */
+@media (max-width: 1024px) {
+    body:has(.pagebar) .topbar { display: none; }
+
+    .pagebar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        padding: 14px 16px;
+        background: #fff;
+        border-bottom: 1px solid var(--border, #E5E9F0);
+    }
+
+    /* The sub-pages' footer "← Account" link is the desktop's only way back;
+       with the back button present it's a second door to the same room. */
+    body:has(.pagebar) .aprof-doc__back { display: none; }
+}

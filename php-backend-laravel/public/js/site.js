@@ -547,6 +547,41 @@ document.addEventListener('DOMContentLoaded', () => {
     closeLoginBtn?.addEventListener('click', closeLoginModal);
 
     /* ------------------------------------------------------------------ */
+    /*  2a0. Page header back button                                       */
+    /* ------------------------------------------------------------------ */
+
+    /** Pops the history stack, but a page opened directly (shared link, new tab)
+     *  has nothing to pop — fall back to the account screen rather than dead-end. */
+    document.querySelector('[data-back]')?.addEventListener('click', () => {
+        if (window.history.length > 1) window.history.back();
+        else window.location.assign('/profile');
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  2a. Member ID — tap to copy                                        */
+    /* ------------------------------------------------------------------ */
+
+    /** Mirrors the app's MemberIdBand: tapping the ID copies it. */
+    document.querySelector('.aprof-memberid')?.addEventListener('click', async function () {
+        const id = this.dataset.copy;
+        if (!id) return;
+        try {
+            await navigator.clipboard.writeText(id);
+        } catch {
+            return; // clipboard blocked (insecure context / denied) — say nothing rather than lie
+        }
+        this.classList.add('is-copied');
+        const label = this.querySelector('small');
+        if (!label) return;
+        const original = label.textContent;
+        label.textContent = 'COPIED';
+        setTimeout(() => {
+            label.textContent = original;
+            this.classList.remove('is-copied');
+        }, 1400);
+    });
+
+    /* ------------------------------------------------------------------ */
     /*  2b. Continue with Google                                           */
     /* ------------------------------------------------------------------ */
 
