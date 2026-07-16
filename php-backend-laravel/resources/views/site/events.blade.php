@@ -26,6 +26,13 @@
 {{-- MOBILE APP-STYLE EVENTS HOME (mirrors the Android app; ≤720px) --}}
 {{-- ============================================================= --}}
 <div class="mhome">
+    {{-- Centered brand lockup between the tabs and the feed (user-placed;
+         replaces the old top strip so the wordmark appears exactly once). --}}
+    <div class="mbrandmark" aria-hidden="true">
+        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+        <span>Discover. Book. Play.</span>
+    </div>
+
     {{-- The app's feed opens with the sponsored slot (AdSpaceBanner), NOT a greeting —
          the header already says hello, and a second "Hello 👋 / Discover in <city>" was
          spending the most valuable space on the page saying it twice.

@@ -9,6 +9,11 @@
     $catCount = fn($c) => (isset($events) ? $events->where('category', $c)->count() : 0);
 @endphp
 <div class="mhome">
+    {{-- Centered brand lockup at the top of the feed (matches /events). --}}
+    <div class="mbrandmark" aria-hidden="true">
+        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+        <span>Discover. Book. Play.</span>
+    </div>
     <div class="mhome__greet">
         <div>
             <p class="mhome__hi">Hello 👋</p>

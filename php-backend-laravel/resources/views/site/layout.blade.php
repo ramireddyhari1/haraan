@@ -33,10 +33,10 @@
         /* NB: the desktop mobile-UI-hide safety rules live in site.css
            (@media min-width:1025px) — not duplicated here. */
 
-        /* Brand strip, end-of-feed sign-off and mobile footer are phone-only
-           (styled in the mobile overrides ≤720px); never render elsewhere. */
+        /* Brand lockup and mobile footer are phone-only (styled in the mobile
+           overrides ≤720px); never render elsewhere. */
         @media (min-width: 721px) {
-            .mbrand, .mbrandend, .mfoot { display: none !important; }
+            .mbrandmark, .mfoot { display: none !important; }
         }
 
         /* Event-section header accent, applied only on /events pages.
@@ -82,16 +82,6 @@
     </style>
 </head>
 <body class="@yield('body_class')">
-    {{-- Mobile-only brand strip: the wordmark's one moment on phones (the desktop
-         .brand lockup is hidden ≤1024px, so mobile never showed the name at all).
-         Deliberately OUTSIDE the sticky header — it scrolls away with the page,
-         so the brand greets at the top without renting permanent header space. --}}
-    @if(request()->is('/', 'events', 'gamehub'))
-    <div class="mbrand" aria-hidden="true">
-        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-        <span>Discover. Book. Play.</span>
-    </div>
-    @endif
     <header class="topbar {{ request()->is('events*') || request()->is('/') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">
