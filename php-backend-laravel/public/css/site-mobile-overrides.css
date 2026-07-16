@@ -799,6 +799,19 @@
         padding: 14px 16px 8px;
     }
 
+    /* One canvas: at the top of the page the sticky header wears the SAME sky
+       wash the section below starts with — the white band above the tint read
+       as a seam and cheapened the page. Once scrolled (.is-scrolled, toggled
+       by JS) it returns to solid surface so content stays readable under it. */
+    .topbar.topbar--events {
+        background: #E0F2FE;
+        border-bottom-color: transparent;
+        transition: background-color 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+    .topbar.topbar--events.is-scrolled {
+        background: var(--surface, #fff);
+    }
+
     /* --- Greeting --- */
     .mhome__greet { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 16px; }
     .mhome__hi { margin: 0; font-size: 13px; font-weight: 600; color: #64748B; }
