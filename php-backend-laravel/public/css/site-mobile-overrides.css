@@ -1056,7 +1056,10 @@
         display: flex;
         gap: 32px;
         overflow-x: auto;
-        scroll-snap-type: x proximity;
+        /* No scroll-snap here: snap containers re-snap on every viewport resize,
+           and the URL bar collapsing during a vertical swipe IS a resize — the
+           rail kept jumping sideways mid-scroll. The app's row free-scrolls too. */
+        overscroll-behavior-x: contain;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
         margin-left: calc(50% - 50vw);
@@ -1068,7 +1071,6 @@
     .mtrend {
         position: relative;
         flex: 0 0 140px;
-        scroll-snap-align: center;
         text-decoration: none; color: inherit;
     }
     .mtrend__img {
@@ -1170,11 +1172,17 @@
     .mfy:active,
     .mcat:active,
     .mad:active,
-    .mtrend:active,
     .mcard:active,
     .mposter:active {
         transform: scale(0.975);
     }
+    /* Trending presses the POSTER only — the whole-card scale moved the
+       oversized rank digit hanging off its edge, which read as the row
+       shaking whenever a vertical swipe started on a card. */
+    .mtrend:active .mtrend__img {
+        transform: scale(0.97);
+    }
+    .mtrend__img { transition: transform 120ms ease; }
     /* Safe on the pager: its per-frame transform lives on .mfy__page, so the card's
        own press composes with it rather than fighting it. */
     .mfy, .mtrend, .mcard, .mposter {
