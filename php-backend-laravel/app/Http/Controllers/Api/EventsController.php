@@ -18,13 +18,27 @@ use Illuminate\Http\Request;
  */
 final class EventsController extends Controller
 {
+    /**
+     * GET /api/events — the list the app's Events tab reads.
+     *
+     * Published only, always. This route sits outside the auth.jwt group, so it is
+     * wide open: it used to apply no status filter at all and served every app user
+     * the admin's drafts (a test listing, "REDDY LIVE TEST", was live in the app's
+     * For You rail — the website never showed it, which is how the mismatch surfaced).
+     *
+     * The old `?status=` parameter is gone rather than defaulted. Nothing passes it,
+     * and honouring it on a public route would be the same leak with an extra step —
+     * `?status=draft` would just hand the drafts back. Anything that legitimately
+     * needs unpublished events is an admin surface: Filament queries Eloquent
+     * directly, and the partner console has its own authenticated endpoints.
+     *
+     * lower(status) because the column carries mixed casing (see the Event mutator).
+     */
     public function index(Request $request): JsonResponse
     {
-        $query = Event::query()->orderByDesc('created_at');
-
-        if ($request->filled('status') && $request->query('status') !== 'All') {
-            $query->where('status', (string) $request->query('status'));
-        }
+        $query = Event::query()
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->orderByDesc('created_at');
 
         if ($request->filled('search')) {
             $term = (string) $request->query('search');
@@ -41,9 +55,16 @@ final class EventsController extends Controller
             ->response();
     }
 
+    /**
+     * GET /api/events/{id} — public, so published only. Filtering the list alone would
+     * have left the back door open: a draft's full detail was fetchable by id.
+     */
     public function show(string $id): JsonResponse
     {
-        $event = Event::query()->find($id);
+        $event = Event::query()
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->where('id', $id)
+            ->first();
 
         if ($event === null) {
             return response()->json(['error' => 'Event not found'], 404);
