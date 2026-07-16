@@ -434,7 +434,7 @@ class EventForm
                     ->disk('public')
                     ->directory('events')
                     ->imageEditor()
-                    ->helperText('Upload files, OR paste image links below — use whichever you prefer (or both). The first image (uploaded, then pasted) is the poster. Size: portrait 1080×1440px (3:4) — the "For You" hero shape; landscape banners lose their sides there. IMPORTANT: the event page hero crops the TOP and BOTTOM edges (it shows roughly the middle 1080×1000 of the poster), so keep the title and all text inside the centre — never near the edges. JPG or PNG · under 20MB.')
+                    ->helperText('Upload files, OR paste image links below — use whichever you prefer (or both). The first image (uploaded, then pasted) is the poster. Size: portrait 1080×1440px (3:4) — the event card AND the event page hero both use this exact shape, so a 3:4 poster shows uncropped everywhere. Other shapes get cropped to fit: landscape banners lose their sides, extra-tall images lose top/bottom — so keep titles away from the edges regardless. JPG or PNG · under 20MB.')
                     ->columnSpanFull(),
                 TagsInput::make('image_urls')
                     ->label('…or paste image URL(s)')

@@ -308,7 +308,11 @@
         .district-event-page .dr-hero-banner {
             position: sticky; top: 0; z-index: 0;
             margin: 0 !important;
-            height: 340px !important; min-height: 0; max-height: none;
+            /* Same 3:4 shape as the event card + the recommended 1080×1440
+               poster — a correctly sized poster shows WITHOUT any crop.
+               Capped so short phones aren't all poster. */
+            height: auto !important; aspect-ratio: 3 / 4;
+            min-height: 0; max-height: 64vh !important;
             border: none !important; border-radius: 0 !important;
             background: #121620;
         }
