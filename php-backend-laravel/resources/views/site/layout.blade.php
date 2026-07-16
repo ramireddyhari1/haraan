@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $title ?? 'Haraan' }}</title>
     <meta name="theme-color" content="#ffffff">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
@@ -292,9 +293,8 @@
             
             <div class="auth-modal__header">
                 <div class="auth-modal__logo">
-                    <img src="{{ asset('bv-white.png') }}" alt="Haraan">
-                    <h2>Haraan</h2>
-                    <p>Experience the best in Dining, Movies, and Events.</p>
+                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                    <p>Book events, play sports, follow live scores — one account for both lanes.</p>
                 </div>
             </div>
 
@@ -304,27 +304,25 @@
                     <p class="subtitle">Enter the 6-digit code sent to your WhatsApp.</p>
                     
                     @if(session('success'))
-                        <div style="background-color: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 20px;">
-                            {{ session('success') }}
-                        </div>
+                        <div class="auth-alert auth-alert--ok" role="status">{{ session('success') }}</div>
                     @endif
-                    
+
                     @if(session('error'))
-                        <div style="background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 20px;">
-                            {{ session('error') }}
-                        </div>
+                        <div class="auth-alert" role="alert">{{ session('error') }}</div>
                     @endif
 
                     <form method="post" action="{{ route('whatsapp.verify.submit') }}" class="phone-form">
                         @csrf
                         <div class="field" style="margin-bottom: 15px;">
-                            <input 
-                                type="text" 
-                                name="otp" 
+                            <input
+                                type="text"
+                                name="otp"
+                                class="otp-input"
                                 placeholder="123456"
                                 required
                                 maxlength="6"
-                                style="text-align: center; font-size: 24px; letter-spacing: 5px; width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;"
+                                inputmode="numeric"
+                                autocomplete="one-time-code"
                             >
                         </div>
                         <button type="submit" class="btn btn--solid btn--full btn--large">Verify & Login</button>
@@ -343,15 +341,24 @@
                         });
                     </script>
                 @else
-                    <h3>Enter your mobile number</h3>
+                    <h3>Log in or sign up</h3>
                     <p class="subtitle">If you don't have an account yet, we'll create one for you</p>
-                    
+
                     @if(session('error'))
-                        <div style="background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 20px;">
-                            {{ session('error') }}
-                        </div>
+                        <div class="auth-alert" role="alert">{{ session('error') }}</div>
                     @endif
-                    
+
+                    {{-- Google first: one tap for returning users, no OTP round-trip.
+                         Hidden entirely when GOOGLE_CLIENT_ID isn't set, so a missing
+                         config shows nothing rather than a button that always fails. --}}
+                    @if(config('services.google.client_id'))
+                        <div class="auth-google">
+                            <div id="googleSignInBtn" class="auth-google__btn"></div>
+                            <p class="auth-google__error" id="googleSignInError" role="alert" hidden></p>
+                        </div>
+                        <div class="auth-divider"><span>or</span></div>
+                    @endif
+
                     <form class="phone-form" id="phoneLoginForm" method="POST" action="{{ route('whatsapp.request') }}">
                         @csrf
                         <input type="hidden" name="phone" id="hiddenPhoneField" value="">
@@ -419,6 +426,19 @@
     @if(config('broadcasting.default') === 'reverb')
         <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
         <script src="{{ $assetVer('js/realtime.js') }}"></script>
+    @endif
+
+    {{-- "Continue with Google" (Google Identity Services). Loaded only when an OAuth
+         client is configured. GIS renders its own button into #googleSignInBtn and hands
+         us an ID token, which we post to the session-login route. --}}
+    @if(config('services.google.client_id') && !auth()->check())
+        <script>
+            window.HaraanGoogleAuth = {
+                clientId: @json(config('services.google.client_id')),
+                postUrl: @json(route('google.web.login')),
+            };
+        </script>
+        <script src="https://accounts.google.com/gsi/client" async defer></script>
     @endif
 
     <script src="{{ $assetVer('js/site.js') }}"></script>

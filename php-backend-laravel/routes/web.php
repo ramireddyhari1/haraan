@@ -77,6 +77,10 @@ Route::controller(\App\Http\Controllers\Auth\WhatsAppAuthController::class)->gro
     Route::get('/auth/whatsapp/cancel', 'cancel')->name('whatsapp.cancel');
 });
 
+// "Continue with Google" on the website — the login modal posts the GIS ID token here.
+Route::post('/auth/google', [\App\Http\Controllers\Auth\GoogleWebAuthController::class, 'login'])
+    ->name('google.web.login');
+
 /*
 |--------------------------------------------------------------------------
 | ERP Portal Routes (Admin & Partner)

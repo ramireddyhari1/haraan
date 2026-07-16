@@ -1890,9 +1890,11 @@ main.container {
     background: rgba(255, 255, 255, 0.3);
 }
 
+/* Brand gradient — EventsBlue → GameHubGreen, the two lanes of the product
+   (same ramp as the mobile footer). Replaces an off-brand indigo→purple. */
 .auth-modal__header {
-    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-    padding: 60px 40px 40px;
+    background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
+    padding: 44px 40px 36px;
     text-align: center;
     color: #fff;
     position: relative;
@@ -1907,23 +1909,22 @@ main.container {
     opacity: 0.1;
 }
 
+/* The wordmark PNG is navy; invert it to white so it reads on the gradient.
+   It carries the brand name, so no separate <h2> heading. */
 .auth-modal__logo img {
-    width: 64px;
-    height: 64px;
-    margin-bottom: 16px;
-    filter: drop-shadow(0 10px 20px rgba(0,0,0,0.2));
-}
-
-.auth-modal__logo h2 {
-    margin: 0 0 8px;
-    font-size: 28px;
-    font-weight: 800;
+    height: 30px;
+    width: auto;
+    margin: 0 auto 14px;
+    display: block;
+    filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
 }
 
 .auth-modal__logo p {
-    margin: 0;
+    margin: 0 auto;
+    max-width: 30ch;
     font-size: 14px;
-    opacity: 0.9;
+    line-height: 1.5;
+    opacity: 0.92;
     font-weight: 500;
 }
 
@@ -1972,6 +1973,9 @@ main.container {
 
 .phone-input-group input {
     flex: 1;
+    /* Without this the input can't shrink below its intrinsic size (flex items
+       default to min-width:auto) and it overflows the card on narrow phones. */
+    min-width: 0;
     padding: 12px 20px;
     background: #fff;
     border: 1px solid #e5e7eb;
@@ -1983,8 +1987,90 @@ main.container {
 
 .phone-input-group input:focus {
     outline: 0;
-    border-color: #6366f1;
-    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+    border-color: #2563EB;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+/* --- Continue with Google -------------------------------------------- */
+/* GIS renders its own iframe button here; we only own the box around it. */
+.auth-google {
+    margin-bottom: 18px;
+}
+
+.auth-google__btn {
+    display: flex;
+    justify-content: center;
+    min-height: 44px;
+}
+
+.auth-google__btn.is-busy {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.auth-google__error {
+    margin: 10px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #DC2626;
+}
+
+/* --- "or" divider ----------------------------------------------------- */
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 18px;
+    color: #9ca3af;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #e5e7eb;
+}
+
+/* --- Inline alerts ---------------------------------------------------- */
+.auth-alert {
+    margin-bottom: 20px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    background: #FEF2F2;
+    color: #B91C1C;
+    border: 1px solid #FECACA;
+}
+
+.auth-alert--ok {
+    background: #ECFDF5;
+    color: #047857;
+    border-color: #A7F3D0;
+}
+
+/* --- OTP field -------------------------------------------------------- */
+.otp-input {
+    width: 100%;
+    padding: 14px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 8px;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.otp-input:focus {
+    outline: 0;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
 
 .btn--large {

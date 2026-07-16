@@ -519,6 +519,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!loginModal) return;
         loginModal.setAttribute('aria-hidden', 'false');
         loginModal.style.display = 'grid';
+        // Now that the slot has a measurable width, GIS can size its button to fit.
+        renderGoogleButtonIfNeeded();
         setTimeout(() => loginCard?.classList.add('show'), 20);
     }
 
@@ -543,6 +545,104 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     loginBackdrop?.addEventListener('click', closeLoginModal);
     closeLoginBtn?.addEventListener('click', closeLoginModal);
+
+    /* ------------------------------------------------------------------ */
+    /*  2b. Continue with Google                                           */
+    /* ------------------------------------------------------------------ */
+
+    let googleRendered = false;
+
+    /**
+     * Draws the Google button, sized to the slot's real width.
+     *
+     * Must run while the modal is visible: GIS needs a pixel width, and a hidden
+     * modal measures 0 — which silently falls back to a 320px button that overflows
+     * the card. Hence the call from openLoginModal() rather than on page load.
+     * Safe to call repeatedly; only the first visible call draws.
+     */
+    function renderGoogleButtonIfNeeded() {
+        const cfg  = window.HaraanGoogleAuth;
+        const slot = document.getElementById('googleSignInBtn');
+        if (googleRendered || !cfg || !slot || !window.google?.accounts?.id) return;
+
+        const width = slot.clientWidth;
+        if (!width) return; // still hidden — we'll be called again on open
+
+        googleRendered = true;
+        window.google.accounts.id.renderButton(slot, {
+            theme: 'outline',
+            size: 'large',
+            shape: 'pill',
+            text: 'continue_with',
+            logo_alignment: 'center',
+            width: Math.min(width, 400),
+        });
+    }
+
+    /**
+     * Initialises Google Identity Services and trades the ID token it returns for a
+     * Laravel session. GIS loads async, so we poll briefly rather than racing it.
+     * The slot only exists when GOOGLE_CLIENT_ID is configured (see layout.blade.php).
+     */
+    (function initGoogleSignIn() {
+        const cfg  = window.HaraanGoogleAuth;
+        const slot = document.getElementById('googleSignInBtn');
+        if (!cfg || !slot) return;
+
+        const errorEl = document.getElementById('googleSignInError');
+        const showError = (msg) => {
+            if (!errorEl) return;
+            errorEl.textContent = msg;
+            errorEl.hidden = false;
+        };
+
+        /** Exchange the Google ID token for a session, then go where the user was headed. */
+        async function onCredential(response) {
+            errorEl && (errorEl.hidden = true);
+            slot.classList.add('is-busy');
+            try {
+                const res = await fetch(cfg.postUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ credential: response.credential }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    showError(data.error || 'That sign-in did not work. Please try again.');
+                    return;
+                }
+                window.location.assign(data.redirect || '/');
+            } catch {
+                showError('Network error. Please check your connection and try again.');
+            } finally {
+                slot.classList.remove('is-busy');
+            }
+        }
+
+        let waited = 0;
+        const timer = setInterval(() => {
+            if (window.google?.accounts?.id) {
+                clearInterval(timer);
+                window.google.accounts.id.initialize({
+                    client_id: cfg.clientId,
+                    callback: onCredential,
+                });
+                // Covers the case where the modal is already open when GIS lands.
+                renderGoogleButtonIfNeeded();
+            } else if ((waited += 100) > 6000) {
+                // GIS blocked (offline, blocker, or an unauthorised origin) — leave the
+                // phone form as the working path instead of showing a dead button.
+                clearInterval(timer);
+                slot.closest('.auth-google')?.remove();
+                document.querySelector('.auth-divider')?.remove();
+            }
+        }, 100);
+    })();
 
     /* ------------------------------------------------------------------ */
     /*  3. Phone Login Form                                                */
