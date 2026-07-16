@@ -1050,44 +1050,60 @@
         box-shadow: 0 4px 12px rgba(8, 12, 22, 0.28);
     }
 
-    /* --- Trending: ranked Top-10 (mirrors TrendingRowSection) --- */
-    .mhome__scroll--sm { gap: 30px; padding-left: 30px; }
+    /* --- Trending — the app's TrendingRowSection (MainScreen.kt). Card 140×160dp,
+       24dp radius, 32dp between cards, contentPadding start 36 / end 24. --- */
+    .mtrends {
+        display: flex;
+        gap: 32px;
+        overflow-x: auto;
+        scroll-snap-type: x proximity;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        margin-left: calc(50% - 50vw);
+        margin-right: calc(50% - 50vw);
+        /* start 36 clears the rank number, which bleeds 24px off the first card. */
+        padding: 4px 24px 12px 36px;
+    }
+    .mtrends::-webkit-scrollbar { display: none; }
     .mtrend {
-        position: relative; scroll-snap-align: start; flex: 0 0 132px;
+        position: relative;
+        flex: 0 0 140px;
+        scroll-snap-align: center;
         text-decoration: none; color: inherit;
     }
     .mtrend__img {
-        position: relative;
-        height: 168px; border-radius: 22px; overflow: hidden;
-        background-size: cover; background-position: center;
-        background-color: #0F172A; box-shadow: 0 10px 22px rgba(15, 23, 42, 0.20);
+        position: relative; display: block;
+        height: 160px; border-radius: 24px; overflow: hidden;
+        background: #000;                   /* the Card's containerColor */
+        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);   /* elevation 2dp */
     }
+    .mtrend__img img {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;
+    }
+    /* Brush.verticalGradient(Transparent → Black 85%) from 80px down. */
     .mtrend__grad {
         position: absolute; inset: 0;
-        background: linear-gradient(to top, rgba(8,12,22,0.9) 8%, rgba(8,12,22,0) 55%);
+        background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.85) 100%);
     }
-    .mtrend__img h5 {
-        position: absolute; left: 12px; right: 10px; bottom: 10px; z-index: 2;
-        margin: 0; font-size: 12px; font-weight: 800; line-height: 1.25; color: #fff;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    .mtrend__title {
+        position: absolute; z-index: 2;
+        left: 24px; right: 8px; bottom: 12px;   /* start 24 keeps clear of the rank */
+        font-size: 12px; font-weight: 700; line-height: 15px; color: #fff;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
     }
-    .mtrend__sold {
-        position: absolute; left: 10px; top: 10px; z-index: 2;
-        display: inline-flex; align-items: center; gap: 3px;
-        background: rgba(8, 12, 22, 0.6); backdrop-filter: blur(4px);
-        color: #fff; font-size: 10px; font-weight: 700;
-        padding: 3px 8px; border-radius: 999px;
-    }
+    /* The oversized rank, bleeding off the card's bottom-left (offset -24, +14). */
     .mtrend__rank {
-        position: absolute; left: -22px; bottom: -14px; z-index: 3;
+        position: absolute; left: -24px; bottom: -14px; z-index: 5;
         font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-        font-size: 84px; font-weight: 900; line-height: 1; letter-spacing: -0.04em;
+        font-size: 96px; font-weight: 900; line-height: 1; letter-spacing: -0.04em;
         color: #F4F7FB;
-        -webkit-text-stroke: 3px #203A5C;
-        text-shadow: 0 6px 16px rgba(15, 23, 42, 0.28);
+        -webkit-text-stroke: 3px rgba(32, 58, 92, 0.7);
+        text-shadow: 0 6px 22px rgba(0, 0, 0, 0.2);
         pointer-events: none;
     }
-    .mtrend > p { margin: 10px 2px 0; font-size: 13px; font-weight: 800; color: #2563EB; }
 
     /* --- Categories — left-aligned cards (mirrors HaraanCategoryCard) --- */
     /* Categories — the app's HaraanCategoryCard row (16dp radius = HaraanRadius.Medium,

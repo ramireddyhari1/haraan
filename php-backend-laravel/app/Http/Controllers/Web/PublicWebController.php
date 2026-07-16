@@ -52,7 +52,7 @@ final class PublicWebController extends Controller
         return view('site.events', [
             'title' => 'Events',
             'events' => $events,
-            'forYou' => $this->forYouFeed(20, $category),
+            'forYou' => $this->railFeed('for_you', 20, $category),
             'eventsAd' => $this->usableAd('events'),
             'catRow' => $this->categoryCards(),
             'trending' => $trending,
@@ -774,32 +774,22 @@ final class PublicWebController extends Controller
     }
 
     /**
-     * "Trending" events, ranked by real ticket sales (sum of booking quantity),
-     * newest-selling first. Only events with at least one non-cancelled booking
-     * are included, so the row is empty (and hidden) until real demand exists —
-     * no synthetic "trending". City-scoped like the main feed.
+     * The "Trending" rail. Now the admin's `trending` placement, via {@see railFeed()},
+     * because that is what the app's row is (MainScreen.kt `trendingEvents`) and the
+     * two must agree.
      *
-     * Status comparisons are case-insensitive because the data carries mixed
-     * casing (e.g. 'published' vs 'PUBLISHED', 'confirmed' vs 'CONFIRMED').
+     * This replaces a version ranked by real ticket sales, which was the more honest
+     * reading of the word but rendered nothing: no event has a booking yet, so the
+     * whole section hid itself and the website was simply missing a row the app has.
+     * The tag is a real editorial signal — an admin picked those events — but note the
+     * label promises popularity it isn't measuring. If the sales ranking should come
+     * back once bookings exist, it belongs on top of the placement, not instead of it.
      *
      * @return Collection<int, Event>
      */
     private function trendingFeed(int $limit = 8, ?string $category = null): Collection
     {
-        $city = CityResolver::selected();
-        $notSold = ['cancelled', 'refunded', 'pending', 'failed'];
-
-        return Event::query()
-            ->whereRaw('lower(status) = ?', ['published'])
-            ->when($city, fn ($q) => $q->where('city', $city))
-            ->when($category, fn ($q) => $q->where('category', $category))
-            ->whereHas('bookings', fn ($q) => $q
-                ->whereRaw('lower(status) not in (?, ?, ?, ?)', $notSold))
-            ->withSum(['bookings as tickets_sold' => fn ($q) => $q
-                ->whereRaw('lower(status) not in (?, ?, ?, ?)', $notSold)], 'quantity')
-            ->orderByDesc('tickets_sold')
-            ->take($limit)
-            ->get();
+        return $this->railFeed('trending', $limit, $category);
     }
 
     /** The category the viewer picked, or null for "All" (= no filter). */
@@ -885,20 +875,21 @@ final class PublicWebController extends Controller
     }
 
     /**
-     * The "For You" rail, mirroring the app's rule (MainScreen.kt `forYouEvents`):
-     * take the same base list the app reads from /api/events (newest first), float
-     * the viewer's city to the top WITHOUT filtering other cities out, then narrow
-     * to the `for_you` placement — untagged events show everywhere, and an empty
-     * rail falls back to the full list rather than rendering blank.
+     * One curated rail — `for_you` or `trending` — mirroring the app's rule
+     * (MainScreen.kt `forYouEvents` / `trendingEvents`): take the same base list the
+     * app reads from /api/events (newest first), float the viewer's city to the top
+     * WITHOUT filtering other cities out, then narrow to the rail's placement.
+     * Untagged events show everywhere, and an empty rail falls back to the full list
+     * rather than rendering blank.
      *
      * NB this deliberately does NOT reuse {@see eventFeed()}, which hard-filters to
-     * the selected city — the app floats, it doesn't filter, and the rail has to
+     * the selected city — the app floats, it doesn't filter, and the rails have to
      * match it.
      *
      * One deliberate divergence from the app: `published` only. /api/events applies
      * no status filter, so the app would surface a draft; the public site must not.
      */
-    private function forYouFeed(int $limit = 20, ?string $category = null): Collection
+    private function railFeed(string $rail, int $limit = 20, ?string $category = null): Collection
     {
         $city = CityResolver::selected();
 
@@ -917,15 +908,15 @@ final class PublicWebController extends Controller
                 ->values();
         }
 
-        // A poster-less event renders the bv-white placeholder — a logo on black. One
-        // of those in the hero rail undoes the whole section, so For You requires a
-        // real image. The event still appears in Trending / Explore Nearby.
+        // A poster-less event renders the bv-white placeholder — a logo on black. Both
+        // rails are poster-led, so both need real artwork. The event still shows in
+        // Explore Nearby, which leads with text.
         $events = $events->filter(fn (Event $e): bool => is_array($e->images) && count($e->images) > 0)->values();
 
-        $tagged = $events->filter(function (Event $e): bool {
+        $tagged = $events->filter(function (Event $e) use ($rail): bool {
             $placements = $e->placements;
 
-            return empty($placements) || in_array('for_you', $placements, true);
+            return empty($placements) || in_array($rail, $placements, true);
         })->values();
 
         return $tagged->isNotEmpty() ? $tagged : $events;

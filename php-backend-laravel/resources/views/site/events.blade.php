@@ -120,24 +120,26 @@
     </div>
     @endif
 
-    {{-- Trending: real, ranked by actual ticket sales (from the controller).
-         Sits BEFORE Categories, as in the app's feed. --}}
+    {{-- Trending — the app's TrendingRowSection: a 140×160 poster with an oversized
+         rank number bleeding off its left edge. No price and no "booked" badge; the
+         app's card carries the title alone, and no "See all" (its SectionHeader gets
+         no action). Sits BEFORE Categories, as in the app's feed.
+
+         The row is the admin's `trending` placement, same as the app. It used to be
+         ranked by real ticket sales, which meant it rendered nothing at all — no event
+         has a booking yet. See PublicWebController::trendingFeed(). --}}
     @if($mTrending->count())
-    <div class="mhome__head"><h3>Trending</h3><a href="/events">See all</a></div>
-    <div class="mhome__scroll mhome__scroll--sm">
+    <div class="mhome__head mhome__head--bare"><h3>Trending</h3></div>
+    <div class="mtrends">
         @foreach($mTrending as $ev)
-            @php
-                $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
-                $sold = (int) ($ev->tickets_sold ?? 0);
-            @endphp
+            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
             <a class="mtrend" href="/events/{{ $ev->id }}">
                 <span class="mtrend__rank" aria-hidden="true">{{ $loop->iteration }}</span>
-                <div class="mtrend__img" style="background-image:url('{{ $img }}')">
-                    <div class="mtrend__grad"></div>
-                    <h5>{{ $ev->title }}</h5>
-                    @if($sold > 0)<span class="mtrend__sold">🎟 {{ number_format($sold) }} booked</span>@endif
-                </div>
-                <p>{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
+                <span class="mtrend__img">
+                    <img src="{{ $img }}" alt="" loading="lazy" decoding="async">
+                    <span class="mtrend__grad"></span>
+                    <span class="mtrend__title">{{ $ev->title }}</span>
+                </span>
             </a>
         @endforeach
     </div>
