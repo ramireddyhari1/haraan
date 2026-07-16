@@ -816,7 +816,13 @@
        the two lanes of the product) with the app CTA + links + brand base --- */
     .mfoot {
         margin-top: 44px;
-        background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
+        /* Aurora, not a flat ramp: a plain blue→green linear went muddy-teal in
+           the middle. Deep navy base, EventsBlue glow washing in from the top,
+           GameHubGreen glow from the bottom corner — rich, and text stays legible. */
+        background:
+            radial-gradient(140% 95% at 12% -10%, rgba(37, 99, 235, 0.95) 0%, rgba(37, 99, 235, 0) 58%),
+            radial-gradient(130% 90% at 100% 110%, rgba(0, 200, 83, 0.8) 0%, rgba(0, 200, 83, 0) 55%),
+            #0B1934;
         color: #ffffff;
         border-radius: 24px 24px 0 0;
         padding: 26px 20px calc(30px + env(safe-area-inset-bottom, 0px));
