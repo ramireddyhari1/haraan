@@ -272,6 +272,26 @@
             -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
             mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
         }
+
+        /* Gallery: the stacked full-width grid is desktop-only; mobile gets a
+           compact swipeable rail as the sheet's closing section. */
+        .district-event-page .dr-gallery-desk { display: none !important; }
+        .dr-mgal { padding: 0 20px; margin-top: 26px; }
+        .dr-mgal__count { font-size: 12px; font-weight: 700; color: #94A3B8; letter-spacing: 0; margin-left: 6px; }
+        .dr-mgal__rail {
+            display: flex; gap: 10px; overflow-x: auto;
+            scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+            margin: 0 -20px; padding: 2px 20px; scrollbar-width: none;
+            -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+        }
+        .dr-mgal__rail::-webkit-scrollbar { display: none; }
+        .dr-mgal__item {
+            flex: 0 0 68vw; height: 190px; scroll-snap-align: start;
+            border-radius: 18px; overflow: hidden; padding: 0; cursor: pointer;
+            border: 1px solid #E2E8F0; background: #F4F7FB;
+        }
+        .dr-mgal__item img { width: 100%; height: 100%; object-fit: cover; display: block; }
         /* Full-bleed: both nested .containers carry 16px side MARGINS from the
            site stylesheet (not just padding) — zero them or the hero/sheet
            floats 32px off each edge. */
@@ -638,8 +658,24 @@
         .dr-gtk__txt strong { font-size: 13px; }
     }
 
+    /* Photo lightbox — opened from the mobile gallery rail. */
+    .dr-lbx {
+        position: fixed; inset: 0; z-index: 140;
+        background: rgba(4, 8, 15, 0.93);
+        display: flex; align-items: center; justify-content: center; padding: 20px;
+        opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+    }
+    .dr-lbx.is-open { opacity: 1; pointer-events: auto; }
+    .dr-lbx img { max-width: 100%; max-height: 86vh; border-radius: 12px; object-fit: contain; }
+    .dr-lbx__close {
+        position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px;
+        width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
+        background: rgba(255, 255, 255, 0.14); color: #ffffff; font-size: 17px;
+        display: grid; place-items: center;
+    }
+
     /* Mobile-only elements hidden on desktop */
-    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips, .dr-mmeta, .dr-idrow, .dr-date-line, .dr-mobrows, .dr-lineup, .dr-sched, .dr-sched__backdrop, .floating-right-btn { display: none !important; } }
+    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips, .dr-mmeta, .dr-idrow, .dr-date-line, .dr-mobrows, .dr-lineup, .dr-sched, .dr-sched__backdrop, .floating-right-btn, .dr-mgal, .dr-lbx { display: none !important; } }
 
     /* Toast — feedback pill for the clipboard share fallback (created by JS). */
     .dr-toast {
@@ -987,7 +1023,7 @@
                      pad the page with unrelated placeholders. --}}
                 @php $gallery = $event->imageUrls(); @endphp
                 @if(count($gallery) > 1)
-                <section style="margin-top: 12px; margin-bottom: 8px;">
+                <section class="dr-gallery-desk" style="margin-top: 12px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Gallery</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
                         @foreach(array_slice($gallery, 0, 6) as $img)
@@ -1102,6 +1138,22 @@
                 </div>
                 @endif
             </div>
+
+            {{-- Mobile-only Gallery — swipeable rail, LAST section on the sheet
+                 (the stacked full-width version read like three extra heroes
+                 mid-page). Tap a card for the fullscreen lightbox. --}}
+            @if(count($gallery) > 1)
+            <section class="dr-mgal">
+                <h3 class="dr-section-title" style="margin-bottom: 12px;">Gallery <span class="dr-mgal__count">{{ count($gallery) }} photos</span></h3>
+                <div class="dr-mgal__rail">
+                    @foreach(array_slice($gallery, 0, 8) as $img)
+                        <button type="button" class="dr-mgal__item" onclick="drLbx(this)" aria-label="View photo full screen">
+                            <img src="{{ $img }}" alt="{{ $event->title }}" loading="lazy" decoding="async">
+                        </button>
+                    @endforeach
+                </div>
+            </section>
+            @endif
 
             </div>{{-- /.dr-sheet --}}
         </main>
@@ -1221,6 +1273,12 @@
         }
     </script>
 
+    {{-- Photo lightbox (mobile gallery) --}}
+    <div class="dr-lbx" onclick="drLbxClose()" role="dialog" aria-modal="true" aria-label="Photo viewer">
+        <button type="button" class="dr-lbx__close" aria-label="Close">✕</button>
+        <img src="" alt="{{ $event->title }}">
+    </div>
+
     {{-- Sticky booking bar (mobile only) --}}
     <div class="dr-book-bar">
         <div class="dr-book-bar__price">
@@ -1239,6 +1297,17 @@
         } else if (navigator.clipboard) {
             navigator.clipboard.writeText(location.href).then(function () { drToast('Link copied'); });
         }
+    }
+    // Gallery lightbox: reuses the body scroll lock (which also ducks the book bar).
+    function drLbx(btn) {
+        const box = document.querySelector('.dr-lbx');
+        box.querySelector('img').src = btn.querySelector('img').src;
+        box.classList.add('is-open');
+        document.body.classList.add('dr-lock');
+    }
+    function drLbxClose() {
+        document.querySelector('.dr-lbx').classList.remove('is-open');
+        document.body.classList.remove('dr-lock');
     }
     function drToast(msg) {
         let t = document.querySelector('.dr-toast');
@@ -1290,7 +1359,7 @@
                         if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
                     });
                 }, { rootMargin: '0px 0px -40px 0px' });
-                document.querySelectorAll('.dr-mmeta, .dr-mobrows > section, #pane-details > section, #pane-know > section')
+                document.querySelectorAll('.dr-mmeta, .dr-mobrows > section, #pane-details > section, #pane-know > section, .dr-mgal')
                     .forEach(function (s) { s.classList.add('dr-reveal'); io.observe(s); });
             }
 
