@@ -806,10 +806,12 @@
         display: flex; flex-direction: column; align-items: center; gap: 5px;
         padding: 16px 0 6px;
     }
-    .mbrandmark img { height: 22px; width: auto; display: block; }
+    /* Wordmark rendered pure black (the PNG is navy); tagline is calligraphy. */
+    .mbrandmark img { height: 22px; width: auto; display: block; filter: brightness(0); }
     .mbrandmark span {
-        font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em;
-        color: #64748B;
+        font-family: 'Great Vibes', 'Segoe Script', cursive;
+        font-size: 19px; line-height: 1.2; letter-spacing: 0.01em;
+        color: #334155;
     }
 
     /* --- Mobile footer: brand-gradient sheet (EventsBlue → GameHubGreen —

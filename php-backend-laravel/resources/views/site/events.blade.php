@@ -30,7 +30,7 @@
          replaces the old top strip so the wordmark appears exactly once). --}}
     <div class="mbrandmark" aria-hidden="true">
         <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-        <span>Discover. Book. Play.</span>
+        <span>Where moments come alive</span>
     </div>
 
     {{-- The app's feed opens with the sponsored slot (AdSpaceBanner), NOT a greeting —

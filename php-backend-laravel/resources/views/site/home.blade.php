@@ -12,7 +12,7 @@
     {{-- Centered brand lockup at the top of the feed (matches /events). --}}
     <div class="mbrandmark" aria-hidden="true">
         <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-        <span>Discover. Book. Play.</span>
+        <span>Where moments come alive</span>
     </div>
     <div class="mhome__greet">
         <div>
