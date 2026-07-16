@@ -307,8 +307,8 @@ final class PlayersController extends Controller
     }
 
     /**
-     * Resolve a registered player by their Player ID.
-     * GET /api/players/lookup?playerId=HRN-AP-KDP-00042
+     * Resolve a registered player by their member ID.
+     * GET /api/players/lookup?playerId=HRN00042
      */
     public function lookup(Request $request): JsonResponse
     {

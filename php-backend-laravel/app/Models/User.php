@@ -222,76 +222,57 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return true;
     }
 
-    public static function generatePlayerId($state, $district, $userId): string
+    /**
+     * The member ID: HRN + the zero-padded account number (id 60 → HRN00060).
+     *
+     * Derived from the primary key, so it is unique by construction and needs no
+     * collision loop. Every member gets their real ID the moment the row exists —
+     * there is no temporary form to "upgrade" later.
+     */
+    public static function memberId(int $userId): string
     {
-        // 1. State code: e.g. "Andhra Pradesh" -> "AP", "Telangana" -> "TG"
-        $stateClean = preg_replace('/[^A-Za-z ]/', '', $state ?? '');
-        $stateWords = array_filter(explode(' ', $stateClean));
-        if (count($stateWords) >= 2) {
-            $statePart = '';
-            foreach ($stateWords as $word) {
-                $statePart .= substr($word, 0, 1);
-            }
-        } else {
-            $statePart = substr($stateClean, 0, 2);
-        }
-        $statePart = strtoupper($statePart);
-        if (strlen($statePart) < 2) {
-            $statePart = str_pad($statePart, 2, 'S');
-        }
+        return 'HRN'.str_pad((string) $userId, 5, '0', STR_PAD_LEFT);
+    }
 
-        // 2. District code: Kadapa -> KDP (disemvowel)
-        $distClean = preg_replace('/[^A-Za-z]/', '', $district ?? '');
-        $firstLetter = substr($distClean, 0, 1);
-        $rest = substr($distClean, 1);
-        $restNoVowels = preg_replace('/[aeiouAEIOU]/', '', $rest);
-        $distPart = strtoupper($firstLetter . $restNoVowels);
-        $distPart = substr($distPart, 0, 3);
-        if (strlen($distPart) < 3) {
-            $distPart = str_pad($distPart, 3, 'D');
-        }
+    /**
+     * Anything that isn't a real member ID: blank, a legacy 6-digit random, or one
+     * of the old structured/guest forms (HRN-AP-YSR-00002, HRN-GST-1234).
+     */
+    public static function isPlaceholderPlayerId(?string $playerId): bool
+    {
+        $playerId = trim((string) $playerId);
 
-        // 3. Unique player number
-        $numPart = str_pad((string)$userId, 5, '0', STR_PAD_LEFT);
-
-        // Compact shareable handle: HRN + account number (e.g. HRN00002). State/district are
-        // surfaced separately in the app, so the id itself stays short and easy to read/share.
-        return 'HRN'.$numPart;
+        return $playerId === ''
+            || preg_match('/^\d+$/', $playerId) === 1
+            || str_starts_with($playerId, 'HRN-');
     }
 
     protected static function boot()
     {
         parent::boot();
 
-        static::creating(function ($user) {
-            if (empty($user->player_id)) {
-                // If it is a guest player, we can assign a guest ID prefix
-                if ($user->is_guest) {
-                    $randomSuffix = str_pad((string)random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
-                    $user->player_id = 'HRN-GST-' . $randomSuffix;
-                } else {
-                    do {
-                        $pid = (string)random_int(100000, 999999);
-                    } while (self::where('player_id', $pid)->exists());
-                    $user->player_id = $pid;
-                }
+        static::creating(function (User $user): void {
+            // A guest is a placeholder player on someone's squad, not an account, so it
+            // keeps its own prefix until it's claimed.
+            if (blank($user->player_id) && $user->is_guest) {
+                $user->player_id = 'HRN-GST-'.str_pad((string) random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
+            }
+            // A member's ID is left blank here on purpose: it's the account number, which
+            // the database only assigns on insert. `created` stamps it a moment later.
+        });
+
+        static::created(function (User $user): void {
+            if (! $user->is_guest && blank($user->player_id)) {
+                $user->player_id = self::memberId((int) $user->id);
+                $user->saveQuietly();
             }
         });
 
-        static::saving(function ($user) {
-            // Update temporary numeric IDs or empty IDs to structured ones if state & district are filled
-            if (!$user->is_guest && !empty($user->state) && !empty($user->district)) {
-                $isTempId = empty($user->player_id) || preg_match('/^\d+$/', $user->player_id) || str_starts_with($user->player_id, 'HRN-GST');
-                if ($isTempId) {
-                    // We need a userId. If saving a new user, user->id might be null during creating hook, 
-                    // so we do it in saving or fallback to random/incrementing if we don't have user ID yet.
-                    $userId = $user->id;
-                    if (!$userId) {
-                        // Get next ID from DB auto_increment/sequence fallback
-                        $userId = (self::max('id') ?? 0) + 1;
-                    }
-                    $user->player_id = self::generatePlayerId($user->state, $user->district, $userId);
-                }
+        static::saving(function (User $user): void {
+            // Normalise anything still carrying an old placeholder — including a guest
+            // that has just been claimed into a real account.
+            if (! $user->is_guest && $user->exists && self::isPlaceholderPlayerId($user->player_id)) {
+                $user->player_id = self::memberId((int) $user->id);
             }
         });
     }
@@ -308,6 +289,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     {
         return [
             'email_verified_at' => 'datetime',
+            'last_seen_at'      => 'datetime',
             'password'          => 'hashed',
             'date_of_birth'     => 'date',
             'sport_attributes'  => 'array',
@@ -319,6 +301,33 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'app_authentication_secret' => 'encrypted',
             'app_authentication_recovery_codes' => 'encrypted:array',
         ];
+    }
+
+    /**
+     * Record an activity heartbeat, throttled so we write at most once every few
+     * minutes per user instead of on every single authenticated request. Uses a
+     * quiet update (no `updated_at` bump) so activity tracking never masquerades
+     * as a profile edit in the admin.
+     */
+    public function touchLastSeen(int $throttleSeconds = 300): void
+    {
+        $now = now();
+
+        if ($this->last_seen_at !== null && $this->last_seen_at->gt($now->copy()->subSeconds($throttleSeconds))) {
+            return;
+        }
+
+        $this->last_seen_at = $now;
+        static::withoutTimestamps(fn () => $this->saveQuietly());
+
+        // Append-only day log for the DAU trend. insertOrIgnore is a single statement
+        // that no-ops on the (user_id, activity_date) unique key, so repeat hits in the
+        // same day are free. Runs only past the throttle above → ≤ a few times/day/user.
+        \App\Models\UserActivityDay::query()->insertOrIgnore([
+            'user_id' => $this->getKey(),
+            'activity_date' => $now->toDateString(),
+            'created_at' => $now,
+        ]);
     }
 
     // -------------------------------------------------------------------------
