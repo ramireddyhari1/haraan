@@ -10,62 +10,52 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed interface LoginStage {
-    /** Step 1 — email only. */
-    data object EnterEmail : LoginStage
+    /** Step 1 — the mobile number the WhatsApp code goes to. */
+    data object EnterPhone : LoginStage
     /** Step 2 — the 6-digit code. */
     data object VerifyOtp : LoginStage
-    /** Step 3 — new users only: name + date of birth. */
-    data object CompleteProfile : LoginStage
     data object Success : LoginStage
 }
 
 data class LoginUiState(
-    val email: String = "",
-    val name: String = "",
-    /** Date of birth as yyyy-MM-dd; blank until the new user picks one. */
-    val dob: String = "",
+    /** The 10 national digits only; [DIAL_CODE] is prepended when we call the API. */
+    val phone: String = "",
     val otp: String = "",
     val verificationToken: String? = null,
     val token: String? = null,
-    val newUser: Boolean = false,
     val isLoading: Boolean = false,
     val successMessage: String? = null,
     val errorMessage: String? = null,
-    val stage: LoginStage = LoginStage.EnterEmail
+    val stage: LoginStage = LoginStage.EnterPhone
 ) {
-    val isEmailValid: Boolean
-        get() {
-            val at = email.indexOf('@')
-            return at > 0 && email.indexOf('.', at) > at + 1 && !email.endsWith(".")
-        }
+    val isPhoneValid: Boolean
+        get() = phone.length == 10
 
     val isOtpValid: Boolean
         get() = otp.length == 6
 
     val canContinue: Boolean
-        get() = isEmailValid && !isLoading
-
-    val canComplete: Boolean
-        get() = name.trim().isNotEmpty() && dob.isNotBlank() && !isLoading
+        get() = isPhoneValid && !isLoading
 }
 
 class LoginViewModel : ViewModel() {
+
+    private companion object {
+        /**
+         * India. The website's login posts `"91" + <10 digits>` (see the phone form in
+         * site/layout.blade.php) and the bridge dials exactly what it's given, so the app
+         * must send the same shape or the code goes nowhere.
+         */
+        const val DIAL_CODE = "91"
+    }
 
     private val authRepository = HaraanAuthRepository()
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    fun onEmailChange(input: String) {
-        _uiState.update { it.copy(email = input.trim().take(255), errorMessage = null) }
-    }
-
-    fun onNameChange(input: String) {
-        _uiState.update { it.copy(name = input.take(120), errorMessage = null) }
-    }
-
-    /** [isoDate] is yyyy-MM-dd from the date picker. */
-    fun onDobChange(isoDate: String) {
-        _uiState.update { it.copy(dob = isoDate, errorMessage = null) }
+    fun onPhoneChange(input: String) {
+        val digitsOnly = input.filter { it.isDigit() }.take(10)
+        _uiState.update { it.copy(phone = digitsOnly, errorMessage = null) }
     }
 
     fun onOtpChange(input: String) {
@@ -73,11 +63,14 @@ class LoginViewModel : ViewModel() {
         _uiState.update { it.copy(otp = digitsOnly, errorMessage = null) }
     }
 
-    fun resetToEmail() {
+    fun resetToPhone() {
         _uiState.update {
             it.copy(
-                stage = LoginStage.EnterEmail,
+                stage = LoginStage.EnterPhone,
                 otp = "",
+                // Drop the token too: it belongs to the number they're leaving, and a
+                // stale one would verify against the previous number's session.
+                verificationToken = null,
                 errorMessage = null,
                 successMessage = null
             )
@@ -86,11 +79,11 @@ class LoginViewModel : ViewModel() {
 
     fun requestOtp() {
         val state = _uiState.value
-        if (!state.isEmailValid || state.isLoading) return
+        if (!state.isPhoneValid || state.isLoading) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            runCatching { authRepository.requestEmailOtp(state.email) }
+            runCatching { authRepository.requestOtp(DIAL_CODE + state.phone) }
                 .onSuccess { result ->
                     _uiState.update {
                         it.copy(
@@ -123,30 +116,19 @@ class LoginViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            runCatching { authRepository.verifyEmailOtp(verificationToken, state.otp) }
+            // No profile step here, unlike email sign-up: the WhatsApp endpoint creates the
+            // account when the code is requested, so a verified code is always a login.
+            runCatching { authRepository.verifyOtp(verificationToken, state.otp) }
                 .onSuccess { result ->
-                    if (result.newUser || result.token.isNullOrBlank()) {
-                        // Brand-new email → collect name + date of birth before creating the account.
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                newUser = true,
-                                verificationToken = result.verificationToken ?: verificationToken,
-                                stage = LoginStage.CompleteProfile,
-                                successMessage = result.message
-                            )
-                        }
-                    } else {
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                token = result.token,
-                                stage = LoginStage.Success,
-                                successMessage = result.message
-                            )
-                        }
-                        onSuccess(result.token)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            token = result.token,
+                            stage = LoginStage.Success,
+                            successMessage = result.message
+                        )
                     }
+                    onSuccess(result.token)
                 }
                 .onFailure { throwable ->
                     _uiState.update {
@@ -199,37 +181,4 @@ class LoginViewModel : ViewModel() {
         _uiState.update { it.copy(isLoading = loading, errorMessage = null) }
     }
 
-    fun completeProfile(onSuccess: (String) -> Unit) {
-        val state = _uiState.value
-        val verificationToken = state.verificationToken
-        if (verificationToken.isNullOrBlank()) {
-            _uiState.update { it.copy(errorMessage = "Session expired. Please request a code again.") }
-            return
-        }
-        if (!state.canComplete) return
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            runCatching { authRepository.completeEmailProfile(verificationToken, state.name.trim(), state.dob) }
-                .onSuccess { result ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            token = result.token,
-                            stage = LoginStage.Success,
-                            successMessage = result.message
-                        )
-                    }
-                    onSuccess(result.token)
-                }
-                .onFailure { throwable ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = throwable.message ?: "Couldn't finish sign-up. Please try again."
-                        )
-                    }
-                }
-        }
-    }
 }

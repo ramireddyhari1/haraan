@@ -10,11 +10,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.ConfirmationNumber
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.QrCode2
@@ -34,6 +36,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -42,9 +46,11 @@ import coil.compose.AsyncImage
 import com.haraan.app.OrderLine
 import com.haraan.app.OrderSummary
 import com.haraan.app.R
+import com.haraan.app.data.AccountRepository
 import com.haraan.app.data.BookingLite
 import com.haraan.app.data.BookingRepository
 import com.haraan.app.data.BookingResult
+import com.haraan.app.data.ContactDetails
 import com.haraan.app.data.TokenStore
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.HaraanRadius
@@ -89,6 +95,31 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
     var booking by remember { mutableStateOf(false) }
     var pass by remember { mutableStateOf<BookingLite?>(null) }
     var confirmedCount by remember { mutableStateOf(0) } // >0 → multi-pass success screen
+
+    // ── Personal information: who the ticket is for ──────────────────────
+    // Prefilled from the account (server-computed `contact` — a WhatsApp signup's
+    // placeholder email arrives blank on purpose), so most people fill only the gap.
+    var contactName by remember { mutableStateOf("") }
+    var contactEmail by remember { mutableStateOf("") }
+    var contactPhone by remember { mutableStateOf("") }
+    var showContactErrors by remember { mutableStateOf(false) }
+    var prefilled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val token = TokenStore.getToken(context) ?: return@LaunchedEffect
+        runCatching { AccountRepository().fetchAccount(token) }.onSuccess { a ->
+            // Never clobber what the user has already typed while this was in flight.
+            if (contactName.isBlank()) contactName = a.contactName
+            if (contactEmail.isBlank()) contactEmail = a.contactEmail
+            if (contactPhone.isBlank()) contactPhone = a.contactPhone
+            prefilled = true
+        }
+    }
+
+    val nameError = contactName.isBlank()
+    val emailError = !android.util.Patterns.EMAIL_ADDRESS.matcher(contactEmail.trim()).matches()
+    val phoneError = contactPhone.filter { it.isDigit() }.length !in 7..15
+    val contactValid = !nameError && !emailError && !phoneError
 
     Box(
         modifier = Modifier
@@ -141,6 +172,16 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
             ) {
                 EventCard(order)
                 OrderCard(lines = order.lines)
+                // Who the ticket is for — asked once the cart is settled and before
+                // the bill, so the last thing before paying is still the amount.
+                PersonalInfoCard(
+                    name = contactName, onName = { contactName = it; showContactErrors = false },
+                    email = contactEmail, onEmail = { contactEmail = it; showContactErrors = false },
+                    phone = contactPhone, onPhone = { contactPhone = it; showContactErrors = false },
+                    nameError = showContactErrors && nameError,
+                    emailError = showContactErrors && emailError,
+                    phoneError = showContactErrors && phoneError,
+                )
                 BillCard(
                     subtotal = subtotal,
                     fee = fee,
@@ -235,6 +276,12 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                                 Toast.makeText(context, "This event isn't bookable yet.", Toast.LENGTH_LONG).show()
                                 return@Surface
                             }
+                            // Reveal the field errors rather than failing at the server.
+                            if (!contactValid) {
+                                showContactErrors = true
+                                Toast.makeText(context, "Check your details before paying.", Toast.LENGTH_SHORT).show()
+                                return@Surface
+                            }
 
                             booking = true
                             scope.launch {
@@ -246,6 +293,11 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                                     eventId = order.eventId,
                                     items = items,
                                     couponCode = appliedCode,
+                                    contact = ContactDetails(
+                                        name = contactName.trim(),
+                                        email = contactEmail.trim(),
+                                        phone = contactPhone.trim(),
+                                    ),
                                 )
                                 booking = false
                                 when (result) {
@@ -390,6 +442,125 @@ private fun EventCard(order: OrderSummary) {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Personal information — who the ticket is for.
+ *
+ * Prefilled from the account, but editable: people buy tickets for other people,
+ * and what they type here is issued against the ORDER, never written back onto the
+ * account (an unverified field must not become a login identity — see the web twin
+ * in EventBookingController). Fields, order and rules match the website's checkout.
+ */
+@Composable
+private fun PersonalInfoCard(
+    name: String, onName: (String) -> Unit,
+    email: String, onEmail: (String) -> Unit,
+    phone: String, onPhone: (String) -> Unit,
+    nameError: Boolean, emailError: Boolean, phoneError: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .premiumCardShadow(radius = HaraanRadius.Large)
+            .clip(RoundedCornerShape(HaraanRadius.Large))
+            .background(HaraanColors.Surface)
+            .padding(HaraanSpacing.Medium),
+        verticalArrangement = Arrangement.spacedBy(HaraanSpacing.Compact),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Person,
+                contentDescription = null,
+                tint = HaraanColors.EventsBlue,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Personal information",
+                style = HaraanTypography.TitleMedium.copy(color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+            )
+        }
+
+        ContactField(
+            label = "Full name", value = name, onValueChange = onName,
+            placeholder = "Name on the ticket", isError = nameError,
+            errorText = "Enter the name for this ticket.",
+            keyboardType = KeyboardType.Text,
+        )
+        ContactField(
+            label = "Email", value = email, onValueChange = onEmail,
+            placeholder = "you@example.com", isError = emailError,
+            errorText = "Enter a valid email — your ticket goes here.",
+            keyboardType = KeyboardType.Email,
+        )
+        ContactField(
+            label = "Phone", value = phone, onValueChange = onPhone,
+            placeholder = "10-digit mobile number", isError = phoneError,
+            errorText = "That phone number doesn’t look right.",
+            keyboardType = KeyboardType.Phone,
+        )
+
+        Text(
+            "Your ticket and any updates about this event go to these details.",
+            style = HaraanTypography.BodyMedium.copy(color = HaraanColors.TextMuted, fontSize = 11.5.sp),
+        )
+    }
+}
+
+@Composable
+private fun ContactField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    isError: Boolean,
+    errorText: String,
+    keyboardType: KeyboardType,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            label,
+            style = HaraanTypography.BodyMedium.copy(color = HaraanColors.TextMuted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(HaraanRadius.Small))
+                .border(
+                    1.dp,
+                    if (isError) HaraanColors.LiveRed else HaraanColors.BorderLight,
+                    RoundedCornerShape(HaraanRadius.Small),
+                )
+                .padding(horizontal = HaraanSpacing.Compact),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextPrimary, fontSize = 14.sp),
+                cursorBrush = SolidColor(HaraanColors.EventsBlue),
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                decorationBox = { inner ->
+                    if (value.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextMuted, fontSize = 14.sp),
+                        )
+                    }
+                    inner()
+                },
+            )
+        }
+        if (isError) {
+            Text(
+                errorText,
+                style = HaraanTypography.BodyMedium.copy(color = HaraanColors.LiveRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+            )
         }
     }
 }

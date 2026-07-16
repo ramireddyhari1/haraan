@@ -82,6 +82,13 @@ class HaraanAuthRepository(
     )
   }
 
+  // ── Email OTP: currently UNUSED by the UI ──────────────────────────────────
+  // The login screen offers Google + WhatsApp OTP only (2026-07-17). These are kept,
+  // not deleted, on purpose: a handful of accounts exist with a real email and no
+  // phone, and WhatsApp OTP keys on the phone — so if email login has to come back
+  // for them, it's a screen change, not a rewrite. The `/api/auth/email/` endpoints
+  // are still live. Delete both sides together if email login is retired for good.
+
   /**
    * Step 1 of email login: request a code for [email] only. Whether the account is new is
    * decided by the backend and reported back on verify — not here.

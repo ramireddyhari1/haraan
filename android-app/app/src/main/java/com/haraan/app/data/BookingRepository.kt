@@ -25,6 +25,16 @@ sealed interface BookingResult {
   data class Error(val message: String) : BookingResult
 }
 
+/**
+ * Who the ticket is for, collected at checkout. The account is who paid; this is
+ * what the order is issued against, so buying for someone else doesn't rewrite you.
+ */
+data class ContactDetails(
+  val name: String,
+  val email: String,
+  val phone: String,
+)
+
 class BookingRepository(
   private val baseUrl: String = ApiConfig.BASE_URL,
 ) {
@@ -97,6 +107,7 @@ class BookingRepository(
     eventId: Int,
     items: List<Pair<Int?, Int>>,
     couponCode: String? = null,
+    contact: ContactDetails? = null,
   ): BookingResult = withContext(Dispatchers.IO) {
     try {
       val jsonBody = JSONObject().apply {
@@ -118,6 +129,15 @@ class BookingRepository(
           put("quantity", items.sumOf { it.second }.coerceAtLeast(1))
         }
         if (!couponCode.isNullOrBlank()) put("couponCode", couponCode)
+        // Who the ticket is for. The server falls back to the account when absent,
+        // so this stays optional and older payloads keep working.
+        contact?.let {
+          put("contact", JSONObject().apply {
+            put("name", it.name)
+            put("email", it.email)
+            put("phone", it.phone)
+          })
+        }
       }
 
       val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings").openConnection() as HttpURLConnection).apply {

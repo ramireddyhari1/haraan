@@ -28,7 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -81,14 +81,11 @@ fun LoginRoute(
 
     LoginScreen(
         uiState = uiState,
-        onEmailChange = viewModel::onEmailChange,
-        onNameChange = viewModel::onNameChange,
-        onDobChange = viewModel::onDobChange,
+        onPhoneChange = viewModel::onPhoneChange,
         onOtpChange = viewModel::onOtpChange,
         onContinueClick = viewModel::requestOtp,
         onVerifyOtpClick = { viewModel.verifyOtp(onLoginSuccess) },
-        onCompleteProfileClick = { viewModel.completeProfile(onLoginSuccess) },
-        onBackToEmailClick = viewModel::resetToEmail,
+        onBackToPhoneClick = viewModel::resetToPhone,
         onSkipClick = onSkipClick,
         // "Continue with Google": drive Credential Manager here (needs an Activity context),
         // then hand the ID token to the VM. Only offered when a Web client ID is configured.
@@ -127,14 +124,11 @@ private val FrostBorder = Color.White.copy(alpha = 0.30f)
 @Composable
 fun LoginScreen(
     uiState: LoginUiState,
-    onEmailChange: (String) -> Unit,
-    onNameChange: (String) -> Unit,
-    onDobChange: (String) -> Unit,
+    onPhoneChange: (String) -> Unit,
     onOtpChange: (String) -> Unit,
     onContinueClick: () -> Unit,
     onVerifyOtpClick: () -> Unit,
-    onCompleteProfileClick: () -> Unit,
-    onBackToEmailClick: () -> Unit,
+    onBackToPhoneClick: () -> Unit,
     onSkipClick: () -> Unit = {},
     googleEnabled: Boolean = false,
     onGoogleClick: () -> Unit = {},
@@ -274,7 +268,7 @@ fun LoginScreen(
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
             // card has room and nothing clips.
-            if (uiState.stage == LoginStage.EnterEmail && !isDetailsInputVisible) {
+            if (uiState.stage == LoginStage.EnterPhone && !isDetailsInputVisible) {
                 Row(
                     modifier = Modifier.padding(bottom = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -316,7 +310,7 @@ fun LoginScreen(
                 ) {
                     // Full branding only in the collapsed hero — hidden once the keyboard
                     // is up so the card stays compact and nothing clips at the top.
-                    val showBranding = uiState.stage == LoginStage.EnterEmail && !isDetailsInputVisible
+                    val showBranding = uiState.stage == LoginStage.EnterPhone && !isDetailsInputVisible
 
                     // Grab handle.
                     Box(
@@ -457,11 +451,10 @@ fun LoginScreen(
                                     .align(Alignment.Center)
                                     .padding(vertical = 6.dp),
                                 text = when (uiState.stage) {
-                                    LoginStage.EnterEmail ->
+                                    LoginStage.EnterPhone ->
                                         if (!isDetailsInputVisible) "Login or sign up to continue"
-                                        else "Enter your email to get a login code"
-                                    LoginStage.VerifyOtp -> "Enter the 6-digit code sent to your email"
-                                    LoginStage.CompleteProfile -> "Almost there — tell us a bit about you"
+                                        else "Enter your WhatsApp number to get a code"
+                                    LoginStage.VerifyOtp -> "Enter the 6-digit code sent to your WhatsApp"
                                     else -> ""
                                 },
                                 fontSize = 14.sp,
@@ -483,47 +476,13 @@ fun LoginScreen(
 
                     when (uiState.stage) {
                         // ── Step 1: email only ────────────────────────────────────────────
-                        LoginStage.EnterEmail -> {
+                        LoginStage.EnterPhone -> {
                             if (!isDetailsInputVisible) {
-                                val ci = remember { MutableInteractionSource() }
-                                Button(
-                                    onClick = {
-                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                        isDetailsInputVisible = true
-                                    },
-                                    interactionSource = ci,
-                                    modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Email,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Text(
-                                        "Continue with email",
-                                        fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                                        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-
-                                // "Continue with Google" — only when a Web client ID is configured.
+                                // Primary CTA — "Continue with Google" (when a Web client ID is
+                                // configured). Email drops to a secondary text link below.
                                 if (googleEnabled) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Box(Modifier.weight(1f).height(1.dp).background(Stroke))
-                                        Text("  or  ", color = Text3, fontSize = 12.sp)
-                                        Box(Modifier.weight(1f).height(1.dp).background(Stroke))
-                                    }
-                                    Spacer(Modifier.height(12.dp))
                                     val gi = remember { MutableInteractionSource() }
-                                    OutlinedButton(
+                                    Button(
                                         onClick = {
                                             view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                                             onGoogleClick()
@@ -531,31 +490,104 @@ fun LoginScreen(
                                         interactionSource = gi,
                                         modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(gi),
                                         shape = RoundedCornerShape(16.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Stroke),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
                                         enabled = !uiState.isLoading
                                     ) {
-                                        Text("G", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color(0xFF4285F4))
+                                        // Real multi-colour Google mark on a white chip so it
+                                        // stays legible on the blue button.
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color.White),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = R.drawable.ic_google_logo),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                         Spacer(Modifier.width(10.dp))
                                         Text(
                                             "Continue with Google",
-                                            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Text1,
+                                            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
                                             maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                }
 
-                                if (!uiState.errorMessage.isNullOrEmpty()) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                    if (!uiState.errorMessage.isNullOrEmpty()) {
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                    }
+
+                                    // Secondary — WhatsApp OTP as a plain text link.
+                                    Spacer(Modifier.height(16.dp))
+                                    Text(
+                                        text = "Continue with WhatsApp",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Accent,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                                isDetailsInputVisible = true
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    )
+                                } else {
+                                    // No Google client configured — WhatsApp is the primary CTA.
+                                    val ci = remember { MutableInteractionSource() }
+                                    Button(
+                                        onClick = {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                            isDetailsInputVisible = true
+                                        },
+                                        interactionSource = ci,
+                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Chat,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            "Continue with WhatsApp",
+                                            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                                            maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    if (!uiState.errorMessage.isNullOrEmpty()) {
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                    }
                                 }
                             } else {
+                                // +91 is fixed, as on the website's login: the bridge dials
+                                // exactly what it's sent, and the VM prepends the same code.
                                 OutlinedTextField(
-                                    value = uiState.email,
-                                    onValueChange = onEmailChange,
-                                    placeholder = { Text("Email address", color = Text3) },
+                                    value = uiState.phone,
+                                    onValueChange = onPhoneChange,
+                                    placeholder = { Text("Mobile number", color = Text3) },
+                                    leadingIcon = {
+                                        Text(
+                                            "+91",
+                                            color = Text2,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(start = 14.dp)
+                                        )
+                                    },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(16.dp),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                     singleLine = true,
                                     colors = fieldColors
                                 )
@@ -623,52 +655,8 @@ fun LoginScreen(
                             }
 
                             Spacer(Modifier.height(4.dp))
-                            TextButton(onClick = onBackToEmailClick) {
-                                Text("Change email", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
-                        // ── Step 3: new users only — name + date of birth ─────────────────
-                        LoginStage.CompleteProfile -> {
-                            OutlinedTextField(
-                                value = uiState.name,
-                                onValueChange = onNameChange,
-                                placeholder = { Text("Your name", color = Text3) },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                                singleLine = true,
-                                colors = fieldColors
-                            )
-
-                            Spacer(Modifier.height(10.dp))
-
-                            DateOfBirthField(dob = uiState.dob, onDobChange = onDobChange)
-
-                            if (!uiState.errorMessage.isNullOrEmpty()) {
-                                Spacer(Modifier.height(12.dp))
-                                Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
-                            }
-
-                            Spacer(Modifier.height(14.dp))
-
-                            val fi = remember { MutableInteractionSource() }
-                            Button(
-                                onClick = {
-                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                    onCompleteProfileClick()
-                                },
-                                interactionSource = fi,
-                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(fi),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
-                                enabled = uiState.canComplete
-                            ) {
-                                Text(
-                                    if (uiState.isLoading) "Creating account…" else "Create account",
-                                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                    color = if (uiState.canComplete) Color.White else Text3
-                                )
+                            TextButton(onClick = onBackToPhoneClick) {
+                                Text("Change number", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
 
@@ -691,76 +679,6 @@ fun LoginScreen(
                     )
                 }
             }
-        }
-    }
-}
-
-/**
- * Date-of-birth picker field (new-user sign-up). Renders like the other fields but opens a
- * Material date picker; emits the chosen date as an ISO yyyy-MM-dd string. Future dates are
- * not selectable.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DateOfBirthField(dob: String, onDobChange: (String) -> Unit) {
-    var showPicker by remember { mutableStateOf(false) }
-
-    val display = remember(dob) {
-        runCatching {
-            java.time.LocalDate.parse(dob)
-                .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
-        }.getOrNull()
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(FieldBg)
-            .border(1.dp, Stroke, RoundedCornerShape(16.dp))
-            .clickable { showPicker = true }
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Text(
-            text = display ?: "Date of birth",
-            color = if (display == null) Text3 else Text1,
-            fontSize = 16.sp
-        )
-    }
-
-    if (showPicker) {
-        val today = remember { java.time.LocalDate.now() }
-        val pickerState = rememberDatePickerState(
-            initialSelectedDateMillis = dob.takeIf { it.isNotBlank() }?.let {
-                runCatching {
-                    java.time.LocalDate.parse(it).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
-                }.getOrNull()
-            },
-            yearRange = 1920..today.year,
-            selectableDates = object : SelectableDates {
-                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                    utcTimeMillis <= System.currentTimeMillis()
-            }
-        )
-        DatePickerDialog(
-            onDismissRequest = { showPicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { millis ->
-                        val iso = java.time.Instant.ofEpochMilli(millis)
-                            .atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
-                        onDobChange(iso)
-                    }
-                    showPicker = false
-                }) { Text("OK", color = Accent, fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPicker = false }) { Text("Cancel", color = Text2) }
-            }
-        ) {
-            DatePicker(state = pickerState, title = null, showModeToggle = false)
         }
     }
 }

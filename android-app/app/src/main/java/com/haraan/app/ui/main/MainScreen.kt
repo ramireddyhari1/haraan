@@ -3396,14 +3396,11 @@ fun MainScreenPreview() {
   ThannaTheme {
     com.haraan.app.ui.LoginScreen(
       uiState = com.haraan.app.ui.LoginUiState(),
-      onEmailChange = {},
-      onNameChange = {},
-      onDobChange = {},
+      onPhoneChange = {},
       onOtpChange = {},
       onContinueClick = {},
       onVerifyOtpClick = {},
-      onCompleteProfileClick = {},
-      onBackToEmailClick = {}
+      onBackToPhoneClick = {}
     )
   }
 }
@@ -3414,14 +3411,11 @@ fun MainScreenPortraitPreview() {
   ThannaTheme {
     com.haraan.app.ui.LoginScreen(
       uiState = com.haraan.app.ui.LoginUiState(),
-      onEmailChange = {},
-      onNameChange = {},
-      onDobChange = {},
+      onPhoneChange = {},
       onOtpChange = {},
       onContinueClick = {},
       onVerifyOtpClick = {},
-      onCompleteProfileClick = {},
-      onBackToEmailClick = {}
+      onBackToPhoneClick = {}
     )
   }
 }

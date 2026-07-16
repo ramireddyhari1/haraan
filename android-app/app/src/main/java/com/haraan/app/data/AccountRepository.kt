@@ -12,6 +12,15 @@ data class AccountInfo(
   val name: String,
   val email: String?,
   val phone: String?,
+  /**
+   * What checkout should prefill, computed by the server (`user.contact`).
+   * NOT the same as [email]: WhatsApp signup mints a `<phone>@whatsapp.local`
+   * placeholder that is not an inbox, and the server blanks it here so we never
+   * offer it as the buyer's address. Blank = we don't know it; ask.
+   */
+  val contactName: String = "",
+  val contactEmail: String = "",
+  val contactPhone: String = "",
   val avatar: String?,
   val playerId: String?,
   val district: String?,
@@ -46,10 +55,14 @@ class AccountRepository(
   suspend fun fetchAccount(token: String): AccountInfo = withContext(Dispatchers.IO) {
     val body = get("/api/auth/me", token)
     val user = JSONObject(body).getJSONObject("user")
+    val contact = user.optJSONObject("contact")
     AccountInfo(
       name = user.optString("name", ""),
       email = user.optString("email", null).clean(),
       phone = user.optString("phone", null).clean(),
+      contactName = contact?.optString("name", "").orEmpty(),
+      contactEmail = contact?.optString("email", "").orEmpty(),
+      contactPhone = contact?.optString("phone", "").orEmpty(),
       avatar = user.optString("avatar", null).clean(),
       playerId = user.optString("playerId", null).clean(),
       district = user.optString("district", null).clean(),
