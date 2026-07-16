@@ -63,7 +63,7 @@
     <div class="mpager" data-mpager>
             @foreach($forYou as $ev)
                 @php
-                    $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
+                    $img = $ev->heroImageUrl() ?? '/bv-white.png';
                     // Mirrors EventRepository.formatWhen(): "27 Jun • 12:00 AM", then
                     // uppercased by the card. Not the site's old "Sat, Jun 27" shape.
                     $whenParts = array_filter([
@@ -132,7 +132,7 @@
     <div class="mhome__head mhome__head--bare"><h3>Trending</h3></div>
     <div class="mtrends">
         @foreach($mTrending as $ev)
-            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
+            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
             <a class="mtrend" href="/events/{{ $ev->id }}">
                 <span class="mtrend__rank" aria-hidden="true">{{ $loop->iteration }}</span>
                 <span class="mtrend__img">
@@ -192,7 +192,7 @@
     <div class="mhome__grid">
         @foreach($mEvents as $ev)
             @php
-                $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png';
+                $img = $ev->heroImageUrl() ?? '/bv-white.png';
                 $soon = optional($ev->date)->between(now(), now()->addDays(7)) ?? false;
                 $hasOnwards = $ev->price > 0;
             @endphp
@@ -208,6 +208,12 @@
         @endforeach
     </div>
     @endif
+
+    {{-- End-of-feed brand sign-off (phone-only, see layout's ≥721px hide) --}}
+    <div class="mbrandend" aria-hidden="true">
+        <img src="{{ asset('images/haraan-logo.png') }}" alt="">
+        <span>Discover. Book. Play.</span>
+    </div>
 </div>
 
 <section class="page-shell events-page theme-events">

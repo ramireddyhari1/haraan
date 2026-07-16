@@ -4,7 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ $title ?? 'Haraan' }}</title>
-    <meta name="theme-color" content="#f3f5f7">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
+    <link rel="manifest" href="{{ asset('site.webmanifest') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@300..800&display=swap" rel="stylesheet">
@@ -30,6 +32,12 @@
     <style>
         /* NB: the desktop mobile-UI-hide safety rules live in site.css
            (@media min-width:1025px) — not duplicated here. */
+
+        /* Brand strip + end-of-feed sign-off are phone-only (styled in the
+           mobile overrides ≤720px); everywhere else they must not render. */
+        @media (min-width: 721px) {
+            .mbrand, .mbrandend { display: none !important; }
+        }
 
         /* Event-section header accent, applied only on /events pages.
            NB: the location-pill label is intentionally left neutral — it is a
@@ -74,6 +82,16 @@
     </style>
 </head>
 <body class="@yield('body_class')">
+    {{-- Mobile-only brand strip: the wordmark's one moment on phones (the desktop
+         .brand lockup is hidden ≤1024px, so mobile never showed the name at all).
+         Deliberately OUTSIDE the sticky header — it scrolls away with the page,
+         so the brand greets at the top without renting permanent header space. --}}
+    @if(request()->is('/', 'events', 'gamehub'))
+    <div class="mbrand" aria-hidden="true">
+        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+        <span>Discover. Book. Play.</span>
+    </div>
+    @endif
     <header class="topbar {{ request()->is('events*') || request()->is('/') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">

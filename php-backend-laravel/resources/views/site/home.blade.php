@@ -16,50 +16,63 @@
         </div>
     </div>
 
-    {{-- For You: poster carousel --}}
+    {{-- For You: full-bleed poster carousel (mirrors HaraanEventCard) --}}
     <div class="mhome__head">
         <h3>For You</h3>
         <a href="/events">See all</a>
     </div>
     <div class="mhome__scroll">
         @forelse($mEvents as $ev)
-            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
-            <a class="mposter" href="/events/{{ $ev->id }}">
-                <div class="mposter__img" style="background-image:url('{{ $img }}')">
-                    <span class="mposter__badge">Filling fast</span>
-                    <span class="mposter__cat">{{ $ev->category ?? 'Event' }}</span>
-                </div>
-                <div class="mposter__body">
-                    <h4>{{ $ev->title }}</h4>
-                    <p class="mposter__date">{{ optional($ev->date)->format('D, M j • g:i A') }}</p>
-                    <p class="mposter__venue">📍 {{ $ev->venue }}</p>
-                    <div class="mposter__foot">
-                        <span class="mposter__price">{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</span>
-                        <span class="mposter__book">Book</span>
+            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
+            <a class="mposter" href="/events/{{ $ev->id }}" style="background-image:url('{{ $img }}')">
+                <span class="mposter__grad"></span>
+                <span class="mposter__cat">{{ $ev->category ?? 'Event' }}</span>
+                @if(!empty($ev->rating) && $ev->rating > 0)
+                    <span class="mposter__rating"><i>★</i>{{ number_format($ev->rating, 1) }}</span>
+                @else
+                    <span class="mposter__rating mposter__rating--soon">NEW</span>
+                @endif
+                <div class="mposter__overlay">
+                    <div class="mposter__text">
+                        <p class="mposter__date">{{ optional($ev->date)->format('D, M j • g:i A') }}</p>
+                        <h4>{{ $ev->title }}</h4>
+                        <p class="mposter__meta">📍 {{ $ev->venue }} · {{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
                     </div>
+                    <span class="mposter__book" aria-label="Book">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                    </span>
                 </div>
             </a>
         @empty
-            <a class="mposter" href="/events">
-                <div class="mposter__img" style="background:linear-gradient(135deg,#2563EB,#1e40af)"></div>
-                <div class="mposter__body">
-                    <h4>Live nights & shows</h4>
-                    <p class="mposter__venue">📍 Near you</p>
-                    <div class="mposter__foot"><span class="mposter__price">Explore</span><span class="mposter__book">Open</span></div>
+            <a class="mposter" href="/events" style="background:linear-gradient(135deg,#2563EB,#1e40af)">
+                <span class="mposter__grad"></span>
+                <span class="mposter__cat">Events</span>
+                <div class="mposter__overlay">
+                    <div class="mposter__text">
+                        <h4>Live nights & shows</h4>
+                        <p class="mposter__meta">📍 Near you</p>
+                    </div>
+                    <span class="mposter__book" aria-label="Explore">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                    </span>
                 </div>
             </a>
         @endforelse
     </div>
 
-    {{-- Trending: compact row --}}
+    {{-- Trending: ranked Top-10 (mirrors TrendingRowSection) --}}
     @if($mEvents->count())
     <div class="mhome__head"><h3>Trending</h3><a href="/events">See all</a></div>
     <div class="mhome__scroll mhome__scroll--sm">
-        @foreach($mEvents as $ev)
-            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
+        @foreach($mEvents->take(10) as $ev)
+            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
             <a class="mtrend" href="/events/{{ $ev->id }}">
-                <div class="mtrend__img" style="background-image:url('{{ $img }}')"></div>
-                <h5>{{ $ev->title }}</h5>
+                <span class="mtrend__rank">{{ $loop->iteration }}</span>
+                <div class="mtrend__img" style="background-image:url('{{ $img }}')">
+                    <span class="mtrend__grad"></span>
+                    <span class="mtrend__sold"><i>🔥</i>Trending</span>
+                    <h5>{{ $ev->title }}</h5>
+                </div>
                 <p>{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
             </a>
         @endforeach
@@ -71,42 +84,57 @@
     <div class="mhome__cats">
         <a href="/events?category=Concerts" class="mcat mcat--blue">
             <span class="mcat__ico">🎵</span>
-            <strong>Concerts</strong>
-            <small>{{ $catCount('Concerts') ?: 245 }} events</small>
+            <span class="mcat__txt">
+                <strong>Concerts</strong>
+                <small>{{ $catCount('Concerts') ?: 245 }} events</small>
+            </span>
         </a>
         <a href="/events?category=Comedy" class="mcat mcat--blue">
             <span class="mcat__ico">🎤</span>
-            <strong>Standup</strong>
-            <small>{{ $catCount('Comedy') ?: 54 }} shows</small>
+            <span class="mcat__txt">
+                <strong>Standup</strong>
+                <small>{{ $catCount('Comedy') ?: 54 }} shows</small>
+            </span>
         </a>
         <a href="/gamehub" class="mcat mcat--green">
             <span class="mcat__ico">🏏</span>
-            <strong>GameHub</strong>
-            <small>Turf & slots</small>
+            <span class="mcat__txt">
+                <strong>GameHub</strong>
+                <small>Turf & slots</small>
+            </span>
         </a>
     </div>
 
-    {{-- Popular near you: feed --}}
+    {{-- Explore Nearby: 2-col grid of vertical cards (mirrors EventListCard) --}}
     @if($mEvents->count())
-    <div class="mhome__head"><h3>Popular near you</h3><a href="/events">See all</a></div>
-    <div class="mhome__feed">
+    <div class="mhome__head mhome__head--stack">
+        <span class="mhome__eyebrow">Popular near you</span>
+        <h3>Explore Nearby</h3>
+    </div>
+    <div class="mhome__grid">
         @foreach($mEvents as $ev)
-            @php $img = (is_array($ev->images) && count($ev->images)) ? $ev->images[0] : '/bv-white.png'; @endphp
-            <a class="mrow" href="/events/{{ $ev->id }}">
-                <div class="mrow__img" style="background-image:url('{{ $img }}')"></div>
-                <div class="mrow__body">
-                    <span class="mrow__cat">{{ $ev->category ?? 'Event' }}</span>
-                    <h4>{{ $ev->title }}</h4>
-                    <p class="mrow__date">{{ optional($ev->date)->format('D, M j') }}</p>
-                    <p class="mrow__venue">📍 {{ $ev->venue }}</p>
+            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
+            <a class="mcard" href="/events/{{ $ev->id }}">
+                <div class="mcard__img" style="background-image:url('{{ $img }}')">
+                    <span class="mcard__fast"><i>⚡</i>Fast filling</span>
                 </div>
-                <span class="mrow__price">{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</span>
+                <p class="mcard__date">{{ optional($ev->date)->format('D, M j') }}</p>
+                <h4 class="mcard__title">{{ $ev->title }}</h4>
+                <p class="mcard__venue">📍 {{ $ev->venue }}</p>
+                <p class="mcard__price"><span>₹</span>{{ $ev->price ? number_format($ev->price) : '0' }}</p>
             </a>
         @endforeach
     </div>
     @endif
+
+    {{-- End-of-feed brand sign-off (phone-only, see layout's ≥721px hide) --}}
+    <div class="mbrandend" aria-hidden="true">
+        <img src="{{ asset('images/haraan-logo.png') }}" alt="">
+        <span>Discover. Book. Play.</span>
+    </div>
 </div>
 
+<div class="home-desktop-only">
 <section class="hero">
     <div class="hero__copy">
         <p class="eyebrow eyebrow--dark">Curated entertainment platform</p>
@@ -203,4 +231,5 @@
         @endif
     </div>
 </section>
+</div>{{-- /.home-desktop-only --}}
 @endsection
