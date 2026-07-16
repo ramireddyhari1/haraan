@@ -794,17 +794,17 @@
     .mhome {
         font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
         color: #0F172A;
-        /* Sky-blue gradient wash behind the greeting, like the app Events header */
-        background: linear-gradient(180deg, #E0F2FE 0%, #F4F7FB 220px);
+        /* White wash fading into the slate canvas (user preference over the
+           app's sky-blue) — the fade is what kills the header/content seam. */
+        background: linear-gradient(180deg, #FFFFFF 0%, #F4F7FB 220px);
         padding: 14px 16px 8px;
     }
 
-    /* One canvas: at the top of the page the sticky header wears the SAME sky
-       wash the section below starts with — the white band above the tint read
-       as a seam and cheapened the page. Once scrolled (.is-scrolled, toggled
-       by JS) it returns to solid surface so content stays readable under it. */
+    /* One canvas: at the top of the page the sticky header matches the white
+       the section below starts with (no border, so no band). Once scrolled
+       (.is-scrolled, toggled by JS) the solid surface + elevation return. */
     .topbar.topbar--events {
-        background: #E0F2FE;
+        background: #FFFFFF;
         border-bottom-color: transparent;
         transition: background-color 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
     }
