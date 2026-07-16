@@ -854,14 +854,17 @@
         overflow-x: auto;
         overscroll-behavior-x: contain;
         scroll-snap-type: x mandatory;
-        scroll-padding-left: 16px;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
         /* Full-bleed: cancels every ancestor gutter at once (.mhome's 16px and
            main.container's) instead of guessing at them. */
         margin-left: calc(50% - 50vw);
         margin-right: calc(50% - 50vw);
-        padding: 4px 16px 8px;
+        /* Half the free space either side — the card is (100vw − 92px), so this is a
+           constant 46px at any width. It centres the poster and lets the first and
+           last card reach the middle. With `start` alignment and a 16px pad the card
+           sat against the left edge: a peek on the right, dead space on the left. */
+        padding: 4px 46px 8px;
     }
     .mpager::-webkit-scrollbar { display: none; }
 
@@ -877,7 +880,9 @@
     .mfy__page {
         position: relative;
         flex: 0 0 calc(100vw - 92px);
-        scroll-snap-align: start;
+        /* Centred, like the app: a sliver of the previous poster on the left and the
+           next one on the right, ~34px each. */
+        scroll-snap-align: center;
         content-visibility: auto;
         contain-intrinsic-size: calc(100vw - 92px) calc((100vw - 92px) * 4 / 3);
     }
