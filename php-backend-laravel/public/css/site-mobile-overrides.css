@@ -1176,13 +1176,10 @@
     .mposter:active {
         transform: scale(0.975);
     }
-    /* Trending presses the POSTER only — the whole-card scale moved the
-       oversized rank digit hanging off its edge, which read as the row
-       shaking whenever a vertical swipe started on a card. */
-    .mtrend:active .mtrend__img {
-        transform: scale(0.97);
-    }
-    .mtrend__img { transition: transform 120ms ease; }
+    /* Trending gets NO press movement at all. Chrome fires :active the moment
+       a slow vertical swipe starts on a card, so any pressed-state transform
+       makes "the card move first" before the page scrolls — reported twice.
+       Stability beats feedback on this row; the tap still navigates. */
     /* Safe on the pager: its per-frame transform lives on .mfy__page, so the card's
        own press composes with it rather than fighting it. */
     .mfy, .mtrend, .mcard, .mposter {
