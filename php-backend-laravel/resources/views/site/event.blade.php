@@ -321,6 +321,26 @@
             background: linear-gradient(180deg, rgba(4,8,15,0.32) 0%, rgba(4,8,15,0) 26%);
         }
 
+        /* Hero pager: swipe through the event's photos. Native scroll-snap —
+           compositor-driven, no JS in the scroll path (dots update via IO). */
+        .district-event-page .dr-hero__rail {
+            display: flex; height: 100%;
+            overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; overscroll-behavior-x: contain;
+        }
+        .district-event-page .dr-hero__rail::-webkit-scrollbar { display: none; }
+        .district-event-page .dr-hero__slide { flex: 0 0 100%; scroll-snap-align: start; }
+        .dr-hero__dots {
+            position: absolute; left: 0; right: 0; bottom: 40px; z-index: 5;
+            display: flex; justify-content: center; gap: 6px; pointer-events: none;
+        }
+        .dr-hero__dot {
+            width: 6px; height: 6px; border-radius: 999px;
+            background: rgba(255,255,255,0.45); box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            transition: width 0.25s ease, background 0.25s ease;
+        }
+        .dr-hero__dot.is-on { width: 18px; background: #ffffff; }
+
         /* White content sheet overlaps the poster with a big rounded top curve. */
         .district-event-page .dr-sheet {
             position: relative; z-index: 4;
@@ -676,6 +696,11 @@
 
     /* Mobile-only elements hidden on desktop */
     @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips, .dr-mmeta, .dr-idrow, .dr-date-line, .dr-mobrows, .dr-lineup, .dr-sched, .dr-sched__backdrop, .floating-right-btn, .dr-mgal, .dr-lbx { display: none !important; } }
+    /* Desktop hero stays a single image — the swipe pager is mobile-only. */
+    @media (min-width: 1025px) {
+        .dr-hero__dots { display: none !important; }
+        .dr-hero__slide:not(:first-child) { display: none !important; }
+    }
 
     /* Toast — feedback pill for the clipboard share fallback (created by JS). */
     .dr-toast {
@@ -720,8 +745,24 @@
                     ? 'Starts '.$event->date->diffForHumans()
                     : null;
             @endphp
+            @php
+                // Hero pager: swipe through all the event's photos (mobile).
+                $heroImgs = count($event->imageUrls()) ? array_slice($event->imageUrls(), 0, 6) : [$heroImg];
+            @endphp
             <div class="dr-hero-banner" style="margin-top: 0; margin-bottom: 12px;">
-                <img src="{{ $heroImg }}" alt="{{ $event->title }}" fetchpriority="high" decoding="async">
+                <div class="dr-hero__rail">
+                    @foreach($heroImgs as $i => $img)
+                        <img class="dr-hero__slide" src="{{ $img }}" alt="{{ $event->title }}"
+                             @if($i === 0) fetchpriority="high" @else loading="lazy" @endif decoding="async">
+                    @endforeach
+                </div>
+                @if(count($heroImgs) > 1)
+                <div class="dr-hero__dots" aria-hidden="true">
+                    @foreach($heroImgs as $i => $img)
+                        <span class="dr-hero__dot @if($i === 0) is-on @endif"></span>
+                    @endforeach
+                </div>
+                @endif
                 @if($countdown)<div class="dr-hero-badge">{{ $countdown }}</div>@endif
             </div>
 
@@ -1361,6 +1402,21 @@
                 }, { rootMargin: '0px 0px -40px 0px' });
                 document.querySelectorAll('.dr-mmeta, .dr-mobrows > section, #pane-details > section, #pane-know > section, .dr-mgal')
                     .forEach(function (s) { s.classList.add('dr-reveal'); io.observe(s); });
+            }
+
+            // Hero pager dots track the visible slide (IO, not scroll handlers).
+            const heroRail = document.querySelector('.dr-hero__rail');
+            const heroDots = document.querySelectorAll('.dr-hero__dot');
+            if (heroRail && heroDots.length > 1 && hasIO) {
+                const slides = Array.prototype.slice.call(heroRail.children);
+                const heroIo = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (e) {
+                        if (!e.isIntersecting) return;
+                        const idx = slides.indexOf(e.target);
+                        heroDots.forEach(function (d, i) { d.classList.toggle('is-on', i === idx); });
+                    });
+                }, { root: heroRail, threshold: 0.6 });
+                slides.forEach(function (s) { heroIo.observe(s); });
             }
 
             const bar = document.querySelector('.dr-book-bar');
