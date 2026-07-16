@@ -812,10 +812,12 @@
         text-transform: uppercase; color: #94A3B8;
     }
 
-    /* --- Mobile footer: ink sheet with the app CTA + links + brand base ---- */
+    /* --- Mobile footer: brand-gradient sheet (EventsBlue → GameHubGreen —
+       the two lanes of the product) with the app CTA + links + brand base --- */
     .mfoot {
         margin-top: 44px;
-        background: #0F172A; color: #E2E8F0;
+        background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
+        color: #ffffff;
         border-radius: 24px 24px 0 0;
         padding: 26px 20px calc(30px + env(safe-area-inset-bottom, 0px));
         font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
@@ -825,15 +827,15 @@
 
     .mfoot__app {
         display: flex; flex-direction: column; gap: 14px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.09);
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.22);
         border-radius: 18px; padding: 18px;
     }
     .mfoot__app strong {
         display: block; font-size: 17px; font-weight: 800;
         letter-spacing: -0.02em; color: #ffffff; margin-bottom: 4px;
     }
-    .mfoot__app p { margin: 0; font-size: 13px; line-height: 1.55; color: #94A3B8; }
+    .mfoot__app p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.85); }
     .mfoot__play {
         display: inline-flex; align-items: center; gap: 11px; width: fit-content;
         background: #000000; border: 1px solid rgba(255, 255, 255, 0.28);
@@ -846,22 +848,22 @@
         letter-spacing: 0.09em; text-transform: uppercase; color: #CBD5E1;
     }
     .mfoot__play b { display: block; font-size: 16px; font-weight: 700; line-height: 1.2; }
-    .mfoot__apk { font-size: 12.5px; font-weight: 600; color: #93C5FD; text-decoration: none; }
+    .mfoot__apk { font-size: 12.5px; font-weight: 700; color: #ffffff; text-decoration: underline; text-underline-offset: 3px; }
 
     .mfoot__links { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 24px 2px 22px; }
-    .mfoot__links a { font-size: 13px; font-weight: 600; color: #CBD5E1; text-decoration: none; }
+    .mfoot__links a { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.95); text-decoration: none; }
 
     .mfoot__base {
         display: flex; flex-direction: column; gap: 7px;
-        border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.28); padding-top: 20px;
     }
     /* The navy wordmark inverts to white on the ink footer. */
     .mfoot__base img { height: 16px; width: auto; align-self: flex-start; filter: brightness(0) invert(1); opacity: 0.92; }
     .mfoot__base span {
         font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
-        text-transform: uppercase; color: #64748B;
+        text-transform: uppercase; color: rgba(255, 255, 255, 0.8);
     }
-    .mfoot__base small { font-size: 11px; color: #475569; }
+    .mfoot__base small { font-size: 11px; color: rgba(255, 255, 255, 0.62); }
 
     /* One canvas: at the top of the page the sticky header matches the white
        the section below starts with (no border, so no band). Once scrolled
