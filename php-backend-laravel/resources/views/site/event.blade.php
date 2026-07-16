@@ -238,16 +238,59 @@
     @media (max-width: 1024px) {
         /* Reclaim the whole viewport: the home topbar is noise on a detail page. */
         body.event-detail-page .topbar { display: none !important; }
-        body.event-detail-page main.container { padding: 0 !important; }
-        .district-event-page .container { padding: 0 !important; }
+        /* Native feel: no accidental pull-to-refresh on the hero, no grey tap
+           flash (we provide our own :active feedback below). */
+        body.event-detail-page { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+        /* Page scroll is locked while a bottom sheet is open (JS toggles this). */
+        body.event-detail-page.dr-lock { overflow: hidden; }
+
+        /* Press feedback: every tappable surface compresses slightly on touch. */
+        .dr-mcard, .dr-mrow__cta, .dr-book-bar__btn, .dr-tix__cta, .dr-stepper button,
+        .floating-left-btn, .floating-right-btn {
+            transition: transform 0.12s ease !important;
+        }
+        .dr-mcard:active, .dr-mrow__cta:active,
+        .dr-book-bar__btn:active:not(:disabled), .dr-tix__cta:active:not(:disabled),
+        .dr-stepper button:active,
+        .floating-left-btn:active, .floating-right-btn:active {
+            transform: scale(0.96) !important;
+        }
+
+        /* Section reveals: JS tags sheet sections with .dr-reveal and a one-shot
+           IntersectionObserver flips .is-in as they enter the viewport. */
+        .dr-reveal { opacity: 0; transform: translateY(12px); transition: opacity 0.4s ease, transform 0.4s ease; }
+        .dr-reveal.is-in { opacity: 1; transform: none; }
+
+        /* Book bar starts off-screen and slides in once the title scrolls away
+           (JS toggles .is-vis); it also ducks under any open bottom sheet. */
+        .dr-book-bar { transform: translateY(110%); transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .dr-book-bar.is-vis { transform: none; }
+        body.dr-lock .dr-book-bar { transform: translateY(110%); }
+
+        /* Lineup rail: fade the edges so it visibly continues off-screen. */
+        .dr-lineup__rail {
+            -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+        }
+        /* Full-bleed: both nested .containers carry 16px side MARGINS from the
+           site stylesheet (not just padding) — zero them or the hero/sheet
+           floats 32px off each edge. */
+        body.event-detail-page main.container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; width: 100% !important; }
+        .district-event-page .container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; width: 100% !important; }
 
         /* Poster hero — full colour; the title lives on the sheet, so no heavy scrim. */
         .district-event-page .dr-card-body { padding: 0 !important; background: #F4F7FB; }
+        /* Sticky hero: the poster pins to the top and the white sheet scrolls
+           OVER it (app-style). Compositor-driven — no JS scroll handlers.
+           NOTE: ancestors use overflow-x: clip (not hidden) below; hidden
+           would silently kill position: sticky. Dark background = the scrim
+           and floating buttons sit on something while the image decodes. */
         .district-event-page .dr-hero-banner {
-            position: relative;
+            position: sticky; top: 0; z-index: 0;
             margin: 0 !important;
             height: 340px !important; min-height: 0; max-height: none;
             border: none !important; border-radius: 0 !important;
+            background: #121620;
         }
         .district-event-page .dr-hero-banner img {
             border-radius: 0 !important; width: 100%; height: 100%; object-fit: cover;
@@ -287,7 +330,9 @@
             flex-direction: column; align-items: flex-start;
             border-bottom: none !important;
         }
-        .dr-idrow { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        /* App parity (EventIdentityRow): category hugs the left, rating sits at
+           the right edge. */
+        .dr-idrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
         .dr-cat-pill {
             font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
             color: #2563EB; background: rgba(37,99,235,0.10); padding: 5px 11px; border-radius: 999px;
@@ -377,6 +422,114 @@
         .dr-mcard small { font-size: 11px; color: #94A3B8; }
         .dr-mcard__link { color: #2563EB !important; font-weight: 600; }
 
+        /* App parity: section titles are dark and tight (HaraanTypography.SectionTitle),
+           not the page-wide MI blue used on desktop. */
+        .district-event-page .dr-section-title {
+            color: #121620 !important;
+            font-size: 17px !important; font-weight: 800 !important;
+            letter-spacing: -0.02em !important; text-transform: none !important;
+        }
+        .district-event-page h4 { color: #121620 !important; }
+
+        /* Date line under the title is accent-blue like the app EventHeader. */
+        .dr-date-line { color: #2563EB !important; font-weight: 700 !important; }
+
+        /* The desktop map card + organizer card are replaced by app-style row
+           cards (EventOrganizerSection / EventVenueSection) in .dr-mobrows. */
+        .district-event-page a[aria-label="Open venue location in Maps"] { display: none !important; }
+        .district-event-page .dr-organizer-desk { display: none !important; }
+
+        /* App-style compact row cards: Organizer + Venue */
+        .dr-mobrows { display: flex; flex-direction: column; gap: 22px; margin-top: 24px; }
+        .dr-mobrows h3 { margin: 0 0 10px; }
+        .dr-mrow {
+            display: flex; align-items: center; gap: 12px;
+            background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px; padding: 14px;
+        }
+        .dr-mrow__ava, .dr-mrow__ico {
+            flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center;
+            background: rgba(37, 99, 235, 0.12); color: #2563EB;
+        }
+        .dr-mrow__ava {
+            border-radius: 50%; font-size: 18px; font-weight: 800; overflow: hidden;
+        }
+        .dr-mrow__ava img { width: 100%; height: 100%; object-fit: cover; }
+        .dr-mrow__ico { border-radius: 12px; }
+        .dr-mrow__ico svg { width: 22px; height: 22px; }
+        .dr-mrow__txt { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+        .dr-mrow__txt strong {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 15px; font-weight: 700; color: #0F172A;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .dr-mrow__txt strong svg { width: 15px; height: 15px; color: #2563EB; flex-shrink: 0; }
+        .dr-mrow__txt small {
+            font-size: 13px; color: #64748B;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .dr-mrow__cta {
+            flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(37, 99, 235, 0.10); color: #2563EB; text-decoration: none;
+            font-size: 12.5px; font-weight: 700; padding: 10px 12px; border-radius: 12px;
+        }
+        .dr-mrow__cta svg { width: 15px; height: 15px; }
+
+        /* Important Information — bordered card like the app (EventImportantInfoCard),
+           not a bare bullet list. */
+        .dr-impinfo { background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; }
+        .dr-impinfo .dr-section-title { font-size: 15px !important; margin-bottom: 10px !important; }
+        .dr-impinfo ul { font-size: 13.5px !important; line-height: 1.8 !important; color: #64748B !important; }
+
+        /* App parity: no fabricated fallback policy cards — the app renders
+           nothing when the host authored nothing. */
+        .dr-know-fallback { display: none !important; }
+
+        /* App parity: info notes appear once (Important Information card), so the
+           Highlights section that repeats them is desktop-only. */
+        .dr-highlights { display: none !important; }
+
+        /* Lineup: centre-snapping rail with neighbours peeking in (the app's
+           coverflow, minus scroll-linked transforms — see porting notes). */
+        .dr-lineup-desk { display: none !important; }
+        .dr-lineup__rail {
+            display: flex; gap: 12px; overflow-x: auto;
+            scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+            margin: 0 -20px; padding: 2px 44px; scrollbar-width: none;
+        }
+        .dr-lineup__rail::-webkit-scrollbar { display: none; }
+        /* App card width: full width minus the pager's 64dp content padding
+           per side (flex-basis % would resolve against the rail's content box,
+           which under-sizes the card). */
+        .dr-lineup__card { flex: 0 0 calc(100vw - 128px); height: 300px; scroll-snap-align: center; }
+
+        /* Schedule bottom sheet (app EventScheduleSheet) — opened from the
+           "Doors Open" metadata card when the admin authored a run-of-show. */
+        button.dr-mcard { font-family: inherit; cursor: pointer; }
+        .dr-sched__backdrop {
+            position: fixed; inset: 0; background: rgba(4,8,15,0.45); z-index: 120;
+            opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+        }
+        .dr-sched {
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 121;
+            background: #ffffff; border-radius: 24px 24px 0 0;
+            padding: 14px 24px calc(28px + env(safe-area-inset-bottom, 0px));
+            max-height: 70vh; overflow-y: auto; overscroll-behavior: contain;
+            transform: translateY(105%); transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .dr-sched.is-open { transform: none; }
+        .dr-sched__backdrop.is-open { opacity: 1; pointer-events: auto; }
+        .dr-sched__grab { width: 40px; height: 4px; border-radius: 2px; background: #E2E8F0; margin: 0 auto 14px; }
+        .dr-sched h3 { margin: 0 0 18px; font-size: 22px; font-weight: 800; color: #121620; letter-spacing: -0.02em; }
+        .dr-schedrow { display: flex; gap: 16px; }
+        .dr-schedrow__rail { display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
+        .dr-schedrow__dot { width: 12px; height: 12px; border-radius: 50%; background: #2563EB; flex-shrink: 0; }
+        .dr-schedrow__line { width: 2px; flex: 1; min-height: 30px; background: #E2E8F0; margin-top: 2px; }
+        .dr-schedrow__txt { min-width: 0; padding-bottom: 18px; display: flex; flex-direction: column; gap: 2px; }
+        .dr-schedrow:last-child .dr-schedrow__txt { padding-bottom: 0; }
+        .dr-schedrow__time { font-size: 13px; font-weight: 800; color: #2563EB; }
+        .dr-schedrow__title { font-size: 15px; font-weight: 600; color: #0F172A; }
+        .dr-schedrow__note { font-size: 13px; color: #64748B; line-height: 1.4; }
+
         /* Sticky booking bar */
         .dr-book-bar {
             display: flex !important; position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
@@ -396,6 +549,76 @@
             box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
         }
     }
+    /* "Who takes the stage" — performer cards (app EventLineupSection).
+       Card look is shared; mobile lays them in a snap rail, desktop in a grid. */
+    .dr-lineup__card {
+        position: relative; margin: 0; border-radius: 20px; overflow: hidden; background: #121620;
+    }
+    .dr-lineup__card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .dr-lineup__card::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        background: linear-gradient(180deg, transparent 45%, rgba(0,0,0,0.78) 100%);
+    }
+    .dr-lineup__meta {
+        position: absolute; left: 18px; right: 18px; bottom: 16px; z-index: 2;
+        display: flex; flex-direction: column; gap: 2px;
+    }
+    .dr-lineup__meta strong {
+        color: #ffffff; font-size: 18px; font-weight: 700;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dr-lineup__meta span {
+        color: rgba(255,255,255,0.82); font-size: 13px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* Desktop grid variant */
+    .dr-lineup-desk__row { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; }
+    .dr-lineup-desk .dr-lineup__card { height: 260px; }
+
+    /* Ticket selection sheet — opened by Book Tickets (both breakpoints).
+       Bottom sheet on mobile, bottom-docked centred panel on desktop. */
+    .dr-tix__backdrop {
+        position: fixed; inset: 0; background: rgba(4,8,15,0.45); z-index: 120;
+        opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+    }
+    .dr-tix {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 121;
+        background: #ffffff; border-radius: 24px 24px 0 0;
+        padding: 14px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+        max-height: 75vh; overflow-y: auto; overscroll-behavior: contain;
+        transform: translateY(105%); transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .dr-tix.is-open { transform: none; }
+    .dr-tix__backdrop.is-open { opacity: 1; pointer-events: auto; }
+    @media (min-width: 1025px) { .dr-tix { left: 50%; right: auto; width: 430px; margin-left: -215px; } }
+    .dr-tix__grab { width: 40px; height: 4px; border-radius: 2px; background: #E2E8F0; margin: 0 auto 14px; }
+    .dr-tix h3 { margin: 0 0 6px; font-size: 20px; font-weight: 800; color: #121620 !important; letter-spacing: -0.02em; }
+    .dr-tixrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid #F1F5F9; }
+    .dr-tixrow:last-of-type { border-bottom: none; }
+    .dr-tixrow__info { min-width: 0; }
+    .dr-tixrow__info strong { display: block; font-size: 14.5px; font-weight: 700; color: #0F172A; }
+    .dr-tixrow__info small { font-size: 13px; color: #64748B; font-weight: 600; }
+    .dr-stepper { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .dr-stepper button {
+        width: 32px; height: 32px; border-radius: 50%; border: 1px solid #E2E8F0;
+        background: #F4F7FB; color: #0F172A; font-size: 17px; font-weight: 700;
+        cursor: pointer; display: grid; place-items: center; line-height: 1; padding: 0;
+    }
+    .dr-stepper input {
+        width: 34px; border: none; background: none; text-align: center;
+        font: inherit; font-size: 15px; font-weight: 800; color: #121620;
+        -moz-appearance: textfield; pointer-events: none;
+    }
+    .dr-stepper input::-webkit-outer-spin-button, .dr-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .dr-tix__cta {
+        display: block; width: 100%; border: none; cursor: pointer; margin-top: 14px;
+        background: #2563EB; color: #fff; font: inherit; font-size: 15px; font-weight: 700;
+        padding: 14px 24px; border-radius: 16px; letter-spacing: -0.01em;
+        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+    }
+    .dr-tix__cta:disabled { background: #CBD5E1; box-shadow: none; cursor: default; }
+    .dr-tix__closed { padding: 18px 0; text-align: center; font-size: 14px; color: #64748B; }
+
     /* Good to Know — app-style card of icon-chip cells (EventGoodToKnowCard) */
     .dr-gtk__card { background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; }
     .dr-gtk__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; }
@@ -405,30 +628,56 @@
     .dr-gtk__txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .dr-gtk__txt small { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94A3B8; }
     .dr-gtk__txt strong { font-size: 14px; font-weight: 600; color: #0F172A; line-height: 1.3; overflow-wrap: anywhere; }
-    @media (max-width: 430px) { .dr-gtk__grid { grid-template-columns: 1fr; gap: 16px; } }
+    /* Stay two-up on phones (app parity — items split left/right); just tighten
+       the cells so the pairs fit at 360-430px. */
+    @media (max-width: 430px) {
+        .dr-gtk__grid { gap: 14px 12px; }
+        .dr-gtk__card { padding: 14px; }
+        .dr-gtk__ico { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px; }
+        .dr-gtk__ico svg { width: 15px; height: 15px; }
+        .dr-gtk__txt strong { font-size: 13px; }
+    }
 
     /* Mobile-only elements hidden on desktop */
-    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips, .dr-mmeta, .dr-idrow, .dr-date-line, .floating-right-btn { display: none !important; } }
+    @media (min-width: 1025px) { .dr-book-bar, .dr-meta-chips, .dr-mmeta, .dr-idrow, .dr-date-line, .dr-mobrows, .dr-lineup, .dr-sched, .dr-sched__backdrop, .floating-right-btn { display: none !important; } }
+
+    /* Toast — feedback pill for the clipboard share fallback (created by JS). */
+    .dr-toast {
+        position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+        transform: translate(-50%, 8px);
+        background: rgba(15, 23, 42, 0.92); color: #ffffff;
+        font-size: 13px; font-weight: 600; padding: 10px 16px; border-radius: 999px;
+        z-index: 130; opacity: 0; pointer-events: none;
+        transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    .dr-toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+    /* Accessibility: no entrance motion when the OS asks for reduced motion. */
+    @media (prefers-reduced-motion: reduce) {
+        .dr-reveal, .dr-reveal.is-in { opacity: 1 !important; transform: none !important; transition: none !important; }
+        .dr-book-bar { transform: none !important; transition: none !important; }
+    }
 </style>
 
 <div class="district-event-page" style="position: relative;">
     <div class="container" style="max-width: 1300px; margin: 0 auto; padding: 0; position: relative;">
         
         {{-- Floating Back Button on the Left --}}
-        <a href="/events" class="floating-left-btn">
+        {{-- Real back navigation preserves the events list's scroll/filters;
+             /events stays as the no-JS and deep-link fallback. --}}
+        <a href="/events" class="floating-left-btn" onclick="if(window.history.length>1){event.preventDefault();history.back();}">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
         </a>
 
         {{-- Floating Share Button on the Right (mobile) --}}
-        <button type="button" class="floating-right-btn" aria-label="Share"
-            onclick="if(navigator.share){navigator.share({title:document.title,url:location.href}).catch(()=>{});}else{navigator.clipboard&&navigator.clipboard.writeText(location.href);}">
+        <button type="button" class="floating-right-btn" aria-label="Share" onclick="drShare()">
             <svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
         </button>
 
         <main class="dr-card-body">
             {{-- Hero Banner --}}
             @php
-                $heroImg = (is_array($event->images) && count($event->images)) ? $event->images[0] : asset('events.png');
+                $heroImg = $event->heroImageUrl() ?? asset('events.png');
                 // Real countdown from the event date; hidden for past events so we
                 // never show a fabricated "Starts in 3H".
                 $countdown = ($event->date && $event->date->isFuture())
@@ -436,7 +685,7 @@
                     : null;
             @endphp
             <div class="dr-hero-banner" style="margin-top: 0; margin-bottom: 12px;">
-                <img src="{{ $heroImg }}" alt="{{ $event->title }}">
+                <img src="{{ $heroImg }}" alt="{{ $event->title }}" fetchpriority="high" decoding="async">
                 @if($countdown)<div class="dr-hero-badge">{{ $countdown }}</div>@endif
             </div>
 
@@ -471,7 +720,7 @@
                         @endif
                     </div>
                 </div>
-                <button class="dr-checkin-btn">
+                <button class="dr-checkin-btn" type="button" onclick="drTixToggle(true)">
                     Book Tickets
                 </button>
             </div>
@@ -482,6 +731,7 @@
                 $mMonth = optional($event->date)->format('M');
                 $mTime = optional($event->date)->format('g:i A');
                 $mVenueShort = $event->venue ? \Illuminate\Support\Str::before($event->venue, ',') : 'Venue';
+                $mSchedule = $event->scheduleRows();
                 $mMapsUrl = 'https://www.google.com/maps/search/?api=1&query='.urlencode(trim(($event->venue ?: '').' '.($event->city ?: 'India')));
             @endphp
             <div class="dr-mmeta">
@@ -507,11 +757,20 @@
                         <strong>{{ $mVenueShort }}</strong>
                         <small class="dr-mcard__link">Directions</small>
                     </a>
+                    @if(count($mSchedule))
+                    {{-- Tapping opens the run-of-show sheet, like the app's Doors Open card. --}}
+                    <button type="button" class="dr-mcard" onclick="drSchedToggle(true)">
+                        <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
+                        <strong>{{ $mTime ?: 'On time' }}</strong>
+                        <small class="dr-mcard__link">Schedule</small>
+                    </button>
+                    @else
                     <div class="dr-mcard">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
                         <strong>{{ $mTime ?: 'On time' }}</strong>
                         <small>Doors Open</small>
                     </div>
+                    @endif
                 </div>
             </div>
 
@@ -528,7 +787,7 @@
                 <div class="dr-content-grid" style="gap: 28px; display: grid;">
                     <div>
                         <section style="margin-bottom: 0px;">
-                            <h3 class="dr-section-title" style="margin-bottom: 12px;">Event Details</h3>
+                            <h3 class="dr-section-title" style="margin-bottom: 12px;">Overview</h3>
                             <div class="dr-description">
                                 {!! $event->description !!}
                             </div>
@@ -583,10 +842,74 @@
                                     </div>
                                 </div>
                             </a>
+
+                            {{-- Mobile-only app-parity rows: Organizer + Venue
+                                 (EventOrganizerSection / EventVenueSection order). --}}
+                            @php
+                                $mOrganizer = $event->artist->name ?? 'Event Host';
+                                $mVenueName = $event->venue ? trim(\Illuminate\Support\Str::before($event->venue, ',')) : '';
+                                $mVenueAddr = $event->venue ? trim(\Illuminate\Support\Str::after($event->venue, ',')) : '';
+                                if ($mVenueAddr === $event->venue) { $mVenueAddr = ''; }
+                                if ($mVenueAddr === '' && $event->location) {
+                                    // Don't repeat the venue name when the location string starts with it.
+                                    $mVenueAddr = trim(ltrim(\Illuminate\Support\Str::after($event->location, $mVenueName), " |,-·"));
+                                    if ($mVenueAddr === '') { $mVenueAddr = $event->location; }
+                                } elseif ($mVenueAddr === '' && $event->city) { $mVenueAddr = $event->city; }
+                            @endphp
+                            <div class="dr-mobrows">
+                                <section>
+                                    <h3 class="dr-section-title">Organizer</h3>
+                                    <div class="dr-mrow">
+                                        <span class="dr-mrow__ava">
+                                            @if($event->artist && $event->artist->image)
+                                                <img src="{{ $event->artist->image }}" alt="{{ $mOrganizer }}">
+                                            @else
+                                                {{ strtoupper(mb_substr(trim($mOrganizer), 0, 1)) }}
+                                            @endif
+                                        </span>
+                                        <span class="dr-mrow__txt">
+                                            <strong>{{ $mOrganizer }}<svg viewBox="0 0 24 24" fill="currentColor"><path d="M23 12l-2.44-2.79.34-3.69-3.61-.82-1.89-3.2L12 2.96 8.6 1.5 6.71 4.69 3.1 5.5l.34 3.7L1 12l2.44 2.79-.34 3.7 3.61.82L8.6 22.5l3.4-1.47 3.4 1.46 1.89-3.19 3.61-.82-.34-3.69L23 12zm-12.91 4.72l-3.8-3.81 1.48-1.48 2.32 2.33 5.85-5.87 1.48 1.48-7.33 7.35z"/></svg></strong>
+                                            @if($event->category)<small>{{ $event->category }} · Verified organizer</small>@endif
+                                        </span>
+                                    </div>
+                                </section>
+                                @php $lineupRows = $event->lineupRows(); @endphp
+                                @if(count($lineupRows))
+                                <section class="dr-lineup">
+                                    <h3 class="dr-section-title">Who takes the stage</h3>
+                                    <div class="dr-lineup__rail">
+                                        @foreach($lineupRows as $artist)
+                                            <figure class="dr-lineup__card">
+                                                @if($artist["image"])<img src="{{ $artist["image"] }}" alt="{{ $artist["name"] }}" loading="lazy" decoding="async">@endif
+                                                <figcaption class="dr-lineup__meta">
+                                                    <strong>{{ $artist['name'] }}</strong>
+                                                    @if($artist['subtitle'])<span>{{ $artist['subtitle'] }}</span>@endif
+                                                </figcaption>
+                                            </figure>
+                                        @endforeach
+                                    </div>
+                                </section>
+                                @endif
+                                @if($event->venue)
+                                <section>
+                                    <h3 class="dr-section-title">Venue</h3>
+                                    <div class="dr-mrow">
+                                        <span class="dr-mrow__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+                                        <span class="dr-mrow__txt">
+                                            <strong>{{ $mVenueName }}</strong>
+                                            @if($mVenueAddr)<small>{{ $mVenueAddr }}</small>@endif
+                                        </span>
+                                        <a class="dr-mrow__cta" href="{{ $mMapsUrl }}" target="_blank" rel="noopener">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>Directions
+                                        </a>
+                                    </div>
+                                </section>
+                                @endif
+                            </div>
                         </section>
                     </div>
 
-                    <div>
+                    <div class="dr-organizer-desk">
                         <section>
                             <h3 class="dr-section-title" style="margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none; color: #121620;">Organized by</h3>
                             <div class="dr-organizer-card" style="background: #ffffff; border: 1px solid var(--dr-border); border-radius: 24px; padding: 24px; display: flex; align-items: center; gap: 24px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.02); min-height: 180px;">
@@ -621,13 +944,33 @@
                     </div>
                 </div>
 
+                {{-- "Who takes the stage" — desktop grid variant (mobile uses the
+                     snap rail inside .dr-mobrows, matching the app's coverflow). --}}
+                @php $lineupRowsDesk = $event->lineupRows(); @endphp
+                @if(count($lineupRowsDesk))
+                <section class="dr-lineup-desk" style="margin-top: 8px; margin-bottom: 8px;">
+                    <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Who takes the stage</h3>
+                    <div class="dr-lineup-desk__row">
+                        @foreach($lineupRowsDesk as $artist)
+                            <figure class="dr-lineup__card">
+                                @if($artist["image"])<img src="{{ $artist["image"] }}" alt="{{ $artist["name"] }}" loading="lazy" decoding="async">@endif
+                                <figcaption class="dr-lineup__meta">
+                                    <strong>{{ $artist['name'] }}</strong>
+                                    @if($artist['subtitle'])<span>{{ $artist['subtitle'] }}</span>@endif
+                                </figcaption>
+                            </figure>
+                        @endforeach
+                    </div>
+                </section>
+                @endif
+
                 {{-- Highlights: only when the event carries real notes. Previously
                      this was hardcoded boilerplate ("world-class bowling…") shown on
                      every event plus a fake carousel — removed to stay honest.
                      Real highlights live in the "Know Before You Go" tab. --}}
                 @php $highlights = is_array($event->info_notes) ? array_values(array_filter($event->info_notes)) : []; @endphp
                 @if(!empty($highlights))
-                <section style="margin-top: 8px; margin-bottom: 8px;">
+                <section class="dr-highlights" style="margin-top: 8px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Highlights</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px;">
                         @foreach(array_slice($highlights, 0, 4) as $note)
@@ -642,7 +985,7 @@
                 {{-- Gallery: the event's own images (not stock arcade photos).
                      Shown only when there is more than the hero image, so we never
                      pad the page with unrelated placeholders. --}}
-                @php $gallery = is_array($event->images) ? array_values(array_filter($event->images)) : []; @endphp
+                @php $gallery = $event->imageUrls(); @endphp
                 @if(count($gallery) > 1)
                 <section style="margin-top: 12px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Gallery</h3>
@@ -708,7 +1051,7 @@
                     @endif
 
                     @if(count($infoNotes) > 0)
-                        <section style="margin-bottom: 32px;">
+                        <section class="dr-impinfo" style="margin-bottom: 32px;">
                             <h3 class="dr-section-title" style="margin-bottom: 16px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none; color: #121620;">Important Information</h3>
                             <ul style="margin: 0; padding-left: 20px; color: var(--dr-text-mute); font-size: 14px; line-height: 1.9;">
                                 @foreach($infoNotes as $note)
@@ -718,7 +1061,7 @@
                         </section>
                     @endif
                 @else
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-bottom: 32px;">
+                <div class="dr-know-fallback" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-bottom: 32px;">
 
                     {{-- Entry & Timing --}}
                     <div style="border: 1px solid var(--dr-border); padding: 24px; border-radius: 0px; background: #ffffff;">
@@ -764,17 +1107,148 @@
         </main>
     </div>
 
+    {{-- Schedule bottom sheet (mobile only; app EventScheduleSheet) --}}
+    @if(count($mSchedule))
+    <div class="dr-sched__backdrop" onclick="drSchedToggle(false)"></div>
+    <div class="dr-sched" role="dialog" aria-modal="true" aria-label="Event schedule">
+        <div class="dr-sched__grab"></div>
+        <h3>Schedule</h3>
+        @foreach($mSchedule as $row)
+            <div class="dr-schedrow">
+                <span class="dr-schedrow__rail">
+                    <span class="dr-schedrow__dot"></span>
+                    @unless($loop->last)<span class="dr-schedrow__line"></span>@endunless
+                </span>
+                <span class="dr-schedrow__txt">
+                    <span class="dr-schedrow__time">{{ $row['time'] }}</span>
+                    @if($row['title'])<span class="dr-schedrow__title">{{ $row['title'] }}</span>@endif
+                    @if($row['note'])<span class="dr-schedrow__note">{{ $row['note'] }}</span>@endif
+                </span>
+            </div>
+        @endforeach
+    </div>
+    <script>
+        function drSchedToggle(open) {
+            document.querySelector('.dr-sched').classList.toggle('is-open', open);
+            document.querySelector('.dr-sched__backdrop').classList.toggle('is-open', open);
+            document.body.classList.toggle('dr-lock', open);
+        }
+    </script>
+    @endif
+
+    {{-- Ticket selection sheet (both breakpoints) — GET to the auth-gated
+         checkout review, so guests bounce through /login and resume. --}}
+    @php
+        $tixTiers = $event->ticketTypes->filter->isOnSale()->values();
+        $tixSalesClosed = $event->ticketTypes->isNotEmpty() && $tixTiers->isEmpty();
+        $tixSoldOut = (int) $event->available_slots <= 0;
+    @endphp
+    <div class="dr-tix__backdrop" onclick="drTixToggle(false)"></div>
+    <form class="dr-tix" method="GET" action="/events/{{ $event->id }}/book" role="dialog" aria-modal="true" aria-label="Select tickets">
+        <div class="dr-tix__grab"></div>
+        <h3>Select tickets</h3>
+        @if($tixSoldOut)
+            <p class="dr-tix__closed">This event is sold out.</p>
+        @elseif($tixSalesClosed)
+            <p class="dr-tix__closed">Ticket sales are closed right now.</p>
+        @elseif($tixTiers->count())
+            @foreach($tixTiers as $tier)
+                <div class="dr-tixrow" data-price="{{ $tier->effectivePrice() }}">
+                    <div class="dr-tixrow__info">
+                        <strong>{{ $tier->name }}</strong>
+                        <small>₹{{ number_format($tier->effectivePrice()) }}</small>
+                    </div>
+                    <div class="dr-stepper">
+                        <button type="button" onclick="drStep(this, -1)" aria-label="Fewer">−</button>
+                        <input type="number" name="qty[{{ $tier->id }}]" value="0" min="0" max="10" readonly>
+                        <button type="button" onclick="drStep(this, 1)" aria-label="More">+</button>
+                    </div>
+                </div>
+            @endforeach
+        @else
+            <div class="dr-tixrow" data-price="{{ (float) $event->price }}">
+                <div class="dr-tixrow__info">
+                    <strong>Standard</strong>
+                    <small>{{ $event->price ? '₹'.number_format($event->price) : 'Free' }}</small>
+                </div>
+                <div class="dr-stepper">
+                    <button type="button" onclick="drStep(this, -1)" aria-label="Fewer">−</button>
+                    <input type="number" name="qty[0]" value="0" min="0" max="10" readonly>
+                    <button type="button" onclick="drStep(this, 1)" aria-label="More">+</button>
+                </div>
+            </div>
+        @endif
+        @unless($tixSoldOut || $tixSalesClosed)
+            <button type="submit" class="dr-tix__cta" disabled>Continue</button>
+        @endunless
+    </form>
+    <script>
+        function drTixToggle(open) {
+            document.querySelector('.dr-tix').classList.toggle('is-open', open);
+            document.querySelector('.dr-tix__backdrop').classList.toggle('is-open', open);
+            document.body.classList.toggle('dr-lock', open);
+        }
+        function drStep(btn, delta) {
+            const input = btn.parentElement.querySelector('input');
+            input.value = Math.min(10, Math.max(0, parseInt(input.value || '0', 10) + delta));
+            drTixTotal();
+        }
+        function drTixTotal() {
+            let total = 0, count = 0;
+            document.querySelectorAll('.dr-tixrow[data-price]').forEach(function (row) {
+                const qty = parseInt(row.querySelector('input').value || '0', 10);
+                total += qty * parseFloat(row.dataset.price);
+                count += qty;
+            });
+            const cta = document.querySelector('.dr-tix__cta');
+            if (!cta) return;
+            cta.disabled = count === 0;
+            cta.textContent = count === 0 ? 'Continue'
+                : (total > 0 ? 'Continue — ₹' + total.toLocaleString('en-IN') : 'Continue — Free');
+            // Reflect the selection in the sticky bar so closing the sheet keeps context.
+            const amt = document.querySelector('.dr-book-bar__amount');
+            const lbl = document.querySelector('.dr-book-bar__label');
+            if (amt && lbl) {
+                if (!amt.dataset.base) { amt.dataset.base = amt.textContent; lbl.dataset.base = lbl.textContent; }
+                if (count > 0) {
+                    amt.textContent = total > 0 ? '₹' + total.toLocaleString('en-IN') : 'Free';
+                    lbl.textContent = count + (count === 1 ? ' ticket' : ' tickets');
+                } else {
+                    amt.textContent = amt.dataset.base;
+                    lbl.textContent = lbl.dataset.base;
+                }
+            }
+        }
+    </script>
+
     {{-- Sticky booking bar (mobile only) --}}
     <div class="dr-book-bar">
         <div class="dr-book-bar__price">
             <span class="dr-book-bar__amount">{{ $event->price ? '₹'.number_format($event->price) : 'Free' }}</span>
             <span class="dr-book-bar__label">{{ $event->price ? 'onwards' : 'entry' }}</span>
         </div>
-        <button class="dr-book-bar__btn" type="button">Book Tickets</button>
+        <button class="dr-book-bar__btn" type="button" onclick="drTixToggle(true)" @if($tixSoldOut) disabled style="background:#CBD5E1;box-shadow:none;" @endif>{{ $tixSoldOut ? 'Sold out' : 'Book Tickets' }}</button>
     </div>
 </div>
 
 <script>
+    // Share: native sheet when available, clipboard + toast fallback.
+    function drShare() {
+        if (navigator.share) {
+            navigator.share({ title: document.title, url: location.href }).catch(function () {});
+        } else if (navigator.clipboard) {
+            navigator.clipboard.writeText(location.href).then(function () { drToast('Link copied'); });
+        }
+    }
+    function drToast(msg) {
+        let t = document.querySelector('.dr-toast');
+        if (!t) { t = document.createElement('div'); t.className = 'dr-toast'; document.body.appendChild(t); }
+        t.textContent = msg;
+        t.classList.add('is-on');
+        clearTimeout(t._h);
+        t._h = setTimeout(function () { t.classList.remove('is-on'); }, 1600);
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         const tabs = document.querySelectorAll('.dr-tab');
         const panes = document.querySelectorAll('.dr-tab-pane');
@@ -802,6 +1276,37 @@
                 }
             });
         });
+
+        // Mobile-only motion: section reveals + book-bar entrance. One-shot
+        // IntersectionObservers — never per-frame scroll handlers (they jank;
+        // see the For You rail postmortem).
+        if (window.matchMedia('(max-width: 1024px)').matches) {
+            const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const hasIO = 'IntersectionObserver' in window;
+
+            if (!reduce && hasIO) {
+                const io = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (e) {
+                        if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+                    });
+                }, { rootMargin: '0px 0px -40px 0px' });
+                document.querySelectorAll('.dr-mmeta, .dr-mobrows > section, #pane-details > section, #pane-know > section')
+                    .forEach(function (s) { s.classList.add('dr-reveal'); io.observe(s); });
+            }
+
+            const bar = document.querySelector('.dr-book-bar');
+            const title = document.querySelector('.dr-main-title');
+            if (bar && title && hasIO && !reduce) {
+                // Bar shows at the top (while the title is on screen) and slides
+                // away once the reader scrolls down into the content.
+                bar.classList.add('is-vis');
+                new IntersectionObserver(function (entries) {
+                    bar.classList.toggle('is-vis', entries[0].isIntersecting);
+                }).observe(title);
+            } else if (bar) {
+                bar.classList.add('is-vis');
+            }
+        }
     });
 </script>
 @endsection
