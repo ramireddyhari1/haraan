@@ -321,6 +321,10 @@
             background: linear-gradient(180deg, rgba(4,8,15,0.32) 0%, rgba(4,8,15,0) 26%);
         }
 
+        /* No countdown badge on the mobile hero — it covered the poster art and
+           the date already sits under the title. Desktop keeps it. */
+        .district-event-page .dr-hero-badge { display: none !important; }
+
         /* Hero pager: swipe through the event's photos. Native scroll-snap —
            compositor-driven, no JS in the scroll path (dots update via IO). */
         .district-event-page .dr-hero__rail {
