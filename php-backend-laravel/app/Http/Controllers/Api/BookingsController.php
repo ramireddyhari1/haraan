@@ -64,12 +64,12 @@ final class BookingsController extends Controller
     }
 
     /**
-     * POST /api/bookings — reserve an order and start payment.
+     * POST /api/bookings — create a booking.
      *
-     * Creates the ticket rows as a PENDING reservation (holding inventory), then either
-     * confirms immediately when the order is free, or creates a Razorpay order and returns the
-     * fields the client needs to open checkout. Nothing is CONFIRMED here for a paid order —
-     * that happens in {@see confirm()} once the payment signature verifies.
+     * Payment is OPT-IN (`pay: true`) so already-installed app builds keep the legacy
+     * behaviour: without the flag the order is confirmed immediately, exactly as before. New
+     * clients (web + payment-aware app builds) send `pay: true` to get the reserve→pay path:
+     * a PENDING reservation that holds inventory until {@see confirm()} verifies the signature.
      */
     public function store(StoreBookingRequest $request): JsonResponse
     {
@@ -77,6 +77,22 @@ final class BookingsController extends Controller
 
         if (!$authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        // Legacy path for clients that don't understand payment — immediate confirmed booking.
+        if (! $request->boolean('pay')) {
+            $legacy = $this->bookings->createOrder(
+                $authUser,
+                (int) $request->validated('eventId'),
+                $request->orderLines(),
+                $request->validated('couponCode'),
+                $request->contact(),
+            )->load('ticketType');
+
+            return response()->json([
+                'message' => 'Booking confirmed',
+                'data'    => $this->envelope($legacy, (string) $legacy->first()->status),
+            ], 201);
         }
 
         $bookings = $this->bookings->createOrder(
