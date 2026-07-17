@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\DB;
  */
 class RevenueOverviewWidget extends ChartWidget
 {
+    use \App\Filament\Concerns\RefreshesOnContentUpdate;
+
     protected static ?int $sort = -40;
 
     protected ?string $heading = 'Payments overview';

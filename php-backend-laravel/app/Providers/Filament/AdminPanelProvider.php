@@ -10,6 +10,7 @@ use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
+use Filament\View\PanelsRenderHook;
 use Filament\Support\Colors\Color;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -61,6 +62,13 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            // Real-time refresh: subscribe the panel to the Reverb "content" channel so
+            // dashboard widgets + live pages update in seconds when content changes. No-op
+            // unless BROADCAST_CONNECTION=reverb (the partial guards itself).
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => view('filament.realtime-head')->render(),
+            )
             ->plugin(FilamentShieldPlugin::make());
     }
 }

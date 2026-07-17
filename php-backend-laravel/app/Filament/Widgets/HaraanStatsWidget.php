@@ -21,6 +21,8 @@ use Illuminate\Support\Collection;
  */
 class HaraanStatsWidget extends StatsOverviewWidget
 {
+    use \App\Filament\Concerns\RefreshesOnContentUpdate;
+
     // Dashboard order is deliberate and spaced by 10 (KPIs → money → growth → live →
     // recent) so widgets read as one narrative and new ones slot in without collisions.
     protected static ?int $sort = -50;

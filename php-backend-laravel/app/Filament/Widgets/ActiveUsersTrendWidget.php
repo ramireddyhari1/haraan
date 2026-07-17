@@ -15,6 +15,8 @@ use Filament\Widgets\ChartWidget;
  */
 class ActiveUsersTrendWidget extends ChartWidget
 {
+    use \App\Filament\Concerns\RefreshesOnContentUpdate;
+
     protected static ?int $sort = -30;
 
     protected ?string $heading = 'Active users over time';

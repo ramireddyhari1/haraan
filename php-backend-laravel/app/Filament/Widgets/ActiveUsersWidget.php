@@ -17,6 +17,8 @@ use Illuminate\Support\Carbon;
  */
 class ActiveUsersWidget extends TableWidget
 {
+    use \App\Filament\Concerns\RefreshesOnContentUpdate;
+
     protected static ?int $sort = -20;
 
     protected int | string | array $columnSpan = 'full';
