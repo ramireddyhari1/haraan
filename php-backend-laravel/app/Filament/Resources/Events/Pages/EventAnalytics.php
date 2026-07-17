@@ -8,8 +8,11 @@ use App\Filament\Resources\Events\EventResource;
 use App\Filament\Resources\Events\Pages\EditEvent;
 use App\Filament\Resources\Events\Widgets\EventAnalyticsStatsWidget;
 use App\Filament\Resources\Events\Widgets\EventArrivalCurveWidget;
+use App\Filament\Resources\Events\Widgets\EventAudienceWidget;
+use App\Filament\Resources\Events\Widgets\EventComparisonWidget;
 use App\Filament\Resources\Events\Widgets\EventCouponWidget;
 use App\Filament\Resources\Events\Widgets\EventInsightsWidget;
+use App\Filament\Resources\Events\Widgets\EventRefundWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesChartWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesPacingWidget;
@@ -67,10 +70,13 @@ class EventAnalytics extends Page
             EventInsightsWidget::class,
             EventSalesPacingWidget::class,
             EventAnalyticsStatsWidget::class,
+            EventComparisonWidget::class,
             EventRevenueByTypeWidget::class,
             EventSalesChartWidget::class,
+            EventAudienceWidget::class,
             EventArrivalCurveWidget::class,
             EventCouponWidget::class,
+            EventRefundWidget::class,
         ];
     }
 
