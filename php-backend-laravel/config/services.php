@@ -49,4 +49,12 @@ return [
         'bridge_url' => env('WHATSAPP_BRIDGE_URL', 'http://localhost:8090/api/send-message'),
     ],
 
+    // Razorpay Standard Checkout. `key` (public key id) is safe to expose to the
+    // browser; `secret` NEVER reaches the frontend — it signs orders and verifies the
+    // payment signature server-side only. Read via config() so it survives config:cache.
+    'razorpay' => [
+        'key'    => env('RAZORPAY_KEY_ID'),
+        'secret' => env('RAZORPAY_KEY_SECRET'),
+    ],
+
 ];

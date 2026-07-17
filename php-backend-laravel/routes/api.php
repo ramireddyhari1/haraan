@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\LeaderboardsController;
 use App\Http\Controllers\Api\LiveMatchController;
 use App\Http\Controllers\Api\MatchesController;
 use App\Http\Controllers\Api\PlayersController;
+use App\Http\Controllers\Api\RazorpayController;
 use App\Http\Controllers\Api\UsersController;
 use Illuminate\Support\Facades\Route;
 
@@ -222,6 +223,15 @@ Route::prefix('leaderboards')->group(function (): void {
 // -------------------------------------------------------------------------
 
 Route::middleware('auth.jwt.optional')->get('/districts/summary', [DistrictsController::class, 'summary']);
+
+// -------------------------------------------------------------------------
+//  Payments (Razorpay Standard Checkout)
+//  Order creation fixes the amount server-side; verification confirms the
+//  signature. The KEY_SECRET never leaves the backend.
+// -------------------------------------------------------------------------
+
+Route::post('/create-order', [RazorpayController::class, 'createOrder']);
+Route::post('/verify-payment', [RazorpayController::class, 'verifyPayment']);
 
 // -------------------------------------------------------------------------
 //  Bookings

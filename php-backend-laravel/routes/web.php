@@ -37,6 +37,12 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/api/search/suggest', 'searchSuggest')->name('api.search.suggest');
     Route::get('/login', 'login')->name('site.login');
     Route::get('/register', 'register')->name('site.register');
+    // Razorpay Standard Checkout demo page — LOCAL ONLY. It's an unauthenticated page
+    // that opens a real charge, so it must never be reachable on the live server. The
+    // public key is delivered by the /api/create-order response (never templated in).
+    if (app()->environment('local')) {
+        Route::view('/pay', 'site.pay')->name('site.pay');
+    }
     // NB: /profile lives in Web\AccountController (auth-gated) — the account screen is
     // the app's twin now. The old PUT /profile name/email/phone editor went with the
     // page that posted to it; nothing referenced it afterwards.
