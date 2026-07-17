@@ -205,11 +205,19 @@
          The Play badge targets the final package id — the link goes live the day
          the listing publishes; until then the direct-APK line below it works. --}}
     @if(request()->is('/', 'events', 'gamehub'))
+    @php
+        $footIsHub = request()->is('gamehub');
+        $footHead  = $footIsHub ? 'Play on the go' : 'Take Haraan with you';
+        $footBlurb = $footIsHub
+            ? 'Follow live scores, track your stats, and climb the leaderboards from anywhere.'
+            : 'Book faster, discover events near you, and keep your tickets in your pocket.';
+        $footTag   = $footIsHub ? 'Play. Compete. Climb.' : 'Discover. Book. Play.';
+    @endphp
     <footer class="mfoot">
         <div class="mfoot__app">
             <div>
-                <strong>Take Haraan with you</strong>
-                <p>Book faster, follow live scores, and keep your tickets in your pocket.</p>
+                <strong>{{ $footHead }}</strong>
+                <p>{{ $footBlurb }}</p>
             </div>
             <a class="mfoot__play" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -223,15 +231,20 @@
             <a class="mfoot__apk" href="/haraan.apk">or download the Android APK directly</a>
         </div>
         <nav class="mfoot__links" aria-label="Footer">
+            @if($footIsHub)
+            <a href="/gamehub">GameHub</a>
+            <a href="/gamehub/leaderboard">Leaderboard</a>
+            @else
             <a href="/events">Events</a>
             <a href="/gamehub">GameHub</a>
+            @endif
             <a href="/support">Support</a>
             <a href="/notifications">Notifications</a>
             <a href="/profile">My profile</a>
         </nav>
         <div class="mfoot__base">
             <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-            <span>Discover. Book. Play.</span>
+            <span>{{ $footTag }}</span>
             <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
         </div>
     </footer>
