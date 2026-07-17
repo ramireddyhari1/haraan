@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Events\Pages;
 
 use App\Filament\Resources\Events\EventResource;
+use App\Filament\Resources\Events\Pages\EditEvent;
 use App\Filament\Resources\Events\Widgets\EventAnalyticsStatsWidget;
 use App\Filament\Resources\Events\Widgets\EventArrivalCurveWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesChartWidget;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
 
@@ -44,6 +46,16 @@ class EventAnalytics extends Page
     public static function canAccess(array $parameters = []): bool
     {
         return auth()->user()?->canManage('events') ?? false;
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('edit')
+                ->label('Edit event')
+                ->icon('heroicon-m-pencil-square')
+                ->url(fn (): string => EditEvent::getUrl(['record' => $this->getRecord()])),
+        ];
     }
 
     protected function getHeaderWidgets(): array

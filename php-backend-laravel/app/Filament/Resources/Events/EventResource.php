@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Events;
 
 use App\Filament\Resources\Events\Pages\CreateEvent;
 use App\Filament\Resources\Events\Pages\EditEvent;
+use App\Filament\Resources\Events\Pages\EventAnalytics;
 use App\Filament\Resources\Events\Pages\ListEvents;
 use App\Filament\Resources\Events\RelationManagers\TicketTypesRelationManager;
 use App\Filament\Resources\Events\Schemas\EventForm;
@@ -71,6 +72,9 @@ class EventResource extends Resource
         return [
             'index' => ListEvents::route('/'),
             'create' => CreateEvent::route('/create'),
+            // Clicking an event name opens this read-only analytics dashboard (see EventsTable
+            // ->recordUrl); editing is a deliberate, separate action via the Edit button.
+            'analytics' => EventAnalytics::route('/{record}/analytics'),
             'edit' => EditEvent::route('/{record}/edit'),
         ];
     }
