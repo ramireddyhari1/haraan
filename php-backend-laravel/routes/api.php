@@ -45,25 +45,25 @@ Route::get('/i18n/{locale}', [\App\Http\Controllers\Api\I18nController::class, '
 // -------------------------------------------------------------------------
 
 Route::prefix('auth')->group(function (): void {
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:auth');
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth');
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::middleware('auth.jwt')->get('/me', [AuthController::class, 'me']);
 });
 
 Route::prefix('auth/whatsapp')->controller(WhatsAppAuthController::class)->group(function (): void {
-    Route::post('/request', 'requestOtp');
-    Route::post('/verify', 'verifyOtp');
+    Route::post('/request', 'requestOtp')->middleware('throttle:otp');
+    Route::post('/verify', 'verifyOtp')->middleware('throttle:auth');
 });
 
 Route::prefix('auth/email')->controller(EmailAuthController::class)->group(function (): void {
-    Route::post('/request', 'requestOtp');
-    Route::post('/verify', 'verifyOtp');
+    Route::post('/request', 'requestOtp')->middleware('throttle:otp');
+    Route::post('/verify', 'verifyOtp')->middleware('throttle:auth');
     Route::post('/complete', 'completeProfile'); // new user: name + date of birth after verify
 });
 
 // "Continue with Google" — the app posts a Google ID token; we verify it and log in.
-Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login']);
+Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login'])->middleware('throttle:auth');
 
 // -------------------------------------------------------------------------
 //  Users (admin-only)
@@ -230,8 +230,8 @@ Route::middleware('auth.jwt.optional')->get('/districts/summary', [DistrictsCont
 //  signature. The KEY_SECRET never leaves the backend.
 // -------------------------------------------------------------------------
 
-Route::post('/create-order', [RazorpayController::class, 'createOrder']);
-Route::post('/verify-payment', [RazorpayController::class, 'verifyPayment']);
+Route::post('/create-order', [RazorpayController::class, 'createOrder'])->middleware('throttle:payments');
+Route::post('/verify-payment', [RazorpayController::class, 'verifyPayment'])->middleware('throttle:payments');
 
 // -------------------------------------------------------------------------
 //  Bookings

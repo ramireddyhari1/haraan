@@ -9,7 +9,10 @@ use App\Models\User;
 use App\Policies\EventPolicy;
 use App\Services\SupportChat;
 use App\Support\CityResolver;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -30,6 +33,8 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Event::class, EventPolicy::class);
 
+        $this->configureRateLimiters();
+
         // Share the viewer's selected city with every view so the header pill
         // and any page can reflect / scope by it. Null = "All India".
         View::composer('*', function ($view): void {
@@ -47,6 +52,40 @@ class AppServiceProvider extends ServiceProvider
                 'headerBellUnread'    => $user ? $this->unreadNotifications($user) : 0,
             ]);
         });
+    }
+
+    /**
+     * Abuse / cost protection for the API. Each limiter is referenced by name from routes/api.php
+     * via the `throttle:<name>` middleware. A blown limit returns HTTP 429 with a Retry-After
+     * header — Laravel handles the response, we only declare the ceilings here.
+     */
+    private function configureRateLimiters(): void
+    {
+        // OTP send is the most expensive & abusable path (SMTP + WhatsApp cost, and a spam vector).
+        // Guard the *destination* (email / phone) AND the source IP so neither a single target nor a
+        // single origin can be hammered. Keyed on the request payload, falling back to IP.
+        RateLimiter::for('otp', function (Request $request) {
+            $target = (string) ($request->input('email')
+                ?? $request->input('phone')
+                ?? $request->input('mobile')
+                ?? $request->ip());
+
+            return [
+                Limit::perMinutes(10, 5)->by('otp:target:' . mb_strtolower($target)),
+                Limit::perMinutes(10, 20)->by('otp:ip:' . $request->ip()),
+            ];
+        });
+
+        // Credential / token endpoints (login, register, google, verify). Brute-force ceiling per IP.
+        RateLimiter::for('auth', fn (Request $request) => Limit::perMinute(20)->by($request->ip()));
+
+        // Payment order creation & verification — tie to the signed-in user when we have one.
+        RateLimiter::for('payments', fn (Request $request) => Limit::perMinute(30)
+            ->by(optional($request->user())->id ? 'u:' . $request->user()->id : 'ip:' . $request->ip()));
+
+        // Broad default for the rest of the API: generous, just a runaway-client / scraper backstop.
+        RateLimiter::for('api', fn (Request $request) => Limit::perMinute(120)
+            ->by(optional($request->user())->id ? 'u:' . $request->user()->id : 'ip:' . $request->ip()));
     }
 
     /** Delivered notifications aimed at this user that they haven't opened yet. */
