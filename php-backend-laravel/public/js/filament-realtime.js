@@ -13,11 +13,29 @@
     'use strict';
 
     var cfg = window.HaraanRealtime;
-    if (!cfg || !cfg.enabled || typeof window.Pusher === 'undefined') {
+    if (!cfg || !cfg.enabled) {
         return;
     }
 
     var pusher, debounce;
+
+    // The Pusher CDN script and this bridge are both injected into the panel <head>; depending
+    // on how Filament emits render-hook output they can execute out of order, so don't assume
+    // window.Pusher exists yet — poll briefly until it does, then connect. (~10s ceiling.)
+    function whenPusherReady(cb) {
+        if (typeof window.Pusher !== 'undefined') {
+            return cb();
+        }
+        var tries = 0;
+        var iv = setInterval(function () {
+            if (typeof window.Pusher !== 'undefined') {
+                clearInterval(iv);
+                cb();
+            } else if (++tries > 100) {
+                clearInterval(iv);
+            }
+        }, 100);
+    }
 
     function connect() {
         try {
@@ -52,5 +70,5 @@
         }
     }
 
-    connect();
+    whenPusherReady(connect);
 })();
