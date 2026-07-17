@@ -1460,6 +1460,8 @@ private fun VenueBookingSheet(onDismiss: () -> Unit, onBooked: () -> Unit) {
                                                 Toast.makeText(ctx, "Slot booked!", Toast.LENGTH_SHORT).show(); onBooked()
                                             }
                                             is BookingResult.Error -> error = res.message
+                                            // Venue slots don't use the reserve→pay flow.
+                                            is BookingResult.PaymentRequired -> error = "Payment isn't supported for venue slots yet."
                                         }
                                     }
                                 } else Modifier,

@@ -1170,6 +1170,8 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
                     Toast.makeText(ctx, "Slot booked", Toast.LENGTH_SHORT).show()
                   }
                   is BookingResult.Error -> result = r.message
+                  // Venue slots confirm without the reserve→pay flow; not reachable here.
+                  is BookingResult.PaymentRequired -> result = "Payment isn't supported for venue slots yet."
                 }
                 submitting = false
               }

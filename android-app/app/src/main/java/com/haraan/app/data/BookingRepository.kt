@@ -22,6 +22,19 @@ sealed interface BookingResult {
     val bookingCount: Int = 1
   ) : BookingResult
 
+  /**
+   * The order was reserved (PENDING) and needs payment. Carries everything the client
+   * needs to open Razorpay Checkout; on success the reservation is finalised via
+   * [BookingRepository.confirmOrder], on abandon via [BookingRepository.releaseOrder].
+   */
+  data class PaymentRequired(
+    val razorpayKey: String,
+    val orderId: String,
+    val amountPaise: Long,
+    val currency: String,
+    val bookingId: Int,
+  ) : BookingResult
+
   data class Error(val message: String) : BookingResult
 }
 
@@ -129,6 +142,9 @@ class BookingRepository(
           put("quantity", items.sumOf { it.second }.coerceAtLeast(1))
         }
         if (!couponCode.isNullOrBlank()) put("couponCode", couponCode)
+        // Opt in to the reserve→pay flow: the server holds inventory as PENDING and
+        // returns Razorpay order details instead of confirming for free.
+        put("pay", true)
         // Who the ticket is for. The server falls back to the account when absent,
         // so this stays optional and older payloads keep working.
         contact?.let {
@@ -158,6 +174,72 @@ class BookingRepository(
       if (code in 200..299) {
         val json = JSONObject(body)
         val data = json.getJSONObject("data")
+
+        // Paid order: the server reserved it and wants payment before confirming.
+        val payment = json.optJSONObject("payment")
+        if (payment != null && payment.optBoolean("required", false)) {
+          BookingResult.PaymentRequired(
+            razorpayKey = payment.optString("key"),
+            orderId = payment.optString("orderId"),
+            amountPaise = payment.optLong("amount"),
+            currency = payment.optString("currency", "INR"),
+            bookingId = data.optInt("id"),
+          )
+        } else {
+          // Free order (or a legacy immediate confirm): already CONFIRMED.
+          BookingResult.Success(
+            bookingId = data.optInt("id"),
+            quantity = data.optInt("quantity"),
+            totalAmount = data.optString("totalAmount", "0.00"),
+            status = data.optString("status", "CONFIRMED"),
+            message = json.optString("message", "Booking confirmed."),
+            ticketCode = data.optString("ticketCode").takeIf { it.isNotBlank() },
+            bookingCount = data.optJSONArray("bookings")?.length() ?: 1,
+          )
+        }
+      } else {
+        BookingResult.Error(parseErrorMessage(body, "Booking failed (Status code: $code)"))
+      }
+    } catch (e: Exception) {
+      BookingResult.Error(e.message ?: "Failed to connect to server. Please check your network connection.")
+    }
+  }
+
+  /**
+   * Finalise a reserved order after a successful Razorpay payment (POST /api/bookings/confirm).
+   * The server re-verifies the signature; a mismatch returns an Error and nothing is confirmed.
+   */
+  suspend fun confirmOrder(
+    token: String,
+    orderId: String,
+    paymentId: String,
+    signature: String,
+  ): BookingResult = withContext(Dispatchers.IO) {
+    try {
+      val jsonBody = JSONObject().apply {
+        put("razorpayOrderId", orderId)
+        put("razorpayPaymentId", paymentId)
+        put("razorpaySignature", signature)
+      }
+
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/confirm").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      connection.outputStream.use { it.write(jsonBody.toString().toByteArray(Charsets.UTF_8)) }
+
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+
+      if (code in 200..299) {
+        val json = JSONObject(body)
+        val data = json.getJSONObject("data")
         BookingResult.Success(
           bookingId = data.optInt("id"),
           quantity = data.optInt("quantity"),
@@ -168,11 +250,34 @@ class BookingRepository(
           bookingCount = data.optJSONArray("bookings")?.length() ?: 1,
         )
       } else {
-        BookingResult.Error(parseErrorMessage(body, "Booking failed (Status code: $code)"))
+        BookingResult.Error(parseErrorMessage(body, "Payment could not be verified."))
       }
     } catch (e: Exception) {
-      BookingResult.Error(e.message ?: "Failed to connect to server. Please check your network connection.")
+      BookingResult.Error(e.message ?: "Couldn't reach the server to confirm your payment.")
     }
+  }
+
+  /**
+   * Release a reserved order the buyer abandoned (POST /api/bookings/release), freeing its held
+   * seats. Best-effort: the server also expires stale holds, so a failure here isn't fatal.
+   */
+  suspend fun releaseOrder(token: String, orderId: String) = withContext(Dispatchers.IO) {
+    runCatching {
+      val jsonBody = JSONObject().apply { put("razorpayOrderId", orderId) }
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/release").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      connection.outputStream.use { it.write(jsonBody.toString().toByteArray(Charsets.UTF_8)) }
+      connection.responseCode
+      connection.disconnect()
+    }
+    Unit
   }
 
   /** Result of a coupon-code check (POST /api/bookings/validate-coupon). */

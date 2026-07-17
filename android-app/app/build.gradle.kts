@@ -70,6 +70,10 @@ dependencies {
   implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
   implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
+  // Razorpay Standard Checkout (native) — opens the payment sheet; the host Activity
+  // receives the result via PaymentResultWithDataListener.
+  implementation("com.razorpay:checkout:1.6.40")
+
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.viewmodel.compose)

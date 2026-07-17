@@ -1,5 +1,6 @@
 package com.haraan.app.ui.main
 
+import android.app.Activity
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -51,7 +52,10 @@ import com.haraan.app.data.BookingLite
 import com.haraan.app.data.BookingRepository
 import com.haraan.app.data.BookingResult
 import com.haraan.app.data.ContactDetails
+import com.haraan.app.data.PaymentBridge
 import com.haraan.app.data.TokenStore
+import com.razorpay.Checkout
+import org.json.JSONObject
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.HaraanRadius
 import com.haraan.app.ui.theme.HaraanSpacing
@@ -283,6 +287,27 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                                 return@Surface
                             }
 
+                            // Turn a CONFIRMED order (free, or freshly paid) into the success UI.
+                            val onConfirmed: (BookingResult.Success) -> Unit = { result ->
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (result.bookingCount > 1) {
+                                    confirmedCount = result.bookingCount
+                                } else {
+                                    pass = BookingLite(
+                                        id = result.bookingId.toLong(),
+                                        status = result.status,
+                                        quantity = result.quantity,
+                                        totalAmount = result.totalAmount.toDoubleOrNull() ?: grandTotal,
+                                        type = "event",
+                                        eventTitle = order.title,
+                                        eventVenue = order.venue.ifBlank { null },
+                                        eventDate = order.date.ifBlank { null },
+                                        ticketCode = result.ticketCode,
+                                        imageUrl = order.imageUrl.ifBlank { null },
+                                    )
+                                }
+                            }
+
                             booking = true
                             scope.launch {
                                 val items = order.lines.map { line ->
@@ -299,29 +324,67 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                                         phone = contactPhone.trim(),
                                     ),
                                 )
-                                booking = false
                                 when (result) {
                                     is BookingResult.Success -> {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        if (result.bookingCount > 1) {
-                                            confirmedCount = result.bookingCount
-                                        } else {
-                                            pass = BookingLite(
-                                                id = result.bookingId.toLong(),
-                                                status = result.status,
-                                                quantity = result.quantity,
-                                                totalAmount = result.totalAmount.toDoubleOrNull() ?: grandTotal,
-                                                type = "event",
-                                                eventTitle = order.title,
-                                                eventVenue = order.venue.ifBlank { null },
-                                                eventDate = order.date.ifBlank { null },
-                                                ticketCode = result.ticketCode,
-                                                imageUrl = order.imageUrl.ifBlank { null },
-                                            )
-                                        }
+                                        booking = false
+                                        onConfirmed(result)
                                     }
-                                    is BookingResult.Error ->
+                                    is BookingResult.PaymentRequired -> {
+                                        val activity = context as? Activity
+                                        if (activity == null) {
+                                            booking = false
+                                            Toast.makeText(context, "Couldn't open payment.", Toast.LENGTH_LONG).show()
+                                            return@launch
+                                        }
+                                        // Arm the one-shot handler, then open the Razorpay sheet.
+                                        // The result returns via MainActivity → PaymentBridge.
+                                        PaymentBridge.await { outcome ->
+                                            scope.launch {
+                                                when (outcome) {
+                                                    is PaymentBridge.Outcome.Success -> {
+                                                        val confirmRes = BookingRepository().confirmOrder(
+                                                            token = token,
+                                                            orderId = result.orderId,
+                                                            paymentId = outcome.paymentId,
+                                                            signature = outcome.signature,
+                                                        )
+                                                        booking = false
+                                                        when (confirmRes) {
+                                                            is BookingResult.Success -> onConfirmed(confirmRes)
+                                                            else -> Toast.makeText(
+                                                                context,
+                                                                (confirmRes as? BookingResult.Error)?.message
+                                                                    ?: "Payment could not be verified.",
+                                                                Toast.LENGTH_LONG,
+                                                            ).show()
+                                                        }
+                                                    }
+                                                    is PaymentBridge.Outcome.Cancelled -> {
+                                                        BookingRepository().releaseOrder(token, result.orderId)
+                                                        booking = false
+                                                        Toast.makeText(context, "Payment cancelled.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    is PaymentBridge.Outcome.Failed -> {
+                                                        BookingRepository().releaseOrder(token, result.orderId)
+                                                        booking = false
+                                                        Toast.makeText(context, outcome.message, Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        openRazorpayCheckout(
+                                            activity = activity,
+                                            pr = result,
+                                            name = contactName.trim(),
+                                            email = contactEmail.trim(),
+                                            phone = contactPhone.trim(),
+                                            description = order.title,
+                                        )
+                                    }
+                                    is BookingResult.Error -> {
+                                        booking = false
                                         Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             }
                         },
@@ -363,6 +426,38 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
             OrderConfirmedOverlay(passCount = confirmedCount, onDone = onBack)
         }
     }
+}
+
+/**
+ * Open the Razorpay Standard Checkout sheet for a reserved order. The result is delivered to
+ * the host Activity (MainActivity implements the listener) and routed back via [PaymentBridge].
+ */
+private fun openRazorpayCheckout(
+    activity: Activity,
+    pr: BookingResult.PaymentRequired,
+    name: String,
+    email: String,
+    phone: String,
+    description: String,
+) {
+    val checkout = Checkout()
+    checkout.setKeyID(pr.razorpayKey)
+
+    val options = JSONObject().apply {
+        put("name", "Haraan")
+        put("description", description)
+        put("order_id", pr.orderId)
+        put("currency", pr.currency)
+        put("amount", pr.amountPaise)
+        put("prefill", JSONObject().apply {
+            if (name.isNotBlank()) put("name", name)
+            if (email.isNotBlank()) put("email", email)
+            if (phone.isNotBlank()) put("contact", phone)
+        })
+        put("theme", JSONObject().apply { put("color", "#2563EB") })
+    }
+
+    checkout.open(activity, options)
 }
 
 /** Event identity — poster thumb, title, date, venue. */
