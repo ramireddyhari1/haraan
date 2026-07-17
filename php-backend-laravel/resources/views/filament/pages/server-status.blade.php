@@ -1,19 +1,18 @@
 <x-filament-panels::page>
     @php
-        // status → palette. Kept in the view so the PHP page stays presentation-free.
-        $palette = [
-            'ok'   => ['label' => 'Healthy', 'text' => 'text-emerald-600 dark:text-emerald-400', 'dot' => 'bg-emerald-500', 'tile' => 'bg-emerald-50 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400', 'bar' => 'bg-emerald-500', 'edge' => 'before:bg-emerald-500'],
-            'warn' => ['label' => 'Watch',   'text' => 'text-amber-600 dark:text-amber-400',     'dot' => 'bg-amber-500',   'tile' => 'bg-amber-50 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400',       'bar' => 'bg-amber-500',   'edge' => 'before:bg-amber-500'],
-            'down' => ['label' => 'Down',     'text' => 'text-red-600 dark:text-red-400',         'dot' => 'bg-red-500',     'tile' => 'bg-red-50 text-red-600 dark:bg-red-400/10 dark:text-red-400',               'bar' => 'bg-red-500',     'edge' => 'before:bg-red-500'],
-            'idle' => ['label' => 'Inactive', 'text' => 'text-gray-400 dark:text-gray-500',       'dot' => 'bg-gray-300 dark:bg-gray-600', 'tile' => 'bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500', 'bar' => 'bg-gray-300', 'edge' => 'before:bg-gray-300 dark:before:bg-gray-600'],
-        ];
-
+        // Self-contained styling: Filament ships a precompiled CSS bundle that does NOT include
+        // arbitrary Tailwind utilities used in custom views, so this page styles itself with a
+        // scoped <style> block (.hss-*) instead of utility classes. Dark mode keys off Filament's
+        // class-based toggle (html.dark), not prefers-color-scheme.
         $counts  = collect($cards)->countBy('status');
-        $down    = $counts['down'] ?? 0;
-        $warn    = $counts['warn'] ?? 0;
-        $ok      = $counts['ok'] ?? 0;
-        $anyDown = $down > 0;
-        $anyWarn = $warn > 0;
+        $down = $counts['down'] ?? 0; $warn = $counts['warn'] ?? 0; $ok = $counts['ok'] ?? 0;
+        $anyDown = $down > 0; $anyWarn = $warn > 0;
+
+        $hero = $anyDown
+            ? ['grad' => 'linear-gradient(135deg,#ef4444,#e11d48)', 'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed', 'sub' => $down.' system'.($down===1?'':'s').' down'.($anyWarn?' · '.$warn.' to watch':'')]
+            : ($anyWarn
+                ? ['grad' => 'linear-gradient(135deg,#f59e0b,#ea580c)', 'icon' => 'heroicon-o-exclamation-circle', 'head' => 'All up — '.$warn.' to watch', 'sub' => 'No outages. Some metrics are elevated.']
+                : ['grad' => 'linear-gradient(135deg,#10b981,#0d9488)', 'icon' => 'heroicon-o-check-circle', 'head' => 'All systems operational', 'sub' => 'Every probe is green.']);
 
         $sections = [
             'data'     => ['label' => 'Data & cache',   'icon' => 'heroicon-m-circle-stack'],
@@ -21,95 +20,109 @@
             'services' => ['label' => 'Services',       'icon' => 'heroicon-m-squares-2x2'],
         ];
         $grouped = collect($cards)->groupBy('group');
-
-        $hero = $anyDown
-            ? ['grad' => 'from-red-500 to-rose-600',        'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed',        'sub' => $down . ' system' . ($down === 1 ? '' : 's') . ' down' . ($anyWarn ? ' · ' . $warn . ' to watch' : '')]
-            : ($anyWarn
-                ? ['grad' => 'from-amber-500 to-orange-500', 'icon' => 'heroicon-o-exclamation-circle',    'head' => 'All up — ' . $warn . ' to watch', 'sub' => 'No outages. Some metrics are elevated.']
-                : ['grad' => 'from-emerald-500 to-teal-600', 'icon' => 'heroicon-o-check-circle',          'head' => 'All systems operational',  'sub' => 'Every probe is green.']);
+        $chipLabel = ['ok' => 'Healthy', 'warn' => 'Watch', 'down' => 'Down', 'idle' => 'Inactive'];
     @endphp
 
-    <div wire:poll.10s="refresh" class="space-y-8">
+    <style>
+        .hss{--card:#fff;--border:#e8ecf3;--ink:#0b1220;--ink2:#5a6579;--ink3:#8a94a6;--track:#eef1f6;
+             --ok:#059669;--ok-d:#10b981;--ok-bg:#ecfdf5;--warn:#d97706;--warn-d:#f59e0b;--warn-bg:#fffbeb;
+             --down:#dc2626;--down-d:#ef4444;--down-bg:#fef2f2;--idle:#9aa4b2;--idle-d:#cbd2dd;--idle-bg:#f1f3f7;
+             display:flex;flex-direction:column;gap:28px;}
+        .dark .hss{--card:#111726;--border:rgba(255,255,255,.08);--ink:#f3f5f9;--ink2:#aeb7c6;--ink3:#7b8698;--track:rgba(255,255,255,.09);
+             --ok-bg:rgba(16,185,129,.13);--warn-bg:rgba(245,158,11,.13);--down-bg:rgba(239,68,68,.13);--idle-bg:rgba(255,255,255,.05);}
 
-        {{-- ── Hero status banner ───────────────────────────────────────────── --}}
-        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br {{ $hero['grad'] }} px-6 py-5 text-white shadow-lg">
-            <div class="relative z-10 flex flex-wrap items-center justify-between gap-4">
-                <div class="flex items-center gap-4">
-                    <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 ring-1 ring-white/30">
-                        <x-filament::icon :icon="$hero['icon']" class="h-7 w-7" />
-                    </div>
+        .hss-hero{position:relative;overflow:hidden;border-radius:18px;padding:22px 24px;color:#fff;box-shadow:0 10px 30px -14px rgba(2,6,23,.45);}
+        .hss-hero-row{position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;}
+        .hss-hero-lead{display:flex;align-items:center;gap:16px;}
+        .hss-badge{width:48px;height:48px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.2);box-shadow:inset 0 0 0 1px rgba(255,255,255,.3);}
+        .hss-badge svg{width:28px;height:28px;}
+        .hss-h1{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em;line-height:1.2;}
+        .hss-hsub{margin:2px 0 0;font-size:13px;color:rgba(255,255,255,.85);}
+        .hss-tally{display:flex;gap:8px;flex-wrap:wrap;}
+        .hss-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700;}
+        .hss-pill b{width:8px;height:8px;border-radius:50%;background:#fff;display:inline-block;}
+        .hss-pill.soft b{background:rgba(255,255,255,.7);}
+        .hss-live{position:relative;z-index:2;margin-top:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.78);}
+        .hss-ping{position:relative;width:8px;height:8px;display:inline-block;}
+        .hss-ping i{position:absolute;inset:0;border-radius:50%;background:#fff;}
+        .hss-ping i.a{animation:hssping 1.4s cubic-bezier(0,0,.2,1) infinite;opacity:.75;}
+        @keyframes hssping{75%,100%{transform:scale(2.3);opacity:0;}}
+        .hss-wash{position:absolute;right:-30px;top:-44px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.12);filter:blur(32px);}
+
+        .hss-sec-h{display:flex;align-items:center;gap:8px;margin:0 0 12px 2px;}
+        .hss-sec-h svg{width:16px;height:16px;color:var(--ink3);}
+        .hss-sec-h h2{margin:0;font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink2);}
+        .hss-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+        @media(max-width:1100px){.hss-grid{grid-template-columns:repeat(2,1fr);}}
+        @media(max-width:640px){.hss-grid{grid-template-columns:1fr;}}
+
+        .hss-card{position:relative;overflow:hidden;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;box-shadow:0 1px 2px rgba(11,18,32,.04);transition:transform .18s,box-shadow .18s;}
+        .hss-card:hover{transform:translateY(-2px);box-shadow:0 14px 26px -16px rgba(11,18,32,.28);}
+        .hss-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;}
+        .hss-card.ok::before{background:var(--ok-d);} .hss-card.warn::before{background:var(--warn-d);}
+        .hss-card.down::before{background:var(--down-d);} .hss-card.idle::before{background:var(--idle-d);}
+        .hss-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+        .hss-lft{display:flex;align-items:center;gap:12px;}
+        .hss-tile{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;}
+        .hss-tile svg{width:20px;height:20px;}
+        .hss-tile.ok{background:var(--ok-bg);color:var(--ok);} .hss-tile.warn{background:var(--warn-bg);color:var(--warn);}
+        .hss-tile.down{background:var(--down-bg);color:var(--down);} .hss-tile.idle{background:var(--idle-bg);color:var(--idle);}
+        .hss-title{font-size:14px;font-weight:600;color:var(--ink2);}
+        .hss-chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;background:var(--idle-bg);box-shadow:inset 0 0 0 1px var(--border);white-space:nowrap;}
+        .hss-chip b{width:6px;height:6px;border-radius:50%;display:inline-block;}
+        .hss-chip.ok{color:var(--ok);} .hss-chip.ok b{background:var(--ok-d);}
+        .hss-chip.warn{color:var(--warn);} .hss-chip.warn b{background:var(--warn-d);}
+        .hss-chip.down{color:var(--down);} .hss-chip.down b{background:var(--down-d);}
+        .hss-chip.idle{color:var(--idle);} .hss-chip.idle b{background:var(--idle-d);}
+        .hss-val{margin:15px 0 0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:var(--ink);line-height:1.15;}
+        .hss-meter{margin-top:11px;height:6px;border-radius:999px;background:var(--track);overflow:hidden;}
+        .hss-meter i{display:block;height:100%;border-radius:999px;transition:width .5s ease;}
+        .hss-meter i.ok{background:var(--ok-d);} .hss-meter i.warn{background:var(--warn-d);} .hss-meter i.down{background:var(--down-d);} .hss-meter i.idle{background:var(--idle-d);}
+        .hss-subtext{margin:9px 0 0;font-size:12px;line-height:1.5;color:var(--ink3);}
+    </style>
+
+    <div class="hss" wire:poll.10s="refresh">
+        {{-- Hero --}}
+        <div class="hss-hero" style="background:{{ $hero['grad'] }}">
+            <div class="hss-hero-row">
+                <div class="hss-hero-lead">
+                    <div class="hss-badge"><x-filament::icon :icon="$hero['icon']" /></div>
                     <div>
-                        <p class="text-lg font-bold leading-tight">{{ $hero['head'] }}</p>
-                        <p class="text-sm text-white/80">{{ $hero['sub'] }}</p>
+                        <p class="hss-h1">{{ $hero['head'] }}</p>
+                        <p class="hss-hsub">{{ $hero['sub'] }}</p>
                     </div>
                 </div>
-
-                {{-- Health tally --}}
-                <div class="flex items-center gap-2">
-                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold ring-1 ring-white/20">
-                        <span class="h-2 w-2 rounded-full bg-white"></span>{{ $ok }} healthy
-                    </span>
-                    @if ($anyWarn)
-                        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold ring-1 ring-white/20">
-                            <span class="h-2 w-2 rounded-full bg-white/70"></span>{{ $warn }} watch
-                        </span>
-                    @endif
-                    @if ($anyDown)
-                        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/25 px-3 py-1 text-sm font-semibold ring-1 ring-white/30">
-                            <span class="h-2 w-2 rounded-full bg-white"></span>{{ $down }} down
-                        </span>
-                    @endif
+                <div class="hss-tally">
+                    <span class="hss-pill"><b></b>{{ $ok }} healthy</span>
+                    @if ($anyWarn)<span class="hss-pill soft"><b></b>{{ $warn }} watch</span>@endif
+                    @if ($anyDown)<span class="hss-pill"><b></b>{{ $down }} down</span>@endif
                 </div>
             </div>
-
-            {{-- Auto-refresh footer --}}
-            <div class="relative z-10 mt-4 flex items-center gap-2 text-xs text-white/70">
-                <span class="relative flex h-2 w-2">
-                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75"></span>
-                    <span class="relative inline-flex h-2 w-2 rounded-full bg-white"></span>
-                </span>
-                Live · auto-refresh every 10s · last checked {{ $checkedAt }}
-            </div>
-
-            {{-- Decorative wash --}}
-            <div class="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
+            <div class="hss-live"><span class="hss-ping"><i class="a"></i><i></i></span>Live · auto-refresh every 10s · last checked {{ $checkedAt }}</div>
+            <div class="hss-wash"></div>
         </div>
 
-        {{-- ── Grouped health cards ─────────────────────────────────────────── --}}
+        {{-- Grouped cards --}}
         @foreach ($sections as $key => $section)
             @if ($grouped->has($key))
-                <section class="space-y-3">
-                    <div class="flex items-center gap-2 px-1">
-                        <x-filament::icon :icon="$section['icon']" class="h-4 w-4 text-gray-400" />
-                        <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ $section['label'] }}</h2>
-                    </div>
-
-                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <section>
+                    <div class="hss-sec-h"><x-filament::icon :icon="$section['icon']" /><h2>{{ $section['label'] }}</h2></div>
+                    <div class="hss-grid">
                         @foreach ($grouped[$key] as $c)
-                            @php $s = $palette[$c['status']] ?? $palette['idle']; @endphp
-                            <div class="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-gray-900
-                                        before:absolute before:inset-y-0 before:left-0 before:w-1 {{ $s['edge'] }}">
-                                <div class="flex items-start justify-between gap-3">
-                                    <div class="flex items-center gap-3">
-                                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl {{ $s['tile'] }}">
-                                            <x-filament::icon :icon="$c['icon']" class="h-5 w-5" />
-                                        </div>
-                                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300">{{ $c['title'] }}</span>
+                            @php $st = $c['status']; @endphp
+                            <div class="hss-card {{ $st }}">
+                                <div class="hss-top">
+                                    <div class="hss-lft">
+                                        <div class="hss-tile {{ $st }}"><x-filament::icon :icon="$c['icon']" /></div>
+                                        <span class="hss-title">{{ $c['title'] }}</span>
                                     </div>
-                                    <span class="inline-flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-xs font-semibold {{ $s['text'] }} ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:ring-white/10">
-                                        <span class="h-1.5 w-1.5 rounded-full {{ $s['dot'] }}"></span>{{ $s['label'] }}
-                                    </span>
+                                    <span class="hss-chip {{ $st }}"><b></b>{{ $chipLabel[$st] ?? 'n/a' }}</span>
                                 </div>
-
-                                <p class="mt-4 text-2xl font-bold tracking-tight text-gray-950 dark:text-white">{{ $c['value'] }}</p>
-
+                                <p class="hss-val">{{ $c['value'] }}</p>
                                 @if (! is_null($c['meter'] ?? null))
-                                    <div class="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-white/10">
-                                        <div class="h-full rounded-full {{ $s['bar'] }} transition-all duration-500" style="width: {{ max(2, min(100, (int) $c['meter'])) }}%"></div>
-                                    </div>
+                                    <div class="hss-meter"><i class="{{ $st }}" style="width:{{ max(2, min(100, (int) $c['meter'])) }}%"></i></div>
                                 @endif
-
-                                <p class="mt-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ $c['sub'] }}</p>
+                                <p class="hss-subtext">{{ $c['sub'] }}</p>
                             </div>
                         @endforeach
                     </div>
