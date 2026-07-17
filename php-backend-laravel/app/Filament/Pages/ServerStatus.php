@@ -66,6 +66,18 @@ class ServerStatus extends Page
             $this->bridgeCard(),
         ];
 
+        // Tag each card with a section so the view can group them into
+        // Data & cache / Host resources / Services rather than one flat grid.
+        $groups = [
+            'Database' => 'data', 'Cache' => 'data', 'Redis' => 'data', 'Queue' => 'data',
+            'Disk' => 'host', 'PHP memory' => 'host', 'CPU load' => 'host',
+            'Runtime' => 'services', 'WhatsApp bridge' => 'services',
+        ];
+        foreach ($this->cards as &$card) {
+            $card['group'] = $groups[$card['title']] ?? 'data';
+        }
+        unset($card);
+
         $this->checkedAt = now()->toDateTimeString();
     }
 
@@ -184,7 +196,7 @@ class ServerStatus extends Page
             $free = @disk_free_space(base_path());
             $total = @disk_total_space(base_path());
             if ($free === false || $total === false || $total <= 0) {
-                return $this->card('Disk', 'n/a', 'Unavailable on this host', 'heroicon-o-circle-stack', 'idle');
+                return $this->card('Disk', 'n/a', 'Unavailable on this host', 'heroicon-o-inbox-stack', 'idle');
             }
 
             $usedPct = (int) round((($total - $free) / $total) * 100);
@@ -194,11 +206,12 @@ class ServerStatus extends Page
                 'Disk',
                 $usedPct . '% used',
                 $this->bytes((int) $free) . ' free of ' . $this->bytes((int) $total),
-                'heroicon-o-circle-stack',
+                'heroicon-o-inbox-stack',
                 $status,
+                $usedPct,
             );
         } catch (\Throwable $e) {
-            return $this->card('Disk', 'n/a', $this->short($e), 'heroicon-o-circle-stack', 'idle');
+            return $this->card('Disk', 'n/a', $this->short($e), 'heroicon-o-inbox-stack', 'idle');
         }
     }
 
@@ -206,14 +219,25 @@ class ServerStatus extends Page
     {
         $used = memory_get_usage(true);
         $peak = memory_get_peak_usage(true);
-        $limit = (string) ini_get('memory_limit');
+        $limitRaw = (string) ini_get('memory_limit');
+        $limitBytes = $this->parseBytes($limitRaw);
+
+        // Only a finite limit (-1 = unlimited on many prod fpm pools) yields a meaningful bar.
+        $meter = null;
+        $status = 'ok';
+        if ($limitBytes > 0) {
+            $meter = (int) min(100, round($used / $limitBytes * 100));
+            $status = $meter >= 90 ? 'down' : ($meter >= 75 ? 'warn' : 'ok');
+        }
+        $limitLabel = $limitBytes > 0 ? $limitRaw : 'unlimited';
 
         return $this->card(
             'PHP memory',
             $this->bytes($used),
-            'peak ' . $this->bytes($peak) . ' · limit ' . $limit,
+            'peak ' . $this->bytes($peak) . ' · limit ' . $limitLabel,
             'heroicon-o-cpu-chip',
-            'ok',
+            $status,
+            $meter,
         );
     }
 
@@ -238,8 +262,9 @@ class ServerStatus extends Page
         // Load per core > 1.0 means saturated.
         $perCore = $cores !== null && $cores > 0 ? $load[0] / $cores : $load[0];
         $status = $perCore >= 1.5 ? 'down' : ($perCore >= 0.9 ? 'warn' : 'ok');
+        $meter = (int) min(100, round($perCore * 100));
 
-        return $this->card('CPU load', (string) $one, $sub, 'heroicon-o-cpu-chip', $status);
+        return $this->card('CPU load', (string) $one, $sub, 'heroicon-o-signal', $status, $meter);
     }
 
     private function runtimeCard(): array
@@ -291,10 +316,13 @@ class ServerStatus extends Page
     //  Helpers
     // ---------------------------------------------------------------------
 
-    /** @return array<string,mixed> */
-    private function card(string $title, string $value, string $sub, string $icon, string $status): array
+    /**
+     * @param  int|null  $meter  0–100 fill for a progress bar (disk/mem/cpu); null = no bar.
+     * @return array<string,mixed>
+     */
+    private function card(string $title, string $value, string $sub, string $icon, string $status, ?int $meter = null): array
     {
-        return compact('title', 'value', 'sub', 'icon', 'status');
+        return compact('title', 'value', 'sub', 'icon', 'status', 'meter');
     }
 
     private function bridgeBase(): string
@@ -315,6 +343,24 @@ class ServerStatus extends Page
         $env = (int) getenv('NUMBER_OF_PROCESSORS'); // Windows
 
         return $env > 0 ? $env : null;
+    }
+
+    /** Parse a php.ini shorthand size (e.g. "128M", "1G", "-1") into bytes; ≤0 means unlimited. */
+    private function parseBytes(string $val): int
+    {
+        $val = trim($val);
+        if ($val === '' || $val === '-1') {
+            return -1;
+        }
+        $unit = strtolower(substr($val, -1));
+        $num = (int) $val;
+
+        return match ($unit) {
+            'g' => $num * 1024 * 1024 * 1024,
+            'm' => $num * 1024 * 1024,
+            'k' => $num * 1024,
+            default => (int) $val,
+        };
     }
 
     private function bytes(int $bytes): string
