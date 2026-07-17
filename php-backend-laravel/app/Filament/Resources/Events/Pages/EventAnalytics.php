@@ -9,6 +9,7 @@ use App\Filament\Resources\Events\Pages\EditEvent;
 use App\Filament\Resources\Events\Widgets\EventAnalyticsStatsWidget;
 use App\Filament\Resources\Events\Widgets\EventArrivalCurveWidget;
 use App\Filament\Resources\Events\Widgets\EventCouponWidget;
+use App\Filament\Resources\Events\Widgets\EventInsightsWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesChartWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesPacingWidget;
@@ -63,6 +64,7 @@ class EventAnalytics extends Page
     protected function getHeaderWidgets(): array
     {
         return [
+            EventInsightsWidget::class,
             EventSalesPacingWidget::class,
             EventAnalyticsStatsWidget::class,
             EventRevenueByTypeWidget::class,
