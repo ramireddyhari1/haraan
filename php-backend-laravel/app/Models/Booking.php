@@ -52,6 +52,11 @@ final class Booking extends Model
         'total_amount',
         'convenience_fee',
         'status',
+        // Razorpay reserve→confirm: order id links the rows of one payment, payment id
+        // is stamped once the signature verifies, reserved_until bounds the PENDING hold.
+        'razorpay_order_id',
+        'razorpay_payment_id',
+        'reserved_until',
         'seat_numbers',
         'coupon_code',
         'discount',
@@ -89,6 +94,7 @@ final class Booking extends Model
             'discount'        => 'float',
             'seat_numbers' => 'array',
             'slot_date'    => 'date',
+            'reserved_until' => 'datetime',
         ];
     }
 

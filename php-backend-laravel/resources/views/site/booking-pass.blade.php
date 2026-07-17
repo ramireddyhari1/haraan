@@ -7,6 +7,9 @@
     .bp-wrap { max-width: 460px; margin: 24px auto 60px; padding: 0 16px; }
     .bp-ok { display: flex; align-items: center; gap: 10px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #047857; border-radius: 14px; padding: 12px 14px; font-size: 13.5px; font-weight: 700; margin-bottom: 16px; }
     .bp-card { background: #ffffff; border: 1px solid #E2E8F0; border-radius: 22px; overflow: hidden; margin-bottom: 14px; }
+    .bp-brand { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: linear-gradient(120deg, #2563EB 0%, #12B76A 100%); color: #fff; }
+    .bp-brand__mark { font-size: 17px; font-weight: 800; letter-spacing: 0.02em; }
+    .bp-brand__tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; opacity: .9; background: rgba(255,255,255,.18); padding: 3px 9px; border-radius: 999px; }
     .bp-head { display: flex; gap: 12px; align-items: center; padding: 16px 18px; border-bottom: 1px dashed #E2E8F0; }
     .bp-head img { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; flex-shrink: 0; background: #121620; }
     .bp-head strong { display: block; font-size: 15px; font-weight: 800; color: #0F172A; line-height: 1.3; }
@@ -37,6 +40,10 @@
 
     @foreach($group as $pass)
         <div class="bp-card">
+            <div class="bp-brand">
+                <span class="bp-brand__mark">Haraan</span>
+                <span class="bp-brand__tag">e-Ticket</span>
+            </div>
             <div class="bp-head">
                 <img src="{{ $event->heroImageUrl() ?? asset('events.png') }}" alt="">
                 <div>
@@ -61,12 +68,19 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+{{-- Self-hosted so the pass never depends on a third-party CDN loading (the old
+     jsdelivr path 404'd, leaving the pass with no QR). --}}
+<script src="{{ asset('js/qrcode.min.js') }}"></script>
 <script>
     document.querySelectorAll('.bp-qr').forEach(function (el) {
         // Payload contract shared with the app + host scanner: haraan:ticket:<code>
-        QRCode.toCanvas(el.dataset.code, { width: 190, margin: 1 }, function (err, canvas) {
-            if (!err) el.appendChild(canvas);
+        new QRCode(el, {
+            text: el.dataset.code,
+            width: 190,
+            height: 190,
+            colorDark: '#0F172A',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M,
         });
     });
 </script>

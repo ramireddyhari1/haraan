@@ -11,8 +11,11 @@ use App\Models\Booking;
 use App\Models\Event;
 use App\Models\User;
 use App\Services\BookingService;
+use App\Services\RazorpayGateway;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use RuntimeException;
 
 /**
  * Handles booking listing, creation, and cancellation.
@@ -21,6 +24,7 @@ final class BookingsController extends Controller
 {
     public function __construct(
         private readonly BookingService $bookings,
+        private readonly RazorpayGateway $razorpay,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -59,6 +63,14 @@ final class BookingsController extends Controller
         return response()->json(['data' => new BookingResource($booking)]);
     }
 
+    /**
+     * POST /api/bookings — reserve an order and start payment.
+     *
+     * Creates the ticket rows as a PENDING reservation (holding inventory), then either
+     * confirms immediately when the order is free, or creates a Razorpay order and returns the
+     * fields the client needs to open checkout. Nothing is CONFIRMED here for a paid order —
+     * that happens in {@see confirm()} once the payment signature verifies.
+     */
     public function store(StoreBookingRequest $request): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
@@ -73,31 +85,141 @@ final class BookingsController extends Controller
             $request->orderLines(),
             $request->validated('couponCode'),
             $request->contact(),
+            reserve: true,
         )->load('ticketType');
 
+        $grand      = $this->grandTotal($bookings);
+        $grandPaise = (int) round($grand * 100);
+
+        // Free order (fully discounted / ₹0 tiers): no payment needed — confirm right away.
+        if ($grandPaise <= 0) {
+            $confirmed = $this->bookings->confirmReservation($bookings->pluck('id')->all(), null);
+
+            return response()->json([
+                'message' => 'Booking confirmed',
+                'data'    => $this->envelope($confirmed->load('ticketType'), 'CONFIRMED'),
+            ], 201);
+        }
+
+        // Paid order: create the Razorpay order, tag the reservation with its id, and hand the
+        // client the checkout parameters. If the gateway is down we release the hold so the
+        // seats aren't stuck PENDING for 15 minutes on an error the buyer can't retry past.
+        try {
+            $order = $this->razorpay->createOrder(
+                $grandPaise,
+                'evt_' . (int) $request->validated('eventId') . '_' . $bookings->first()->id,
+            );
+        } catch (RuntimeException $e) {
+            $this->bookings->releaseReservation($bookings->pluck('id')->all());
+
+            $status = $e->getCode() >= 400 ? (int) $e->getCode() : 500;
+
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        $this->bookings->attachOrderId($bookings, (string) $order['id']);
+
+        return response()->json([
+            'message'  => 'Payment required',
+            'payment'  => [
+                'required'   => true,
+                'key'        => $this->razorpay->publicKey(),
+                'orderId'    => $order['id'],
+                'amount'     => $order['amount'],
+                'currency'   => $order['currency'],
+            ],
+            'data'     => $this->envelope($bookings, 'PENDING'),
+        ], 201);
+    }
+
+    /**
+     * POST /api/bookings/confirm — finalise a reserved order after checkout.
+     * Body: { razorpayOrderId, razorpayPaymentId, razorpaySignature }.
+     * Verifies the signature server-side, then flips the reservation to CONFIRMED.
+     */
+    public function confirm(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $data = $request->validate([
+            'razorpayOrderId'   => ['required', 'string'],
+            'razorpayPaymentId' => ['required', 'string'],
+            'razorpaySignature' => ['required', 'string'],
+        ]);
+
+        if (! $this->razorpay->verifySignature($data['razorpayOrderId'], $data['razorpayPaymentId'], $data['razorpaySignature'])) {
+            // Leave the reservation PENDING (it will expire) rather than confirm on a bad
+            // signature — never mark paid without a verified payment.
+            return response()->json(['error' => 'Payment verification failed'], 400);
+        }
+
+        $confirmed = $this->bookings
+            ->confirmReservedOrder($authUser, $data['razorpayOrderId'], $data['razorpayPaymentId'])
+            ->load('ticketType');
+
+        return response()->json([
+            'message' => 'Booking confirmed',
+            'data'    => $this->envelope($confirmed, 'CONFIRMED'),
+        ]);
+    }
+
+    /**
+     * POST /api/bookings/release — hand back a reservation the buyer abandoned (modal dismissed
+     * or payment failed), freeing its seats immediately instead of waiting for the hold to lapse.
+     */
+    public function release(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $data = $request->validate(['razorpayOrderId' => ['required', 'string']]);
+
+        $this->bookings->releaseReservedOrder($authUser, $data['razorpayOrderId']);
+
+        return response()->json(['message' => 'Reservation released']);
+    }
+
+    /** Grand total charged for an order: ticket subtotal + convenience fee − discount. */
+    private function grandTotal(Collection $bookings): float
+    {
+        $subtotal = round((float) $bookings->sum('total_amount'), 2);
+        $fee      = round((float) $bookings->sum('convenience_fee'), 2);
+        $discount = round((float) $bookings->sum('discount'), 2);
+
+        return round($subtotal + $fee - $discount, 2);
+    }
+
+    /**
+     * Aggregate response envelope. Top-level fields keep the legacy single-booking shape (so
+     * older clients keep working); `bookings` carries the full per-tier breakdown.
+     *
+     * @param  Collection<int, Booking>  $bookings
+     */
+    private function envelope(Collection $bookings, string $status): array
+    {
         $primary  = $bookings->first();
         $subtotal = round((float) $bookings->sum('total_amount'), 2);
         $fee      = round((float) $bookings->sum('convenience_fee'), 2);
         $discount = round((float) $bookings->sum('discount'), 2);
-        $grand    = round($subtotal + $fee - $discount, 2);
 
-        // Aggregate envelope: the top-level fields keep the legacy single-booking
-        // shape (so older clients keep working) — `totalAmount` is the grand total
-        // charged. `bookings` carries the full per-tier breakdown (one pass each).
-        return response()->json([
-            'message' => 'Booking confirmed',
-            'data'    => [
-                'id'             => $primary->id,
-                'quantity'       => (int) $bookings->sum('quantity'),
-                'subtotal'       => (string) $subtotal,
-                'convenienceFee' => (string) $fee,
-                'discount'       => (string) $discount,
-                'totalAmount'    => (string) $grand,
-                'status'         => $primary->status,
-                'ticketCode'     => $primary->ticket_code,
-                'bookings'       => BookingResource::collection($bookings),
-            ],
-        ], 201);
+        return [
+            'id'             => $primary->id,
+            'quantity'       => (int) $bookings->sum('quantity'),
+            'subtotal'       => (string) $subtotal,
+            'convenienceFee' => (string) $fee,
+            'discount'       => (string) $discount,
+            'totalAmount'    => (string) round($subtotal + $fee - $discount, 2),
+            'status'         => $status,
+            'ticketCode'     => $primary->ticket_code,
+            'bookings'       => BookingResource::collection($bookings),
+        ];
     }
 
     /**

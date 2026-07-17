@@ -8,10 +8,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\Event;
 use App\Services\BookingService;
+use App\Services\RazorpayGateway;
 use App\Support\ContactPrefill;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -27,6 +30,7 @@ final class EventBookingController extends Controller
 {
     public function __construct(
         private readonly BookingService $bookings,
+        private readonly RazorpayGateway $razorpay,
     ) {}
 
     /** GET /events/{id}/book — order review before confirming. */
@@ -48,8 +52,11 @@ final class EventBookingController extends Controller
         ]);
     }
 
-    /** POST /events/{id}/book — create the confirmed order. */
-    public function store(Request $request, string $id): RedirectResponse
+    /**
+     * POST /events/{id}/book — reserve the order, then either confirm it (free) or hand off to
+     * the payment page. Nothing is CONFIRMED for a paid order until the signature verifies.
+     */
+    public function store(Request $request, string $id): RedirectResponse|View
     {
         $event = $this->publishedEvent($id);
         $lines = $this->linesFrom($request, $event);
@@ -82,6 +89,7 @@ final class EventBookingController extends Controller
                 $lines,
                 $coupon !== '' ? $coupon : null,
                 $contact,
+                reserve: true,
             );
         } catch (ConflictHttpException|NotFoundHttpException $e) {
             return back()->withInput()->with('error', $e->getMessage());
@@ -91,9 +99,97 @@ final class EventBookingController extends Controller
         // their own details twice. Never overwrite details they already set.
         $this->backfillAccount($request->user(), $contact);
 
-        return redirect()
-            ->route('site.booking.pass', ['id' => $order->first()->id])
-            ->with('success', 'Booking confirmed!');
+        $grand      = $this->grandTotal($order);
+        $grandPaise = (int) round($grand * 100);
+
+        // Free order — no payment step, confirm the reservation straight away.
+        if ($grandPaise <= 0) {
+            $this->bookings->confirmReservation($order->pluck('id')->all(), null);
+
+            return redirect()
+                ->route('site.booking.pass', ['id' => $order->first()->id])
+                ->with('success', 'Booking confirmed!');
+        }
+
+        // Paid order — create the Razorpay order and show the payment page. If the gateway is
+        // unreachable, release the hold so the seats aren't stuck and send the buyer back.
+        try {
+            $rzp = $this->razorpay->createOrder($grandPaise, 'evt_' . $event->id . '_' . $order->first()->id);
+        } catch (RuntimeException $e) {
+            $this->bookings->releaseReservation($order->pluck('id')->all());
+
+            return redirect("/events/{$event->id}")->with('error', 'Could not start payment. Please try again.');
+        }
+
+        $this->bookings->attachOrderId($order, (string) $rzp['id']);
+
+        return view('site.event-pay', [
+            'title'       => 'Complete payment',
+            'event'       => $event,
+            'amountLabel' => number_format($grand, 2),
+            'razorKey'    => $this->razorpay->publicKey(),
+            'orderId'     => $rzp['id'],
+            'amount'      => $rzp['amount'],
+            'currency'    => $rzp['currency'],
+            'contact'     => $contact,
+            'passUrl'     => route('site.booking.pass', ['id' => $order->first()->id]),
+            'eventUrl'    => "/events/{$event->id}",
+        ]);
+    }
+
+    /**
+     * POST /events/{id}/book/confirm — finalise after checkout (AJAX from the payment page).
+     * Verifies the signature server-side and returns the pass URL to redirect to.
+     */
+    public function confirmWeb(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'razorpay_order_id'   => ['required', 'string'],
+            'razorpay_payment_id' => ['required', 'string'],
+            'razorpay_signature'  => ['required', 'string'],
+        ]);
+
+        if (! $this->razorpay->verifySignature($data['razorpay_order_id'], $data['razorpay_payment_id'], $data['razorpay_signature'])) {
+            return response()->json(['ok' => false, 'error' => 'Payment verification failed'], 400);
+        }
+
+        try {
+            $order = $this->bookings->confirmReservedOrder(
+                $request->user(),
+                $data['razorpay_order_id'],
+                $data['razorpay_payment_id'],
+            );
+        } catch (NotFoundHttpException $e) {
+            return response()->json(['ok' => false, 'error' => 'Reservation not found'], 404);
+        }
+
+        return response()->json([
+            'ok'       => true,
+            'redirect' => route('site.booking.pass', ['id' => $order->first()->id]),
+        ]);
+    }
+
+    /**
+     * POST /events/{id}/book/release — hand back an abandoned reservation (modal dismissed /
+     * payment failed) so its seats free up immediately.
+     */
+    public function releaseWeb(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate(['razorpay_order_id' => ['required', 'string']]);
+
+        $this->bookings->releaseReservedOrder($request->user(), $data['razorpay_order_id']);
+
+        return response()->json(['ok' => true]);
+    }
+
+    /** Grand total charged for an order: ticket subtotal + convenience fee − discount. */
+    private function grandTotal(\Illuminate\Support\Collection $order): float
+    {
+        $subtotal = round((float) $order->sum('total_amount'), 2);
+        $fee      = round((float) $order->sum('convenience_fee'), 2);
+        $discount = round((float) $order->sum('discount'), 2);
+
+        return round($subtotal + $fee - $discount, 2);
     }
 
     /**

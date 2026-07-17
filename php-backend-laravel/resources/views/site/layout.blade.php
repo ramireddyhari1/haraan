@@ -40,6 +40,11 @@
             .mbrandmark, .mfoot { display: none !important; }
         }
 
+        /* Focused checkout: the booking review + payment pages hide the whole site
+           header (greeting, search, section tabs) so nothing competes with the order.
+           These pages carry their own "Back to event" link for navigation. */
+        body.booking-page .topbar { display: none !important; }
+
         /* Event-section header accent, applied only on /events pages.
            NB: the location-pill label is intentionally left neutral — it is a
            secondary control and should not compete with search / the nav. */
@@ -251,6 +256,9 @@
     @endif
 
     <!-- Premium Login Modal -->
+    {{-- The floating login modal is hidden on the /login page itself — that page renders the
+         same design inline, and two copies would collide on the shared element ids. --}}
+    @unless(request()->routeIs('site.login'))
     <div id="loginModal" class="auth-modal" aria-hidden="true">
         <div class="auth-modal__backdrop" id="loginBackdrop"></div>
         <div class="auth-modal__card" role="dialog" aria-modal="true" aria-label="Login to Haraan">
@@ -348,6 +356,7 @@
             </div>
         </div>
     </div>
+    @endunless
 
     <!-- Location selector modal (improved) -->
     <div id="locationModal" class="location-modal" aria-hidden="true">

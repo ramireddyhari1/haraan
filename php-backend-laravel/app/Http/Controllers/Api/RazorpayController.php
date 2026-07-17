@@ -5,31 +5,24 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Client\ConnectionException;
+use App\Services\RazorpayGateway;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 /**
- * Razorpay Standard Checkout — server side.
+ * Razorpay Standard Checkout — standalone demo endpoints (used by the local-only /pay page).
  *
- * Two endpoints: one creates an order (so the amount is fixed server-side and can't
- * be tampered with in the browser), the other verifies the payment signature after
- * the checkout modal succeeds. The KEY_SECRET lives only here (config/services) and
- * never reaches the client.
- *
- * Orders are created via Razorpay's REST API with the framework HTTP client (no SDK
- * dependency) — key/secret go as HTTP basic auth, exactly as the SDK does internally.
+ * The real product flow lives in {@see BookingsController} (reserve→confirm). These two
+ * endpoints exist for the demo/test page and as a generic create-order + verify pair. Both
+ * delegate to {@see RazorpayGateway} so key/secret handling lives in one place.
  */
 final class RazorpayController extends Controller
 {
-    /** Razorpay's floor for a live charge. */
-    private const MIN_AMOUNT_PAISE = 100;
-
-    private const ORDERS_ENDPOINT = 'https://api.razorpay.com/v1/orders';
+    public function __construct(private readonly RazorpayGateway $gateway) {}
 
     /**
      * POST /api/create-order
@@ -40,7 +33,7 @@ final class RazorpayController extends Controller
     {
         try {
             $data = $request->validate([
-                'amount'   => ['required', 'integer', 'min:' . self::MIN_AMOUNT_PAISE],
+                'amount'   => ['required', 'integer', 'min:' . RazorpayGateway::MIN_AMOUNT_PAISE],
                 'currency' => ['sometimes', 'string', 'size:3'],
                 'receipt'  => ['sometimes', 'string', 'max:40'],
             ]);
@@ -51,51 +44,21 @@ final class RazorpayController extends Controller
             ], 422);
         }
 
-        [$keyId, $keySecret] = $this->credentials();
-
-        if ($keyId === null || $keySecret === null) {
-            Log::error('Razorpay create-order: missing RAZORPAY_KEY_ID/SECRET');
-
-            return response()->json(['error' => 'Payments are not configured.'], 500);
-        }
-
         try {
-            $response = Http::withBasicAuth($keyId, $keySecret)
-                ->acceptJson()
-                ->timeout(20)
-                ->post(self::ORDERS_ENDPOINT, [
-                    'amount'          => (int) $data['amount'],
-                    'currency'        => strtoupper($data['currency'] ?? 'INR'),
-                    'receipt'         => $data['receipt'] ?? ('rcpt_' . Str::random(16)),
-                    'payment_capture' => 1,
-                ]);
-        } catch (ConnectionException $e) {
-            Log::error('Razorpay create-order connection failed', ['msg' => $e->getMessage()]);
+            $order = $this->gateway->createOrder(
+                (int) $data['amount'],
+                $data['receipt'] ?? ('rcpt_' . Str::random(16)),
+                $data['currency'] ?? 'INR',
+            );
+        } catch (RuntimeException $e) {
+            $status = $e->getCode() >= 400 ? (int) $e->getCode() : 500;
+            Log::warning('Razorpay create-order failed', ['status' => $status, 'msg' => $e->getMessage()]);
 
-            return response()->json(['error' => 'Could not reach the payment provider.'], 502);
+            return response()->json(['error' => $e->getMessage()], $status);
         }
-
-        // Bad/expired keys come back as 401 from Razorpay — surface that verbatim so the
-        // caller can tell auth failure from a generic error. Anything else non-2xx = 500.
-        if ($response->status() === 401) {
-            Log::warning('Razorpay create-order auth failed', ['body' => $response->json()]);
-
-            return response()->json(['error' => 'Payment authentication failed.'], 401);
-        }
-
-        if (! $response->successful()) {
-            Log::warning('Razorpay create-order rejected', [
-                'status' => $response->status(),
-                'body'   => $response->json(),
-            ]);
-
-            return response()->json(['error' => 'Could not create the payment order.'], 500);
-        }
-
-        $order = $response->json();
 
         return response()->json([
-            'key'      => $keyId,
+            'key'      => $this->gateway->publicKey(),
             'order_id' => $order['id'],
             'amount'   => $order['amount'],
             'currency' => $order['currency'],
@@ -105,8 +68,7 @@ final class RazorpayController extends Controller
     /**
      * POST /api/verify-payment
      * Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
-     * Verifies HMAC-SHA256(order_id|payment_id, KEY_SECRET) against the returned
-     * signature. Returns { verified: true } only on an exact, constant-time match.
+     * Returns { verified: true } only on an exact, constant-time signature match.
      */
     public function verifyPayment(Request $request): JsonResponse
     {
@@ -123,21 +85,13 @@ final class RazorpayController extends Controller
             ], 400);
         }
 
-        [, $keySecret] = $this->credentials();
-
-        if ($keySecret === null) {
-            Log::error('Razorpay verify-payment: missing RAZORPAY_KEY_SECRET');
-
-            return response()->json(['verified' => false, 'error' => 'Payments are not configured.'], 500);
-        }
-
-        $expected = hash_hmac(
-            'sha256',
-            $data['razorpay_order_id'] . '|' . $data['razorpay_payment_id'],
-            $keySecret,
+        $ok = $this->gateway->verifySignature(
+            $data['razorpay_order_id'],
+            $data['razorpay_payment_id'],
+            $data['razorpay_signature'],
         );
 
-        if (! hash_equals($expected, $data['razorpay_signature'])) {
+        if (! $ok) {
             Log::warning('Razorpay signature mismatch', ['order' => $data['razorpay_order_id']]);
 
             return response()->json([
@@ -146,26 +100,10 @@ final class RazorpayController extends Controller
             ], 400);
         }
 
-        // Signature is authentic — the payment is genuine. A real fulfilment step
-        // (mark a booking paid, issue the ticket) would hook in here.
         return response()->json([
             'verified'   => true,
             'order_id'   => $data['razorpay_order_id'],
             'payment_id' => $data['razorpay_payment_id'],
         ]);
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null} [keyId, keySecret]
-     */
-    private function credentials(): array
-    {
-        $key    = config('services.razorpay.key');
-        $secret = config('services.razorpay.secret');
-
-        return [
-            is_string($key) && $key !== '' ? $key : null,
-            is_string($secret) && $secret !== '' ? $secret : null,
-        ];
     }
 }

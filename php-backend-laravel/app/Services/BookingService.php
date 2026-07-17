@@ -85,8 +85,14 @@ final class BookingService
      *         Who the ticket is for, captured at checkout. Optional so older callers
      *         (and venue bookings) keep working; stored on every row of the order.
      */
-    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = []): Collection
+    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], bool $reserve = false): Collection
     {
+        // Reserve mode holds inventory in a PENDING row until payment confirms. Sweep any
+        // holds that were never paid first, so their seats are back in the pool for this order.
+        if ($reserve) {
+            $this->releaseExpired($eventId);
+        }
+
         // Collapse duplicate tier lines and drop non-positive quantities up front.
         $normalised = [];
         foreach ($lines as $line) {
@@ -116,7 +122,7 @@ final class BookingService
             'attendee_phone' => self::clean($contact['phone'] ?? null) ?? (trim((string) $user->phone) ?: null),
         ];
 
-        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee): Collection {
+        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee, $reserve): Collection {
             $event = Event::query()->lockForUpdate()->find($eventId);
 
             if ($event === null) {
@@ -169,7 +175,10 @@ final class BookingService
                 $bookings->push(Booking::query()->create([
                     'quantity'       => $qty,
                     'total_amount'   => round($unit * $qty, 2),
-                    'status'         => 'CONFIRMED',
+                    // A reserved order sits PENDING (holding its seats) until payment
+                    // confirms; the legacy direct path still writes CONFIRMED immediately.
+                    'status'         => $reserve ? 'PENDING' : 'CONFIRMED',
+                    'reserved_until' => $reserve ? now()->addMinutes(15) : null,
                     'coupon_code'    => $couponCode,
                     'discount'       => 0,
                     'user_id'        => $user->id,
@@ -190,7 +199,11 @@ final class BookingService
             $coupon   = Coupon::findByCode($couponCode);
             if ($coupon !== null && $coupon->isRedeemable() && $coupon->appliesToEvent($event->id)) {
                 $discount = min((float) $coupon->discount, $subtotal + $fee);
-                $coupon->increment('uses');
+                // A reserved (unpaid) order must not yet burn a coupon use — that's counted
+                // on confirmation, so an abandoned checkout doesn't consume the code.
+                if (! $reserve) {
+                    $coupon->increment('uses');
+                }
             }
 
             if ($fee > 0 || $discount > 0) {
@@ -204,6 +217,182 @@ final class BookingService
             $event->save();
 
             return $bookings;
+        });
+    }
+
+    /**
+     * Stamp the freshly-created Razorpay order id onto every row of a reserved order, so the
+     * confirm step can find them all by that id. Returns the same collection for chaining.
+     *
+     * @param  Collection<int, Booking>  $bookings
+     * @return Collection<int, Booking>
+     */
+    public function attachOrderId(Collection $bookings, string $razorpayOrderId): Collection
+    {
+        $ids = $bookings->pluck('id')->all();
+
+        Booking::query()->whereIn('id', $ids)->update(['razorpay_order_id' => $razorpayOrderId]);
+
+        return $bookings->each(fn (Booking $b) => $b->razorpay_order_id = $razorpayOrderId);
+    }
+
+    /**
+     * Confirm a reserved order after its payment signature has verified (or immediately for a
+     * free order, where $paymentId is null). Flips the PENDING rows to CONFIRMED, records the
+     * payment id, clears the hold, and counts the coupon use once. Idempotent: rows already
+     * CONFIRMED are returned unchanged.
+     *
+     * @return Collection<int, Booking>
+     *
+     * @throws NotFoundHttpException  When no matching reserved order exists for this user.
+     */
+    public function confirmReservedOrder(User $user, string $razorpayOrderId, ?string $paymentId): Collection
+    {
+        /** @var Collection<int, Booking> $bookings */
+        $bookings = Booking::query()
+            ->where('razorpay_order_id', $razorpayOrderId)
+            ->where('user_id', $user->id)
+            ->get();
+
+        if ($bookings->isEmpty()) {
+            throw new NotFoundHttpException('Reservation not found');
+        }
+
+        return $this->confirmReservation($bookings->pluck('id')->all(), $paymentId);
+    }
+
+    /**
+     * Confirm a set of reserved rows by id: flip PENDING → CONFIRMED, stamp the payment id (null
+     * for a free order), clear the hold, and count the order's coupon use once. Idempotent.
+     *
+     * @param  list<int>  $bookingIds
+     * @return Collection<int, Booking>
+     */
+    public function confirmReservation(array $bookingIds, ?string $paymentId): Collection
+    {
+        return DB::transaction(function () use ($bookingIds, $paymentId): Collection {
+            /** @var Collection<int, Booking> $bookings */
+            $bookings = Booking::query()->whereIn('id', $bookingIds)->lockForUpdate()->get();
+
+            if ($bookings->isEmpty()) {
+                throw new NotFoundHttpException('Reservation not found');
+            }
+
+            $alreadyConfirmed = strtoupper((string) $bookings->first()->status) === 'CONFIRMED';
+
+            foreach ($bookings as $booking) {
+                if (strtoupper((string) $booking->status) === 'CONFIRMED') {
+                    continue;
+                }
+
+                $booking->status = 'CONFIRMED';
+                $booking->reserved_until = null;
+                if ($paymentId !== null) {
+                    $booking->razorpay_payment_id = $paymentId;
+                }
+                $booking->save();
+            }
+
+            // Count the coupon use now that the order is paid — once, and not on a re-confirm.
+            if (! $alreadyConfirmed) {
+                $coupon = Coupon::findByCode($bookings->first()->coupon_code);
+                if ($coupon !== null) {
+                    $coupon->increment('uses');
+                }
+            }
+
+            return $bookings;
+        });
+    }
+
+    /**
+     * Release a set of just-reserved rows by id (used when order creation fails before an id is
+     * attached), restoring their inventory.
+     *
+     * @param  list<int>  $bookingIds
+     */
+    public function releaseReservation(array $bookingIds): void
+    {
+        if ($bookingIds !== []) {
+            $this->releaseBookings($bookingIds);
+        }
+    }
+
+    /**
+     * Cancel a reserved order the buyer walked away from (modal dismissed / payment failed),
+     * restoring the seats it was holding. Safe to call with an order id that no longer has any
+     * PENDING rows — it simply does nothing.
+     */
+    public function releaseReservedOrder(User $user, string $razorpayOrderId): void
+    {
+        $ids = Booking::query()
+            ->where('razorpay_order_id', $razorpayOrderId)
+            ->where('user_id', $user->id)
+            ->whereRaw('upper(status) = ?', ['PENDING'])
+            ->pluck('id')
+            ->all();
+
+        if ($ids !== []) {
+            $this->releaseBookings($ids);
+        }
+    }
+
+    /**
+     * Sweep expired PENDING holds for an event and hand their seats back. Called lazily at the
+     * start of every new reservation for the event, so a dead cron isn't required for correctness.
+     */
+    public function releaseExpired(int $eventId): void
+    {
+        $ids = Booking::query()
+            ->where('event_id', $eventId)
+            ->whereRaw('upper(status) = ?', ['PENDING'])
+            ->whereNotNull('reserved_until')
+            ->where('reserved_until', '<', now())
+            ->pluck('id')
+            ->all();
+
+        if ($ids !== []) {
+            $this->releaseBookings($ids);
+        }
+    }
+
+    /**
+     * Restore inventory for a set of PENDING bookings and mark them EXPIRED, atomically.
+     * Adds each line's quantity back to its event's available_slots and its tier's `sold`.
+     *
+     * @param  list<int>  $bookingIds
+     */
+    private function releaseBookings(array $bookingIds): void
+    {
+        DB::transaction(function () use ($bookingIds): void {
+            $bookings = Booking::query()->whereIn('id', $bookingIds)->lockForUpdate()->get();
+
+            foreach ($bookings as $booking) {
+                if (strtoupper((string) $booking->status) !== 'PENDING') {
+                    continue;
+                }
+
+                $event = $booking->event_id !== null
+                    ? Event::query()->lockForUpdate()->find($booking->event_id)
+                    : null;
+
+                if ($event !== null) {
+                    $event->available_slots += (int) $booking->quantity;
+                    $event->save();
+                }
+
+                if ($booking->ticket_type_id !== null) {
+                    $tier = TicketType::query()->lockForUpdate()->find($booking->ticket_type_id);
+                    if ($tier !== null) {
+                        $tier->sold = max(0, (int) $tier->sold - (int) $booking->quantity);
+                        $tier->save();
+                    }
+                }
+
+                $booking->status = 'EXPIRED';
+                $booking->reserved_until = null;
+                $booking->save();
+            }
         });
     }
 

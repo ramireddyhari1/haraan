@@ -241,6 +241,9 @@ Route::middleware('auth.jwt')->prefix('bookings')->group(function (): void {
     Route::get('/', [BookingsController::class, 'index']);
     Route::post('/venue', [BookingsController::class, 'storeVenue']);
     Route::post('/validate-coupon', [BookingsController::class, 'validateCoupon']);
+    // Payment: reserve (store) → confirm after checkout, or release an abandoned hold.
+    Route::post('/confirm', [BookingsController::class, 'confirm']);
+    Route::post('/release', [BookingsController::class, 'release']);
     Route::get('/{id}', [BookingsController::class, 'show']);
     Route::post('/', [BookingsController::class, 'store']);
     Route::patch('/{id}/cancel', [BookingsController::class, 'cancel']);

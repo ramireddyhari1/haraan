@@ -70,6 +70,9 @@ Route::middleware('auth')->group(function() {
 Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingController::class)->group(function (): void {
     Route::get('/events/{id}/book', 'checkout')->whereNumber('id')->name('site.booking.checkout');
     Route::post('/events/{id}/book', 'store')->whereNumber('id')->name('site.booking.store');
+    // Razorpay payment on the reserved order (AJAX from the payment page).
+    Route::post('/events/{id}/book/confirm', 'confirmWeb')->whereNumber('id')->name('site.booking.confirm');
+    Route::post('/events/{id}/book/release', 'releaseWeb')->whereNumber('id')->name('site.booking.release');
     Route::get('/bookings/{id}/pass', 'pass')->whereNumber('id')->name('site.booking.pass');
 });
 
