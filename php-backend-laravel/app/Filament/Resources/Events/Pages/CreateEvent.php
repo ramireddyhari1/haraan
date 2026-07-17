@@ -16,6 +16,13 @@ class CreateEvent extends CreateRecord
     {
         $data = EventForm::mergeImageSources($data);
 
+        // Seed available seats from the total capacity. The form only asks for
+        // total_slots; without this available_slots keeps its DB default of 0, so a
+        // brand-new event would show "sold out" immediately.
+        if (! isset($data['available_slots']) || (int) $data['available_slots'] <= 0) {
+            $data['available_slots'] = (int) ($data['total_slots'] ?? 0);
+        }
+
         // In the partner console, stamp ownership so the new event is scoped to
         // (and visible to) its creating partner. See ScopesToOrganization.
         if (Filament::getCurrentPanel()?->getId() === 'partner') {

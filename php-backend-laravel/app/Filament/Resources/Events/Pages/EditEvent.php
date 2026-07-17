@@ -20,7 +20,19 @@ class EditEvent extends EditRecord
     /** Fold the pasted URLs back into the images column on save. */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        return EventForm::mergeImageSources($data);
+        $data = EventForm::mergeImageSources($data);
+
+        // Keep available seats in step when capacity changes: shift available_slots by the
+        // same delta as total_slots, so bumping capacity frees seats (and shrinking it
+        // removes them) without wiping out seats already sold. Never goes below 0.
+        if (isset($data['total_slots'])) {
+            $delta = (int) $data['total_slots'] - (int) $this->record->total_slots;
+            if ($delta !== 0) {
+                $data['available_slots'] = max(0, (int) $this->record->available_slots + $delta);
+            }
+        }
+
+        return $data;
     }
 
     protected function getHeaderActions(): array
