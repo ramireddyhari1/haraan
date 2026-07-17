@@ -8,8 +8,10 @@ use App\Filament\Resources\Events\EventResource;
 use App\Filament\Resources\Events\Pages\EditEvent;
 use App\Filament\Resources\Events\Widgets\EventAnalyticsStatsWidget;
 use App\Filament\Resources\Events\Widgets\EventArrivalCurveWidget;
+use App\Filament\Resources\Events\Widgets\EventCouponWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesChartWidget;
+use App\Filament\Resources\Events\Widgets\EventSalesPacingWidget;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
@@ -61,10 +63,12 @@ class EventAnalytics extends Page
     protected function getHeaderWidgets(): array
     {
         return [
+            EventSalesPacingWidget::class,
             EventAnalyticsStatsWidget::class,
             EventRevenueByTypeWidget::class,
             EventSalesChartWidget::class,
             EventArrivalCurveWidget::class,
+            EventCouponWidget::class,
         ];
     }
 
