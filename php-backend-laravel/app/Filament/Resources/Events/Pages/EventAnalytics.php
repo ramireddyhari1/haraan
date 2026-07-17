@@ -16,6 +16,7 @@ use App\Filament\Resources\Events\Widgets\EventRefundWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesChartWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesPacingWidget;
+use App\Filament\Resources\Events\Widgets\EventViewsWidget;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
@@ -70,6 +71,7 @@ class EventAnalytics extends Page
             EventInsightsWidget::class,
             EventSalesPacingWidget::class,
             EventAnalyticsStatsWidget::class,
+            EventViewsWidget::class,
             EventComparisonWidget::class,
             EventRevenueByTypeWidget::class,
             EventSalesChartWidget::class,

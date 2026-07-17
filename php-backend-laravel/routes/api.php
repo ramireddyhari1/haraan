@@ -87,7 +87,8 @@ Route::prefix('events')->group(function (): void {
     Route::get('/', [EventsController::class, 'index']);
     Route::get('/search', [EventsController::class, 'index']);
     Route::get('/categories', [EventsController::class, 'categories']);
-    Route::get('/{id}', [EventsController::class, 'show']);
+    // optional JWT so a signed-in viewer's open is attributed (user + city) for Views analytics.
+    Route::get('/{id}', [EventsController::class, 'show'])->middleware('auth.jwt.optional');
 
     Route::middleware('auth.jwt')->group(function (): void {
         Route::post('/', [EventsController::class, 'store']);

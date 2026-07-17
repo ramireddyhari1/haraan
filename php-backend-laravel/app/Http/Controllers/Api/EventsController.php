@@ -59,7 +59,7 @@ final class EventsController extends Controller
      * GET /api/events/{id} — public, so published only. Filtering the list alone would
      * have left the back door open: a draft's full detail was fetchable by id.
      */
-    public function show(string $id): JsonResponse
+    public function show(string $id, Request $request): JsonResponse
     {
         $event = Event::query()
             ->whereRaw('lower(status) = ?', ['published'])
@@ -69,6 +69,9 @@ final class EventsController extends Controller
         if ($event === null) {
             return response()->json(['error' => 'Event not found'], 404);
         }
+
+        // Record the open for Views analytics (best-effort; never blocks the response).
+        \App\Support\EventViewRecorder::record($event, $request);
 
         return response()->json(['data' => new EventResource($event)]);
     }
