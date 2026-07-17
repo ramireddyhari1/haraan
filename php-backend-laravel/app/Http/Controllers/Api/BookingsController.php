@@ -10,6 +10,7 @@ use App\Http\Resources\BookingResource;
 use App\Models\Booking;
 use App\Models\Event;
 use App\Models\User;
+use App\Services\BookingNotifier;
 use App\Services\BookingService;
 use App\Services\RazorpayGateway;
 use Illuminate\Http\JsonResponse;
@@ -89,6 +90,8 @@ final class BookingsController extends Controller
                 $request->contact(),
             )->load('ticketType');
 
+            BookingNotifier::dispatch($legacy->first());
+
             return response()->json([
                 'message' => 'Booking confirmed',
                 'data'    => $this->envelope($legacy, (string) $legacy->first()->status),
@@ -110,6 +113,8 @@ final class BookingsController extends Controller
         // Free order (fully discounted / ₹0 tiers): no payment needed — confirm right away.
         if ($grandPaise <= 0) {
             $confirmed = $this->bookings->confirmReservation($bookings->pluck('id')->all(), null);
+
+            BookingNotifier::dispatch($confirmed->first());
 
             return response()->json([
                 'message' => 'Booking confirmed',
@@ -176,6 +181,8 @@ final class BookingsController extends Controller
         $confirmed = $this->bookings
             ->confirmReservedOrder($authUser, $data['razorpayOrderId'], $data['razorpayPaymentId'])
             ->load('ticketType');
+
+        BookingNotifier::dispatch($confirmed->first());
 
         return response()->json([
             'message' => 'Booking confirmed',
@@ -296,6 +303,8 @@ final class BookingsController extends Controller
             isset($data['courtId']) ? (int) $data['courtId'] : null,
             isset($data['duration']) ? (int) $data['duration'] : 1,
         );
+
+        BookingNotifier::dispatch($booking);
 
         return response()->json([
             'message' => 'Venue booked',

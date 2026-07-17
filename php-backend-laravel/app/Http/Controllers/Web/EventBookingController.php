@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Web;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\Event;
+use App\Services\BookingNotifier;
 use App\Services\BookingService;
 use App\Services\RazorpayGateway;
 use App\Support\ContactPrefill;
@@ -104,7 +105,9 @@ final class EventBookingController extends Controller
 
         // Free order — no payment step, confirm the reservation straight away.
         if ($grandPaise <= 0) {
-            $this->bookings->confirmReservation($order->pluck('id')->all(), null);
+            $confirmed = $this->bookings->confirmReservation($order->pluck('id')->all(), null);
+
+            BookingNotifier::dispatch($confirmed->first());
 
             return redirect()
                 ->route('site.booking.pass', ['id' => $order->first()->id])
@@ -162,6 +165,8 @@ final class EventBookingController extends Controller
         } catch (NotFoundHttpException $e) {
             return response()->json(['ok' => false, 'error' => 'Reservation not found'], 404);
         }
+
+        BookingNotifier::dispatch($order->first());
 
         return response()->json([
             'ok'       => true,

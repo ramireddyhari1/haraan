@@ -47,6 +47,9 @@ return [
     'whatsapp' => [
         'bridge_enabled' => env('WHATSAPP_BRIDGE_ENABLED', false),
         'bridge_url' => env('WHATSAPP_BRIDGE_URL', 'http://localhost:8090/api/send-message'),
+        // Bridge origin for non-send-message endpoints (/qr, /api/send-media). Defaults to
+        // the send-message URL's origin when unset.
+        'bridge_base' => env('WHATSAPP_BRIDGE_BASE'),
     ],
 
     // Razorpay Standard Checkout. `key` (public key id) is safe to expose to the

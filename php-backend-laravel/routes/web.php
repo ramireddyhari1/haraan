@@ -66,6 +66,24 @@ Route::middleware('auth')->group(function() {
     Route::post('/profile/setup', [\App\Http\Controllers\Web\PublicWebController::class, 'saveProfileSetup'])->name('site.profile.setup.save');
 });
 
+// Public ticket-QR image (used by the confirmation email's <img> and anywhere a hosted QR is
+// needed). Proxies the WhatsApp bridge's /qr generator; the code itself is the only secret.
+Route::get('/t/{code}/qr.png', function (string $code) {
+    $base = app(\App\Services\WhatsAppService::class)->bridgeBase();
+    try {
+        $res = \Illuminate\Support\Facades\Http::connectTimeout(3)->timeout(15)
+            ->get($base . '/qr', ['data' => 'haraan:ticket:' . $code]);
+        if ($res->successful()) {
+            return response($res->body(), 200)
+                ->header('Content-Type', 'image/png')
+                ->header('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+    } catch (\Throwable $e) {
+        // fall through to 404
+    }
+    abort(404);
+})->where('code', '[A-Za-z0-9]+')->name('ticket.qr');
+
 // Event ticket booking — the web twin of the app's checkout (same BookingService).
 Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingController::class)->group(function (): void {
     Route::get('/events/{id}/book', 'checkout')->whereNumber('id')->name('site.booking.checkout');
