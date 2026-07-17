@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Notifications\Pages;
 
 use App\Filament\Resources\Notifications\NotificationResource;
+use App\Filament\Resources\Notifications\Widgets\NotificationAnalyticsWidget;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
@@ -16,6 +17,13 @@ class ListNotifications extends ListRecords
     {
         return [
             CreateAction::make()->label('Compose'),
+        ];
+    }
+
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            NotificationAnalyticsWidget::class,
         ];
     }
 }

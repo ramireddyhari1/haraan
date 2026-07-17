@@ -138,6 +138,78 @@ final class Event extends Model
     }
 
     // -------------------------------------------------------------------------
+    //  Images
+    // -------------------------------------------------------------------------
+
+    /**
+     * The event's images as browser-loadable URLs.
+     *
+     * `images` mixes hotlinked absolute URLs with admin-uploaded paths relative
+     * to the `public` storage disk ("events/xyz.png"). The Android app resolves
+     * the relative ones client-side (EventRepository → "$baseUrl/storage/$path");
+     * the web must do the same server-side or uploaded posters 404.
+     *
+     * @return array<int, string>
+     */
+    public function imageUrls(): array
+    {
+        return \App\Support\MediaUrl::resolveMany(is_array($this->images) ? $this->images : []);
+    }
+
+    /** First browser-loadable image, or null when the event has none. */
+    public function heroImageUrl(): ?string
+    {
+        return $this->imageUrls()[0] ?? null;
+    }
+
+    /**
+     * "Who takes the stage" — the host-authored performer lineup, normalized to
+     * {name, subtitle, image(absolute URL or '')}. Rows without a name are
+     * dropped; an uploaded photo wins over a pasted image URL. Shared by the
+     * API resource and the public site's event page.
+     *
+     * @return array<int, array{name: string, subtitle: string, image: string}>
+     */
+    public function lineupRows(): array
+    {
+        return collect((array) ($this->lineup ?? []))
+            ->filter(fn ($r) => is_array($r) && trim((string) ($r['name'] ?? '')) !== '')
+            ->map(function ($r) {
+                $upload = is_array($r['image'] ?? null) ? ($r['image'][0] ?? '') : ($r['image'] ?? '');
+                $upload = trim((string) $upload);
+                $image  = $upload !== '' ? $upload : trim((string) ($r['image_url'] ?? ''));
+
+                return [
+                    'name'     => trim((string) ($r['name'] ?? '')),
+                    'subtitle' => trim((string) ($r['subtitle'] ?? '')),
+                    'image'    => \App\Support\MediaUrl::resolve($image !== '' ? $image : null) ?? '',
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The admin-authored run-of-show, normalized to {time, title, note}. Rows
+     * without a time are dropped. Shared by the API resource and the public
+     * site's event page (schedule sheet).
+     *
+     * @return array<int, array{time: string, title: string, note: string}>
+     */
+    public function scheduleRows(): array
+    {
+        return collect((array) ($this->schedule ?? []))
+            ->filter(fn ($r) => is_array($r) && trim((string) ($r['time'] ?? '')) !== '')
+            ->map(fn ($r) => [
+                'time'  => trim((string) ($r['time'] ?? '')),
+                'title' => trim((string) ($r['title'] ?? '')),
+                'note'  => trim((string) ($r['note'] ?? '')),
+            ])
+            ->values()
+            ->all();
+    }
+
+    // -------------------------------------------------------------------------
     //  Relationships
     // -------------------------------------------------------------------------
 

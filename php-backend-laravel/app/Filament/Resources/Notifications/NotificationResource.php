@@ -12,6 +12,7 @@ use BackedEnum;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -69,12 +70,17 @@ class NotificationResource extends Resource
                 ->label('Send to')
                 ->required()
                 ->default('all')
+                ->live()
                 ->options(Notification::AUDIENCE_TYPES)
-                ->helperText('Who receives this.'),
+                ->helperText(fn (Get $get): string => self::reachHint((string) $get('audience_type'))),
             TextInput::make('audience_value')
                 ->label('Audience value')
                 ->maxLength(120)
-                ->helperText('Leave blank for "Everyone". Otherwise the exact district or state name, the sport (Cricket / Football / Badminton / Basketball), or the target user id.'),
+                // Only the static segments need a typed value; activity segments and
+                // "Everyone" resolve themselves, so hide the box to avoid confusion.
+                ->visible(fn (Get $get): bool => in_array($get('audience_type'), ['district', 'state', 'sport', 'user'], true))
+                ->required(fn (Get $get): bool => in_array($get('audience_type'), ['district', 'state', 'sport', 'user'], true))
+                ->helperText('The exact district or state name, the sport (Cricket / Football / Badminton / Basketball), or the target user id.'),
             Select::make('status')
                 ->required()
                 ->default('draft')
@@ -84,6 +90,27 @@ class NotificationResource extends Resource
                 ])
                 ->helperText('Switch to "Sent" to push it into users\' bells immediately.'),
         ]);
+    }
+
+    /**
+     * A plain-English "who this reaches" line under the segment picker. For activity
+     * segments it runs the same query used at send time, so the operator sees the real
+     * headcount before sending (a snapshot — it's re-frozen at the moment of sending).
+     */
+    private static function reachHint(string $type): string
+    {
+        if ($type === 'all') {
+            return 'Everyone: ' . \App\Models\User::count() . ' users.';
+        }
+
+        if (in_array($type, Notification::ACTIVITY_AUDIENCE_TYPES, true)) {
+            $notification = new Notification(['audience_type' => $type]);
+            $count = $notification->activityAudienceQuery()->count();
+
+            return "Reaches about {$count} users right now (frozen when you send).";
+        }
+
+        return 'Who receives this.';
     }
 
     public static function table(Table $table): Table
@@ -103,10 +130,38 @@ class NotificationResource extends Resource
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => $state === 'sent' ? 'success' : 'gray'),
+                TextColumn::make('reach')
+                    ->label('Reach')
+                    ->state(fn (Notification $r): string => $r->status === 'sent' ? (string) $r->reach() : '—')
+                    ->alignEnd()
+                    ->tooltip('Users this was aimed at (exact for activity segments; current match for others).'),
                 TextColumn::make('reads_count')
-                    ->label('Reads')
+                    ->label('Opened')
                     ->counts('reads')
+                    ->alignEnd()
                     ->sortable(),
+                TextColumn::make('open_rate')
+                    ->label('Open rate')
+                    ->badge()
+                    ->alignEnd()
+                    ->state(function (Notification $r): string {
+                        if ($r->status !== 'sent') {
+                            return '—';
+                        }
+                        $rate = $r->openRate();
+
+                        return $rate === null ? '—' : $rate . '%';
+                    })
+                    ->color(function (Notification $r): string {
+                        $rate = $r->status === 'sent' ? $r->openRate() : null;
+
+                        return match (true) {
+                            $rate === null => 'gray',
+                            $rate >= 40    => 'success',
+                            $rate >= 15    => 'warning',
+                            default        => 'danger',
+                        };
+                    }),
                 TextColumn::make('sent_at')
                     ->label('Sent')
                     ->dateTime('M j, g:i A')

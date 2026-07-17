@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Services\EventService;
+use App\Services\LeaderboardService;
 use App\Support\CityResolver;
 use Illuminate\Support\Collection;
 use Illuminate\Contracts\View\View;
@@ -21,6 +22,12 @@ use App\Models\Venue;
 
 final class PublicWebController extends Controller
 {
+    /**
+     * The GameHub sport chips, in the app's order (MainScreen.kt `sports`). "All" is the
+     * unfiltered lead chip, not a sport. Keep this list and the app's in step.
+     */
+    private const GAMEHUB_SPORTS = ['All', 'Cricket', 'Football', 'Badminton', 'Basketball'];
+
     public function home(): View
     {
         $events = $this->eventFeed(6);
@@ -100,12 +107,53 @@ final class PublicWebController extends Controller
             ->map(fn (LiveMatch $m) => $this->decorateLiveStrip($m))
             ->all();
 
+        // The app's sport chips are a global filter over the whole GameHub screen
+        // (MainScreen.kt `selectedSport`): they narrow the venues AND the ActionBoard.
+        // Here they're ?sport= links, as the Events categories already are — a reload
+        // costs a beat, but the popular/more split below is then recomputed over the
+        // filtered set exactly as the app recomputes it, instead of a JS hide that
+        // would leave the split stale.
+        $selectedSport = $this->selectedSport();
+        $filteredVenues = $selectedSport === 'All'
+            ? $venues
+            : $venues->where('category', $selectedSport)->values();
+
+        // One catalogue, two presentations — no venue appears twice. Mirrors the app:
+        // the reel is the top 5 by rating, "more" is strictly what the reel didn't show.
+        $popularVenues = $filteredVenues->sortByDesc(fn ($v) => (float) $v->rating)->take(5)->values();
+        $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
+
         return view('site.gamehub', [
-            'title'       => 'GameHub',
-            'venues'      => $venues,
-            'sportCounts' => $sportCounts,
-            'liveMatches' => $liveMatches,
+            'title'         => 'GameHub',
+            'venues'        => $venues,
+            'sportCounts'   => $sportCounts,
+            'liveMatches'   => $liveMatches,
+            'topPlayer'     => $this->topRankedPlayer($city),
+            'selectedSport' => $selectedSport,
+            'sportChips'    => self::GAMEHUB_SPORTS,
+            'popularVenues' => $popularVenues,
+            'moreVenues'    => $moreVenues,
         ]);
+    }
+
+    /**
+     * Rank #1 for the GameHub "Top Player" widget — the app's LeaderboardHomeWidget,
+     * reading the same monthly ranked-XP board its API serves (LeaderboardService), so
+     * the two can't drift.
+     *
+     * The app keys the board off the GPS-resolved district; the web only knows a chosen
+     * city, which is the nearest equivalent it has. A city that isn't a district name
+     * simply finds nobody, and the widget shows its honest empty state — the same thing
+     * the app does when a district has no ranked players. Never a placeholder.
+     */
+    private function topRankedPlayer(?string $city): ?array
+    {
+        if (empty($city)) {
+            return null;
+        }
+
+        return app(LeaderboardService::class)
+            ->monthly('district', null, $city, 1)[0] ?? null;
     }
 
     /**
@@ -182,7 +230,75 @@ final class PublicWebController extends Controller
     public function actionBoard(): View
     {
         $matches = LiveMatch::orderBy('created_at', 'desc')->get()->toArray();
-        return view('site.actionboard', ['title' => 'Action Board', 'matches' => $matches]);
+
+        // ── Mobile app-parity feed (mirrors Api\LiveMatchController::index) ──
+        // Same visibility rules as the app: signed-in users get their district's
+        // LOCAL matches + FEATURED; guests get FEATURED only. Private never listed.
+        $viewer = auth()->user();
+        $feed = LiveMatch::query()
+            ->visibleTo($viewer)
+            ->orderByRaw("CASE WHEN LOWER(status) = 'live' THEN 0 ELSE 1 END")
+            ->orderByDesc('updated_at')
+            ->limit(20)
+            ->get()
+            ->map(function (LiveMatch $m) use ($viewer): array {
+                // Which side is batting (latest over's tag)? Drives score/overs
+                // attribution and puts the batting side on top of the card.
+                $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
+                $battingTeam = 1;
+                for ($i = count($overSummary) - 1; $i >= 0; $i--) {
+                    $tag = $overSummary[$i]['batting'] ?? null;
+                    if ($tag !== null && $tag !== '') {
+                        $battingTeam = ($tag === $m->away || $tag === 'away') ? 2 : 1;
+                        break;
+                    }
+                }
+                $overs = (string) ($m->overs ?? '');
+                $scoreText = (string) ($m->score_text ?: '');
+                return [
+                    'id'          => (string) $m->id,
+                    'team1'       => (string) $m->home,
+                    'team2'       => (string) $m->away,
+                    'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
+                    'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
+                    'overs1'      => $battingTeam === 2 ? '' : $overs,
+                    'overs2'      => $battingTeam === 2 ? $overs : '',
+                    'battingTeam' => $battingTeam,
+                    'status'      => (string) ($m->status ?? ''),
+                    'venue'       => (string) ($m->venue ?? ''),
+                    'competition' => (string) ($m->competition ?? ''),
+                    'isLive'      => strtolower((string) $m->status) === 'live',
+                    'visibility'  => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
+                    'district'    => (string) ($m->district ?? ''),
+                    'locality'    => (string) ($m->locality ?? ''),
+                    'isMine'      => $viewer !== null && (int) $m->user_id === (int) $viewer->id,
+                ];
+            })
+            ->values();
+
+        // District Home snapshot + ranked-XP boards — same sources as the app's
+        // District/State tabs. Guests (no district) get honest empty states.
+        $districtSummary = null;
+        $districtBoard = [];
+        $stateBoard = [];
+        $leaderboards = app(\App\Services\LeaderboardService::class);
+        if ($viewer !== null && !empty($viewer->district)) {
+            $districtSummary = app(\App\Services\DistrictService::class)
+                ->summary((string) $viewer->district, $viewer->state !== null ? (string) $viewer->state : null);
+            $districtBoard = $leaderboards->monthly('district', null, (string) $viewer->district, 50);
+        }
+        if ($viewer !== null && !empty($viewer->state)) {
+            $stateBoard = $leaderboards->monthly('state', null, (string) $viewer->state, 50);
+        }
+
+        return view('site.actionboard', [
+            'title' => 'Action Board',
+            'matches' => $matches,
+            'abFeed' => $feed,
+            'abDistrictSummary' => $districtSummary,
+            'abDistrictBoard' => $districtBoard,
+            'abStateBoard' => $stateBoard,
+        ]);
     }
 
     public function actionBoardMatchLive(string $id): View
@@ -670,6 +786,10 @@ final class PublicWebController extends Controller
             'reviews'  => (int) ($v->reviews_count ?? 0),
             'price'    => (int) ($v->price ?? 0),
             'badge'    => $v->is_featured ? 'Featured' : null,
+            // The app's cards carry these two (VenueItem.tagline / .sports); the web card
+            // shape predates them. Additive — the desktop markup ignores both.
+            'tagline'  => (string) ($v->tagline ?? ''),
+            'sports'   => $v->sportsList(),
         ];
     }
 
@@ -744,6 +864,16 @@ final class PublicWebController extends Controller
             'price'        => (int) ($v->price ?? 0),
             'hours'        => $v->displayHours() ?: '6:00 AM – 11:00 PM',
             'cancellation' => $v->cancellationText(),
+            // The app's VenueDetailScreen reads these (address line, "Show in Map"/
+            // "Get directions", the "Good to know" checklist, the rating summary);
+            // the web shape predates them. Additive — the desktop markup ignores them.
+            'address'      => (string) ($v->address ?? ''),
+            'latitude'     => $v->latitude,
+            'longitude'    => $v->longitude,
+            'map_link'     => (string) ($v->map_link ?? ''),
+            'rules'        => is_array($v->rules) ? array_values(array_filter($v->rules)) : [],
+            'ratings_count' => (int) ($v->ratings_count ?? 0),
+            'is_bookable'  => (bool) ($v->is_bookable ?? true),
             'badge'        => $v->is_featured ? 'Featured' : null,
             'description'  => $v->about ?: 'A premium sports facility with well-maintained playing surfaces and modern amenities.',
             'amenities'    => $amenities,
@@ -779,6 +909,28 @@ final class PublicWebController extends Controller
         $category = trim((string) request()->query('category', ''));
 
         return ($category === '' || strcasecmp($category, 'All') === 0) ? null : $category;
+    }
+
+    /**
+     * The GameHub sport chip in play. Whitelisted against the app's own chip row
+     * (MainScreen.kt `sports`) so ?sport= can only ever be one of those — an unknown
+     * value falls back to "All" rather than rendering a chip row where nothing is lit
+     * next to an empty venue list.
+     *
+     * Returns "All" (not null) because the chips are a closed set the view lights up
+     * by name, unlike the open-ended event categories above.
+     */
+    private function selectedSport(): string
+    {
+        $sport = trim((string) request()->query('sport', ''));
+
+        foreach (self::GAMEHUB_SPORTS as $known) {
+            if (strcasecmp($sport, $known) === 0) {
+                return $known;
+            }
+        }
+
+        return 'All';
     }
 
     /**

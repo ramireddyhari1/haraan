@@ -2,6 +2,250 @@
 @section('footer_icon_secondary', '#16a34a')
 @section('content')
 
+{{-- ================================================================= --}}
+{{-- MOBILE APP-STYLE GAMEHUB (mirrors the Android app; ≤720px)         --}}
+{{--                                                                    --}}
+{{-- A port of MainScreen.kt GameHubTabScreen, in its order: green hero --}}
+{{-- → ActionBoard (straddling the seam) → Top Player → sport chips →   --}}
+{{-- Popular Venues reel → More venues. Values track the app's tokens    --}}
+{{-- (GameHubDeep #1B5E20, GameHubGreen #00C853, 20px card radius);      --}}
+{{-- change both together.                                              --}}
+{{--                                                                    --}}
+{{-- Two deliberate divergences from the app, both about not inventing   --}}
+{{-- facts the web can't know:                                          --}}
+{{--   · No distance chip. The app ranks by a real GPS fix; the site has --}}
+{{--     only a chosen city, and the app's card already omits the chip   --}}
+{{--     when distance is blank — so this is its own empty state, not a  --}}
+{{--     missing feature.                                               --}}
+{{--   · No "Available tonight" badge. The app hardcodes availableTonight--}}
+{{--     = true on every venue, so the badge is decoration there; on the --}}
+{{--     public site it would be a booking claim we haven't checked.     --}}
+{{-- ================================================================= --}}
+@php
+    // The app's ActionBoard matches are cricket today (LiveMatchRow carries no sport),
+    // so a non-cricket chip empties the board rather than showing football fixtures
+    // that don't exist. Same rule here.
+    $hubLive = ($selectedSport === 'All' || $selectedSport === 'Cricket') ? $liveMatches : [];
+    $hubFeatured = $hubLive[0] ?? null;
+
+    // Sport → inline glyph, mirroring the app's chip icons (venueSportIcon). Badminton
+    // and Tennis share the racket glyph there, so they collapse to one here too.
+    $hubGlyphKey = function (string $sport): string {
+        $s = strtolower($sport);
+        return match (true) {
+            str_contains($s, 'cricket') => 'cricket',
+            str_contains($s, 'football'), str_contains($s, 'soccer') => 'football',
+            str_contains($s, 'badminton'), str_contains($s, 'tennis') => 'racket',
+            str_contains($s, 'volley') => 'volleyball',
+            default => 'basketball',
+        };
+    };
+    $hubIcons = [
+        'all'        => '<rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect>',
+        'cricket'    => '<path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle>',
+        'football'   => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path><path d="M12 3v4.5M4 9.5 8.5 10M20 9.5 15.5 10M7 20l2.8-6M17 20l-2.8-6"></path>',
+        'racket'     => '<ellipse cx="9.5" cy="9.5" rx="6.5" ry="5.5" transform="rotate(-45 9.5 9.5)"></ellipse><path d="M13.5 13.5 20 20"></path><path d="M6.5 6.5 12.5 12.5M6.5 12.5 12.5 6.5"></path>',
+        'volleyball' => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 0 0 18M3.5 8.5a15 15 0 0 1 17 7M3.5 15.5a15 15 0 0 0 17-7"></path>',
+        'basketball' => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18M5.6 5.6a12 12 0 0 0 12.8 12.8M18.4 5.6A12 12 0 0 1 5.6 18.4"></path>',
+    ];
+@endphp
+
+<div class="mhub">
+    {{-- 1. The app's green hero. This IS the page header, not a banner under one: on the
+         GameHub tab the app renders no outer header at all (MainScreen.kt skips it when
+         `isGameHubTab`) and stacks greeting → search → switch on the green band. So the
+         site's white topbar is hidden here (see the CSS) and its three controls live on
+         the green, in the app's order — otherwise the page carries two search bars and
+         two tab controls, one white and one green. --}}
+    <div class="mhub__hero">
+        {{-- The "H" monogram (the app's haraan_copy drawable), not the wordmark: the
+             band wants identity-as-texture, and a wordmark stretched to 210px is a
+             squashed logo. --}}
+        <img class="mhub__mark" src="{{ asset('images/haraan-mark.png') }}" alt="" aria-hidden="true">
+
+        @include('site.partials.app-greet', ['onDark' => true])
+
+        <form class="mhub__search" action="/search" method="GET" role="search">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.5" y2="16.5"></line></svg>
+            <input type="text" name="q" placeholder="Search grounds, matches, players..." autocomplete="off">
+        </form>
+
+        {{-- The app's GameHubSegmentedSwitch: a translucent track with a white active
+             pill. Real links here, since the web's two lanes are two pages. --}}
+        <div class="mhub__switch" role="tablist" aria-label="Events or GameHub">
+            <a class="mhub__switch-tab" href="/events" role="tab" aria-selected="false">Events</a>
+            <a class="mhub__switch-tab is-on" href="/gamehub" role="tab" aria-selected="true">GameHub</a>
+        </div>
+    </div>
+
+    {{-- 2. ActionBoard — the elevated hero card, straddling the green seam. --}}
+    <a class="mhub__ab" href="/gamehub/actionboard">
+        <div class="mhub__ab-head">
+            <img src="{{ asset('images/haraan-mark.png') }}" alt="" aria-hidden="true">
+            <strong>ActionBoard</strong>
+            @if(count($hubLive))
+                <span class="mhub__ab-live"><i></i>{{ count($hubLive) }} LIVE</span>
+            @endif
+        </div>
+
+        @if($hubFeatured)
+            @php
+                // The batting side leads the card, as in the app's live list.
+                $hubRows = collect([$hubFeatured['home'], $hubFeatured['away']])
+                    ->sortByDesc(fn ($t) => (bool) $t['batting'])
+                    ->values();
+                $hubMeta = collect([
+                    $hubFeatured['competition'] ?: null,
+                    ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs']) ? trim((string) ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs'])) . ' ov' : null,
+                ])->filter()->implode(' • ');
+            @endphp
+            <div class="mhub__ab-strip">
+                @if($hubMeta)<p class="mhub__ab-meta">{{ $hubMeta }}</p>@endif
+                @foreach($hubRows as $team)
+                    <div class="mhub__ab-row {{ $team['batting'] ? 'is-batting' : '' }}">
+                        <span class="mhub__ab-logo">{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}</span>
+                        <span class="mhub__ab-abbr">{{ $team['abbr'] }}</span>
+                        <span class="mhub__ab-name">{{ $team['name'] }}</span>
+                        <span class="mhub__ab-score">{{ $team['score'] }}</span>
+                        @if($team['overs'])<span class="mhub__ab-ov">({{ $team['overs'] }})</span>@endif
+                    </div>
+                @endforeach
+            </div>
+        @else
+            {{-- The app's honest empty state, sport-aware — never a scripted match. --}}
+            <p class="mhub__ab-empty">
+                {{ $selectedSport === 'All'
+                    ? 'No live matches right now · tap to open the board'
+                    : 'No live ' . $selectedSport . ' matches right now · tap to open the board' }}
+            </p>
+        @endif
+    </a>
+
+    {{-- 3. Top Player — the app's LeaderboardHomeWidget, on the same ranked-XP board. --}}
+    <a class="mhub__top" href="/gamehub/leaderboard">
+        <span class="mhub__top-face">
+            @if(!empty($topPlayer['avatar']))
+                <img src="{{ $topPlayer['avatar'] }}" alt="" loading="lazy">
+            @else
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="5"></circle><path d="M8.2 12.5 7 22l5-2.6L17 22l-1.2-9.5"></path></svg>
+            @endif
+        </span>
+        <span class="mhub__top-copy">
+            <strong>Top Player</strong>
+            @if($topPlayer)
+                <span class="mhub__top-line">{{ $topPlayer['name'] }} &nbsp;•&nbsp; +{{ $topPlayer['xp'] }} XP</span>
+                <span class="mhub__top-rank">#{{ $topPlayer['rank'] }}{{ $selectedCity ? ' in ' . $selectedCity : '' }}</span>
+            @else
+                {{-- Two lines, as the app allows this state: it's a sentence, not a name,
+                     and one line ellipsises it to "Play a ranked matc…". --}}
+                <span class="mhub__top-line mhub__top-line--empty">
+                    {{ $selectedCity ? 'No ranked players in ' . $selectedCity . ' yet' : 'Play a ranked match to appear here' }}
+                </span>
+            @endif
+        </span>
+        <span class="mhub__top-cta">View Standings</span>
+    </a>
+
+    {{-- 4. Sport chips — a global filter over the venues below AND the ActionBoard. --}}
+    <div class="mhub__chips">
+        @foreach($sportChips as $chip)
+            @php $key = $chip === 'All' ? 'all' : $hubGlyphKey($chip); @endphp
+            <a class="mhub__chip {{ $chip === $selectedSport ? 'is-on' : '' }}"
+               href="{{ $chip === 'All' ? '/gamehub' : '/gamehub?sport=' . urlencode($chip) }}">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$key] !!}</svg>
+                {{ $chip }}
+            </a>
+        @endforeach
+    </div>
+
+    {{-- 5. Popular Venues — the app's top-5-by-rating reel. --}}
+    @php $hubTotal = $popularVenues->count() + $moreVenues->count(); @endphp
+    <div class="mhub__head">
+        <div>
+            <h3>Popular Venues</h3>
+            {{-- The app's contextual subtitle, minus its two GPS branches: without a fix
+                 it says "N venues • top rated", which is exactly how these are ranked.
+                 Pluralised, which the app's string isn't — that's its bug, not its design. --}}
+            <p>{{ $hubTotal ? $hubTotal . ' ' . \Illuminate\Support\Str::plural('venue', $hubTotal) . ' • top rated' : 'No venues yet' }}</p>
+        </div>
+        {{-- Only when there's somewhere to go. The app's "View all" opens its search
+             overlay, which the web answers with the header's search; with ≤5 venues the
+             reel is already the whole catalogue, so a link here would jump nowhere. --}}
+        @if($moreVenues->count())
+            <a href="#mhub-more">View all</a>
+        @endif
+    </div>
+
+    @if($popularVenues->count())
+        <div class="mhub__reel">
+            @foreach($popularVenues as $venue)
+                <a class="mhub__arena" href="/gamehub/{{ $venue->id }}">
+                    <span class="mhub__arena-img">
+                        <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
+                        <span class="mhub__arena-scrim"></span>
+                        <span class="mhub__arena-cat">{{ $venue->category }}</span>
+                        @if($venue->reviews > 0)
+                            <span class="mhub__arena-rate"><i>★</i>{{ $venue->rating }}</span>
+                        @endif
+                    </span>
+                    <span class="mhub__arena-body">
+                        <strong class="mhub__arena-title">{{ $venue->title }}</strong>
+                        <span class="mhub__arena-sub">{{ $venue->tagline ?: $venue->location }}</span>
+                        <span class="mhub__arena-foot">
+                            <span class="mhub__price">₹{{ number_format($venue->price) }}<i>/hr</i></span>
+                            @include('site.partials.hub-sports', ['sports' => $venue->sports, 'glyphKey' => $hubGlyphKey, 'icons' => $hubIcons])
+                        </span>
+                    </span>
+                </a>
+            @endforeach
+        </div>
+    @else
+        <p class="mhub__empty">No venues match this filter yet.</p>
+    @endif
+
+    {{-- 6. More venues — strictly what the reel didn't show, so nothing repeats. --}}
+    @if($moreVenues->count())
+        <div class="mhub__head mhub__head--tight" id="mhub-more">
+            <div>
+                <h3>More venues</h3>
+                <p>{{ $moreVenues->count() }} more to explore</p>
+            </div>
+        </div>
+        <div class="mhub__list">
+            @foreach($moreVenues as $venue)
+                <a class="mhub__vcard" href="/gamehub/{{ $venue->id }}">
+                    <span class="mhub__vcard-img">
+                        <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
+                        <span class="mhub__vcard-scrim"></span>
+                        <span class="mhub__arena-cat">{{ $venue->category }}</span>
+                        @if($venue->tagline)<span class="mhub__vcard-tag">{{ $venue->tagline }}</span>@endif
+                    </span>
+                    <span class="mhub__vcard-body">
+                        <span class="mhub__vcard-top">
+                            <span class="mhub__vcard-id">
+                                <strong>{{ $venue->title }}</strong>
+                                <span class="mhub__vcard-loc">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                                    {{ $venue->location }}
+                                </span>
+                            </span>
+                            @if($venue->reviews > 0)
+                                <span class="mhub__vcard-rate"><i>★</i>{{ $venue->rating }}</span>
+                            @else
+                                <span class="mhub__vcard-new">New</span>
+                            @endif
+                        </span>
+                        <span class="mhub__vcard-foot">
+                            <span class="mhub__price mhub__price--lg">₹{{ number_format($venue->price) }}<i>/hr</i></span>
+                            <span class="mhub__book">Book Slot</span>
+                        </span>
+                    </span>
+                </a>
+            @endforeach
+        </div>
+    @endif
+</div>
+
 <section class="page-shell gamehub-page theme-gamehub">
     <div class="gamehub-actions">
         <a href="/gamehub/actionboard" class="gamehub-action-card active thanna-trigger">

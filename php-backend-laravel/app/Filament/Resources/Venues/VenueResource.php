@@ -34,6 +34,16 @@ class VenueResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['name', 'city', 'address'];
+    }
+
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        return array_filter(['City' => $record->city]);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return VenueForm::configure($schema);

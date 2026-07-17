@@ -32,6 +32,7 @@ final class OptionalJwtAuthenticated
                 if ($user !== null) {
                     Auth::setUser($user);
                     $request->attributes->set('auth_user', $user);
+                    $user->touchLastSeen();
                 }
             }
         }

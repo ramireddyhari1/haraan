@@ -2,114 +2,135 @@
 
 namespace App\Filament\Resources\Users\Tables;
 
+use App\Models\User;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 
+/**
+ * The people list, rebuilt for operators rather than as a raw column dump. A tight
+ * default set (who they are, whether they're active, where, their role) with the
+ * player-stat detail tucked behind the column toggle, plus filters that make the
+ * activity data actionable — find everyone online now, or everyone who has lapsed.
+ */
 class UsersTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            ->defaultSort('created_at', 'desc')
             ->columns([
                 TextColumn::make('name')
-                    ->searchable(),
-                TextColumn::make('email')
-                    ->label('Email address')
-                    ->searchable(),
-                TextColumn::make('email_verified_at')
-                    ->dateTime()
-                    ->sortable(),
-                TextColumn::make('created_at')
-                    ->dateTime()
+                    ->weight('bold')
+                    ->description(fn (User $r): ?string => $r->email ?? $r->phone)
+                    ->placeholder('Unnamed')
+                    ->searchable(['name', 'email', 'phone']),
+
+                TextColumn::make('presence')
+                    ->label('Status')
+                    ->badge()
+                    ->state(fn (User $r): string => self::presenceLabel($r->last_seen_at))
+                    ->color(fn (User $r): string => self::presenceColor($r->last_seen_at)),
+
+                TextColumn::make('last_seen_at')
+                    ->label('Last seen')
+                    ->since()
+                    ->placeholder('Never')
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('phone')
-                    ->searchable(),
-                TextColumn::make('avatar')
-                    ->searchable(),
-                TextColumn::make('role')
-                    ->searchable(),
-                TextColumn::make('status')
-                    ->searchable(),
-                TextColumn::make('partner_type')
-                    ->searchable(),
-                TextColumn::make('event_host_id')
-                    ->searchable(),
-                TextColumn::make('player_id')
-                    ->searchable(),
-                TextColumn::make('player_role')
-                    ->searchable(),
-                TextColumn::make('playing_style')
-                    ->searchable(),
-                IconColumn::make('is_guest')
-                    ->boolean(),
+                    ->tooltip(fn (User $r): ?string => $r->last_seen_at?->format('d M Y, H:i')),
+
                 TextColumn::make('district')
-                    ->searchable(),
+                    ->placeholder('—')
+                    ->searchable()
+                    ->sortable(),
+
+                TextColumn::make('role')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => $state ? ucfirst(strtolower($state)) : '—')
+                    ->color(fn (?string $state): string => match (strtolower((string) $state)) {
+                        'admin', 'coadmin' => 'danger',
+                        'partner' => 'warning',
+                        default => 'gray',
+                    }),
+
+                TextColumn::make('status')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => $state ? ucfirst(strtolower($state)) : '—')
+                    ->color(fn (?string $state): string => strtolower((string) $state) === 'active' ? 'success' : 'gray'),
+
+                TextColumn::make('created_at')
+                    ->label('Joined')
+                    ->date('d M Y')
+                    ->sortable(),
+
+                // --- Detail, hidden by default (toggle on when needed) ---
+                TextColumn::make('phone')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('state')
-                    ->searchable(),
-                TextColumn::make('batting_style')
-                    ->searchable(),
-                TextColumn::make('bowling_style')
-                    ->searchable(),
-                TextColumn::make('career_runs')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('career_balls')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('career_matches')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('career_wickets')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('career_runs_conceded')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('career_overs_bowled')
-                    ->searchable(),
-                TextColumn::make('rank_district')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('rank_state')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('rank_country')
-                    ->numeric()
-                    ->sortable(),
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('primary_sport')
+                    ->label('Sport')
+                    ->badge()
+                    ->color('info')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('player_id')
+                    ->label('Player ID')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('ranked_xp')
+                    ->label('Ranked XP')
                     ->numeric()
-                    ->sortable(),
-                TextColumn::make('casual_xp')
-                    ->numeric()
-                    ->sortable(),
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('trust_score')
                     ->numeric()
-                    ->sortable(),
-                IconColumn::make('is_organizer')
-                    ->boolean(),
-                TextColumn::make('gender')
-                    ->searchable(),
-                TextColumn::make('date_of_birth')
-                    ->date()
-                    ->sortable(),
-                TextColumn::make('birth_place')
-                    ->searchable(),
-                TextColumn::make('height')
-                    ->searchable(),
-                TextColumn::make('nationality')
-                    ->searchable(),
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                SelectFilter::make('activity')
+                    ->label('Activity')
+                    ->options([
+                        'online'   => 'Online now (5 min)',
+                        'today'    => 'Active today',
+                        'week'     => 'Active this week',
+                        'lapsed14' => 'Lapsed · 14+ days',
+                        'lapsed30' => 'Lapsed · 30+ days',
+                        'never'    => 'Never active',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $now = now();
+
+                        return match ($data['value'] ?? null) {
+                            'online'   => $query->where('last_seen_at', '>=', $now->copy()->subMinutes(5)),
+                            'today'    => $query->where('last_seen_at', '>=', $now->copy()->subDay()),
+                            'week'     => $query->where('last_seen_at', '>=', $now->copy()->subDays(7)),
+                            'lapsed14' => $query->whereNotNull('last_seen_at')->where('last_seen_at', '<', $now->copy()->subDays(14)),
+                            'lapsed30' => $query->whereNotNull('last_seen_at')->where('last_seen_at', '<', $now->copy()->subDays(30)),
+                            'never'    => $query->whereNull('last_seen_at'),
+                            default    => $query,
+                        };
+                    }),
+
+                SelectFilter::make('role')
+                    ->options([
+                        'user'    => 'User',
+                        'partner' => 'Partner',
+                        'coadmin' => 'Co-admin',
+                        'admin'   => 'Admin',
+                    ])
+                    // Column casing is mixed in the DB, so match case-insensitively.
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereRaw('lower(role) = ?', [strtolower($data['value'])])
+                        : $query),
             ])
             ->recordActions([
                 EditAction::make(),
@@ -119,5 +140,33 @@ class UsersTable
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    private static function presenceLabel(?Carbon $seen): string
+    {
+        if ($seen === null) {
+            return 'Away';
+        }
+        if ($seen->gt(now()->subMinutes(5))) {
+            return 'Online';
+        }
+        if ($seen->gt(now()->subDay())) {
+            return 'Today';
+        }
+        if ($seen->gt(now()->subDays(7))) {
+            return 'This week';
+        }
+
+        return 'Away';
+    }
+
+    private static function presenceColor(?Carbon $seen): string
+    {
+        return match (self::presenceLabel($seen)) {
+            'Online' => 'success',
+            'Today' => 'info',
+            'This week' => 'warning',
+            default => 'gray',
+        };
     }
 }

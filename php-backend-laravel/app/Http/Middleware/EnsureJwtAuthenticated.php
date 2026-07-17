@@ -38,6 +38,9 @@ final class EnsureJwtAuthenticated
         Auth::setUser($user);
         $request->attributes->set('auth_user', $user);
 
+        // Activity heartbeat for /control (throttled internally to ~5 min).
+        $user->touchLastSeen();
+
         return $next($request);
     }
 }

@@ -584,6 +584,8 @@ main.container {
 
 /* App-style mobile home is hidden by default; shown only ≤720px. */
 .mhome { display: none; }
+.mhub { display: none; }
+.mven, .mven__modal { display: none; }
 
 /* GameHub live strip is a mobile-only element; shown only ≤1024px (mobile overrides). */
 .gh-live { display: none; }
@@ -601,6 +603,31 @@ main.container {
 	.events-page > .events-section:not(.events-section--filters) {
 		display: none;
 	}
+
+	/* Same swap for GameHub: the desktop action cards / hero / sport grid /
+	   venue grid / promo give way to the app-style .mhub feed. .gh-live goes
+	   with them — .mhub's ActionBoard card is the live strip now, and keeping
+	   both would show the same match twice. (gh-live still serves the 721–1024
+	   band, where the desktop layout is what renders.) */
+	.mhub { display: block; }
+	.gamehub-page > .gamehub-actions,
+	.gamehub-page > .gh-live,
+	.gamehub-page > .gamehub-hero,
+	.gamehub-page > .events-section,
+	.gamehub-page > .promo-banner {
+		display: none;
+	}
+
+	/* Venue detail: the app-style page replaces the desktop two-column sheet.
+	   The desktop container is only VISUALLY hidden — the mobile page moves its
+	   booking widget / review form into a sheet on demand, so those nodes must
+	   stay in the DOM (and keep their ids and listeners).
+
+	   Qualified with .page-shell deliberately: `.page-shell { display: grid }`
+	   is defined LATER in this file, and a media query adds no specificity — so a
+	   bare .gamehub-detail-container ties at (0,1,0) and loses on source order. */
+	.mven { display: block; }
+	.page-shell.gamehub-detail-container { display: none; }
 }
 
 .hero__panel-card p {

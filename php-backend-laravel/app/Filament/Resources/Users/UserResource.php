@@ -29,6 +29,19 @@ class UserResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['name', 'email', 'phone', 'district'];
+    }
+
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        return array_filter([
+            'Email' => $record->email,
+            'District' => $record->district,
+        ]);
+    }
+
     protected static ?string $navigationLabel = 'Staff & users';
 
     /** Super-admins and Operations can manage staff. */

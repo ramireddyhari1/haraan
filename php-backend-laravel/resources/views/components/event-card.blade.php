@@ -3,7 +3,7 @@
 <article class="event-card">
     <a href="/events/{{ $event->id }}" class="event-card__link">
         <div class="event-card__thumb">
-            @php $img = (is_array($event->images) && count($event->images)) ? $event->images[0] : '/bv-white.png'; @endphp
+            @php $img = $event->heroImageUrl() ?? '/bv-white.png'; @endphp
             <img src="{{ $img }}" alt="{{ $event->title }}" />
             <div class="event-card__thumb-overlay">
                 <div class="event-card__thumb-text">

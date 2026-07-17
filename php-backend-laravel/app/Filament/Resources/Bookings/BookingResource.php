@@ -32,6 +32,32 @@ class BookingResource extends Resource
         return auth()->user()?->canManage('events') ?? false;
     }
 
+    // Bookings have no name, so search by id / customer / coupon and render a useful title.
+    protected static ?string $recordTitleAttribute = 'id';
+
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['id', 'user.name', 'coupon_code'];
+    }
+
+    public static function getGlobalSearchResultTitle(\Illuminate\Database\Eloquent\Model $record): string
+    {
+        return 'Booking #' . $record->id . ($record->user?->name ? ' · ' . $record->user->name : '');
+    }
+
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        return array_filter([
+            'For' => $record->event?->title ?? $record->venue?->name,
+            'Status' => $record->status ? ucfirst(strtolower((string) $record->status)) : null,
+        ]);
+    }
+
+    public static function getGlobalSearchEloquentQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        return parent::getGlobalSearchEloquentQuery()->with(['user', 'event', 'venue']);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return BookingForm::configure($schema);

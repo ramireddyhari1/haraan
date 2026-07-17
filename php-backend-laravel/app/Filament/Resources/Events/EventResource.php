@@ -34,6 +34,19 @@ class EventResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'title';
 
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['title', 'city'];
+    }
+
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        return array_filter([
+            'City' => $record->city,
+            'Status' => $record->status ? ucfirst(strtolower((string) $record->status)) : null,
+        ]);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return EventForm::configure($schema);
