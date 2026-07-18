@@ -11,6 +11,7 @@ use App\Filament\Resources\Events\Widgets\EventArrivalCurveWidget;
 use App\Filament\Resources\Events\Widgets\EventAudienceWidget;
 use App\Filament\Resources\Events\Widgets\EventComparisonWidget;
 use App\Filament\Resources\Events\Widgets\EventCouponWidget;
+use App\Filament\Resources\Events\Widgets\EventFunnelWidget;
 use App\Filament\Resources\Events\Widgets\EventInsightsWidget;
 use App\Filament\Resources\Events\Widgets\EventRefundWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
@@ -72,6 +73,7 @@ class EventAnalytics extends Page
             EventSalesPacingWidget::class,
             EventAnalyticsStatsWidget::class,
             EventViewsWidget::class,
+            EventFunnelWidget::class,
             EventComparisonWidget::class,
             EventRevenueByTypeWidget::class,
             EventSalesChartWidget::class,
