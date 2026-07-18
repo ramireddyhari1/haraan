@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\Users\Tables;
 
+use App\Filament\Support\AvatarColumn;
 use App\Models\User;
+use App\Support\ContactPrefill;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -25,14 +27,21 @@ class UsersTable
         return $table
             ->defaultSort('created_at', 'desc')
             ->columns([
+                AvatarColumn::make(
+                    'avatar',
+                    nameFor: fn (User $r): string => (string) ($r->name ?: 'Unnamed'),
+                    avatarFor: fn (User $r): ?string => $r->avatar,
+                ),
                 TextColumn::make('name')
                     ->weight('bold')
-                    ->description(fn (User $r): ?string => $r->email ?? $r->phone)
+                    // Show a REAL contact line: the placeholder `<phone>@whatsapp.local`
+                    // address that phone-signup users carry isn't shown — their phone is.
+                    ->description(fn (User $r): ?string => self::contactLine($r))
                     ->placeholder('Unnamed')
                     ->searchable(['name', 'email', 'phone']),
 
                 TextColumn::make('presence')
-                    ->label('Status')
+                    ->label('Activity')
                     ->badge()
                     ->state(fn (User $r): string => self::presenceLabel($r->last_seen_at))
                     ->color(fn (User $r): string => self::presenceColor($r->last_seen_at)),
@@ -52,16 +61,23 @@ class UsersTable
                 TextColumn::make('role')
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => $state ? ucfirst(strtolower($state)) : '—')
+                    // Roles are a privilege, not an alarm — a calm scale, no red. Red
+                    // stays reserved for genuinely bad account states (below).
                     ->color(fn (?string $state): string => match (strtolower((string) $state)) {
-                        'admin', 'coadmin' => 'danger',
+                        'admin', 'coadmin' => 'info',
                         'partner' => 'warning',
                         default => 'gray',
                     }),
 
                 TextColumn::make('status')
+                    ->label('Account')
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => $state ? ucfirst(strtolower($state)) : '—')
-                    ->color(fn (?string $state): string => strtolower((string) $state) === 'active' ? 'success' : 'gray'),
+                    ->color(fn (?string $state): string => match (strtolower((string) $state)) {
+                        'active' => 'success',
+                        'banned', 'suspended', 'blocked' => 'danger',
+                        default => 'gray',
+                    }),
 
                 TextColumn::make('created_at')
                     ->label('Joined')
@@ -140,6 +156,21 @@ class UsersTable
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    /**
+     * A clean contact sub-line for the name cell: the real email when there is
+     * one, otherwise the phone. Never the `<phone>@whatsapp.local` placeholder.
+     */
+    private static function contactLine(User $r): ?string
+    {
+        if (ContactPrefill::isRealEmail($r->email)) {
+            return $r->email;
+        }
+
+        $phone = trim((string) $r->phone);
+
+        return $phone !== '' ? $phone : null;
     }
 
     private static function presenceLabel(?Carbon $seen): string

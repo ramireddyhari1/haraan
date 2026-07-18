@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Filament\Support;
 
 use App\Models\Booking;
-use App\Support\MediaUrl;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 
@@ -69,47 +68,10 @@ final class BookingTablePresenter
     /** A circular customer avatar column — the account photo, or generated initials. */
     public static function customerAvatarColumn(): ImageColumn
     {
-        return ImageColumn::make('customer_avatar')
-            ->label('')
-            ->circular()
-            ->size(36)
-            ->getStateUsing(fn (Booking $r): string => self::avatarFor($r))
-            ->extraImgAttributes(['loading' => 'lazy']);
-    }
-
-    /** The customer's avatar URL, falling back to an initials chip when none is set. */
-    private static function avatarFor(Booking $r): string
-    {
-        $name = trim((string) ($r->user?->name ?? $r->guest_name ?? '')) ?: 'Guest';
-
-        $resolved = MediaUrl::resolve($r->user?->avatar);
-        if ($resolved !== null && $resolved !== '') {
-            return $resolved;
-        }
-
-        return self::initialsAvatar($name);
-    }
-
-    /** A self-contained data-URI avatar: initials on a colour derived from the name. */
-    private static function initialsAvatar(string $name): string
-    {
-        $parts = preg_split('/\s+/', $name) ?: [$name];
-        $initials = strtoupper(
-            mb_substr($parts[0] ?? '', 0, 1)
-            . (count($parts) > 1 ? mb_substr(end($parts), 0, 1) : '')
+        return AvatarColumn::make(
+            'customer_avatar',
+            nameFor: fn (Booking $r): string => (string) ($r->user?->name ?? $r->guest_name ?? 'Guest'),
+            avatarFor: fn (Booking $r): ?string => $r->user?->avatar,
         );
-        $initials = $initials !== '' ? $initials : '?';
-
-        // Deterministic hue from the name so the same person keeps the same colour.
-        $hue = crc32($name) % 360;
-        $bg = "hsl({$hue} 52% 46%)";
-
-        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
-            . "<rect width='64' height='64' rx='32' fill='{$bg}'/>"
-            . "<text x='50%' y='50%' dy='.35em' text-anchor='middle' "
-            . "font-family='Inter, Arial, sans-serif' font-size='26' font-weight='600' "
-            . "fill='#ffffff'>" . htmlspecialchars($initials, ENT_QUOTES) . '</text></svg>';
-
-        return 'data:image/svg+xml;base64,' . base64_encode($svg);
     }
 }
