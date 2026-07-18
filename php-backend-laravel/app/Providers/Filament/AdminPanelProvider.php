@@ -31,6 +31,11 @@ class AdminPanelProvider extends PanelProvider
             ->brandLogo(asset('images/haraan-logo.png'))
             ->brandLogoHeight('2.2rem')
             ->favicon(asset('images/haraan-logo.png'))
+            // Inter across the whole panel — the single biggest lift from stock
+            // Filament's system font. Compiled theme (viteTheme) carries the rest
+            // of the design system so tables/forms/dashboard inherit it too.
+            ->font('Inter')
+            ->viteTheme('resources/css/filament/control/theme.css')
             ->login()
             ->profile()
             ->multiFactorAuthentication([

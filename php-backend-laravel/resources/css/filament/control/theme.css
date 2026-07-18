@@ -1,0 +1,137 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Haraan Control — compiled panel theme.
+
+   This is the chrome layer that makes the *whole* panel (tables, forms,
+   sidebar, dashboard) read as one premium product, not stock Filament.
+   The reusable component classes (.hrn-card, .hrn-hero, …) still live in
+   resources/views/filament/theme.blade.php; this file styles Filament's own
+   components via its documented, version-stable `fi-*` CSS hooks.
+   ───────────────────────────────────────────────────────────────────────── */
+
+@layer theme {
+    :root {
+        /* Layered neutrals: a faintly tinted app background so white surfaces
+           lift off it (the Stripe/Linear "everything floats" feel), instead of
+           white-on-white which reads flat. */
+        --hrn-app-bg: #f5f7fb;
+        --hrn-surface: #ffffff;
+        --hrn-border: #e8ecf3;
+        --hrn-radius: 14px;
+        --hrn-shadow: 0 1px 2px rgba(11, 18, 32, .04);
+        --hrn-shadow-card: 0 1px 3px rgba(11, 18, 32, .06), 0 1px 2px rgba(11, 18, 32, .04);
+    }
+
+    .dark {
+        --hrn-app-bg: #0b1120;
+        --hrn-surface: #111726;
+        --hrn-border: rgba(255, 255, 255, .08);
+        --hrn-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+        --hrn-shadow-card: 0 1px 3px rgba(0, 0, 0, .35), 0 1px 2px rgba(0, 0, 0, .3);
+    }
+}
+
+@layer components {
+    /* ── App shell: tinted background so panels read as layered surfaces ── */
+    .fi-body,
+    .fi-simple-layout {
+        background-color: var(--hrn-app-bg);
+    }
+
+    /* ── Sidebar: cleaner seam + a real active-item accent ──────────────── */
+    .fi-sidebar {
+        background-color: var(--hrn-surface);
+        border-inline-end: 1px solid var(--hrn-border);
+    }
+
+    .fi-sidebar-item-button {
+        border-radius: 10px;
+        font-weight: 500;
+    }
+
+    /* Active nav item: soft tinted pill + a leading accent bar, the detail
+       that makes Linear/Retool sidebars feel intentional. */
+    .fi-sidebar-item.fi-active .fi-sidebar-item-button {
+        position: relative;
+        background-color: rgba(16, 185, 129, .10);
+        font-weight: 600;
+    }
+    .fi-sidebar-item.fi-active .fi-sidebar-item-button::before {
+        content: "";
+        position: absolute;
+        inset-inline-start: -6px;
+        top: 20%;
+        bottom: 20%;
+        width: 3px;
+        border-radius: 999px;
+        background-color: var(--primary-500, #10b981);
+    }
+
+    /* Sidebar group headings: quieter, uppercase — structure without shouting. */
+    .fi-sidebar-group-label {
+        font-size: 11px;
+        letter-spacing: .07em;
+        text-transform: uppercase;
+        opacity: .72;
+    }
+
+    /* ── Topbar: hairline seam instead of a hard edge ───────────────────── */
+    .fi-topbar > nav {
+        border-bottom: 1px solid var(--hrn-border);
+        box-shadow: none;
+        backdrop-filter: saturate(1.1);
+    }
+
+    /* ── Sections / cards / widgets: consistent radius + soft shadow ────── */
+    .fi-section,
+    .fi-wi-stats-overview-stat,
+    .fi-ta-ctn {
+        border-radius: var(--hrn-radius);
+        box-shadow: var(--hrn-shadow-card);
+    }
+
+    .fi-section {
+        border: 1px solid var(--hrn-border);
+    }
+
+    /* Stat widgets: tighter, more deliberate — the panel's first impression. */
+    .fi-wi-stats-overview-stat {
+        border: 1px solid var(--hrn-border);
+        transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .fi-wi-stats-overview-stat:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 26px -18px rgba(11, 18, 32, .26);
+    }
+    .fi-wi-stats-overview-stat-value {
+        font-weight: 800;
+        letter-spacing: -.02em;
+    }
+
+    /* ── Tables: calmer header, breathable rows, clear hover ────────────── */
+    .fi-ta-header-cell {
+        font-size: 11.5px;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        font-weight: 600;
+        opacity: .74;
+    }
+    .fi-ta-row {
+        transition: background-color .12s ease;
+    }
+
+    /* ── Buttons: a touch more presence on the primary action ───────────── */
+    .fi-btn {
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    /* ── Inputs: match the surface radius so forms feel of a piece ──────── */
+    .fi-input-wrp {
+        border-radius: 10px;
+    }
+}
