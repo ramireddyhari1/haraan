@@ -21,6 +21,7 @@ final class BookingNotifier
     public function __construct(
         private readonly WhatsAppService $whatsapp,
         private readonly EmailOtpService $mailer,
+        private readonly SmsService $sms,
     ) {}
 
     /**
@@ -76,12 +77,28 @@ final class BookingNotifier
 
         if ($phone !== null) {
             $caption = $this->caption($title, $when, $where, $tier, $qty, $code, $passUrl, $note);
-            // Prefer an image (the scannable QR, hosted at $qrUrl) with the details as caption;
-            // if Twilio can't send the media, fall back to a text message + the pass link.
-            if (! $this->whatsapp->sendMedia($phone, $caption, $qrUrl)) {
-                $this->whatsapp->sendMessage($phone, $caption . "\n\nYour ticket & QR: " . $passUrl);
+            // Delivery ladder: WhatsApp image (scannable QR) → WhatsApp text → SMS. The SMS
+            // fallback ensures the ticket still reaches the customer while the WhatsApp sender
+            // is pending approval (or if a WhatsApp send fails for any reason).
+            $whatsappOk = $this->whatsapp->sendMedia($phone, $caption, $qrUrl)
+                || $this->whatsapp->sendMessage($phone, $caption . "\n\nYour ticket & QR: " . $passUrl);
+
+            if (! $whatsappOk) {
+                $this->sms->sendSms($phone, $this->smsText($title, $when, $tier, $qty, $code, $passUrl));
             }
         }
+    }
+
+    /**
+     * Compact ticket text for SMS — no emoji/markdown (plain GSM-7 keeps it to fewer segments),
+     * with the code and the hosted pass link so the recipient can open the full QR ticket.
+     */
+    private function smsText(string $title, string $when, ?string $tier, int $qty, string $code, string $passUrl): string
+    {
+        $tickets = ($tier !== null ? $tier . ' x' : '') . $qty;
+
+        return "Haraan: You're confirmed for {$title} ({$when}). Tickets: {$tickets}. Code: {$code}. "
+            . "View your ticket & QR: {$passUrl}";
     }
 
     private function recipientEmail(Booking $booking): ?string

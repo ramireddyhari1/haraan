@@ -61,6 +61,12 @@ return [
 
         // Country code prepended to bare 10-digit local numbers (India = 91).
         'default_country' => env('TWILIO_DEFAULT_COUNTRY', '91'),
+
+        // SMS fallback: when a WhatsApp send fails (e.g. sender not yet approved), the ticket
+        // is delivered as a plain SMS instead. Uses the same Twilio account; 'sms_from' must be
+        // an SMS-capable Twilio number (the purchased +1 number works).
+        'sms_enabled' => env('TWILIO_SMS_ENABLED', false),
+        'sms_from' => env('TWILIO_SMS_FROM'),
     ],
 
     // Public QR image generator for ticket QRs (/t/{code}/qr.png). Swappable if the default
