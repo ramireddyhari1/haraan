@@ -31,6 +31,17 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 final class BookingService
 {
     /**
+     * How long a selected ticket stays locked for the buyer who reserved it.
+     *
+     * Reserving a ticket writes a PENDING booking that holds the seat out of the
+     * pool. If the buyer doesn't pay within this window the hold lapses and the
+     * seat returns to the pool for the next person — see {@see releaseExpired()}
+     * and the scheduled `bookings:release-expired` sweep. Keep short so an
+     * abandoned checkout doesn't strand inventory; long enough to finish paying.
+     */
+    public const RESERVATION_HOLD_MINUTES = 1;
+
+    /**
      * Create a new confirmed booking inside a DB transaction.
      *
      * Decrements the event's available slots and persists the booking
@@ -178,7 +189,7 @@ final class BookingService
                     // A reserved order sits PENDING (holding its seats) until payment
                     // confirms; the legacy direct path still writes CONFIRMED immediately.
                     'status'         => $reserve ? 'PENDING' : 'CONFIRMED',
-                    'reserved_until' => $reserve ? now()->addMinutes(15) : null,
+                    'reserved_until' => $reserve ? now()->addMinutes(self::RESERVATION_HOLD_MINUTES) : null,
                     'coupon_code'    => $couponCode,
                     'discount'       => 0,
                     'user_id'        => $user->id,
@@ -354,6 +365,34 @@ final class BookingService
         if ($ids !== []) {
             $this->releaseBookings($ids);
         }
+    }
+
+    /**
+     * Sweep every event's expired ticket locks in one pass and hand their seats back.
+     *
+     * The lazy {@see releaseExpired()} only clears an event's holds when someone next
+     * tries to book *that* event — so a ticket one person locked and abandoned would
+     * stay locked (and its seat missing from `available_slots`) until the next buyer
+     * happened along. The scheduled `bookings:release-expired` command calls this every
+     * minute so a lapsed lock frees up for the next buyer on its own. Returns the number
+     * of holds released.
+     */
+    public function releaseAllExpired(): int
+    {
+        $ids = Booking::query()
+            ->whereRaw('upper(status) = ?', ['PENDING'])
+            ->whereNotNull('reserved_until')
+            ->where('reserved_until', '<', now())
+            ->pluck('id')
+            ->all();
+
+        if ($ids === []) {
+            return 0;
+        }
+
+        $this->releaseBookings($ids);
+
+        return count($ids);
     }
 
     /**
