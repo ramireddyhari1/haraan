@@ -66,13 +66,20 @@ Route::middleware('auth')->group(function() {
     Route::post('/profile/setup', [\App\Http\Controllers\Web\PublicWebController::class, 'saveProfileSetup'])->name('site.profile.setup.save');
 });
 
-// Public ticket-QR image (used by the confirmation email's <img> and anywhere a hosted QR is
-// needed). Proxies the WhatsApp bridge's /qr generator; the code itself is the only secret.
+// Public ticket-QR image (used by the confirmation email's <img>, the Twilio WhatsApp media,
+// and anywhere a hosted QR is needed). The QR encodes the scanner contract `haraan:ticket:<code>`
+// — the code itself is the only secret. Generated server-side via a public QR image service
+// (no self-hosted bridge, no QR PHP extension needed); the response is cached hard so it's
+// fetched once. Configurable via services.qr.endpoint.
 Route::get('/t/{code}/qr.png', function (string $code) {
-    $base = app(\App\Services\WhatsAppService::class)->bridgeBase();
+    $payload = 'haraan:ticket:' . $code;
+    $endpoint = (string) config('services.qr.endpoint', 'https://api.qrserver.com/v1/create-qr-code/');
     try {
-        $res = \Illuminate\Support\Facades\Http::connectTimeout(3)->timeout(15)
-            ->get($base . '/qr', ['data' => 'haraan:ticket:' . $code]);
+        $res = \Illuminate\Support\Facades\Http::connectTimeout(4)->timeout(15)->get($endpoint, [
+            'size' => '360x360',
+            'margin' => '1',
+            'data' => $payload,
+        ]);
         if ($res->successful()) {
             return response($res->body(), 200)
                 ->header('Content-Type', 'image/png')

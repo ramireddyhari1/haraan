@@ -76,10 +76,9 @@ final class BookingNotifier
 
         if ($phone !== null) {
             $caption = $this->caption($title, $when, $where, $tier, $qty, $code, $passUrl, $note);
-            $qrPayload = 'haraan:ticket:' . $code;
-            // Prefer an image (the scannable QR) with the details as caption; if the bridge
-            // can't send media (not linked yet), fall back to a text message + the pass link.
-            if (! $this->whatsapp->sendMedia($phone, $caption, $qrPayload)) {
+            // Prefer an image (the scannable QR, hosted at $qrUrl) with the details as caption;
+            // if Twilio can't send the media, fall back to a text message + the pass link.
+            if (! $this->whatsapp->sendMedia($phone, $caption, $qrUrl)) {
                 $this->whatsapp->sendMessage($phone, $caption . "\n\nYour ticket & QR: " . $passUrl);
             }
         }

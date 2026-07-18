@@ -1,103 +1,147 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * WhatsApp delivery via Twilio's REST API. Replaces the old self-hosted whatsapp-web.js bridge
+ * (no QR to scan, no session to keep alive). Keeps the original interface — sendMessage() and
+ * sendMedia() — so callers (BookingNotifier, auth controllers) are unchanged.
+ *
+ * Every send is best-effort and returns bool; a failure is logged, never thrown, so it can't
+ * break a booking or an OTP flow. Requires a WhatsApp-enabled Twilio sender ('from') and, for
+ * business-initiated messages outside a 24h session, an approved template on the Twilio side.
+ */
 class WhatsAppService
 {
-    protected string $apiUrl = 'http://localhost:8090/api/send-message';
+    private const API = 'https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json';
 
-    /**
-     * Send a WhatsApp message.
-     *
-     * @param string $phone The phone number with country code.
-     * @param string $message The message text to send.
-     * @return bool True if successful, false otherwise.
-     */
     public function sendMessage(string $phone, string $message): bool
     {
-        // config() (not env()) so it survives `config:cache` — once config is cached, env()
-        // returns null at runtime, which is what silently broke the bridge URL before.
-        $bridgeEnabled = filter_var(config('services.whatsapp.bridge_enabled', false), FILTER_VALIDATE_BOOLEAN);
+        return $this->dispatch($phone, $message, null);
+    }
 
-        // When the self-hosted bridge isn't enabled, local/dev has nothing on :8080 — the
-        // call would hang and time out the OTP request. Skip it; the dev master code 000000
-        // (see WhatsAppAuthController::verifyOtp) still lets you sign in.
-        if (! $bridgeEnabled && app()->environment('local')) {
-            Log::info("WhatsApp (local — not sent) to {$phone}: {$message}");
+    /**
+     * Send an image (the ticket QR) with a caption. $mediaUrl must be a publicly reachable URL
+     * that Twilio can fetch (e.g. the /t/{code}/qr.png route). Falls back to a text-only send if
+     * no media URL is given.
+     */
+    public function sendMedia(string $phone, string $caption, string $mediaUrl): bool
+    {
+        return $this->dispatch($phone, $caption, $mediaUrl !== '' ? $mediaUrl : null);
+    }
+
+    /** Whether Twilio WhatsApp is configured well enough to attempt a send. */
+    public function isConfigured(): bool
+    {
+        $c = config('services.whatsapp');
+
+        return (bool) ($c['account_sid'] ?? null)
+            && (bool) ($c['from'] ?? null)
+            && (((bool) ($c['api_key_sid'] ?? null) && (bool) ($c['api_key_secret'] ?? null))
+                || (bool) ($c['auth_token'] ?? null));
+    }
+
+    private function dispatch(string $phone, string $body, ?string $mediaUrl): bool
+    {
+        $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
+
+        if (! $enabled) {
+            Log::info("WhatsApp (disabled — not sent) to {$phone}: {$body}");
+
             return false;
         }
 
-        $url = config('services.whatsapp.bridge_url', $this->apiUrl);
+        if (! $this->isConfigured()) {
+            Log::warning('WhatsApp not sent: Twilio credentials / sender not configured.');
+
+            return false;
+        }
+
+        $to = $this->toWhatsApp($phone);
+        if ($to === null) {
+            Log::warning("WhatsApp not sent: unroutable number {$phone}");
+
+            return false;
+        }
+
+        $accountSid = (string) config('services.whatsapp.account_sid');
+        $from = 'whatsapp:' . $this->e164((string) config('services.whatsapp.from'));
+
+        $payload = ['From' => $from, 'To' => $to, 'Body' => $body];
+        if ($mediaUrl !== null) {
+            $payload['MediaUrl'] = $mediaUrl;
+        }
 
         try {
-            $response = Http::connectTimeout(3)->timeout(20)->post($url, [
-                'number' => $phone,
-                'message' => $message,
-            ]);
+            $response = Http::withBasicAuth(...$this->authPair($accountSid))
+                ->asForm()
+                ->connectTimeout(5)->timeout(20)
+                ->post(sprintf(self::API, $accountSid), $payload);
 
             if ($response->successful()) {
                 return true;
             }
 
-            Log::error('WhatsApp API Error: ' . $response->body());
+            // Twilio returns a helpful {code,message} — surface it so sender/template issues are clear.
+            Log::warning('Twilio WhatsApp send failed (' . $response->status() . '): ' . $response->body());
+
             return false;
-        } catch (\Exception $e) {
-            Log::error('WhatsApp Service Exception: ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            Log::warning('Twilio WhatsApp exception: ' . $e->getMessage());
+
             return false;
         }
     }
 
     /**
-     * Send a WhatsApp image (a QR generated by the bridge from $qrPayload) with a text caption.
-     * Used to deliver the ticket QR + details on booking. Best-effort — returns false (logged)
-     * if the bridge is unreachable or WhatsApp isn't linked yet.
+     * Basic-auth pair: prefer the API key (sid+secret); fall back to account SID + auth token.
+     *
+     * @return array{0:string,1:string}
      */
-    public function sendMedia(string $phone, string $caption, string $qrPayload): bool
+    private function authPair(string $accountSid): array
     {
-        $bridgeEnabled = filter_var(config('services.whatsapp.bridge_enabled', false), FILTER_VALIDATE_BOOLEAN);
+        $keySid = (string) config('services.whatsapp.api_key_sid');
+        $keySecret = (string) config('services.whatsapp.api_key_secret');
 
-        if (! $bridgeEnabled && app()->environment('local')) {
-            Log::info("WhatsApp media (local — not sent) to {$phone}: {$caption}");
-            return false;
+        if ($keySid !== '' && $keySecret !== '') {
+            return [$keySid, $keySecret];
         }
 
-        try {
-            $response = Http::connectTimeout(3)->timeout(30)->post($this->bridgeBase() . '/api/send-media', [
-                'number'  => $phone,
-                'caption' => $caption,
-                'qrData'  => $qrPayload,
-            ]);
-
-            if ($response->successful()) {
-                return true;
-            }
-
-            Log::warning('WhatsApp media send failed: ' . $response->body());
-            return false;
-        } catch (\Exception $e) {
-            Log::warning('WhatsApp media exception: ' . $e->getMessage());
-            return false;
-        }
+        return [$accountSid, (string) config('services.whatsapp.auth_token')];
     }
 
-    /** Bridge origin (scheme+host+port), derived from the send-message URL or configured directly. */
-    public function bridgeBase(): string
+    /** Build the `whatsapp:+E164` recipient, or null if the number can't be normalised. */
+    private function toWhatsApp(string $phone): ?string
     {
-        $base = config('services.whatsapp.bridge_base');
-        if (is_string($base) && $base !== '') {
-            return rtrim($base, '/');
+        $e164 = $this->e164($phone);
+
+        return preg_match('/^\+\d{8,15}$/', $e164) ? 'whatsapp:' . $e164 : null;
+    }
+
+    /** Normalise a phone to E.164 (+<country><number>), defaulting bare 10-digit numbers to +91. */
+    private function e164(string $phone): string
+    {
+        $phone = trim($phone);
+        if (str_starts_with($phone, '+')) {
+            return '+' . preg_replace('/\D/', '', $phone);
         }
 
-        // Fall back to stripping the path off the send-message URL.
-        $url = (string) config('services.whatsapp.bridge_url', $this->apiUrl);
-        $parts = parse_url($url);
-        $scheme = $parts['scheme'] ?? 'http';
-        $host = $parts['host'] ?? 'localhost';
-        $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+        $digits = preg_replace('/\D/', '', $phone);
+        $cc = preg_replace('/\D/', '', (string) config('services.whatsapp.default_country', '91'));
 
-        return "{$scheme}://{$host}{$port}";
+        // Trunk-prefixed local numbers (e.g. 0XXXXXXXXXX) — drop the leading zero(s).
+        $digits = ltrim($digits, '0');
+
+        // 10-digit local → prepend country code; already carries a country code → use as-is.
+        if (strlen($digits) === 10) {
+            return '+' . $cc . $digits;
+        }
+
+        return '+' . $digits;
     }
 }

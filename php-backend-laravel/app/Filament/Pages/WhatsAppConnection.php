@@ -5,17 +5,16 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Models\AdminAction;
+use App\Services\WhatsAppService;
 use BackedEnum;
-use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Illuminate\Support\Facades\Http;
 
 /**
- * WhatsApp / OTP connection console. Talks to the self-hosted whatsapp-web.js bridge
- * (localhost:8090) so the team can see whether OTP sending is live and, when the session
- * drops, re-scan the QR straight from /control — no SSH. The page polls the bridge every
- * few seconds via wire:poll. Super-admins only.
+ * WhatsApp / OTP console — now backed by Twilio (the self-hosted whatsapp-web.js bridge and its
+ * QR-scan flow are gone). Shows whether Twilio is configured and lets a super-admin fire a test
+ * message to confirm the sender + credentials work end to end. The test input lives in the view
+ * (wire:model) so we don't depend on the Filament action-form API.
  */
 class WhatsAppConnection extends Page
 {
@@ -25,20 +24,17 @@ class WhatsAppConnection extends Page
 
     protected static string|\UnitEnum|null $navigationGroup = 'Platform';
 
-    protected static ?string $title = 'WhatsApp / OTP';
+    protected static ?string $title = 'WhatsApp (Twilio)';
 
-    protected static ?string $navigationLabel = 'WhatsApp / OTP';
+    protected static ?string $navigationLabel = 'WhatsApp (Twilio)';
 
-    /** Live state pulled from the bridge. */
-    public bool $reachable = true;
+    public ?string $testNumber = null;
 
-    public bool $ready = false;
+    public bool $configured = false;
 
-    public ?string $qr = null;
+    public bool $enabled = false;
 
-    public ?string $event = null;
-
-    public ?string $at = null;
+    public ?string $from = null;
 
     public static function canAccess(): bool
     {
@@ -50,61 +46,35 @@ class WhatsAppConnection extends Page
         $this->refreshStatus();
     }
 
-    /** Derive the bridge base URL from the configured send-message endpoint. */
-    protected function bridgeBase(): string
-    {
-        $url = config('services.whatsapp.bridge_url', 'http://localhost:8090/api/send-message');
-
-        return preg_replace('#/api/send-message/?$#', '', (string) $url) ?: 'http://localhost:8090';
-    }
-
-    /** Polled by wire:poll — refreshes health + QR from the bridge. */
     public function refreshStatus(): void
     {
-        try {
-            $res = Http::timeout(6)->get($this->bridgeBase() . '/status');
-
-            if ($res->successful()) {
-                $this->reachable = true;
-                $this->ready = (bool) $res->json('ready');
-                $this->qr = $res->json('qr');
-                $this->event = $res->json('event');
-                $this->at = $res->json('at');
-
-                return;
-            }
-        } catch (\Throwable $e) {
-            // fall through
-        }
-
-        $this->reachable = false;
+        $this->configured = app(WhatsAppService::class)->isConfigured();
+        $this->enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
+        $this->from = ((string) config('services.whatsapp.from')) ?: null;
     }
 
-    /** Logs the current WhatsApp session out so a fresh QR is generated. */
-    public function forceRelink(): void
+    /** Send a one-off WhatsApp message to the entered number to verify Twilio end to end. */
+    public function sendTest(): void
     {
-        try {
-            Http::timeout(15)->post($this->bridgeBase() . '/logout');
-            AdminAction::log('whatsapp.relink', []);
-            Notification::make()->title('Re-link requested')->body('A fresh QR will appear in a few seconds — scan it from WhatsApp ▸ Linked devices.')->success()->send();
-        } catch (\Throwable $e) {
-            Notification::make()->title('Could not reach the WhatsApp bridge')->danger()->send();
+        $number = trim((string) $this->testNumber);
+        if ($number === '') {
+            Notification::make()->title('Enter a phone number first')->warning()->send();
+
+            return;
         }
 
-        $this->refreshStatus();
-    }
+        $ok = app(WhatsAppService::class)->sendMessage(
+            $number,
+            'Haraan test ✅ — your Twilio WhatsApp integration is working.'
+        );
 
-    protected function getHeaderActions(): array
-    {
-        return [
-            Action::make('relink')
-                ->label('Force re-link')
-                ->icon('heroicon-m-arrow-path')
-                ->color('danger')
-                ->requiresConfirmation()
-                ->modalHeading('Re-link WhatsApp')
-                ->modalDescription('This logs the current WhatsApp session out and shows a fresh QR to scan. OTP sending pauses until you re-scan.')
-                ->action('forceRelink'),
-        ];
+        AdminAction::log('whatsapp.test', ['to' => $number, 'ok' => $ok]);
+
+        $ok
+            ? Notification::make()->title('Test message sent')
+                ->body("Twilio accepted the message to {$number}. Check that WhatsApp.")->success()->send()
+            : Notification::make()->title('Test send failed')
+                ->body('Twilio rejected or could not deliver it. Check logs — usually the sender isn\'t a WhatsApp-approved number, or the recipient must opt in / needs an approved template.')
+                ->danger()->send();
     }
 }

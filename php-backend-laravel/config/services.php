@@ -42,14 +42,31 @@ return [
         ],
     ],
 
-    // Self-hosted WhatsApp bridge (whatsapp-web.js). Read via config() — NOT env() — at
-    // runtime, so it survives `config:cache` (env() returns null once config is cached).
+    // WhatsApp delivery via Twilio (replaces the old self-hosted whatsapp-web.js bridge).
+    // All values read through config() so they survive `config:cache`.
     'whatsapp' => [
-        'bridge_enabled' => env('WHATSAPP_BRIDGE_ENABLED', false),
-        'bridge_url' => env('WHATSAPP_BRIDGE_URL', 'http://localhost:8090/api/send-message'),
-        // Bridge origin for non-send-message endpoints (/qr, /api/send-media). Defaults to
-        // the send-message URL's origin when unset.
-        'bridge_base' => env('WHATSAPP_BRIDGE_BASE'),
+        // Toggle: when false, WhatsAppService is a no-op (logs only) — e.g. local dev.
+        'enabled' => env('TWILIO_WHATSAPP_ENABLED', false),
+
+        // Twilio auth: prefer an API key (SID + secret) over the account Auth Token.
+        // The account SID is always required (it's in the REST resource path).
+        'account_sid' => env('TWILIO_ACCOUNT_SID'),
+        'auth_token' => env('TWILIO_AUTH_TOKEN'),
+        'api_key_sid' => env('TWILIO_API_KEY_SID'),
+        'api_key_secret' => env('TWILIO_API_KEY_SECRET'),
+
+        // The WhatsApp-enabled sender, E.164 without the "whatsapp:" prefix (we add it).
+        // e.g. +16293174010, or the Twilio sandbox +14155238886 while testing.
+        'from' => env('TWILIO_WHATSAPP_FROM'),
+
+        // Country code prepended to bare 10-digit local numbers (India = 91).
+        'default_country' => env('TWILIO_DEFAULT_COUNTRY', '91'),
+    ],
+
+    // Public QR image generator for ticket QRs (/t/{code}/qr.png). Swappable if the default
+    // service is ever unavailable; must accept ?data=&size=WxH and return a PNG.
+    'qr' => [
+        'endpoint' => env('QR_ENDPOINT', 'https://api.qrserver.com/v1/create-qr-code/'),
     ],
 
     // Razorpay Standard Checkout. `key` (public key id) is safe to expose to the

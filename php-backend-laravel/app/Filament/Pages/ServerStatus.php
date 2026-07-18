@@ -292,24 +292,20 @@ class ServerStatus extends Page
 
     private function bridgeCard(): array
     {
-        try {
-            $res = Http::timeout(5)->get($this->bridgeBase() . '/status');
-            if ($res->successful()) {
-                $ready = (bool) $res->json('ready');
+        // WhatsApp now goes through Twilio (the self-hosted bridge is gone) — report config
+        // health rather than pinging a local service.
+        $configured = app(\App\Services\WhatsAppService::class)->isConfigured();
+        $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
+        $from = (string) config('services.whatsapp.from');
 
-                return $this->card(
-                    'WhatsApp bridge',
-                    $ready ? 'Linked' : 'Awaiting scan',
-                    $ready ? 'OTP + ticket delivery live' : 'Session dropped — re-link on WhatsApp / OTP page',
-                    'heroicon-o-chat-bubble-left-right',
-                    $ready ? 'ok' : 'warn',
-                );
-            }
-        } catch (\Throwable) {
-            // fall through
+        if ($configured && $enabled) {
+            return $this->card('WhatsApp (Twilio)', 'Live', 'Sending from ' . ($from ?: 'configured sender'), 'heroicon-o-chat-bubble-left-right', 'ok');
+        }
+        if ($configured) {
+            return $this->card('WhatsApp (Twilio)', 'Disabled', 'Credentials set · TWILIO_WHATSAPP_ENABLED is off', 'heroicon-o-chat-bubble-left-right', 'warn');
         }
 
-        return $this->card('WhatsApp bridge', 'Unreachable', 'Bridge not responding on ' . $this->bridgeBase(), 'heroicon-o-chat-bubble-left-right', 'down');
+        return $this->card('WhatsApp (Twilio)', 'Not configured', 'Set Twilio SID / key / sender', 'heroicon-o-chat-bubble-left-right', 'idle');
     }
 
     // ---------------------------------------------------------------------
@@ -323,13 +319,6 @@ class ServerStatus extends Page
     private function card(string $title, string $value, string $sub, string $icon, string $status, ?int $meter = null): array
     {
         return compact('title', 'value', 'sub', 'icon', 'status', 'meter');
-    }
-
-    private function bridgeBase(): string
-    {
-        $url = config('services.whatsapp.bridge_url', 'http://localhost:8090/api/send-message');
-
-        return preg_replace('#/api/send-message/?$#', '', (string) $url) ?: 'http://localhost:8090';
     }
 
     private function cpuCount(): ?int
