@@ -46,6 +46,11 @@ class PartnerPanelProvider extends PanelProvider
             ->brandLogo(asset('images/haraan-logo.png'))
             ->brandLogoHeight('2.2rem')
             ->favicon(asset('images/haraan-logo.png'))
+            // Same design system as /control — Inter + the compiled theme. The
+            // theme styles panel-agnostic fi-* hooks and follows each panel's own
+            // primary colour, so the blue lane stays blue.
+            ->font('Inter')
+            ->viteTheme('resources/css/filament/control/theme.css')
             ->login()
             ->passwordReset()
             ->profile()

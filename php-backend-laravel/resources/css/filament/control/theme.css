@@ -57,7 +57,9 @@
        that makes Linear/Retool sidebars feel intentional. */
     .fi-sidebar-item.fi-active .fi-sidebar-item-button {
         position: relative;
-        background-color: rgba(16, 185, 129, .10);
+        /* Panel-aware tint: green on /control, blue on /partner — follows the
+           panel's own --primary-500 instead of a hardcoded colour. */
+        background-color: color-mix(in srgb, var(--primary-500, #10b981) 12%, transparent);
         font-weight: 600;
     }
     .fi-sidebar-item.fi-active .fi-sidebar-item-button::before {

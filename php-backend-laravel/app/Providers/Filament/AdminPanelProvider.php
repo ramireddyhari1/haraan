@@ -7,6 +7,7 @@ use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Navigation\NavigationGroup;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -46,6 +47,22 @@ class AdminPanelProvider extends PanelProvider
             ->colors([
                 'primary' => Color::Green,
                 'gray' => Color::Slate,
+            ])
+            // Deliberate sidebar order with group icons. Without this Filament
+            // renders groups in discovery order (effectively random); a stable,
+            // labelled hierarchy is most of what makes a console read "organized".
+            // Day-to-day content up top; admin/plumbing collapsed at the bottom.
+            ->navigationGroups([
+                NavigationGroup::make('App Content')
+                    ->icon('heroicon-o-rectangle-group'),
+                NavigationGroup::make('People')
+                    ->icon('heroicon-o-users'),
+                NavigationGroup::make('Platform')
+                    ->icon('heroicon-o-cog-6-tooth')
+                    ->collapsed(),
+                NavigationGroup::make('System')
+                    ->icon('heroicon-o-server-stack')
+                    ->collapsed(),
             ])
             ->sidebarCollapsibleOnDesktop()
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
