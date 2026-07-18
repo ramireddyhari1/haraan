@@ -34,9 +34,11 @@ class CommandCenter extends Page
 
     protected static ?string $navigationLabel = 'Command Center';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Platform';
+    // Ungrouped and sorted to the very top: this is the operator's home, so it
+    // leads the sidebar rather than sitting inside the collapsed Platform group.
+    protected static string|\UnitEnum|null $navigationGroup = null;
 
-    protected static ?int $navigationSort = -10;
+    protected static ?int $navigationSort = -100;
 
     /** Booking statuses that represent money actually collected (case-insensitive). */
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
