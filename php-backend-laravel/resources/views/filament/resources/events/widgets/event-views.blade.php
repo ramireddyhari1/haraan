@@ -5,8 +5,8 @@
         <x-slot name="description">Measured from every event-page open — real visitors, sources and devices</x-slot>
 
         <style>
-            .evw{--evw-t:#0b1220;--evw-b:#6b7280;--evw-track:#eef1f6;--evw-bd:rgba(120,130,150,.14);}
-            .dark .evw{--evw-t:#f3f5f9;--evw-b:#9aa4b2;--evw-track:rgba(255,255,255,.09);--evw-bd:rgba(255,255,255,.08);}
+            /* Ink hierarchy + track + border from the panel-wide theme (--hrn-*). */
+            .evw{--evw-t:var(--hrn-ink);--evw-b:var(--hrn-ink-2);--evw-track:var(--hrn-track);--evw-bd:var(--hrn-border);}
             .evw-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
             @media(max-width:900px){.evw-kpis{grid-template-columns:repeat(2,1fr);}}
             .evw-kpi{border:1px solid var(--evw-bd);border-radius:12px;padding:12px 13px;}
@@ -27,7 +27,7 @@
         </style>
 
         @if (($d['total'] ?? 0) === 0)
-            <div style="text-align:center;padding:22px 12px;color:#8a94a6;font-size:13px;">
+            <div style="text-align:center;padding:22px 12px;color:var(--hrn-ink-3);font-size:13px;">
                 No views recorded yet. Once people open this event's page (app or web), traffic analytics appear here.
             </div>
         @else

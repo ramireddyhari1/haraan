@@ -6,14 +6,14 @@
         <x-slot name="description">Which promo codes drove paid bookings for this event</x-slot>
 
         @if (empty($rows))
-            <div style="text-align:center;padding:22px 12px;color:#8a94a6;font-size:13px;">
+            <div style="text-align:center;padding:22px 12px;color:var(--hrn-ink-3);font-size:13px;">
                 No coupons redeemed for this event yet.
             </div>
         @else
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
                     <thead>
-                        <tr style="text-align:left;color:#8a94a6;border-bottom:1px solid rgba(120,130,150,.18);">
+                        <tr style="text-align:left;color:var(--hrn-ink-3);border-bottom:1px solid var(--hrn-border);">
                             <th style="padding:8px 10px;font-weight:600;">Code</th>
                             <th style="padding:8px 10px;font-weight:600;text-align:right;">Orders</th>
                             <th style="padding:8px 10px;font-weight:600;text-align:right;">Tickets</th>

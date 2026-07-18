@@ -11,12 +11,13 @@
     @endphp
 
     <style>
-        .cc{--card:#fff;--border:#e8ecf3;--ink:#0b1220;--ink2:#5a6579;--ink3:#8a94a6;--track:#eef1f6;
-            --cc-ok:#059669;--cc-ok-d:#10b981;--cc-ok-bg:#ecfdf5;--cc-warn:#d97706;--cc-warn-d:#f59e0b;--cc-warn-bg:#fffbeb;
-            --cc-down:#dc2626;--cc-down-d:#ef4444;--cc-down-bg:#fef2f2;--cc-idle:#9aa4b2;--cc-idle-d:#cbd2dd;--cc-idle-bg:#f1f3f7;
+        /* Design tokens (--card/--ink/--cc-* status palette) + shared component
+           classes come from the panel-wide theme (resources/views/filament/theme.blade.php).
+           This file keeps only Command-Center-specific layout below.
+           Local aliases map the panel tokens onto this page's legacy var names. */
+        .cc{--card:var(--hrn-surface);--border:var(--hrn-border);--ink:var(--hrn-ink);
+            --ink2:var(--hrn-ink-2);--ink3:var(--hrn-ink-3);--track:var(--hrn-track);
             display:flex;flex-direction:column;gap:26px;}
-        .dark .cc{--card:#111726;--border:rgba(255,255,255,.08);--ink:#f3f5f9;--ink2:#aeb7c6;--ink3:#7b8698;--track:rgba(255,255,255,.09);
-            --cc-ok-bg:rgba(16,185,129,.13);--cc-warn-bg:rgba(245,158,11,.13);--cc-down-bg:rgba(239,68,68,.13);--cc-idle-bg:rgba(255,255,255,.05);}
 
         /* Hero */
         .cc-hero{position:relative;overflow:hidden;border-radius:20px;padding:26px 28px;color:#fff;

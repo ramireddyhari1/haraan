@@ -5,8 +5,8 @@
         <x-slot name="description">Who bought — from the real accounts behind {{ number_format($b['buyers']) }} paid {{ \Illuminate\Support\Str::plural('buyer', $b['buyers']) }}</x-slot>
 
         <style>
-            .eau{--eau-t:#0b1220;--eau-b:#6b7280;--eau-track:#eef1f6;}
-            .dark .eau{--eau-t:#f3f5f9;--eau-b:#9aa4b2;--eau-track:rgba(255,255,255,.09);}
+            /* Ink hierarchy + track from the panel-wide theme (--hrn-*). */
+            .eau{--eau-t:var(--hrn-ink);--eau-b:var(--hrn-ink-2);--eau-track:var(--hrn-track);}
             .eau-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px 28px;}
             @media(max-width:760px){.eau-grid{grid-template-columns:1fr;}}
             .eau-h{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--eau-b);margin:0 0 10px;}
@@ -28,7 +28,7 @@
         @endphp
 
         @if ($b['buyers'] === 0)
-            <div style="text-align:center;padding:22px 12px;color:#8a94a6;font-size:13px;">
+            <div style="text-align:center;padding:22px 12px;color:var(--hrn-ink-3);font-size:13px;">
                 No paid buyers yet — audience breakdown appears once tickets sell.
             </div>
         @else
@@ -48,7 +48,7 @@
                                     </div>
                                 </div>
                             @empty
-                                <div style="font-size:12px;color:#8a94a6;">No data</div>
+                                <div style="font-size:12px;color:var(--hrn-ink-3);">No data</div>
                             @endforelse
                         </div>
                     @endforeach

@@ -40,7 +40,9 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->colors([
                 'primary' => Color::Green,
+                'gray' => Color::Slate,
             ])
+            ->sidebarCollapsibleOnDesktop()
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
@@ -68,6 +70,13 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
                 fn (): string => view('filament.realtime-head')->render(),
+            )
+            // Shared design system: one source of truth for the panel's custom
+            // design tokens (--hrn-*) and reusable component classes (.hrn-*),
+            // so custom pages/widgets stop redefining their own palettes inline.
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => view('filament.theme')->render(),
             )
             ->plugin(FilamentShieldPlugin::make());
     }

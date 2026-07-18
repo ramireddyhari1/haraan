@@ -10,8 +10,9 @@
         <x-slot name="description">Computed from this event's real data — act on these to sell more</x-slot>
 
         <style>
-            .evi{--evi-t:#0b1220;--evi-b:#4b5563;--evi-chip:#fff;}
-            .dark .evi{--evi-t:#f3f5f9;--evi-b:#c3cbd8;--evi-chip:rgba(255,255,255,.10);}
+            /* Ink hierarchy from the panel-wide theme (--hrn-*); chip stays local for tinted-card contrast. */
+            .evi{--evi-t:var(--hrn-ink);--evi-b:var(--hrn-ink-2);--evi-chip:#fff;}
+            .dark .evi{--evi-chip:rgba(255,255,255,.10);}
             .evi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
             @media(max-width:720px){.evi-grid{grid-template-columns:1fr;}}
             .evi-card{display:flex;gap:12px;align-items:flex-start;padding:14px 15px;border-radius:13px;}
@@ -31,7 +32,7 @@
 
         <div class="evi">
             @if (empty($insights))
-                <div style="text-align:center;padding:22px 12px;color:#8a94a6;font-size:13px;">
+                <div style="text-align:center;padding:22px 12px;color:var(--hrn-ink-3);font-size:13px;">
                     Not enough activity yet to generate insights. Once this event gathers views and bookings,
                     recommendations will appear here automatically.
                 </div>

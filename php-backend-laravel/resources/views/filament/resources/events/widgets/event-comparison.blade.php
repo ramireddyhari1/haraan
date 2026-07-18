@@ -6,8 +6,8 @@
             <x-slot name="description">This event vs. “{{ \Illuminate\Support\Str::limit($cmp['prevTitle'], 48) }}”</x-slot>
 
             <style>
-                .ecmp{--ecmp-t:#0b1220;--ecmp-b:#6b7280;--ecmp-bd:rgba(120,130,150,.14);}
-                .dark .ecmp{--ecmp-t:#f3f5f9;--ecmp-b:#9aa4b2;--ecmp-bd:rgba(255,255,255,.08);}
+                /* Ink hierarchy + border from the panel-wide theme (--hrn-*). */
+                .ecmp{--ecmp-t:var(--hrn-ink);--ecmp-b:var(--hrn-ink-2);--ecmp-bd:var(--hrn-border);}
                 .ecmp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
                 @media(max-width:1000px){.ecmp-grid{grid-template-columns:repeat(2,1fr);}}
                 @media(max-width:520px){.ecmp-grid{grid-template-columns:1fr;}}
