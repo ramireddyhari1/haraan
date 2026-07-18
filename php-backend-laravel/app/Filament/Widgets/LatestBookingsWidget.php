@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Support\BookingTablePresenter;
 use App\Models\Booking;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -42,6 +43,7 @@ class LatestBookingsWidget extends TableWidget
             ->emptyStateDescription('Bookings from the app and walk-ins will appear here as they come in.')
             ->emptyStateIcon('heroicon-o-calendar-days')
             ->columns([
+                BookingTablePresenter::customerAvatarColumn(),
                 TextColumn::make('user.name')
                     ->label('Customer')
                     ->weight('bold')
@@ -61,15 +63,7 @@ class LatestBookingsWidget extends TableWidget
                     ->money('INR')
                     ->weight('bold')
                     ->alignEnd(),
-                TextColumn::make('status')
-                    ->badge()
-                    ->formatStateUsing(fn (string $state): string => ucfirst(strtolower($state)))
-                    ->color(fn (string $state): string => match (strtolower($state)) {
-                        'confirmed', 'paid', 'completed', 'checked_in' => 'success',
-                        'pending' => 'warning',
-                        'cancelled', 'failed', 'refunded' => 'danger',
-                        default => 'gray',
-                    }),
+                BookingTablePresenter::statusColumn(),
                 TextColumn::make('created_at')
                     ->label('When')
                     ->since()

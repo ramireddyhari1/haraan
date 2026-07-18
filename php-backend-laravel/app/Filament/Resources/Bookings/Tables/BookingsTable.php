@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Bookings\Tables;
 
+use App\Filament\Support\BookingTablePresenter;
 use App\Models\AdminAction;
 use App\Models\Booking;
 use Filament\Actions\Action;
@@ -25,6 +26,7 @@ class BookingsTable
                 TextColumn::make('id')
                     ->label('#')
                     ->sortable(),
+                BookingTablePresenter::customerAvatarColumn(),
                 TextColumn::make('user.name')
                     ->label('Customer')
                     ->weight('bold')
@@ -46,15 +48,7 @@ class BookingsTable
                     ->weight('bold')
                     ->alignEnd()
                     ->sortable(),
-                TextColumn::make('status')
-                    ->badge()
-                    ->formatStateUsing(fn (string $state): string => ucfirst(strtolower($state)))
-                    ->color(fn (string $state): string => match (strtolower($state)) {
-                        'confirmed', 'paid', 'completed', 'checked_in' => 'success',
-                        'pending' => 'warning',
-                        'cancelled', 'failed', 'refunded' => 'danger',
-                        default => 'gray',
-                    }),
+                BookingTablePresenter::statusColumn()->sortable(),
                 TextColumn::make('coupon_code')
                     ->label('Coupon')
                     ->badge()
