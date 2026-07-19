@@ -13,6 +13,10 @@ class EventsStatsWidget extends StatsOverviewWidget
 
     protected static ?int $sort = -2;
 
+    // Eager: also used on the short partner dashboard where a lazy widget would
+    // never intersect to load.
+    protected static bool $isLazy = false;
+
     protected function getStats(): array
     {
         $events = $this->scopedEventQuery()->count();

@@ -4,22 +4,26 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\GameHub\Widgets;
 
-use App\Models\Venue;
-use App\Models\VenueSlot;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class GameHubStatsWidget extends StatsOverviewWidget
 {
+    use \App\Filament\Concerns\ScopesToPartnerVenues;
+
     protected static ?int $sort = -2;
+
+    // Eager: also used on the short partner dashboard where a lazy widget would
+    // never intersect to load.
+    protected static bool $isLazy = false;
 
     protected function getStats(): array
     {
-        $venues = Venue::count();
-        $bookable = Venue::where('is_bookable', true)->where('is_active', true)->count();
-        $totalSlots = VenueSlot::count();
-        $booked = VenueSlot::where('is_available', false)->count();
-        $fillingFast = VenueSlot::where('filling_fast', true)->where('is_available', true)->count();
+        $venues = $this->scopedVenueQuery()->count();
+        $bookable = $this->scopedVenueQuery()->where('is_bookable', true)->where('is_active', true)->count();
+        $totalSlots = $this->scopedSlotQuery()->count();
+        $booked = $this->scopedSlotQuery()->where('is_available', false)->count();
+        $fillingFast = $this->scopedSlotQuery()->where('filling_fast', true)->where('is_available', true)->count();
         $occupancy = $totalSlots > 0 ? round($booked / $totalSlots * 100) : 0;
 
         return [
