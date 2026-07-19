@@ -1,4 +1,21 @@
 <x-filament-panels::page>
+    {{-- Scoped styling only — reuses the panel-wide --hrn-* tokens. The scanner
+         markup and all JS below are untouched. --}}
+    <style>
+        .tc-row{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--hrn-border);}
+        .tc-row:last-child{border-bottom:0;}
+        .tc-ini{width:32px;height:32px;border-radius:50%;flex:none;display:flex;align-items:center;
+            justify-content:center;color:#fff;font-size:12.5px;font-weight:700;}
+        .tc-main{flex:1;min-width:0;}
+        .tc-name{font-size:13.5px;font-weight:600;color:var(--hrn-ink);}
+        .tc-evt{font-weight:400;color:var(--hrn-ink-3);}
+        .tc-detail{display:inline-block;margin-top:3px;font-size:11px;font-weight:600;
+            padding:2px 8px;border-radius:999px;}
+        .tc-detail--ok{background:var(--hrn-ok-bg);color:var(--hrn-ok);}
+        .tc-detail--warn{background:var(--hrn-warn-bg);color:var(--hrn-warn);}
+        .tc-at{font-size:11px;color:var(--hrn-ink-3);white-space:nowrap;}
+    </style>
+
     <div class="grid gap-6 lg:grid-cols-2">
         {{-- Camera scanner --}}
         <x-filament::section>
@@ -15,8 +32,8 @@
             </div>
 
             <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                The camera needs a secure (HTTPS) connection. Over a plain <code>http://</code> panel the browser
-                blocks it — use manual entry on the right until the panel has TLS.
+                The browser only allows the camera over a secure (HTTPS) connection — which this panel has.
+                If your device blocks camera access, use manual entry on the right.
             </p>
         </x-filament::section>
 
@@ -34,15 +51,20 @@
             <div class="mt-6">
                 <h3 class="mb-2 text-sm font-semibold text-gray-950 dark:text-white">Recent</h3>
                 @forelse ($recent as $r)
-                    <div class="flex items-center justify-between border-b border-gray-100 py-2 text-sm last:border-0 dark:border-gray-800">
-                        <div>
-                            <span class="font-medium text-gray-950 dark:text-white">{{ $r['name'] }}</span>
-                            @if ($r['event'])
-                                <span class="text-gray-400 dark:text-gray-500">· {{ $r['event'] }}</span>
-                            @endif
-                            <div class="text-xs {{ $r['ok'] ? 'text-green-600' : 'text-amber-600' }}">{{ $r['detail'] }}</div>
+                    @php
+                        $nm = trim((string) $r['name']) ?: 'Guest';
+                        $hue = crc32($nm) % 360;
+                        $ini = strtoupper(mb_substr($nm, 0, 1));
+                    @endphp
+                    <div class="tc-row">
+                        <div class="tc-ini" style="background:hsl({{ $hue }} 52% 46%)">{{ $ini }}</div>
+                        <div class="tc-main">
+                            <div class="tc-name">
+                                {{ $r['name'] }}@if ($r['event'])<span class="tc-evt"> · {{ $r['event'] }}</span>@endif
+                            </div>
+                            <span class="tc-detail {{ $r['ok'] ? 'tc-detail--ok' : 'tc-detail--warn' }}">{{ $r['detail'] }}</span>
                         </div>
-                        <span class="text-xs text-gray-400">{{ $r['at'] }}</span>
+                        <span class="tc-at">{{ $r['at'] }}</span>
                     </div>
                 @empty
                     <p class="text-sm text-gray-500 dark:text-gray-400">Scans will appear here.</p>
