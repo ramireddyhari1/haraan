@@ -8,6 +8,8 @@ use Filament\Support\Icons\Heroicon;
 
 class GameHubCluster extends Cluster
 {
+    use \App\Filament\Concerns\NestsClusterItemsInSidebar;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map-pin';
 
     protected static ?int $navigationSort = 12;

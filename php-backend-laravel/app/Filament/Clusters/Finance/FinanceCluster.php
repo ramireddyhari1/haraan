@@ -8,6 +8,8 @@ use Filament\Support\Icons\Heroicon;
 
 class FinanceCluster extends Cluster
 {
+    use \App\Filament\Concerns\NestsClusterItemsInSidebar;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-banknotes';
 
     protected static ?string $clusterBreadcrumb = 'Finance';

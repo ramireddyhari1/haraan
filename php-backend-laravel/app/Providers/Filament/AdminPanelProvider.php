@@ -39,6 +39,14 @@ class AdminPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/control/theme.css')
             ->login()
             ->profile()
+            // Cluster sub-navigation now lives nested in the sidebar (see
+            // NestsClusterItemsInSidebar), so hide Filament's duplicate in-content
+            // sub-nav: the desktop left column, the mobile "Overview ▾" dropdown,
+            // and the top tabs variant.
+            ->renderHook(
+                PanelsRenderHook::STYLES_AFTER,
+                fn (): string => '<style>.fi-page-sub-navigation-dropdown,.fi-page-sub-navigation-sidebar-ctn,.fi-page-sub-navigation-tabs{display:none !important;}</style>',
+            )
             ->multiFactorAuthentication([
                 \Filament\Auth\MultiFactor\App\AppAuthentication::make()
                     ->recoverable()
