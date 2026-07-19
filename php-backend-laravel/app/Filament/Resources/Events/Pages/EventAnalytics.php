@@ -98,7 +98,12 @@ class EventAnalytics extends Page
         ];
     }
 
-    protected function getHeaderWidgets(): array
+    /**
+     * Footer (not header) widgets: the page renders header widgets ABOVE the
+     * view slot and footer widgets BELOW it, so putting these in the footer lets
+     * the poster hero (the view) lead the page and the analytics stack follow.
+     */
+    protected function getFooterWidgets(): array
     {
         return [
             EventInsightsWidget::class,
@@ -116,7 +121,7 @@ class EventAnalytics extends Page
         ];
     }
 
-    public function getHeaderWidgetsColumns(): int | array
+    public function getFooterWidgetsColumns(): int | array
     {
         return 1;
     }
