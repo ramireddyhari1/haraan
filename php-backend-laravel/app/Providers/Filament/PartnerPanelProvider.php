@@ -81,6 +81,7 @@ class PartnerPanelProvider extends PanelProvider
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
             ->pages([
                 Dashboard::class,
+                \App\Filament\Pages\Partner\PartnerEarnings::class,
             ])
             ->widgets([
                 AccountWidget::class,

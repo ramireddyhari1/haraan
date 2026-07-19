@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 /**
@@ -136,6 +137,12 @@ final class Booking extends Model
     public function venueCourt(): BelongsTo
     {
         return $this->belongsTo(VenueCourt::class);
+    }
+
+    /** The settlement record for this booking (nullable until a payout is raised). */
+    public function payout(): HasOne
+    {
+        return $this->hasOne(Payout::class);
     }
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */
