@@ -111,7 +111,21 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/notifications', [\App\Http\Controllers\Web\NotificationsController::class, 'index'])->name('site.notifications');
 });
 
-// WhatsApp Auth Routes
+// Email + password sign-in for the public website login modal (see WebPasswordAuthController).
+Route::post('/auth/password', [\App\Http\Controllers\Auth\WebPasswordAuthController::class, 'login'])
+    ->middleware('throttle:auth')
+    ->name('site.password.login');
+
+// Forgot / set password for site users (companion to the email+password login).
+Route::controller(\App\Http\Controllers\Auth\WebPasswordResetController::class)->group(function (): void {
+    Route::get('/forgot-password', 'showRequestForm')->name('site.password.request');
+    Route::post('/forgot-password', 'sendResetLink')->middleware('throttle:auth')->name('site.password.email');
+    Route::get('/reset-password/{token}', 'showResetForm')->name('site.password.reset');
+    Route::post('/reset-password', 'reset')->middleware('throttle:auth')->name('site.password.update');
+});
+
+// WhatsApp Auth Routes (legacy phone-OTP; the login form no longer surfaces this,
+// but the routes stay so any in-flight/bookmarked flow doesn't 404).
 Route::controller(\App\Http\Controllers\Auth\WhatsAppAuthController::class)->group(function (): void {
     Route::post('/auth/whatsapp/request', 'requestOtp')->name('whatsapp.request');
     Route::get('/auth/whatsapp/verify', 'showVerifyForm')->name('whatsapp.verify.show');
@@ -127,6 +141,7 @@ Route::middleware('auth')->controller(\App\Http\Controllers\Web\AccountControlle
     Route::get('/bookings', 'bookings')->name('site.bookings');
     Route::get('/account/privacy', 'privacy')->name('site.account.privacy');
     Route::post('/account/privacy', 'updatePrivacy')->name('site.account.privacy.save');
+    Route::post('/account/demographics', 'saveDemographics')->name('site.account.demographics');
     Route::post('/profile/avatar', 'uploadAvatar')->name('site.profile.avatar');
     Route::post('/logout', 'logout')->name('site.logout');
 });

@@ -100,6 +100,13 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::HEAD_END,
                 fn (): string => view('filament.theme')->render(),
             )
+            // Haraan logo in the mobile topbar (the sidebar brand is hidden behind
+            // the hamburger below the lg breakpoint). The partial reveals itself
+            // only on mobile via CSS.
+            ->renderHook(
+                PanelsRenderHook::TOPBAR_START,
+                fn (): string => view('filament.topbar-brand')->render(),
+            )
             ->plugin(FilamentShieldPlugin::make());
     }
 }

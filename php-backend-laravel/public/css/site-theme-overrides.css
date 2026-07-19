@@ -97,30 +97,60 @@
 /* Location selector modal */
 .location-modal{display:none;position:fixed;inset:0;z-index:1200}
 .location-modal__backdrop{position:fixed;inset:0;background:rgba(8,12,20,0.55);backdrop-filter:blur(4px)}
-.location-modal__card{position:relative;max-width:980px;margin:5vh auto;padding:18px;border-radius:14px;background:#fff;box-shadow:0 18px 60px rgba(3,12,30,0.25);z-index:1201;display:grid;grid-template-columns:1fr 120px;gap:18px}
-.location-modal__header{display:flex;gap:12px;align-items:center}
-.location-search input{width:100%;padding:12px 14px;border:1px solid #eef3f7;border-radius:10px;font-size:15px}
-.use-current{display:inline-block;margin:12px 0;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e9eef2}
-.popular-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin:12px 0}
-.city-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px;border-radius:12px;background:#fbfcff;border:1px solid #f1f6fb;width:100%;height:120px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease}
-.city-card:hover{transform:translateY(-4px);box-shadow:0 8px 30px rgba(12,30,60,0.08)}
+.location-modal__card{position:relative;max-width:860px;margin:6vh auto;padding:24px 26px;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(3,12,30,0.28);z-index:1201}
+
+/* Title + corner close */
+.location-modal__titles{margin-bottom:16px;padding-right:40px}
+.location-modal__title{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em;color:#0f172a}
+.location-modal__sub{margin:3px 0 0;font-size:13px;color:#64748b}
+.location-modal__close{position:absolute;top:16px;right:16px;width:36px;height:36px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:#f1f5f9;color:#475569;cursor:pointer;transition:background .15s ease,color .15s ease}
+.location-modal__close:hover{background:#e2e8f0;color:#0f172a}
+
+/* Header: search + primary "use current location" */
+.location-modal__header{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+.location-search{position:relative;flex:1;display:flex;align-items:center}
+.location-search__icon{position:absolute;left:14px;color:#2563EB;pointer-events:none}
+.location-search input{width:100%;padding:12px 14px 12px 42px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;background:#fff;transition:border-color .15s ease,box-shadow .15s ease}
+.location-search input:focus{outline:0;border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+.btn--use-location{flex-shrink:0;display:inline-flex;align-items:center;gap:7px;padding:11px 16px;border-radius:12px;background:#2563EB;color:#fff;font-weight:700;font-size:14px;border:0;box-shadow:0 8px 18px rgba(37,99,235,.22);cursor:pointer;transition:background .15s ease,transform .15s ease}
+.btn--use-location:hover{background:#1d4ed8;transform:translateY(-1px)}
+.btn--use-location:disabled{opacity:.7;cursor:default;transform:none}
+
+/* Section headings */
+.loc-section{margin-top:6px}
+.loc-section+.loc-section{margin-top:18px}
+.loc-section__title{margin:0 0 12px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8}
+
+/* Popular cities — shorter cards so the list below gets real room */
+.popular-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.city-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 8px;border-radius:14px;background:#fbfcff;border:1px solid #eef2f7;width:100%;height:92px;justify-content:center;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
+.city-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(12,30,60,0.1);border-color:#dbe6ff}
 .city-card .icon{display:flex;align-items:center;justify-content:center}
-.city-card strong{display:block;font-size:14px}
-.all-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:340px;overflow:auto;padding-right:6px}
-.city-row{display:flex;gap:12px;align-items:center;padding:10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
-.city-row:hover{background:#fbfcff}
+.city-card strong{display:block;font-size:13px;text-align:center;line-height:1.2}
+
+/* All cities list + attached A-Z rail */
+.all-cities-wrap{display:flex;gap:6px;align-items:stretch}
+.all-list{flex:1;display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto;padding-right:6px}
+.city-row{display:flex;gap:12px;align-items:center;padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.city-row:hover{background:#f6f9ff}
 .city-row .thumb{display:flex;align-items:center;justify-content:center}
 .city-row>div:nth-child(2){flex:1;min-width:0}
-/* Colored monogram chips — replace the flat gray letter placeholders */
-.city-mono{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;line-height:1;letter-spacing:-.01em}
-.city-mono--sm{width:40px;height:40px;border-radius:10px;font-size:18px}
+
+/* Colored monogram chips — brand-blue family, cohesive with the header */
+.city-mono{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;line-height:1;letter-spacing:-.01em}
+.city-mono--sm{width:38px;height:38px;border-radius:10px;font-size:17px}
 /* Selected-city affordance */
 .city-card.is-selected{border-color:#2563EB;box-shadow:0 0 0 1px #2563EB inset}
 .city-row.is-selected{background:#eff4ff;border-color:#dbe6ff}
 .city-row__check{margin-left:auto;color:#2563EB;font-weight:800;font-size:15px}
-.alpha-index{display:flex;flex-direction:column;gap:6px;align-items:center;padding:6px;border-left:1px solid #f1f5f9}
-.alpha-index button{background:transparent;border:0;padding:6px 8px;border-radius:8px;color:#0d1720;cursor:pointer}
-.alpha-index button.active{background:#eef6ff}
+
+/* A-Z quick-jump rail — narrow, attached to the list, blue active state */
+.alpha-index{flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:2px;width:26px;border-left:1px solid #f1f5f9}
+.alpha-index button{background:transparent;border:0;padding:0;height:15px;width:22px;border-radius:5px;color:#94a3b8;font-size:10px;font-weight:700;cursor:pointer;transition:background .12s ease,color .12s ease}
+.alpha-index button:hover{color:#2563EB}
+.alpha-index button.active{background:#2563EB;color:#fff}
+.alpha-index button.disabled{color:#cbd5e1;pointer-events:none}
+
 .location-modal__card.show{animation:modalIn .18s ease}
 @keyframes modalIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 

@@ -101,13 +101,12 @@
 
             <a class="location-pill" href="#" id="locationToggle" data-location-toggle>
                 <span class="location-pill__pin">
-                    <lord-icon
-                        src="https://cdn.lordicon.com/rbsqvtgo.json"
-                        trigger="hover"
-                        stroke="bold"
-                        colors="primary:#000000,secondary:#e86830"
-                        style="width:18px;height:18px">
-                    </lord-icon>
+                    {{-- Inline SVG so the pin inherits the section accent (body.mode-*
+                         already tints this) instead of the lord-icon's hardcoded black. --}}
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
                 </span>
                 <span class="location-pill__label">
                     <strong>{{ $selectedCity ?? 'All India' }}</strong>
@@ -117,13 +116,13 @@
 
             <form action="/search" method="GET" class="topbar__search" role="search">
                 <span class="search-icon">
-                    <lord-icon
-                        src="https://cdn.lordicon.com/wjyqkiew.json"
-                        trigger="hover"
-                        stroke="bold"
-                        colors="primary:#000000,secondary:#e86830"
-                        style="width:20px;height:20px">
-                    </lord-icon>
+                    {{-- Inline SVG (was a lord-icon with hardcoded black) so it inherits
+                         the section accent — blue on Events, green on GameHub — and drops
+                         the cdn.lordicon.com dependency. --}}
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="7"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
                 </span>
                 <input
                     type="text"
@@ -178,7 +177,15 @@
                         @if(!empty($avatar))
                             <img src="{{ $avatar }}" alt="Profile" class="topbar__account" />
                         @else
-                            <img src="https://cdn-icons-png.flaticon.com/512/2815/2815428.png" alt="Profile" class="topbar__account" />
+                            {{-- No uploaded photo: inline user glyph that inherits the section
+                                 accent, instead of the black flaticon PNG. Real avatars above
+                                 stay as photos. --}}
+                            <span class="topbar__account topbar__account--placeholder" aria-label="Account">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="12" cy="8" r="4"></circle>
+                                    <path d="M4 21c0-4.5 3.6-7.5 8-7.5s8 3 8 7.5"></path>
+                                </svg>
+                            </span>
                         @endif
                     </a>
                 @else
@@ -259,7 +266,21 @@
     {{-- The floating login modal is hidden on the /login page itself — that page renders the
          same design inline, and two copies would collide on the shared element ids. --}}
     @unless(request()->routeIs('site.login'))
-    <div id="loginModal" class="auth-modal" aria-hidden="true">
+    <style>
+        .auth-modal .pw-form .auth-field { margin-bottom: 13px; text-align: left; }
+        .auth-modal .pw-form .auth-field label { display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; letter-spacing: .01em; }
+        .auth-modal .pw-form .auth-input { width: 100%; box-sizing: border-box; height: 46px; padding: 0 14px; font-size: 15px; color: #0F172A; background: #F8FAFC; border: 1.5px solid #E2E8F0; border-radius: 12px; transition: border-color .15s, box-shadow .15s, background .15s; }
+        .auth-modal .pw-form .auth-input::placeholder { color: #94A3B8; }
+        .auth-modal .pw-form .auth-input:focus { outline: none; background: #fff; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.14); }
+        .auth-modal .pw-form .pw-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -2px 0 14px; }
+        .auth-modal .pw-form .pw-meta a { font-size: 12.5px; font-weight: 600; color: #2563EB; text-decoration: none; }
+        .auth-modal .pw-form .pw-meta a:hover { text-decoration: underline; }
+        .auth-modal .pw-form .pw-switch { color: #0F172A; }
+        .auth-modal .pw-form .auth-row { display: flex; gap: 10px; }
+        .auth-modal .pw-form .auth-row .auth-field { flex: 1; margin-bottom: 13px; }
+        .auth-modal .pw-form select.auth-input { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 34px; }
+    </style>
+    <div id="loginModal" class="auth-modal" aria-hidden="true"@if($errors->any() || session('error')) data-open-on-error="1"@endif>
         <div class="auth-modal__backdrop" id="loginBackdrop"></div>
         <div class="auth-modal__card" role="dialog" aria-modal="true" aria-label="Login to Haraan">
             <button class="auth-modal__close" id="closeLogin" aria-label="Close login">
@@ -322,8 +343,11 @@
                     @if(session('error'))
                         <div class="auth-alert" role="alert">{{ session('error') }}</div>
                     @endif
+                    @if($errors->any())
+                        <div class="auth-alert" role="alert">{{ $errors->first() }}</div>
+                    @endif
 
-                    {{-- Google first: one tap for returning users, no OTP round-trip.
+                    {{-- Google first: one tap for returning users, no round-trip.
                          Hidden entirely when GOOGLE_CLIENT_ID isn't set, so a missing
                          config shows nothing rather than a button that always fails. --}}
                     @if(config('services.google.client_id'))
@@ -334,20 +358,75 @@
                         <div class="auth-divider"><span>or</span></div>
                     @endif
 
-                    <form class="phone-form" id="phoneLoginForm" method="POST" action="{{ route('whatsapp.request') }}">
+                    <form class="pw-form" id="mAuthForm" method="POST" action="{{ route('site.password.login') }}" data-mode="login">
                         @csrf
-                        <input type="hidden" name="phone" id="hiddenPhoneField" value="">
-                        <div class="phone-input-group">
-                            <div class="country-selector">
-                                <img src="https://flagcdn.com/w20/in.png" alt="India">
-                                <span>+91</span>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                            </div>
-                            <input type="tel" placeholder="Enter mobile number" id="phoneNumber" maxlength="10">
+                        <div class="auth-field auth-field--signup" id="mNameField" hidden>
+                            <label for="mAuthName">Name</label>
+                            <input type="text" name="name" id="mAuthName" class="auth-input" placeholder="Your name" autocomplete="name" maxlength="60" disabled>
                         </div>
-                        
-                        <button type="submit" class="btn btn--solid btn--full btn--large">Continue</button>
+                        <div class="auth-row auth-field--signup" hidden>
+                            <div class="auth-field">
+                                <label for="mAuthAge">Age</label>
+                                <input type="number" name="age" id="mAuthAge" class="auth-input" placeholder="Age" min="5" max="120" inputmode="numeric" disabled>
+                            </div>
+                            <div class="auth-field">
+                                <label for="mAuthGender">Gender</label>
+                                <select name="gender" id="mAuthGender" class="auth-input" disabled>
+                                    <option value="">Select</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="auth-field">
+                            <label for="mAuthEmail">Email</label>
+                            <input type="email" name="email" id="mAuthEmail" class="auth-input" placeholder="you@example.com" value="{{ old('email') }}" required autocomplete="email" autocapitalize="off" spellcheck="false">
+                        </div>
+                        <div class="auth-field">
+                            <label for="mAuthPassword">Password</label>
+                            <input type="password" name="password" id="mAuthPassword" class="auth-input" placeholder="Your password" required autocomplete="current-password" minlength="6">
+                        </div>
+                        <div class="pw-meta">
+                            <a href="#" id="mSignupToggle" class="pw-switch">Create new account</a>
+                            <a href="{{ route('site.password.request') }}" class="pw-forgot-link" id="mForgotLink">Forgot password?</a>
+                        </div>
+                        <button type="submit" class="btn btn--solid btn--full btn--large" id="mAuthSubmit">Continue</button>
                     </form>
+
+                    <script>
+                        (function () {
+                            var form = document.getElementById('mAuthForm');
+                            if (!form) return;
+                            var toggle = document.getElementById('mSignupToggle');
+                            var nameField = document.getElementById('mNameField');
+                            var nameInput = document.getElementById('mAuthName');
+                            var pwInput = document.getElementById('mAuthPassword');
+                            var submit = document.getElementById('mAuthSubmit');
+                            var forgot = document.getElementById('mForgotLink');
+                            var heading = form.closest('.auth-modal__body')?.querySelector('h3');
+
+                            function setMode(signup) {
+                                form.dataset.mode = signup ? 'signup' : 'login';
+                                // Show/hide every sign-up-only field and toggle its inputs
+                                // (disabled inputs are NOT submitted, so login mode stays clean).
+                                form.querySelectorAll('.auth-field--signup').forEach(function (el) { el.hidden = !signup; });
+                                form.querySelectorAll('.auth-field--signup input, .auth-field--signup select').forEach(function (inp) { inp.disabled = !signup; });
+                                nameInput.required = signup;       // only name is required among sign-up fields
+                                submit.textContent = signup ? 'Create account' : 'Continue';
+                                toggle.textContent = signup ? 'Have an account? Log in' : 'Create new account';
+                                if (forgot) forgot.hidden = signup;
+                                if (heading) heading.textContent = signup ? 'Create your account' : 'Log in or sign up';
+                                pwInput.setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+                                if (signup) nameInput.focus();
+                            }
+
+                            toggle.addEventListener('click', function (e) {
+                                e.preventDefault();
+                                setMode(form.dataset.mode !== 'signup');
+                            });
+                        })();
+                    </script>
 
                     <div class="auth-modal__footer">
                         <p>By continuing, you agree to our <br> <a href="#">Terms of Service</a> &nbsp; <a href="#">Privacy Policy</a></p>
@@ -358,33 +437,108 @@
     </div>
     @endunless
 
+    {{-- One-time "tell us about you" prompt: age + gender for logged-in users who
+         are missing both. Google can't supply these, so we ask once — the data
+         feeds the per-event Audience analytics. Only fills blanks; never overwrites. --}}
+    @auth
+        @if(blank(auth()->user()->age) && blank(auth()->user()->gender) && ! session('demographics_prompt_dismissed'))
+        <style>
+            .demo-prompt { display: none; position: fixed; inset: 0; z-index: 1200; place-items: center; padding: 18px; }
+            .demo-prompt__backdrop { position: absolute; inset: 0; background: rgba(15,23,42,.55); backdrop-filter: blur(2px); }
+            .demo-prompt__card { position: relative; width: 100%; max-width: 360px; background: #fff; border-radius: 20px; padding: 24px 22px; box-shadow: 0 24px 60px rgba(15,23,42,.28); }
+            .demo-prompt__card h3 { margin: 0 0 6px; font-size: 19px; font-weight: 800; color: #0F172A; letter-spacing: -.02em; }
+            .demo-prompt__card p { margin: 0 0 16px; font-size: 13px; color: #64748B; line-height: 1.5; }
+            .demo-prompt__close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 0; background: #F1F5F9; border-radius: 50%; color: #64748B; cursor: pointer; font-size: 16px; line-height: 1; }
+            .demo-row { display: flex; gap: 10px; }
+            .demo-row .demo-field { flex: 1; margin-bottom: 14px; text-align: left; }
+            .demo-field label { display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; }
+            .demo-field input, .demo-field select { width: 100%; box-sizing: border-box; height: 46px; padding: 0 14px; font-size: 15px; color: #0F172A; background: #F8FAFC; border: 1.5px solid #E2E8F0; border-radius: 12px; }
+            .demo-field select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 34px; }
+            .demo-field input:focus, .demo-field select:focus { outline: none; background: #fff; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.14); }
+            .demo-skip { display: block; width: 100%; margin: 10px 0 0; padding: 6px; border: 0; background: none; color: #94A3B8; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+            .demo-skip:hover { color: #64748B; text-decoration: underline; }
+        </style>
+        <div id="demoPrompt" class="demo-prompt" aria-hidden="true">
+            <div class="demo-prompt__backdrop" id="demoBackdrop"></div>
+            <div class="demo-prompt__card" role="dialog" aria-modal="true" aria-label="Tell us a bit about you">
+                <button type="button" class="demo-prompt__close" id="demoClose" aria-label="Close">&times;</button>
+                <h3>Tell us a bit about you</h3>
+                <p>It helps organisers plan better events for you. Takes 5 seconds.</p>
+                <form method="POST" action="{{ route('site.account.demographics') }}">
+                    @csrf
+                    <div class="demo-row">
+                        <div class="demo-field">
+                            <label for="dpAge">Age</label>
+                            <input type="number" name="age" id="dpAge" min="5" max="120" inputmode="numeric" placeholder="Age">
+                        </div>
+                        <div class="demo-field">
+                            <label for="dpGender">Gender</label>
+                            <select name="gender" id="dpGender">
+                                <option value="">Select</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn--solid btn--full btn--large">Save</button>
+                    <button type="submit" name="skip" value="1" class="demo-skip">Skip for now</button>
+                </form>
+            </div>
+        </div>
+        <script>
+            (function () {
+                var p = document.getElementById('demoPrompt');
+                if (!p) return;
+                // Auto-open once per browser session; navigations within the session won't nag.
+                if (!sessionStorage.getItem('demoPromptShown')) {
+                    sessionStorage.setItem('demoPromptShown', '1');
+                    setTimeout(function () { p.setAttribute('aria-hidden', 'false'); p.style.display = 'grid'; }, 700);
+                }
+                function hide() { p.setAttribute('aria-hidden', 'true'); p.style.display = 'none'; }
+                document.getElementById('demoClose')?.addEventListener('click', hide);
+                document.getElementById('demoBackdrop')?.addEventListener('click', hide);
+            })();
+        </script>
+        @endif
+    @endauth
+
     <!-- Location selector modal (improved) -->
     <div id="locationModal" class="location-modal" aria-hidden="true">
         <div class="location-modal__backdrop" id="locationBackdrop"></div>
-        <div class="location-modal__card" role="dialog" aria-modal="true" aria-label="Select Location">
-            <div>
-                <div class="location-modal__header">
-                    <label class="location-search" style="flex:1">
-                        <input type="search" id="locationSearch" placeholder="Search cities">
-                    </label>
-                    <div style="display:flex;gap:8px;align-items:center;margin-left:8px">
-                        <button id="useCurrent" class="btn btn--ghost">Use Current Location</button>
-                        <button id="closeLocation" class="btn btn--ghost">Close</button>
-                    </div>
-                </div>
+        <div class="location-modal__card" role="dialog" aria-modal="true" aria-labelledby="locationTitle">
+            <button id="closeLocation" class="location-modal__close" aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
 
-                <section style="margin-top:12px">
-                    <h4 style="margin:8px 0">Popular Cities</h4>
-                    <div id="popularCities" class="popular-grid" role="list"></div>
-                </section>
-
-                <section style="margin-top:8px">
-                    <h4 style="margin:8px 0">All Cities</h4>
-                    <div id="allCities" class="all-list" role="list"></div>
-                </section>
+            <div class="location-modal__titles">
+                <h3 id="locationTitle" class="location-modal__title">Choose your city</h3>
+                <p class="location-modal__sub" id="locationCurrent">Set where you want to play &amp; attend</p>
             </div>
 
-            <aside class="alpha-index" aria-hidden="false" id="alphaIndex" title="Jump to letter"></aside>
+            <div class="location-modal__header">
+                <label class="location-search">
+                    <svg class="location-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="search" id="locationSearch" placeholder="Search cities">
+                </label>
+                <button id="useCurrent" class="btn btn--use-location">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                    Use current location
+                </button>
+            </div>
+
+            <section class="loc-section">
+                <h4 class="loc-section__title">Popular Cities</h4>
+                <div id="popularCities" class="popular-grid" role="list"></div>
+            </section>
+
+            <section class="loc-section">
+                <h4 class="loc-section__title">All Cities</h4>
+                <div class="all-cities-wrap">
+                    <div id="allCities" class="all-list" role="list"></div>
+                    <aside class="alpha-index" aria-hidden="false" id="alphaIndex" title="Jump to letter"></aside>
+                </div>
+            </section>
         </div>
     </div>
 

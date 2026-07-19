@@ -46,15 +46,25 @@ final class EventService
      */
     public function getBannerEvents(): Collection
     {
+        // Real published events only — the banner carousel never invents demo
+        // events. It also requires a real poster: an image-less event (e.g. a bare
+        // test listing) would otherwise headline the hero with the /events.png brand
+        // placeholder, which reads as broken. Filtered in PHP so the JSON images
+        // column is inspected the same way the map below reads it. When nothing
+        // qualifies this returns empty and the view hides the whole carousel.
         $events = Event::query()
             ->where('status', 'published')
             ->orderByDesc('date')
-            ->take(3)
-            ->get();
+            ->get()
+            ->filter(function (object $event): bool {
+                $images = is_string($event->images)
+                    ? json_decode($event->images, true)
+                    : (array) ($event->images ?? []);
 
-        if ($events->isEmpty()) {
-            $events = $this->fallbackEvents()->take(3);
-        }
+                return ! empty($images);
+            })
+            ->take(3)
+            ->values();
 
         return $events->map(function (object $event): array {
             $date = $event->date;
@@ -69,11 +79,11 @@ final class EventService
                 }
             }
 
-            $images = [];
-            if (isset($event->images)) {
-                $images = is_string($event->images) ? json_decode($event->images, true) : (array) $event->images;
-            }
-            $poster = !empty($images) ? $images[0] : '/events.png';
+            // Normalized, browser-loadable URL: resolves an uploaded storage path to a
+            // /storage/… URL and leaves a pasted external URL untouched (via MediaUrl,
+            // the same resolver the event cards use). The raw images[0] was a bare
+            // "events/xxx.png" that the browser resolved against /events → 404.
+            $poster = $event->heroImageUrl() ?? '/events.png';
 
             return [
                 'id'     => $event->id,

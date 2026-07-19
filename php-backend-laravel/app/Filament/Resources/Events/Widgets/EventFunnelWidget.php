@@ -63,18 +63,127 @@ class EventFunnelWidget extends Widget
 
         $conversion = ($viewed > 0 && ! $ramping) ? round($paid / $viewed * 100, 2) : null;
 
-        return ['stages' => $stages, 'conversion' => $conversion, 'ramping' => $ramping];
+        return [
+            'stages' => $stages,
+            'conversion' => $conversion,
+            'ramping' => $ramping,
+            'svg' => $this->buildSvg($stages),
+            'rail' => $this->buildRail($stages),
+        ];
     }
 
     /**
-     * @return array{label:string,count:int,pctTop:int,drop:?int,note:string}
+     * Enrich each stage for the breakdown rail: an icon, its accent colours
+     * (blue deepening down, green for the final "goal" stage), a progress width,
+     * and step-retention (the share of the previous step that continued — the
+     * positive flip-side of drop-off).
+     *
+     * @param  array<int,array{label:string,count:int,pctTop:int,drop:?int,lost:int,note:string}>  $stages
+     * @return array<int,array<string,mixed>>
+     */
+    private function buildRail(array $stages): array
+    {
+        $n = count($stages);
+
+        // Blue ramp for the funnel body; the last stage is the green payoff.
+        $blues = [
+            ['bar' => '#9CC0EE', 'icon' => '#3b82f6'],
+            ['bar' => '#4B8FE0', 'icon' => '#2563eb'],
+            ['bar' => '#2F7FD0', 'icon' => '#1d4ed8'],
+        ];
+        $icons = ['heroicon-m-eye', 'heroicon-m-shopping-cart', 'heroicon-m-tag'];
+
+        $rail = [];
+        foreach ($stages as $i => $s) {
+            $isLast = $i === $n - 1;
+            $tone = $blues[min($i, count($blues) - 1)];
+
+            $rail[] = [
+                'label'    => $s['label'],
+                'note'     => $s['note'],
+                'count'    => (int) $s['count'],
+                'pctTop'   => (int) $s['pctTop'],
+                'drop'     => $s['drop'],
+                'lost'     => (int) $s['lost'],
+                'retained' => is_null($s['drop']) ? null : max(0, 100 - (int) $s['drop']),
+                'isLast'   => $isLast,
+                'icon'     => $isLast ? 'heroicon-m-check-circle' : ($icons[$i] ?? 'heroicon-m-chevron-right'),
+                'barHex'   => $isLast ? '#16a34a' : $tone['bar'],
+                'iconHex'  => $isLast ? '#16a34a' : $tone['icon'],
+                'iconBg'   => $isLast ? 'rgb(22 163 74 / .12)' : 'rgb(37 99 235 / .11)',
+            ];
+        }
+
+        return $rail;
+    }
+
+    /**
+     * Pre-compute the continuous-funnel SVG geometry so the blade stays math-free.
+     * Each stage becomes a trapezoid tapering to the next stage's width (the last
+     * stage is a straight cap), giving one narrowing silhouette. Returns the
+     * viewBox size plus per-segment polygon points and centred count labels.
+     *
+     * @param  array<int,array{label:string,count:int,pctTop:int,drop:?int,lost:int,note:string}>  $stages
+     * @return array{width:int,height:int,segments:array<int,array{points:string,count:int,tx:int,ty:int,fs:int,dark:bool}>}
+     */
+    private function buildSvg(array $stages): array
+    {
+        $width   = 340;
+        $cx      = 170;   // horizontal centre
+        $maxHalf = 156;   // half-width of a 100% stage (spans x14..326)
+        $minHalf = 20;    // floor so a tiny stage stays visible
+        $segH    = 104;   // height of a tapering segment
+        $capH    = 56;    // height of the final (flat) cap
+        $gap     = 8;     // visual gap between segments
+
+        $n = count($stages);
+
+        $half = static fn (int $pct): int => (int) max($minHalf, round($pct / 100 * $maxHalf));
+
+        $segments = [];
+        $y = 0;
+
+        foreach ($stages as $i => $s) {
+            $isLast = $i === $n - 1;
+            $topHalf = $half((int) $s['pctTop']);
+            $h = $isLast ? $capH : $segH;
+            $botHalf = $isLast ? $topHalf : $half((int) $stages[$i + 1]['pctTop']);
+
+            $y1 = $y + $h;
+            $points = implode(' ', [
+                ($cx - $topHalf) . ',' . $y,
+                ($cx + $topHalf) . ',' . $y,
+                ($cx + $botHalf) . ',' . $y1,
+                ($cx - $botHalf) . ',' . $y1,
+            ]);
+
+            $segments[] = [
+                'points' => $points,
+                'count'  => (int) $s['count'],
+                'tx'     => $cx,
+                'ty'     => (int) round($y + $h * 0.5 + 9),
+                'fs'     => $i === 0 ? 30 : ($isLast ? 20 : 26),
+                'dark'   => $i === 0, // light top band → dark ink; deeper bands → white
+            ];
+
+            $y = $y1 + $gap;
+        }
+
+        return ['width' => $width, 'height' => max($y - $gap, 1), 'segments' => $segments];
+    }
+
+    /**
+     * @return array{label:string,count:int,pctTop:int,drop:?int,lost:int,note:string}
      */
     private function stage(string $label, int $count, int $top, ?int $prev, string $note): array
     {
-        // Drop-off vs the previous stage (null for the first stage).
+        // Drop-off vs the previous stage (null for the first stage). `lost` is the
+        // raw headcount that fell away — what a host actually acts on.
         $drop = null;
+        $lost = 0;
         if ($prev !== null && $prev > 0) {
-            $drop = (int) round(max($prev - $count, 0) / $prev * 100);
+            $lost = max($prev - $count, 0);
+            $drop = (int) round($lost / $prev * 100);
         }
 
         return [
@@ -82,6 +191,7 @@ class EventFunnelWidget extends Widget
             'count' => $count,
             'pctTop' => $top > 0 ? (int) round($count / $top * 100) : 0,
             'drop' => $drop,
+            'lost' => $lost,
             'note' => $note,
         ];
     }

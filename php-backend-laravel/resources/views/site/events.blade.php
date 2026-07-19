@@ -20,7 +20,7 @@
     ];
 @endphp
 
-<link rel="stylesheet" href="/css/banner.css">
+<link rel="stylesheet" href="{{ asset('css/banner.css') }}?v={{ @filemtime(public_path('css/banner.css')) ?: '1' }}">
 
 {{-- ============================================================= --}}
 {{-- MOBILE APP-STYLE EVENTS HOME (mirrors the Android app; ≤720px) --}}
@@ -219,15 +219,22 @@
 </div>
 
 <section class="page-shell events-page theme-events">
-    <!-- Premium Banner Carousel -->
+    <!-- Premium Banner Carousel — real events only; hidden when there are none -->
+    @if(count($bannerEvents))
     <section class="banner-carousel" id="eventBanner">
         <div class="banner-track" id="bannerTrack">
             @foreach($bannerEvents as $index => $event)
                 <div class="banner-item">
+                    {{-- "Haraan special" lockup (the mobile .mbrandmark). Lives inside
+                         each slide's top-left corner, so it moves with the banner. --}}
+                    <div class="banner-brand" aria-hidden="true">
+                        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                        <span>special</span>
+                    </div>
                     <div class="banner-item__bg">
                         <img src="{{ $event['poster'] }}" alt="">
                     </div>
-                    
+
                     <div class="banner-item__left">
                         <p class="date">{{ $event['meta'] }}</p>
                         <h2>{{ $event['title'] }}</h2>
@@ -257,6 +264,7 @@
             @endforeach
         </div>
     </section>
+    @endif
 
     <section class="events-section events-section--filters">
         <div class="event-explore-grid event-explore-grid--filters" aria-label="Event categories">
@@ -284,12 +292,12 @@
         <div class="section-shell__header">
             <div>
                 <p class="eyebrow eyebrow--soft">Handpicked experiences</p>
-                <h2>Trending events in Mumbai</h2>
+                <h2>Popular in {{ $selectedCity ?? 'India' }}</h2>
             </div>
         </div>
 
         <div class="events-grid-list">
-            @foreach ($listedEvents as $event)
+            @forelse ($listedEvents as $event)
                 <a class="event-list-card" href="/events/{{ $event->id }}">
                     <div class="event-list-card__media">
                         @php
@@ -320,7 +328,12 @@
                         <p class="event-list-card__price">₹{{ number_format((float) $event->price) }} onwards</p>
                     </div>
                 </a>
-            @endforeach
+            @empty
+                <div class="events-empty">
+                    <h3>No events yet</h3>
+                    <p>There are no published events right now. Check back soon.</p>
+                </div>
+            @endforelse
         </div>
     </section>
     <script>

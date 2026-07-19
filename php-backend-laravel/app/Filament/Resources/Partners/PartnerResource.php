@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Support\ContactPrefill;
 use BackedEnum;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
@@ -52,9 +53,26 @@ class PartnerResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
+            FileUpload::make('avatar')
+                ->label('Profile picture')
+                ->avatar()
+                ->image()
+                ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                ->maxSize(5120)
+                ->imageEditor()
+                ->disk('public')
+                ->directory('avatars/partners')
+                ->helperText('Optional. Square photo works best.')
+                ->columnSpanFull(),
             TextInput::make('name')->required(),
             TextInput::make('email')->email()->required()->unique(ignoreRecord: true),
             TextInput::make('phone'),
+            TextInput::make('password')
+                ->password()
+                ->revealable()
+                ->required(fn (string $operation): bool => $operation === 'create')
+                ->dehydrated(fn (?string $state): bool => filled($state))
+                ->helperText('Password for the partner to sign in. When editing, leave blank to keep the current one.'),
             Select::make('partner_type')
                 ->options(['venue' => 'Venue owner', 'event' => 'Event organiser'])
                 ->native(false),

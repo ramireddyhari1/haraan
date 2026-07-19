@@ -36,6 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
         locationModal.style.display = 'block';
         locationCard?.classList.add('show');
         locationSearch?.focus();
+        // Now that the list has layout, reset to the top and light up the
+        // matching A-Z letter (syncing before this point sees zero offsets).
+        if (allList) { allList.scrollTop = 0; syncActiveLetter(); }
     }
 
     /** Hide the location-selector modal. */
@@ -114,10 +117,23 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.className   = letters[letter] ? '' : 'disabled';
 
             if (letters[letter]) {
-                btn.addEventListener('click', () => filterByLetter(letter));
+                btn.addEventListener('click', () => scrollToLetter(letter));
             }
             alphaIndex.appendChild(btn);
         });
+
+        // Keep the active letter in sync as the list scrolls.
+        allList.onscroll = syncActiveLetter;
+        syncActiveLetter();
+
+        // Current-city context line under the title.
+        const currentLine = document.getElementById('locationCurrent');
+        if (currentLine) {
+            const sel = selectedCityName();
+            currentLine.textContent = sel
+                ? 'Currently showing: ' + sel
+                : 'Set where you want to play & attend';
+        }
 
         // --- Wire up the search input ---
         if (locationSearch) {
@@ -145,8 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function cityMonogram(city, cls) {
         let h = 0;
         for (const ch of (city.name || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+        // Constrain to the brand blue/indigo family (198–238°) so the modal reads
+        // as one product with the now-blue header, not a bag of random pastels.
+        const hue = 198 + (h % 40);
         const letter = (city.name || '?').charAt(0).toUpperCase();
-        return `<span class="${cls}" style="background:hsl(${h} 68% 93%);color:hsl(${h} 55% 38%)">${letter}</span>`;
+        return `<span class="${cls}" style="background:hsl(${hue} 70% 94%);color:hsl(${hue} 62% 42%)">${letter}</span>`;
     }
 
     /** Build a card element for the "Popular Cities" grid. */
@@ -166,6 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.className = 'city-row' + (city.name === selectedCityName() ? ' is-selected' : '');
         div.setAttribute('role', 'listitem');
+        div.dataset.letter = (city.name || '?').charAt(0).toUpperCase();
         div.innerHTML = `
             <div class="thumb">${cityMonogram(city, 'city-mono city-mono--sm')}</div>
             <div><strong>${city.name}</strong></div>
@@ -192,11 +212,32 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.reload();
     }
 
-    /** Filter the "All Cities" list to show only a given starting letter. */
-    function filterByLetter(letter) {
-        Array.from(allList.children).forEach(row => {
-            const name = row.querySelector('strong').textContent;
-            row.style.display = name.charAt(0).toUpperCase() === letter ? '' : 'none';
+    /** Scroll the "All Cities" list to the first city under a given letter. */
+    function scrollToLetter(letter) {
+        const target = Array.from(allList.children)
+            .find(row => row.dataset.letter === letter);
+        if (target) {
+            allList.scrollTop = target.offsetTop - allList.offsetTop;
+            // Programmatic scrollTop doesn't reliably fire 'scroll', so refresh
+            // the active-letter highlight directly.
+            syncActiveLetter();
+        }
+    }
+
+    /** Highlight the A-Z button matching the topmost visible row as you scroll. */
+    function syncActiveLetter() {
+        if (!allList || !alphaIndex) return;
+        // No layout yet (modal still hidden) → skip; every offset is 0 and the
+        // loop would otherwise fall through to the last letter.
+        if (!allList.offsetParent && allList.offsetHeight === 0) return;
+        const top = allList.scrollTop;
+        let current = null;
+        for (const row of allList.children) {
+            if (row.offsetTop - allList.offsetTop <= top + 4) current = row.dataset.letter;
+            else break;
+        }
+        Array.from(alphaIndex.children).forEach(btn => {
+            btn.classList.toggle('active', btn.textContent === current);
         });
     }
 
@@ -545,6 +586,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     loginBackdrop?.addEventListener('click', closeLoginModal);
     closeLoginBtn?.addEventListener('click', closeLoginModal);
+    // Re-open the modal after a failed email/password sign-in so the error shows
+    // (the POST redirects back to whatever page the modal lives on).
+    if (loginModal?.dataset.openOnError) { openLoginModal(); }
 
     /* ------------------------------------------------------------------ */
     /*  2a0. Page header back button                                       */

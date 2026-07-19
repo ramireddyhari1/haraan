@@ -903,6 +903,27 @@ final class PublicWebController extends Controller
         return $this->railFeed('trending', $limit, $category);
     }
 
+    /**
+     * Local-first ordering shared by every event feed: the selected city sorts
+     * ahead of all others, without excluding anyone. Applied at the DB level (a
+     * CASE in the ORDER BY) so it composes with take($limit) — the selected city
+     * wins even when its events aren't the most recent. A caller adds its own
+     * secondary order (date / created_at) as the within-group tiebreak.
+     *
+     * lower() both sides because the city column is free-text and mixed-case.
+     * No city selected ("All India") → a no-op, leaving the caller's order.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    private function orderLocalFirst($query, ?string $city)
+    {
+        return $query->when(
+            $city !== null && $city !== '',
+            fn ($q) => $q->orderByRaw('CASE WHEN lower(city) = lower(?) THEN 0 ELSE 1 END', [$city])
+        );
+    }
+
     /** The category the viewer picked, or null for "All" (= no filter). */
     private function selectedCategory(): ?string
     {
@@ -1026,20 +1047,19 @@ final class PublicWebController extends Controller
     {
         $city = CityResolver::selected();
 
-        $events = Event::query()
-            ->where('status', 'published')
-            ->when($category, fn ($q) => $q->where('category', $category))
+        // Local-first, but never a filter: the selected city floats to the top and
+        // every other city follows. Ordered in the DB so a city whose events aren't
+        // among the newest still surfaces first (a post-fetch sort of take($limit)
+        // could never see them). Newest-first is the tiebreak inside each group.
+        $events = $this->orderLocalFirst(
+            Event::query()
+                ->where('status', 'published')
+                ->when($category, fn ($q) => $q->where('category', $category)),
+            $city
+        )
             ->orderByDesc('created_at')
             ->take($limit)
             ->get();
-
-        // Local-first. PHP 8's sort is stable, so the newest-first order survives
-        // inside each group — same as the app's sortedByDescending.
-        if ($city !== null) {
-            $events = $events
-                ->sortByDesc(fn (Event $e): int => strcasecmp((string) $e->city, $city) === 0 ? 1 : 0)
-                ->values();
-        }
 
         // A poster-less event renders the bv-white placeholder — a logo on black. Both
         // rails are poster-led, so both need real artwork. The event still shows in
@@ -1059,73 +1079,22 @@ final class PublicWebController extends Controller
     {
         $city = CityResolver::selected();
 
-        $events = Event::query()
-            ->where('status', 'published')
-            ->when($city, fn ($q) => $q->where('city', $city))
-            ->when($category, fn ($q) => $q->where('category', $category))
+        // Local-first, not city-filtered: all published events show, the selected
+        // city floats to the top (ordered in the DB so it wins even when its events
+        // aren't the newest), then everything else by date.
+        $events = $this->orderLocalFirst(
+            Event::query()
+                ->where('status', 'published')
+                ->when($category, fn ($q) => $q->where('category', $category)),
+            $city
+        )
             ->orderBy('date', 'desc')
             ->take($limit)
             ->get();
 
-        if ($events->isNotEmpty()) {
-            return $events;
-        }
-
-        // A filtered-to-empty result is a real answer ("no Comedy in Hyderabad"), not
-        // a reason to fall through to the sample data below.
-        if ($category !== null) {
-            return collect();
-        }
-
-        // When a city is selected but has no events, show its empty state
-        // rather than sample data from other cities.
-        if ($city !== null) {
-            return collect();
-        }
-
-        $now = now();
-
-        return collect([
-            (object) [
-                'id' => 1,
-                'title' => 'Zomato Feeding India ft. Dua Lipa',
-                'category' => 'Music',
-                'venue' => 'MMRDA Grounds, BKC',
-                'date' => $now->copy()->addDays(10),
-                'price' => 4500,
-                'images' => ['/events.png'],
-                'status' => 'published',
-            ],
-            (object) [
-                'id' => 2,
-                'title' => 'Weekend Game Slots',
-                'category' => 'Sports',
-                'venue' => 'Turf Arena',
-                'date' => $now->copy()->addDays(3),
-                'price' => 300,
-                'images' => ['/events.png'],
-                'status' => 'published',
-            ],
-            (object) [
-                'id' => 3,
-                'title' => 'Stand-up Open Mic Night',
-                'category' => 'Comedy',
-                'venue' => 'South Bombay Studio',
-                'date' => $now->copy()->addDays(6),
-                'price' => 799,
-                'images' => ['/events.png'],
-                'status' => 'published',
-            ],
-            (object) [
-                'id' => 4,
-                'title' => 'Creator Workshop Series',
-                'category' => 'Workshops',
-                'venue' => 'Taj Lands End',
-                'date' => $now->copy()->addDays(12),
-                'price' => 1200,
-                'images' => ['/events.png'],
-                'status' => 'published',
-            ],
-        ])->take($limit);
+        // Only real, admin-created events ever reach the public feed — no invented demo
+        // cards. When there are none (fresh install, or everything is still a draft),
+        // this returns empty and the view shows its "no events yet" state.
+        return $events;
     }
 }

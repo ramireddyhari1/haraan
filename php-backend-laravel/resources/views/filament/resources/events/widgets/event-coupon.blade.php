@@ -1,7 +1,7 @@
 @php($rows = $this->getCoupons())
 @php($totals = $this->getTotals())
 <x-filament-widgets::widget>
-    <x-filament::section>
+    <x-filament::section collapsible>
         <x-slot name="heading">Coupon performance</x-slot>
         <x-slot name="description">Which promo codes drove paid bookings for this event</x-slot>
 

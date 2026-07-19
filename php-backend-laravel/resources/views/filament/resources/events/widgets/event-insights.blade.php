@@ -1,6 +1,11 @@
-@php($insights = $this->getInsights())
+{{-- Use the block php form below, not the inline one. An inline php directive
+     whose expression calls a method mis-parses in this Blade version and silently
+     breaks the rest of the view's conditional compilation. --}}
+@php
+    $insights = $this->getInsights();
+@endphp
 <x-filament-widgets::widget>
-    <x-filament::section>
+    <x-filament::section collapsible>
         <x-slot name="heading">
             <span style="display:inline-flex;align-items:center;gap:7px;">
                 <x-filament::icon icon="heroicon-m-sparkles" style="width:18px;height:18px;color:#7c3aed;" />

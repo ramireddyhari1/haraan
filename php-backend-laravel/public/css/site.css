@@ -104,6 +104,17 @@ a {
 	height: 34px;
 	width: auto;
 	object-fit: contain;
+	transition: filter 160ms ease;
+}
+
+/* Tint the header wordmark to the active section's brand colour (the PNG ships
+   navy). Filter chains approximate EventsBlue / GameHubDeep; neutral pages keep
+   the original navy. */
+.topbar--events .brand__img {
+	filter: brightness(0) saturate(100%) invert(29%) sepia(94%) saturate(1728%) hue-rotate(213deg) brightness(97%) contrast(94%);
+}
+.topbar--gamehub .brand__img {
+	filter: brightness(0) saturate(100%) invert(20%) sepia(84%) saturate(560%) hue-rotate(93deg) brightness(94%) contrast(92%);
 }
 
 .brand__text {
@@ -276,23 +287,106 @@ a {
 
 	.topnav {
 		display: flex !important;
-		position: absolute !important;
-		left: 50% !important;
-		transform: translateX(-50%) !important;
+		position: static !important;
+		left: auto !important;
+		transform: none !important;
+	}
+}
+
+/* --- Desktop header rebalance (≥1081px) ---------------------------------
+   The old grid (auto 1fr auto auto) parked the location pill in the flexible
+   column and pushed search + actions to the far right, leaving ~700px of dead
+   space center-left with the nav absolutely floating in it. Switch to a flex
+   row where SEARCH owns the flexible middle, and everything else groups to the
+   two ends: logo · pill · [ search ] · nav · actions. Scoped above the mobile
+   lockup breakpoint (≤1080px) so the phone/tablet layout is untouched. */
+@media (min-width: 1081px) {
+	.topbar__inner {
+		display: flex;
+		align-items: center;
+		gap: 18px;
+	}
+
+	.brand,
+	.location-pill,
+	.topnav,
+	.topbar__actions {
+		flex-shrink: 0;
+	}
+
+	.location-pill {
+		justify-self: auto; /* no longer in a grid column */
+	}
+
+	/* Search grows to fill the middle instead of hugging the right edge, but
+	   stays a search box — not an empty hero trough. Capped so the nav + actions
+	   keep real estate on the right. */
+	.topbar__search {
+		flex: 1 1 auto;
+		max-width: 460px;
+		min-width: 240px;
+	}
+
+	/* Actions pinned to the far right; nav sits just before them, in flow. A
+	   hairline divider separates "navigate" (nav) from "my account" (icons). */
+	.topbar__actions {
+		margin-left: 0;
+		padding-left: 16px;
+		border-left: 1px solid rgba(18, 22, 32, 0.1);
+	}
+
+	/* Lighten the location pill: it's a secondary control and shouldn't rival
+	   the logo. Smaller pin, single line — the "India" subtitle under an Indian
+	   city was redundant, so it's dropped up here. */
+	.topbar .location-pill {
+		gap: 8px;
+		padding: 6px 12px 6px 6px;
+	}
+	.topbar .location-pill__pin {
+		width: 24px;
+		height: 24px;
+	}
+	.topbar .location-pill__pin lord-icon {
+		width: 15px !important;
+		height: 15px !important;
+	}
+	.topbar .location-pill small {
+		display: none;
 	}
 }
 
 .topnav__link {
+	position: relative;
 	color: #3d4553;
 	font-weight: 700;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
-	font-size: 11px; /* slightly smaller nav labels */
+	font-size: 13px; /* reads as primary nav, not fine print */
+	padding: 4px 2px;
 }
 
 .topnav__link.is-active,
 .topnav__link:hover {
 	color: #111827;
+}
+
+/* Active/hovered tab gets a real indicator, not just a colour shift. The
+   section accent rules (.topbar--events / --gamehub) recolour this underline. */
+.topnav__link.is-active::after,
+.topnav__link:hover::after {
+	content: "";
+	position: absolute;
+	left: 2px;
+	right: 2px;
+	bottom: -2px;
+	height: 2px;
+	border-radius: 2px;
+	background: currentColor;
+}
+
+/* Hover on a non-active tab: hint the underline without full weight. */
+.topnav__link:hover:not(.is-active)::after {
+	opacity: 0.45;
 }
 
 .topbar__actions {
@@ -581,6 +675,274 @@ main.container {
 
 .event-card__details { display:flex; align-items:center; justify-content:flex-start; gap:10px; color:var(--muted); font-size:13px; }
 .event-card__date { font-weight:600; }
+
+/* ============================================================
+   Desktop home (>720px) — content-first, in the app's design
+   language: Slate + EventsBlue, a dark-poster featured event,
+   category tiles, and the live event grid. Replaces the old
+   marketing hero (.hero / .quick-grid / .feature-list, now unused).
+   ============================================================ */
+.dhero {
+	display: grid;
+	grid-template-columns: 1.05fr 0.95fr;
+	gap: 32px;
+	align-items: stretch;
+	margin: 20px 0 8px;
+}
+.dhero__copy {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	padding: 8px 4px;
+}
+.dhero__eyebrow {
+	font-size: 12px;
+	font-weight: 800;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--events);
+}
+.dhero__title {
+	margin: 14px 0 0;
+	font-size: clamp(38px, 4.2vw, 58px);
+	line-height: 1.02;
+	letter-spacing: -0.03em;
+	color: #0F172A;
+	max-width: 14ch;
+}
+.dhero__sub {
+	margin: 18px 0 0;
+	max-width: 46ch;
+	font-size: 17px;
+	line-height: 1.6;
+	color: var(--muted);
+}
+.dhero__actions {
+	display: flex;
+	gap: 12px;
+	margin-top: 28px;
+	flex-wrap: wrap;
+}
+.dbtn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 13px 24px;
+	border-radius: 999px;
+	font-size: 15px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+.dbtn:hover { transform: translateY(-2px); }
+.dbtn--events {
+	background: var(--events);
+	color: #fff;
+	box-shadow: 0 12px 26px rgba(37, 99, 235, 0.28);
+}
+.dbtn--gamehub {
+	background: #fff;
+	color: #16a34a;
+	border: 1.5px solid #dcfce7;
+	box-shadow: 0 8px 20px rgba(22, 163, 74, 0.10);
+}
+.dbtn--gamehub:hover { border-color: #16a34a; }
+.dhero__stats {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 12px;
+	margin-top: 34px;
+}
+.dhero__stats div {
+	padding: 16px 18px;
+	border-radius: 18px;
+	background: #fff;
+	border: 1px solid var(--border);
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+.dhero__stats strong {
+	display: block;
+	font-size: 24px;
+	line-height: 1;
+	letter-spacing: -0.03em;
+	color: #0F172A;
+}
+.dhero__stats span {
+	display: block;
+	margin-top: 8px;
+	font-size: 12.5px;
+	color: var(--muted-2);
+}
+
+/* Featured event — a widened .mposter (dark art, scrim, glass pills, book CTA). */
+.dfeat {
+	position: relative;
+	display: block;
+	overflow: hidden;
+	border-radius: 28px;
+	min-height: 460px;
+	background-size: cover;
+	background-position: center;
+	background-color: #0F172A;
+	box-shadow: 0 24px 50px rgba(15, 23, 42, 0.28), 0 4px 12px rgba(15, 23, 42, 0.16);
+	color: #fff;
+	transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.dfeat:hover {
+	transform: translateY(-4px);
+	box-shadow: 0 30px 62px rgba(15, 23, 42, 0.34);
+}
+.dfeat__grad {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(to top, rgba(8, 12, 22, 0.94) 6%, rgba(8, 12, 22, 0.30) 42%, rgba(8, 12, 22, 0) 70%);
+}
+.dfeat__cat {
+	position: absolute;
+	top: 18px;
+	left: 18px;
+	z-index: 2;
+	background: rgba(8, 12, 22, 0.45);
+	backdrop-filter: blur(6px);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	padding: 6px 14px;
+	border-radius: 999px;
+}
+.dfeat__rating {
+	position: absolute;
+	top: 18px;
+	right: 18px;
+	z-index: 2;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: rgba(8, 12, 22, 0.55);
+	backdrop-filter: blur(6px);
+	font-size: 12px;
+	font-weight: 800;
+	padding: 6px 11px;
+	border-radius: 10px;
+}
+.dfeat__rating i { color: #F5A623; font-style: normal; }
+.dfeat__body {
+	position: absolute;
+	inset: auto 0 0 0;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 26px;
+}
+.dfeat__date {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.85);
+}
+.dfeat__name {
+	font-size: 26px;
+	font-weight: 800;
+	line-height: 1.12;
+	letter-spacing: -0.02em;
+}
+.dfeat__meta {
+	font-size: 13.5px;
+	color: rgba(255, 255, 255, 0.72);
+}
+.dfeat__cta {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	align-self: flex-start;
+	margin-top: 12px;
+	background: #fff;
+	color: var(--events);
+	font-size: 14px;
+	font-weight: 700;
+	padding: 11px 20px;
+	border-radius: 999px;
+	box-shadow: 0 8px 20px rgba(8, 12, 22, 0.28);
+}
+
+/* Section heads shared across the desktop home sections. */
+.dsec__head {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 18px;
+	margin: 46px 2px 18px;
+}
+.dsec__eyebrow {
+	display: block;
+	font-size: 12px;
+	font-weight: 800;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--muted-2);
+	margin-bottom: 6px;
+}
+.dsec__head h2 {
+	margin: 0;
+	font-size: 26px;
+	letter-spacing: -0.02em;
+	color: #0F172A;
+}
+.dsec__link {
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--events);
+	white-space: nowrap;
+}
+
+/* Category tiles — desktop twin of the mobile .mcat row. */
+.dcats {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 14px;
+}
+.dcat {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	min-height: 120px;
+	padding: 16px;
+	background: #fff;
+	border: 1px solid var(--border);
+	border-radius: 18px;
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+	transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.dcat:hover {
+	transform: translateY(-3px);
+	border-color: #cdd7e5;
+	box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+}
+.dcat__ico {
+	width: 42px;
+	height: 42px;
+	border-radius: 12px;
+	display: grid;
+	place-items: center;
+	background: rgba(37, 99, 235, 0.10);
+	color: var(--events);
+}
+.dcat__txt {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	margin-top: auto;
+}
+.dcat__txt strong { font-size: 14px; font-weight: 700; color: #0F172A; }
+.dcat__txt small { font-size: 12px; color: var(--muted-2); }
+.dcat--hub .dcat__ico { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
+
+/* The desktop home is phone-hidden; the .mhome feed takes over ≤720px. */
+@media (max-width: 720px) {
+	.home-desktop-only { display: none; }
+}
 
 /* App-style mobile home is hidden by default; shown only ≤720px. */
 .mhome { display: none; }
@@ -1017,6 +1379,27 @@ main.container {
 	gap: 24px;
 }
 
+/* Category explore cards, aligned to the mobile .mcat tiles: one clean white
+   surface with an EventsBlue active state, instead of the old per-category
+   warm gradients (yellow/orange/pink) that clashed with the Slate+Blue system.
+   The inline --card-* vars from the blade are simply left unused. */
+.events-page .event-explore-card {
+	background: #fff;
+	border-color: var(--border);
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+.events-page .event-explore-card::after { display: none; }
+.events-page .event-explore-card__title { color: #0F172A; }
+.events-page .event-explore-card:hover {
+	border-color: #cdd7e5;
+	box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+}
+.events-page .event-explore-card.is-active {
+	border-color: var(--events);
+	box-shadow: 0 12px 28px rgba(37, 99, 235, 0.16), inset 0 0 0 1px var(--events);
+}
+.events-page .event-explore-card.is-active .event-explore-card__title { color: var(--events); }
+
 .event-list-card {
 	display: flex;
 	flex-direction: column;
@@ -1270,6 +1653,22 @@ main.container {
 	border-radius: 24px;
 	background: rgba(255, 255, 255, 0.5);
 }
+
+/* Give the desktop GameHub hero the app's signature green band identity
+   (the mobile hub leads with a full green hero). White copy on deep green;
+   the inner search card stays white and reads as a control on the band. */
+.gamehub-page .gamehub-hero {
+	background:
+		radial-gradient(circle at top right, rgba(0, 200, 83, 0.28), transparent 46%),
+		linear-gradient(135deg, #1B5E20 0%, #123f18 100%);
+	border-color: transparent;
+	box-shadow: 0 24px 50px rgba(27, 94, 32, 0.26);
+}
+/* Chain both section classes so this beats the theme-override's own
+   !important green heading rule on specificity, not just source order. */
+.gamehub-page.theme-gamehub .gamehub-hero__copy h1 { color: #ffffff !important; }
+.gamehub-page.theme-gamehub .gamehub-hero__copy p { color: rgba(255, 255, 255, 0.82) !important; }
+.gamehub-page .gamehub-hero__art { background: rgba(255, 255, 255, 0.08); }
 
 .sport-grid {
 	display: grid;
@@ -3414,4 +3813,42 @@ body.mode-events .section-shell__header h2 {
 	border-radius: 50%;
 	background: #D32F2F;
 	box-shadow: 0 0 0 1.5px var(--surface-strong);
+}
+
+/* Account placeholder (no uploaded photo): a section-tinted user glyph in a
+   soft circle, sized to match the 36px avatar it replaces. */
+.topbar__account--placeholder {
+	display: inline-grid;
+	place-items: center;
+	background: #F1F5F9;
+	color: var(--muted);
+}
+
+/* --- Section-tinted header icons -----------------------------------------
+   The nav + logo are already blue (Events) / green (GameHub); these rules pull
+   the remaining icons into the same lane colour so the bar reads as one colour
+   instead of "blue nav + black icons". Typed search text stays neutral (see
+   .topbar__search-input) for readability — only the glyphs are tinted.
+   .topbar.topbar--* = specificity 0,3,0 so it wins over the base icon rules
+   and the body.mode-* pin tint. */
+.topbar.topbar--events .search-icon,
+.topbar.topbar--events .location-pill__pin,
+.topbar.topbar--events .topbar__util,
+.topbar.topbar--events .topbar__account--placeholder {
+	color: #0d6efd;
+}
+.topbar.topbar--events .topbar__util:hover {
+	background: rgba(13, 110, 253, 0.1);
+	color: #0d6efd;
+}
+
+.topbar.topbar--gamehub .search-icon,
+.topbar.topbar--gamehub .location-pill__pin,
+.topbar.topbar--gamehub .topbar__util,
+.topbar.topbar--gamehub .topbar__account--placeholder {
+	color: #16a34a;
+}
+.topbar.topbar--gamehub .topbar__util:hover {
+	background: rgba(22, 163, 74, 0.1);
+	color: #16a34a;
 }

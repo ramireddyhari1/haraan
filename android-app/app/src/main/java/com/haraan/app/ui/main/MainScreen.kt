@@ -1038,18 +1038,12 @@ private fun EventsTabScreen(
     )
   )
   
-  // Bundled samples — only shown if the API is empty/unreachable so the tab is never blank.
-  val sampleEvents = listOf(
-    EventItem("13", "Karthik Live In Hyderabad", "Sat, 13 Jun, 7:00 PM", "Quake Arena, Kondapur", "₹2999 onwards", "Concerts", "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1777470598/ikf8alfkn0vutbb1ugxz.jpg", isFillingFast = true),
-    EventItem("14", "Amaal Mallik Live at Quake Arena", "Fri, 12 Jun, 7:00 PM", "Quake Arena, Kondapur", "₹599 onwards", "Concerts", "https://media.insider.in/image/upload/c_crop,g_custom,q_auto/v1778825095/gvfqqsvogxamj88yijun.jpg", isFillingFast = true),
-    EventItem("15", "Saturday Soiree ft. Merakee Live", "Sat, 13 Jun, 9:30 PM", "Raasta, Hitech City", "₹1000 onwards", "Concerts", "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KTEMTANYJC4WW9B7XGPZKQM3.png", isFillingFast = true),
-    EventItem("16", "Tribute to Arijit Singh (Ed. 2) Ft. Root 35", "Sat, 27 Jun, 9:00 PM", "Hard Rock Cafe, Banjara Hills", "₹249 onwards", "Concerts", "https://cdn.district.in/assets/events/publisher/event_cover_image_horizontal/01KS7X3SFGYW02JHNBXEYYB7KJ.jpg", isFillingFast = true),
-    EventItem("17", "Bassi Live - Show", "Sun, 14 Jun, 6:00 PM", "Shilpakala Vedika, Madhapur", "₹999 onwards", "Comedy", "https://images.unsplash.com/photo-1516280440614-37939bbacd6a?w=500&q=80", isFillingFast = true),
-  )
-
-  // Events tab is backend-driven: pull real events (real ids → real booking) from
-  // GET /api/events, mapped to the card model. Falls back to samples on empty/failure.
-  var eventsData by remember { mutableStateOf(sampleEvents) }
+  // Events tab is backend-driven: only real, admin-published events ever show
+  // (GET /api/events, mapped to the card model → real ids → real booking). There is
+  // no bundled sample fallback — an unreachable or empty API leaves the list empty
+  // rather than showing demo events that aren't in the admin. A transient refresh
+  // failure keeps the last good load, so the tab doesn't blank on a network blip.
+  var eventsData by remember { mutableStateOf<List<EventItem>>(emptyList()) }
   val eventRepo = remember { com.haraan.app.data.EventRepository() }
   val loadEvents: suspend () -> Unit = remember {
     {

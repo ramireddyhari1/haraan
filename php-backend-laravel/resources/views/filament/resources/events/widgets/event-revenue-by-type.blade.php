@@ -1,5 +1,5 @@
 <x-filament-widgets::widget>
-    <x-filament::section>
+    <x-filament::section collapsible>
         <x-slot name="heading">Revenue by Ticket Type</x-slot>
         <x-slot name="description">Paid revenue split across tiers</x-slot>
 

@@ -38,7 +38,9 @@ class EventViewsWidget extends Widget
 
         $total = (int) $base()->count();
         if ($total === 0) {
-            return ['total' => 0];
+            // No per-visitor rows yet — surface the raw open counter so the empty
+            // state can say something concrete instead of just "nothing here".
+            return ['total' => 0, 'counter' => max((int) $event->views, 0)];
         }
 
         $unique = (int) $base()->distinct('visitor_key')->count('visitor_key');

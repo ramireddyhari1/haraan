@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Policies\EventPolicy;
 use App\Services\SupportChat;
 use App\Support\CityResolver;
+use Filament\Tables\Table;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -32,6 +33,13 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(Event::class, EventPolicy::class);
+
+        // Consistent empty-state affordance across every Filament table (both panels):
+        // a friendlier icon + striped layout. Individual tables can still override, and
+        // Filament keeps deriving the heading from each resource's model label.
+        Table::configureUsing(function (Table $table): void {
+            $table->emptyStateIcon('heroicon-o-inbox')->striped();
+        });
 
         $this->configureRateLimiters();
 

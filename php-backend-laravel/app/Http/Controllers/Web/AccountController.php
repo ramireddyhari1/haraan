@@ -109,6 +109,39 @@ final class AccountController extends Controller
     }
 
     /**
+     * Save age + gender from the one-time "tell us a bit about you" prompt (Google
+     * can't supply these, so we ask). Only fills blanks — never overwrites what the
+     * user already set. `skip=1` just dismisses the prompt for the session without
+     * saving. Feeds the per-event audience analytics.
+     */
+    public function saveDemographics(Request $request): RedirectResponse
+    {
+        if (! $request->boolean('skip')) {
+            $data = $request->validate([
+                'age' => ['nullable', 'integer', 'min:5', 'max:120'],
+                'gender' => ['nullable', 'in:Male,Female,Other'],
+            ]);
+
+            $user = $request->user();
+            $fill = [];
+            if (blank($user->age) && filled($data['age'] ?? null)) {
+                $fill['age'] = $data['age'];
+            }
+            if (blank($user->gender) && filled($data['gender'] ?? null)) {
+                $fill['gender'] = $data['gender'];
+            }
+            if ($fill !== []) {
+                $user->fill($fill)->save();
+            }
+        }
+
+        // Don't ask again this session either way.
+        $request->session()->put('demographics_prompt_dismissed', true);
+
+        return back();
+    }
+
+    /**
      * The hero avatar's one action, matching the app. Storage shape is identical to
      * Api\PlayersController::uploadAvatar (public disk, '/storage/…' URL, previous
      * upload deleted) so a photo set here and one set in the app are the same thing.

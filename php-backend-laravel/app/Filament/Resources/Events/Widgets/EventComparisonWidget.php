@@ -112,14 +112,29 @@ class EventComparisonWidget extends Widget
     }
 
     /**
-     * @return array{label:string,cur:string,prev:string,dir:string}
+     * @return array{label:string,cur:string,prev:string,dir:string,arrow:string,delta:string,star:bool}
      */
     private function row(string $label, float $cur, float $prev, string $fmt, bool $higherBetter = true): array
     {
+        // `dir` colours the pill by good/bad (polarity-aware); `arrow` shows the
+        // actual movement; `delta` is the magnitude — % change, except ratings
+        // which read better as an absolute point change (−0.3 not −6%).
         $dir = 'flat';
+        $arrow = 'flat';
+        $delta = 'no change';
+
         if (abs($cur - $prev) > 1e-9) {
             $up = $cur > $prev;
+            $arrow = $up ? 'up' : 'down';
             $dir = ($up === $higherBetter) ? 'good' : 'bad';
+
+            if ($fmt === 'rating') {
+                $delta = number_format(abs($cur - $prev), 1);
+            } elseif (abs($prev) > 1e-9) {
+                $delta = ((int) round(abs(($cur - $prev) / $prev * 100))) . '%';
+            } else {
+                $delta = 'new';
+            }
         }
 
         return [
@@ -127,6 +142,9 @@ class EventComparisonWidget extends Widget
             'cur' => $this->fmt($cur, $fmt),
             'prev' => $this->fmt($prev, $fmt),
             'dir' => $dir,
+            'arrow' => $arrow,
+            'delta' => $delta,
+            'star' => $fmt === 'rating' && $cur > 0,
         ];
     }
 

@@ -10,6 +10,7 @@ use App\Http\Requests\Event\UpdateEventRequest;
 use App\Http\Resources\EventResource;
 use App\Models\Event;
 use App\Models\User;
+use App\Support\CityResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -36,9 +37,15 @@ final class EventsController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        // Local-first, never filtered: all published events are returned, but the
+        // viewer's city floats to the top so "near me" leads. The native app can't
+        // read the header's haraan_city cookie, so it passes ?city=; the web falls
+        // back to that cookie (CityResolver). Ordered in the DB so the float survives
+        // pagination — a page of the newest events won't bury the local ones.
+        $city = trim((string) $request->query('city', '')) ?: CityResolver::selected();
+
         $query = Event::query()
-            ->whereRaw('lower(status) = ?', ['published'])
-            ->orderByDesc('created_at');
+            ->whereRaw('lower(status) = ?', ['published']);
 
         if ($request->filled('search')) {
             $term = (string) $request->query('search');
@@ -48,6 +55,11 @@ final class EventsController extends Controller
                   ->orWhere('venue', 'like', "%{$term}%");
             });
         }
+
+        if (! empty($city)) {
+            $query->orderByRaw('CASE WHEN lower(city) = lower(?) THEN 0 ELSE 1 END', [$city]);
+        }
+        $query->orderByDesc('created_at');
 
         $limit = (int) $request->query('limit', '20');
 
