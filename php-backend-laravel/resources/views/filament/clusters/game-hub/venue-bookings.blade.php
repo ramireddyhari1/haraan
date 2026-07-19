@@ -1,4 +1,26 @@
 <x-filament-panels::page>
+    {{-- Scoped styling only — reuses the panel-wide --hrn-* design tokens
+         (resources/views/filament/theme.blade.php). No logic changes here. --}}
+    <style>
+        .vb-slot-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+        .vb-time{font-size:15px;font-weight:700;color:var(--hrn-ink);line-height:1.2;}
+        .vb-price{font-size:12.5px;color:var(--hrn-ink-3);margin-top:2px;}
+        .vb-occ{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;
+            padding:4px 11px;border-radius:999px;white-space:nowrap;
+            background:var(--_bg,var(--hrn-ok-bg));color:var(--_fg,var(--hrn-ok));}
+        .vb-meter{height:5px;border-radius:999px;background:var(--hrn-track);overflow:hidden;margin-top:10px;}
+        .vb-meter i{display:block;height:100%;border-radius:999px;background:var(--_fg,var(--hrn-ok-strong));transition:width .4s ease;}
+        .vb-cust{display:flex;align-items:center;gap:11px;padding-top:12px;margin-top:12px;border-top:1px solid var(--hrn-border);}
+        .vb-ini{width:32px;height:32px;border-radius:50%;flex:none;display:flex;align-items:center;
+            justify-content:center;color:#fff;font-size:12.5px;font-weight:700;}
+        .vb-cust-main{flex:1;min-width:0;}
+        .vb-cust-name{font-size:13.5px;font-weight:600;color:var(--hrn-ink);}
+        .vb-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px;}
+        .vb-tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;
+            background:var(--hrn-idle-bg);color:var(--hrn-ink-2);}
+        .vb-tag--in{background:var(--hrn-ok-bg);color:var(--hrn-ok);}
+    </style>
+
     <div class="space-y-6">
         {{-- Venue + date controls --}}
         <div class="flex flex-wrap items-end gap-4">
@@ -54,26 +76,45 @@
         {{-- Slot grid --}}
         <div class="space-y-3">
             @forelse ($this->slots() as $slot)
+                @php
+                    $cap = max(0, (int) $slot['capacity']);
+                    $booked = (int) $slot['booked'];
+                    $pct = $cap > 0 ? min(100, (int) round($booked / $cap * 100)) : 0;
+                    $st = $slot['available'] <= 0 ? 'down' : ($cap > 0 && $booked / $cap >= 0.85 ? 'warn' : 'ok');
+                    $occStyle = "--_bg:var(--hrn-{$st}-bg);--_fg:var(--hrn-{$st})";
+                @endphp
                 <x-filament::section>
-                    <div class="flex items-center justify-between">
+                    <div class="vb-slot-top">
                         <div>
-                            <div class="font-semibold text-gray-900 dark:text-white">{{ $slot['time'] ?: $slot['label'] }}</div>
+                            <div class="vb-time">{{ $slot['time'] ?: $slot['label'] }}</div>
                             @if ($slot['price'] > 0)
-                                <div class="text-sm text-gray-500">₹{{ number_format($slot['price']) }}</div>
+                                <div class="vb-price">₹{{ number_format($slot['price']) }}</div>
                             @endif
                         </div>
-                        <div class="text-lg font-bold {{ $slot['available'] <= 0 ? 'text-danger-600' : 'text-success-600' }}">
-                            {{ $slot['booked'] }}/{{ $slot['capacity'] }}
-                        </div>
+                        <span class="vb-occ" style="{{ $occStyle }}">
+                            {{ $booked }}/{{ $cap }} booked
+                        </span>
                     </div>
+                    @if ($cap > 0)
+                        <div class="vb-meter" style="--_fg:var(--hrn-{{ $st }}-strong)"><i style="width:{{ $pct }}%"></i></div>
+                    @endif
 
                     @foreach ($slot['bookings'] as $b)
-                        <div class="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 text-sm dark:border-gray-700">
-                            <div>
-                                <span class="font-medium text-gray-900 dark:text-white">{{ $b['customer'] }}</span>
-                                <span class="text-gray-500">
-                                    · {{ $b['channel'] === 'offline' ? 'Walk-in' : 'Online' }}{{ $b['checked_in'] > 0 ? ' · checked in' : '' }}
-                                </span>
+                        @php
+                            $name = trim((string) $b['customer']) ?: 'Guest';
+                            $hue = crc32($name) % 360;
+                            $ini = strtoupper(mb_substr($name, 0, 1));
+                        @endphp
+                        <div class="vb-cust">
+                            <div class="vb-ini" style="background:hsl({{ $hue }} 52% 46%)">{{ $ini }}</div>
+                            <div class="vb-cust-main">
+                                <div class="vb-cust-name">{{ $b['customer'] }}</div>
+                                <div class="vb-tags">
+                                    <span class="vb-tag">{{ $b['channel'] === 'offline' ? 'Walk-in' : 'Online' }}</span>
+                                    @if ($b['checked_in'] > 0)
+                                        <span class="vb-tag vb-tag--in">Checked in</span>
+                                    @endif
+                                </div>
                             </div>
                             <x-filament::button size="xs" color="danger" wire:click="cancelBooking({{ $b['id'] }})">
                                 Cancel
