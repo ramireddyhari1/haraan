@@ -48,11 +48,15 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     /** Department roles → the workspaces they may manage. */
     private const DEPT_ROLES = ['FINANCE', 'MARKETING', 'OPS', 'PARTNER'];
 
-    /** Which roles may manage each workspace key. */
+    /**
+     * Which roles may manage each workspace key. NB: PARTNER is deliberately NOT
+     * listed here — partners are lane-locked by partner_type in canManage() below
+     * (event organisers → Events only, venue owners → GameHub only).
+     */
     private const WORKSPACE_ROLES = [
         'finance' => ['FINANCE'],
         'marketing' => ['MARKETING'],
-        'gamehub' => ['OPS', 'PARTNER'],
+        'gamehub' => ['OPS'],
         'events' => ['OPS'],
         'admin' => [], // super-admin only (People / System)
     ];
@@ -77,8 +81,22 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     /** Can this user manage a given workspace? Super-admins can manage all. */
     public function canManage(string $workspace): bool
     {
-        return $this->isSuperAdmin()
-            || $this->hasRoleEither(self::WORKSPACE_ROLES[$workspace] ?? []);
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        // Partners are lane-locked by partner_type: an event organiser only sees the
+        // Events lane, a venue owner only the GameHub (venue) lane. Partners without a
+        // type set fall back to GameHub, the historical default, so they aren't stranded.
+        if ($this->hasRoleEither(['PARTNER'])) {
+            return match ($workspace) {
+                'events' => $this->partner_type === 'event',
+                'gamehub' => $this->partner_type !== 'event',
+                default => false,
+            };
+        }
+
+        return $this->hasRoleEither(self::WORKSPACE_ROLES[$workspace] ?? []);
     }
 
     /**
