@@ -34,14 +34,49 @@ class PartnerResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function canAccess(): bool
+    /**
+     * This resource is entirely super-admin-only. Gate every ability on isSuperAdmin so
+     * edit/create/delete don't fall through to the granular UserPolicy (Shield's
+     * Update:User etc.), which a legacy-role super-admin doesn't hold → 403.
+     */
+    private static function allowed(): bool
     {
         return auth()->user()?->isSuperAdmin() ?? false;
     }
 
+    public static function canAccess(): bool
+    {
+        return static::allowed();
+    }
+
     public static function canViewAny(): bool
     {
-        return auth()->user()?->isSuperAdmin() ?? false;
+        return static::allowed();
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::allowed();
+    }
+
+    public static function canView(mixed $record): bool
+    {
+        return static::allowed();
+    }
+
+    public static function canEdit(mixed $record): bool
+    {
+        return static::allowed();
+    }
+
+    public static function canDelete(mixed $record): bool
+    {
+        return static::allowed();
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return static::allowed();
     }
 
     /** Partners are users with the PARTNER role. */
