@@ -29,6 +29,8 @@
     .pw-meta a:hover { text-decoration: underline; }
     .pw-switch { color: #0F172A; }
     .pw-form .auth-row { display: flex; gap: 10px; }
+    /* `hidden` must beat the flex display above, or Age/Gender leak into login mode. */
+    .pw-form .auth-row[hidden] { display: none; }
     .pw-form .auth-row .auth-field { flex: 1; }
     .pw-form select.auth-input { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 34px; }
 </style>
