@@ -100,18 +100,61 @@
         border: 1px solid var(--hrn-border);
     }
 
-    /* Stat widgets: tighter, more deliberate — the panel's first impression. */
+    /* ── Stat cards: give the boxes "feel" — depth, a hero number, and a
+       colour-aware status chip (Filament only colours the description, so we
+       tint a pill from its own currentColor). Lifts every StatsOverviewWidget
+       in the panel: analytics, Users/Events/Partners KPIs. ──────────────── */
     .fi-wi-stats-overview-stat {
+        position: relative;
         border: 1px solid var(--hrn-border);
-        transition: transform .18s ease, box-shadow .18s ease;
+        padding: 18px 18px 16px;
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--hrn-ink) 2.5%, transparent) 0%, transparent 42%),
+            var(--hrn-surface);
+        transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
     }
     .fi-wi-stats-overview-stat:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 14px 26px -18px rgba(11, 18, 32, .26);
+        transform: translateY(-2px);
+        box-shadow: var(--hrn-shadow-hover);
+        border-color: color-mix(in srgb, var(--hrn-ink) 14%, var(--hrn-border));
     }
+    /* Micro-label above the number. */
+    .fi-wi-stats-overview-stat-label {
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: var(--hrn-ink-3);
+    }
+    /* The number is the hero of the card. */
     .fi-wi-stats-overview-stat-value {
+        font-size: 27px;
         font-weight: 800;
-        letter-spacing: -.02em;
+        line-height: 1.1;
+        letter-spacing: -.025em;
+        color: var(--hrn-ink);
+        font-variant-numeric: tabular-nums;
+        margin-top: 6px;
+    }
+    /* The coloured sub-line becomes a tinted status chip in its own colour. */
+    .fi-wi-stats-overview-stat-description {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        width: fit-content;
+        max-width: 100%;
+        margin-top: 10px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 600;
+        line-height: 1.35;
+        background: color-mix(in srgb, currentColor 12%, transparent);
+    }
+    .fi-wi-stats-overview-stat-description svg {
+        width: 13px;
+        height: 13px;
+        flex: none;
     }
 
     /* ── Tables: calmer header, breathable rows, clear hover ────────────── */
