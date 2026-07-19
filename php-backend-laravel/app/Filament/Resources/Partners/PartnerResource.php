@@ -5,7 +5,9 @@ namespace App\Filament\Resources\Partners;
 use App\Filament\Resources\Partners\Pages\CreatePartner;
 use App\Filament\Resources\Partners\Pages\EditPartner;
 use App\Filament\Resources\Partners\Pages\ListPartners;
+use App\Filament\Support\AvatarColumn;
 use App\Models\User;
+use App\Support\ContactPrefill;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
@@ -67,9 +69,16 @@ class PartnerResource extends Resource
     {
         return $table
             ->columns([
+                AvatarColumn::make(
+                    'avatar',
+                    nameFor: fn (User $r): string => (string) ($r->name ?: 'Partner'),
+                    avatarFor: fn (User $r): ?string => $r->avatar,
+                ),
                 TextColumn::make('name')
                     ->weight('bold')
-                    ->description(fn ($record) => $record->email)
+                    ->description(fn (User $r): ?string => ContactPrefill::isRealEmail($r->email)
+                        ? $r->email
+                        : (trim((string) $r->phone) ?: null))
                     ->searchable(),
                 TextColumn::make('phone')->placeholder('—')->toggleable(),
                 TextColumn::make('partner_type')

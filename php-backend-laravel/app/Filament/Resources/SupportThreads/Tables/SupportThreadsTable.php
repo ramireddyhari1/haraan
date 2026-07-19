@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\SupportThreads\Tables;
 
+use App\Filament\Support\AvatarColumn;
 use App\Models\SupportThread;
 use Filament\Actions\Action;
+use Illuminate\Database\Eloquent\Builder;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
@@ -15,7 +17,15 @@ class SupportThreadsTable
     public static function configure(Table $table): Table
     {
         return $table
+            // Eager-load the person + assignee + topic the row renders, so the
+            // list isn't N+1 once the avatar reads user->avatar too.
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['user', 'assignee', 'category']))
             ->columns([
+                AvatarColumn::make(
+                    'avatar',
+                    nameFor: fn (SupportThread $r): string => (string) ($r->user?->name ?: 'User'),
+                    avatarFor: fn (SupportThread $r): ?string => $r->user?->avatar,
+                ),
                 TextColumn::make('user.name')
                     ->label('User')
                     ->weight('bold')
