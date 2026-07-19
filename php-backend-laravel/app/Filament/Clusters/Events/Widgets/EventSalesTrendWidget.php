@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\Events\Widgets;
 
-use App\Models\Booking;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Support\Facades\DB;
 
@@ -17,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 class EventSalesTrendWidget extends ChartWidget
 {
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
+    use \App\Filament\Concerns\ScopesToPartnerEvents;
 
     protected static ?int $sort = 0;
 
@@ -46,7 +46,7 @@ class EventSalesTrendWidget extends ChartWidget
         $days = (int) ($this->filter ?? 14);
         $start = now()->startOfDay()->subDays($days - 1);
 
-        $rows = Booking::query()
+        $rows = $this->scopedBookingQuery()
             ->whereIn(DB::raw('lower(status)'), self::PAID)
             ->whereNotNull('event_id')
             ->where('created_at', '>=', $start)

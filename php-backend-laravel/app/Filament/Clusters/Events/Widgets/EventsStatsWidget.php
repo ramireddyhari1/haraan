@@ -4,25 +4,25 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\Events\Widgets;
 
-use App\Models\Booking;
-use App\Models\Event;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class EventsStatsWidget extends StatsOverviewWidget
 {
+    use \App\Filament\Concerns\ScopesToPartnerEvents;
+
     protected static ?int $sort = -2;
 
     protected function getStats(): array
     {
-        $events = Event::count();
-        $totalSeats = (int) Event::sum('total_slots');
-        $available = (int) Event::sum('available_slots');
+        $events = $this->scopedEventQuery()->count();
+        $totalSeats = (int) $this->scopedEventQuery()->sum('total_slots');
+        $available = (int) $this->scopedEventQuery()->sum('available_slots');
         $sold = max($totalSeats - $available, 0);
         $sellThrough = $totalSeats > 0 ? round($sold / $totalSeats * 100) : 0;
-        $soldOut = Event::whereColumn('available_slots', '<=', 'total_slots')
+        $soldOut = $this->scopedEventQuery()->whereColumn('available_slots', '<=', 'total_slots')
             ->where('available_slots', '<=', 0)->count();
-        $eventBookings = Booking::whereNotNull('event_id')->count();
+        $eventBookings = $this->scopedBookingQuery()->whereNotNull('event_id')->count();
 
         return [
             Stat::make('Events', (string) $events)

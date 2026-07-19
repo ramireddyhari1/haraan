@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Events\Widgets;
 
-use App\Models\Event;
+use App\Filament\Resources\Events\EventResource;
 use Filament\Widgets\Widget;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * KPI header for the Events list — the catalogue at a glance before the rows:
@@ -35,18 +36,23 @@ class EventsListStatsWidget extends Widget
      */
     public function getSummary(): array
     {
-        $total = Event::count();
-        $published = Event::whereRaw("lower(status) = 'published'")->count();
-        $draft = Event::whereRaw("lower(status) = 'draft'")->count();
-        $upcoming = Event::query()
+        // Base every count on the resource's SCOPED query so the partner console
+        // only ever sums the partner's own events — matching the table below —
+        // while /control (super-admin) still sees the whole catalogue.
+        $base = fn (): Builder => EventResource::getEloquentQuery();
+
+        $total = $base()->count();
+        $published = $base()->whereRaw("lower(status) = 'published'")->count();
+        $draft = $base()->whereRaw("lower(status) = 'draft'")->count();
+        $upcoming = $base()
             ->whereRaw("lower(status) = 'published'")
             ->whereDate('date', '>=', now()->toDateString())
             ->count();
 
-        $sold = (int) Event::query()
+        $sold = (int) $base()
             ->selectRaw('coalesce(sum(total_slots - available_slots), 0) as s')
             ->value('s');
-        $capacity = (int) Event::sum('total_slots');
+        $capacity = (int) $base()->sum('total_slots');
         $fillPct = $capacity > 0 ? (int) round($sold / $capacity * 100) : 0;
 
         return compact('total', 'published', 'draft', 'upcoming', 'sold', 'capacity', 'fillPct');

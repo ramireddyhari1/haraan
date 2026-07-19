@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 class LatestBookingsWidget extends TableWidget
 {
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
+    use \App\Filament\Concerns\ScopesToPartnerEvents;
 
     protected static ?int $sort = -10;
 
@@ -33,7 +34,7 @@ class LatestBookingsWidget extends TableWidget
     {
         return $table
             ->query(
-                Booking::query()
+                $this->scopedBookingQuery()
                     ->with(['user', 'event', 'venue'])
                     ->latest()
                     ->limit(8)

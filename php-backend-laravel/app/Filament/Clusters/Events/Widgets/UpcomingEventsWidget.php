@@ -21,6 +21,7 @@ use Filament\Widgets\TableWidget;
 class UpcomingEventsWidget extends TableWidget
 {
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
+    use \App\Filament\Concerns\ScopesToPartnerEvents;
 
     protected static ?int $sort = 1;
 
@@ -35,7 +36,7 @@ class UpcomingEventsWidget extends TableWidget
     {
         return $table
             ->query(
-                Event::query()
+                $this->scopedEventQuery()
                     ->whereRaw("lower(status) = 'published'")
                     ->whereDate('date', '>=', now()->toDateString())
                     ->orderBy('date')
