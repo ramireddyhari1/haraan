@@ -76,11 +76,14 @@ final class GoogleWebAuthController extends Controller
         Auth::login($user, true);
         $request->session()->regenerate();
 
-        // Straight to where they were headed — never via cricket onboarding. Most people
-        // signing in here came for Events, and district/state are an ActionBoard concern:
-        // EnsureActionboardProfile already collects them at the point they're needed.
-        return response()->json([
-            'redirect' => $request->session()->pull('url.intended', '/'),
-        ]);
+        // Partners (event hosts / venue owners) go straight to their /partner console.
+        // Otherwise: straight to where they were headed — never via cricket onboarding.
+        // Most people signing in here came for Events, and district/state are an
+        // ActionBoard concern: EnsureActionboardProfile collects them at the point of use.
+        $redirect = $user->hasRoleEither(['PARTNER'])
+            ? '/partner'
+            : $request->session()->pull('url.intended', '/');
+
+        return response()->json(['redirect' => $redirect]);
     }
 }

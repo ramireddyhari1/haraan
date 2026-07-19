@@ -75,8 +75,14 @@ class WebPasswordAuthController extends Controller
         Auth::login($user, true);
         $request->session()->regenerate();
 
-        // Straight to where they were headed — never via cricket onboarding, for the
-        // same reason as the OTP/Google flows (most web sign-ins are Events traffic).
+        // Partners (event hosts / venue owners) run their business from the /partner
+        // console, not the public site — drop them straight into their dashboard.
+        if ($user->hasRoleEither(['PARTNER'])) {
+            return redirect('/partner');
+        }
+
+        // Everyone else: straight to where they were headed — never via cricket
+        // onboarding, same as the OTP/Google flows (most web sign-ins are Events traffic).
         return redirect()->intended('/')->with('success', 'Logged in successfully.');
     }
 }

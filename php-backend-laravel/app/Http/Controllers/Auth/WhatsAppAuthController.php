@@ -107,6 +107,11 @@ class WhatsAppAuthController extends Controller
             Auth::login($user, true); // login and remember
             session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone']);
 
+            // Partners (event hosts / venue owners) go straight to their /partner console.
+            if ($user->hasRoleEither(['PARTNER'])) {
+                return redirect('/partner');
+            }
+
             // Straight to where they were headed — never via cricket onboarding, and for
             // the same reason as the Google flow (see GoogleWebAuthController): most web
             // sign-ins are Events traffic, and a "Permanent Cricket Identity" wall right
