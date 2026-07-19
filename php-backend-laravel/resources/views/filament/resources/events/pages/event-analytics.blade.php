@@ -1,6 +1,8 @@
 <x-filament-panels::page>
-    {{-- Block @php (NOT inline) — an inline @php($x = $this->method()) with a
-         nested call mis-compiles in this Blade version. See memory. --}}
+    {{-- The php block below must use the block form, not the parenthesised
+         inline form: the inline form mis-compiles when its expression contains
+         a nested method call. (Do not write directive tokens in a comment —
+         Blade compiles them even here, which is its own landmine.) --}}
     @php
         $e = $this->getRecord();
         $s = $this->heroStats();
