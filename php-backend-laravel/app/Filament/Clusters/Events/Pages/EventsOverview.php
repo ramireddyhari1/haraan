@@ -3,6 +3,7 @@
 namespace App\Filament\Clusters\Events\Pages;
 
 use App\Filament\Clusters\Events\EventsCluster;
+use App\Filament\Clusters\Events\Widgets\EventSalesTrendWidget;
 use App\Filament\Clusters\Events\Widgets\EventsStatsWidget;
 use App\Filament\Clusters\Events\Widgets\UpcomingEventsWidget;
 use App\Filament\Widgets\LatestBookingsWidget;
@@ -34,6 +35,7 @@ class EventsOverview extends Page
     protected function getFooterWidgets(): array
     {
         return [
+            EventSalesTrendWidget::class,
             UpcomingEventsWidget::class,
             LatestBookingsWidget::class,
         ];
