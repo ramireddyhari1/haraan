@@ -112,6 +112,25 @@ class UsersTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                // Drill-in for the "New this week" KPI tile above the table.
+                SelectFilter::make('joined')
+                    ->label('Joined')
+                    ->options([
+                        'today' => 'Today',
+                        'week'  => 'This week',
+                        'month' => 'This month',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $now = now();
+
+                        return match ($data['value'] ?? null) {
+                            'today' => $query->where('created_at', '>=', $now->copy()->startOfDay()),
+                            'week'  => $query->where('created_at', '>=', $now->copy()->subDays(6)->startOfDay()),
+                            'month' => $query->where('created_at', '>=', $now->copy()->subDays(29)->startOfDay()),
+                            default => $query,
+                        };
+                    }),
+
                 SelectFilter::make('activity')
                     ->label('Activity')
                     ->options([
