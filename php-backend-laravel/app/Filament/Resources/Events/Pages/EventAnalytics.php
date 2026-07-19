@@ -51,6 +51,38 @@ class EventAnalytics extends Page
         return $this->getRecord()->title . ' — Analytics';
     }
 
+    /**
+     * Headline numbers for the hero banner: money collected, tickets gone vs
+     * capacity, page views, and sell-through. Revenue is the paid-booking sum;
+     * sold comes from the authoritative slot count. Cheap, and independent of
+     * the individual analytics widgets.
+     *
+     * @return array{revenue: float, sold: int, total: int, views: int, sellThrough: int, status: string, poster: ?string}
+     */
+    public function heroStats(): array
+    {
+        $e = $this->getRecord();
+        $paid = ['confirmed', 'paid', 'completed', 'checked_in'];
+
+        $revenue = (float) \App\Models\Booking::query()
+            ->where('event_id', $e->id)
+            ->whereIn(\Illuminate\Support\Facades\DB::raw('lower(status)'), $paid)
+            ->sum('total_amount');
+
+        $total = max(0, (int) $e->total_slots);
+        $sold = $total > 0 ? max(0, $total - max(0, (int) $e->available_slots)) : 0;
+
+        return [
+            'revenue'     => $revenue,
+            'sold'        => $sold,
+            'total'       => $total,
+            'views'       => max(0, (int) $e->views),
+            'sellThrough' => $total > 0 ? (int) round($sold / $total * 100) : 0,
+            'status'      => (string) $e->status,
+            'poster'      => $e->heroImageUrl(),
+        ];
+    }
+
     public static function canAccess(array $parameters = []): bool
     {
         return auth()->user()?->canManage('events') ?? false;
