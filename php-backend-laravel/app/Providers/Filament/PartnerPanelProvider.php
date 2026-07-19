@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Http\Responses\PartnerLogoutResponse;
+use Filament\Auth\Http\Responses\Contracts\LogoutResponse;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -37,6 +39,15 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  */
 class PartnerPanelProvider extends PanelProvider
 {
+    public function register(): void
+    {
+        parent::register();
+
+        // Send partners back to the website login area on logout, instead of the
+        // bare Filament panel "Sign in" page (the response self-scopes to /partner).
+        $this->app->bind(LogoutResponse::class, PartnerLogoutResponse::class);
+    }
+
     public function panel(Panel $panel): Panel
     {
         return $panel
