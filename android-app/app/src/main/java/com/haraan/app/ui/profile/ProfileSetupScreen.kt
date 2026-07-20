@@ -17,6 +17,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -526,7 +528,18 @@ fun PlayerProfileSetupScreen(
         // Footer CTA — blue while there's still progress to make, green to commit on the last step.
         val isLast = step == TOTAL_STEPS - 1
         val ctaColor = if (isLast) Green else Blue
-        Box(Modifier.fillMaxWidth().background(Surface).padding(16.dp)) {
+        // Same footer rule as the create-match wizard: the white surface stays flush to
+        // the screen edge, but the button is lifted above the system navigation (and the
+        // keyboard on text-entry steps). Without this the CTA sat underneath the gesture
+        // bar, which overlapped the tap target.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(Surface)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(16.dp)
+        ) {
             Button(
                 onClick = {
                     if (saving) return@Button
