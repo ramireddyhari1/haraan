@@ -28,14 +28,24 @@ class Dashboard extends BaseDashboard
 {
     public function mount(): void
     {
-        if (CommandCenter::canAccess()) {
+        // Command Center only exists in /control. Never redirect there from the
+        // partner console — an event partner passes canAccess() (canManage events)
+        // but the route doesn't exist in /partner, which would 500.
+        if (! self::isPartnerPanel() && CommandCenter::canAccess()) {
             $this->redirect(CommandCenter::getUrl());
         }
     }
 
     public static function shouldRegisterNavigation(): bool
     {
-        return ! CommandCenter::canAccess();
+        // Partners always keep the Dashboard nav; in /control it hides for Command
+        // Center users (who land there instead).
+        return self::isPartnerPanel() || ! CommandCenter::canAccess();
+    }
+
+    private static function isPartnerPanel(): bool
+    {
+        return Filament::getCurrentPanel()?->getId() === 'partner';
     }
 
     /**
