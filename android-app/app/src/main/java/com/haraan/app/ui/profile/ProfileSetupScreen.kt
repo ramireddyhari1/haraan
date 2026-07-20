@@ -66,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -350,6 +351,37 @@ fun PlayerProfileSetupScreen(
         1 -> step2Valid
         else -> step3Valid
     }
+
+    // Name the FIRST thing still missing, so the footer can say why Continue is inert.
+    // Without this the button just sat grey: step 1 requires height and nationality,
+    // which are below the fold, so a user who filled everything visible hit a dead
+    // button with no explanation and no way to discover the cause.
+    val sportAttrLabels = mapOf(
+        "role" to "playing role", "batting" to "batting style", "bowling" to "bowling style",
+        "position" to "position", "foot" to "stronger foot", "format" to "format", "hand" to "playing hand",
+    )
+    val missingField: String? = when (step) {
+        0 -> when {
+            name.isBlank() -> "your name"
+            dobIso.isBlank() -> "your date of birth"
+            gender.isBlank() -> "your gender"
+            height.isBlank() -> "your height"
+            nationality.isBlank() -> "your nationality"
+            else -> null
+        }
+        1 -> when {
+            state.isBlank() -> "your state"
+            district.isBlank() -> "your district"
+            birthPlace.isBlank() -> "your birth place"
+            else -> null
+        }
+        else -> when {
+            primarySport.isBlank() -> "your primary sport"
+            else -> SPORT_REQUIRED[primarySport].orEmpty()
+                .firstOrNull { sportAttrs[it].isNullOrBlank() }
+                ?.let { sportAttrLabels[it] ?: it }
+        }
+    }
     val firstName = name.trim().substringBefore(' ').takeIf { it.isNotBlank() }
 
     val (title, subtitle) = when (step) {
@@ -532,7 +564,7 @@ fun PlayerProfileSetupScreen(
         // the screen edge, but the button is lifted above the system navigation (and the
         // keyboard on text-entry steps). Without this the CTA sat underneath the gesture
         // bar, which overlapped the tap target.
-        Box(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .background(Surface)
@@ -540,6 +572,19 @@ fun PlayerProfileSetupScreen(
                 .imePadding()
                 .padding(16.dp)
         ) {
+            // Says what is still needed BEFORE the tap, rather than leaving a grey
+            // button to be poked at. Named field, not a generic "complete all fields".
+            if (missingField != null && !saving) {
+                Text(
+                    text = "Add $missingField to continue",
+                    color = Text2,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    textAlign = TextAlign.Center,
+                )
+            }
             Button(
                 onClick = {
                     if (saving) return@Button
@@ -761,7 +806,28 @@ private fun DateField(display: String, placeholder: String, onPicked: (iso: Stri
     }
 
     if (open) {
-        val pickerState = rememberDatePickerState()
+        // A date of BIRTH: the future is never valid, and opening on today forced every
+        // user to scroll back 20-40 years to reach their birth year. Land on ~25 years
+        // ago and refuse anything later than today — previously "21 Jul 2026" was
+        // accepted without complaint.
+        val today = remember { java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")) }
+        val todayMillis = remember { today.timeInMillis }
+        val thisYear = remember { today.get(java.util.Calendar.YEAR) }
+        val openAtMillis = remember {
+            java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                add(java.util.Calendar.YEAR, -25)
+            }.timeInMillis
+        }
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = null,
+            initialDisplayedMonthMillis = openAtMillis,
+            // 120 years is the widest plausible span for a living player.
+            yearRange = (thisYear - 120)..thisYear,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= todayMillis
+                override fun isSelectableYear(year: Int) = year <= thisYear
+            },
+        )
         DatePickerDialog(
             onDismissRequest = { open = false },
             confirmButton = {

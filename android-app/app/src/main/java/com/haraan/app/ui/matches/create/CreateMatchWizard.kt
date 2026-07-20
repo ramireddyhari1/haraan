@@ -258,6 +258,7 @@ fun CreateMatchWizard(
             step = step,
             lastStep = lastStep,
             canContinue = canAdvance(draft, step),
+            missing = missingOn(draft, step),
             onContinue = {
                 if (step == lastStep) onCreate(draft) else step++
             },
@@ -352,6 +353,26 @@ private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
     else -> true
 }
 
+/**
+ * The first thing still missing on [step], phrased for the footer. Mirrors
+ * [canAdvance] exactly — a greyed-out Continue with no explanation is the same
+ * dead end the player-profile form had.
+ */
+private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
+    1 -> when {
+        d.overs <= 0 -> "the number of overs"
+        d.playersPerSide <= 0 -> "players per side"
+        !d.isPrivate && d.locality.trim().length < 2 -> "the area or village"
+        else -> null
+    }
+    2 -> when {
+        d.teamA.isBlank() -> "a name for team A"
+        d.teamB.isBlank() -> "a name for team B"
+        else -> null
+    }
+    else -> null
+}
+
 // ─────────────────────────────────────────────────────────────── Top bar ──────
 @Composable
 private fun WizardTopBar(step: Int, total: Int, onBack: () -> Unit, onClose: () -> Unit) {
@@ -400,8 +421,14 @@ private fun IconCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, cd
 
 // ─────────────────────────────────────────────────────────────── Footer ────────
 @Composable
-private fun WizardFooter(step: Int, lastStep: Int, canContinue: Boolean, onContinue: () -> Unit) {
-    Box(
+private fun WizardFooter(
+    step: Int,
+    lastStep: Int,
+    canContinue: Boolean,
+    onContinue: () -> Unit,
+    missing: String? = null,
+) {
+    Column(
         Modifier
             .fillMaxWidth()
             .background(Surface)
@@ -411,6 +438,16 @@ private fun WizardFooter(step: Int, lastStep: Int, canContinue: Boolean, onConti
             .imePadding()
             .padding(16.dp)
     ) {
+        // Why the button is inert, named, before the user pokes at it.
+        if (missing != null) {
+            Text(
+                text = "Add $missing to continue",
+                color = Text2,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                textAlign = TextAlign.Center,
+            )
+        }
         // Blue carries the user forward through the steps; green commits the match at
         // the end — a deliberate blue→green hand-off so the final action reads as "go".
         val isCommit = step == lastStep
