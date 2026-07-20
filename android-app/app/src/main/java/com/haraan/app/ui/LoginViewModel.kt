@@ -6,119 +6,93 @@ import com.haraan.app.data.HaraanAuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed interface LoginStage {
-    /** Step 1 — the mobile number the WhatsApp code goes to. */
-    data object EnterPhone : LoginStage
-    /** Step 2 — the 6-digit code. */
-    data object VerifyOtp : LoginStage
+    /** Email + password entry — the only step. Sign-in and sign-up share it, as on the website. */
+    data object EnterCredentials : LoginStage
     data object Success : LoginStage
 }
 
 data class LoginUiState(
-    /** The 10 national digits only; [DIAL_CODE] is prepended when we call the API. */
-    val phone: String = "",
-    val otp: String = "",
-    val verificationToken: String? = null,
+    val email: String = "",
+    val password: String = "",
+    /** Only collected on the "create account" variant of the form. */
+    val name: String = "",
+    val isSignUp: Boolean = false,
     val token: String? = null,
     val isLoading: Boolean = false,
     val successMessage: String? = null,
     val errorMessage: String? = null,
-    val stage: LoginStage = LoginStage.EnterPhone
+    val stage: LoginStage = LoginStage.EnterCredentials
 ) {
-    val isPhoneValid: Boolean
-        get() = phone.length == 10
+    /** Deliberately loose — the server is the authority; this only gates the button. */
+    val isEmailValid: Boolean
+        get() = email.contains('@') && email.substringAfterLast('@').contains('.')
 
-    val isOtpValid: Boolean
-        get() = otp.length == 6
+    /** Matches the backend rule (min:6) so the button doesn't promise a request that 422s. */
+    val isPasswordValid: Boolean
+        get() = password.length >= 6
 
-    val canContinue: Boolean
-        get() = isPhoneValid && !isLoading
+    val canSubmit: Boolean
+        get() = isEmailValid && isPasswordValid && !isLoading
 }
 
 class LoginViewModel : ViewModel() {
 
     private companion object {
-        /**
-         * India. The website's login posts `"91" + <10 digits>` (see the phone form in
-         * site/layout.blade.php) and the bridge dials exactly what it's given, so the app
-         * must send the same shape or the code goes nowhere.
-         */
-        const val DIAL_CODE = "91"
+        /** How long the success confirmation holds before the app takes over. */
+        const val SUCCESS_BEAT_MS = 900L
     }
 
     private val authRepository = HaraanAuthRepository()
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    fun onPhoneChange(input: String) {
-        val digitsOnly = input.filter { it.isDigit() }.take(10)
-        _uiState.update { it.copy(phone = digitsOnly, errorMessage = null) }
+    fun onEmailChange(input: String) {
+        _uiState.update { it.copy(email = input.trim(), errorMessage = null) }
     }
 
-    fun onOtpChange(input: String) {
-        val digitsOnly = input.filter { it.isDigit() }.take(6)
-        _uiState.update { it.copy(otp = digitsOnly, errorMessage = null) }
+    fun onPasswordChange(input: String) {
+        _uiState.update { it.copy(password = input, errorMessage = null) }
     }
 
-    fun resetToPhone() {
-        _uiState.update {
-            it.copy(
-                stage = LoginStage.EnterPhone,
-                otp = "",
-                // Drop the token too: it belongs to the number they're leaving, and a
-                // stale one would verify against the previous number's session.
-                verificationToken = null,
-                errorMessage = null,
-                successMessage = null
-            )
-        }
+    fun onNameChange(input: String) {
+        _uiState.update { it.copy(name = input, errorMessage = null) }
     }
 
-    fun requestOtp() {
+    /**
+     * Leaving the credentials form (system Back). Drops transient messages so a failed
+     * attempt doesn't follow the user back out to the landing card.
+     */
+    fun clearMessages() {
+        _uiState.update { it.copy(errorMessage = null, successMessage = null) }
+    }
+
+    /** Toggle between "Sign in" and "Create account" — same endpoint, extra name field. */
+    fun setSignUp(signUp: Boolean) {
+        _uiState.update { it.copy(isSignUp = signUp, errorMessage = null, successMessage = null) }
+    }
+
+    /**
+     * One call for both sign-in and sign-up: the backend creates the account when the
+     * email is unknown, exactly like the website's password login.
+     */
+    fun signInWithPassword(onSuccess: (String) -> Unit) {
         val state = _uiState.value
-        if (!state.isPhoneValid || state.isLoading) return
+        if (!state.canSubmit) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            runCatching { authRepository.requestOtp(DIAL_CODE + state.phone) }
-                .onSuccess { result ->
-                    _uiState.update {
-                        it.copy(
-                            verificationToken = result.verificationToken,
-                            stage = LoginStage.VerifyOtp,
-                            isLoading = false,
-                            successMessage = result.message
-                        )
-                    }
-                }
-                .onFailure { throwable ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = throwable.message ?: "Failed to send the code. Please check your network."
-                        )
-                    }
-                }
-        }
-    }
-
-    fun verifyOtp(onSuccess: (String) -> Unit) {
-        val state = _uiState.value
-        val verificationToken = state.verificationToken
-        if (verificationToken.isNullOrBlank()) {
-            _uiState.update { it.copy(errorMessage = "Session expired. Please request a code again.") }
-            return
-        }
-        if (!state.isOtpValid || state.isLoading) return
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
-            // No profile step here, unlike email sign-up: the WhatsApp endpoint creates the
-            // account when the code is requested, so a verified code is always a login.
-            runCatching { authRepository.verifyOtp(verificationToken, state.otp) }
+            runCatching {
+                authRepository.passwordLogin(
+                    email = state.email,
+                    password = state.password,
+                    name = state.name.takeIf { state.isSignUp },
+                )
+            }
                 .onSuccess { result ->
                     _uiState.update {
                         it.copy(
@@ -128,13 +102,17 @@ class LoginViewModel : ViewModel() {
                             successMessage = result.message
                         )
                     }
+                    // Hold on the confirmation beat before handing control to the app.
+                    // Without it the screen cuts straight to home, which reads as a jump
+                    // rather than an arrival — the token is already stored either way.
+                    delay(SUCCESS_BEAT_MS)
                     onSuccess(result.token)
                 }
                 .onFailure { throwable ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = throwable.message ?: "Invalid code. Please try again."
+                            errorMessage = throwable.message ?: "Couldn't sign you in. Please try again."
                         )
                     }
                 }
@@ -159,6 +137,9 @@ class LoginViewModel : ViewModel() {
                             successMessage = result.message
                         )
                     }
+                    // Same confirmation beat as the password path — both ways in should
+                    // arrive identically.
+                    delay(SUCCESS_BEAT_MS)
                     onSuccess(result.token)
                 }
                 .onFailure { throwable ->
@@ -180,5 +161,4 @@ class LoginViewModel : ViewModel() {
     fun setLoading(loading: Boolean) {
         _uiState.update { it.copy(isLoading = loading, errorMessage = null) }
     }
-
 }

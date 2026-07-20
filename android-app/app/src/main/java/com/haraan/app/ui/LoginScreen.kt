@@ -8,19 +8,18 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.platform.LocalView
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.PathFillType
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.core.view.WindowInsetsControllerCompat
 import com.haraan.app.ui.animations.pressScale
 import coil.compose.AsyncImage
 import androidx.compose.foundation.background
@@ -28,12 +27,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,7 +51,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -81,11 +85,24 @@ fun LoginRoute(
 
     LoginScreen(
         uiState = uiState,
-        onPhoneChange = viewModel::onPhoneChange,
-        onOtpChange = viewModel::onOtpChange,
-        onContinueClick = viewModel::requestOtp,
-        onVerifyOtpClick = { viewModel.verifyOtp(onLoginSuccess) },
-        onBackToPhoneClick = viewModel::resetToPhone,
+        onEmailChange = viewModel::onEmailChange,
+        onPasswordChange = viewModel::onPasswordChange,
+        onNameChange = viewModel::onNameChange,
+        onSignUpToggle = viewModel::setSignUp,
+        onSubmitClick = { viewModel.signInWithPassword(onLoginSuccess) },
+        onExitForm = viewModel::clearMessages,
+        // Reset lives on the website (same accounts, same mail) — no app-side twin
+        // to keep in sync. Opens externally so the login screen keeps its state.
+        onForgotPasswordClick = {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("${com.haraan.app.data.ApiConfig.BASE_URL}/forgot-password")
+                    )
+                )
+            }
+        },
         onSkipClick = onSkipClick,
         // "Continue with Google": drive Credential Manager here (needs an Activity context),
         // then hand the ID token to the VM. Only offered when a Web client ID is configured.
@@ -116,19 +133,38 @@ private val Text2 = Color(0xFF475569)
 private val Text3 = Color(0xFF94A3B8)
 private val Stroke = Color(0xFFE2E8F0)
 private val FieldBg = Color(0xFFF8FAFC)
-private val BlueTint = Color(0xFFEFF4FF)
 private val FrostFill = Color.White.copy(alpha = 0.16f)
 private val FrostBorder = Color.White.copy(alpha = 0.30f)
+private val Danger = Color(0xFFDC2626)
+// Green is reserved for the committed/done state — blue stays the "act now" colour.
+private val Success = Color(0xFF16A34A)
+private val SuccessTint = Color(0xFFE7F7EC)
+
+// ── Type scale ────────────────────────────────────────────────────────────────
+// Three sizes, three weights. The premium read on this screen comes from using
+// the same few values everywhere rather than from more decoration — the previous
+// pass drifted to 11/13/13.5/14/15/16/26sp, which is what made it feel generic.
+private val TitleSize = 24.sp   // the one headline
+private val BodySize = 16.sp    // CTA labels, field text
+private val CaptionSize = 13.sp // helper text, legal, secondary links
+
+// ── Spacing grid ──────────────────────────────────────────────────────────────
+// Everything on this screen snaps to 8 / 16 / 24. No in-between values.
+private val GapS = 8.dp
+private val GapM = 16.dp
+private val GapL = 24.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LoginScreen(
     uiState: LoginUiState,
-    onPhoneChange: (String) -> Unit,
-    onOtpChange: (String) -> Unit,
-    onContinueClick: () -> Unit,
-    onVerifyOtpClick: () -> Unit,
-    onBackToPhoneClick: () -> Unit,
+    onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onSignUpToggle: (Boolean) -> Unit,
+    onSubmitClick: () -> Unit,
+    onExitForm: () -> Unit = {},
+    onForgotPasswordClick: () -> Unit = {},
     onSkipClick: () -> Unit = {},
     googleEnabled: Boolean = false,
     onGoogleClick: () -> Unit = {},
@@ -137,16 +173,48 @@ fun LoginScreen(
     var isDetailsInputVisible by remember { mutableStateOf(false) }
     val view = LocalView.current
 
-    // Card entrance — a subtle rise + fade the first time the screen appears.
+    // Expanding the card into the credentials form is a navigation step, so Back has to
+    // undo it. Without this the whole login screen is the Activity's only destination and
+    // Back fell straight through to the system — the app closed instead of going back to
+    // the Google/email choice. Unwinds one step at a time (sign-up → sign-in → landing).
+    // Disabled during Success so Back can't interrupt the hand-off to the app.
+    BackHandler(enabled = isDetailsInputVisible && uiState.stage != LoginStage.Success) {
+        if (uiState.isSignUp) {
+            onSignUpToggle(false)
+        } else {
+            isDetailsInputVisible = false
+            onExitForm()
+        }
+    }
+
+    // The top of this screen is ALWAYS a darkened poster, so the status-bar icons must
+    // be light. Without this the system keeps whatever appearance the rest of the app
+    // uses (dark icons for light surfaces) and they sink into the scrim — which is what
+    // made "no scrim" and "weak scrim" look equally bad. Restored on dispose so the
+    // screens after login keep their own appearance.
+    if (!view.isInEditMode) {
+        DisposableEffect(Unit) {
+            val window = (view.context as? android.app.Activity)?.window
+            val controller = window?.let { WindowInsetsControllerCompat(it, view) }
+            val previous = controller?.isAppearanceLightStatusBars
+            controller?.isAppearanceLightStatusBars = false
+            onDispose { if (previous != null) controller.isAppearanceLightStatusBars = previous }
+        }
+    }
+
+    // Card entrance — the poster settles first, then the card rises 24dp and fades
+    // in on an ease-out curve. Deliberately a short, single motion: the previous
+    // 450ms linear rise from 64dp read as a slide-up panel rather than an arrival.
     var cardVisible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { cardVisible = true }
     val cardAlpha by animateFloatAsState(
         targetValue = if (cardVisible) 1f else 0f,
-        animationSpec = tween(durationMillis = 450), label = "cardAlpha"
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing), label = "cardAlpha"
     )
+    val cardShift = with(LocalDensity.current) { GapL.toPx() }
     val cardShiftPx by animateFloatAsState(
-        targetValue = if (cardVisible) 0f else 64f,
-        animationSpec = tween(durationMillis = 450), label = "cardShift"
+        targetValue = if (cardVisible) 0f else cardShift,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing), label = "cardShift"
     )
 
     // Ken-Burns — a slow continuous zoom so the hero breathes instead of sitting flat.
@@ -206,12 +274,16 @@ fun LoginScreen(
             val imgModifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { scaleX = posterZoom; scaleY = posterZoom }
+            // Anchor the crop to the TOP: the card covers the lower ~45% of the screen,
+            // and posters put their subject's face in the upper half. Centre-cropping
+            // pushed faces behind the card and sliced them at the card edge.
             if (hasRemote) {
                 AsyncImage(
                     model = remotePosters[actualPage],
                     contentDescription = "Poster ${actualPage + 1}",
                     modifier = imgModifier,
                     contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
                     placeholder = painterResource(id = localPosters[actualPage % localPosters.size]),
                     error = painterResource(id = localPosters[actualPage % localPosters.size]),
                 )
@@ -220,20 +292,23 @@ fun LoginScreen(
                     painter = painterResource(id = localPosters[actualPage]),
                     contentDescription = "Poster ${actualPage + 1}",
                     modifier = imgModifier,
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter
                 )
             }
         }
 
-        // 2. Soft scrim — darkens the very top (for Skip) and the very bottom (so the
-        //    white card's edge blends into the image instead of cutting hard).
+        // 2. Scrim — the top stop has to guarantee legibility for the status-bar icons
+        //    and Skip against an ARBITRARY admin-uploaded poster, so it is sized for the
+        //    worst case (a bright, near-white image), not for the posters shipped today.
+        //    0.30f was too weak: on the light cricket poster the status icons vanished.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0.0f to Ink.copy(alpha = 0.30f),
-                        0.22f to Color.Transparent,
+                        0.0f to Ink.copy(alpha = 0.55f),
+                        0.18f to Color.Transparent,
                         0.70f to Color.Transparent,
                         1.0f to Ink.copy(alpha = 0.55f),
                     )
@@ -268,9 +343,9 @@ fun LoginScreen(
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
             // card has room and nothing clips.
-            if (uiState.stage == LoginStage.EnterPhone && !isDetailsInputVisible) {
+            if (uiState.stage == LoginStage.EnterCredentials && !isDetailsInputVisible) {
                 Row(
-                    modifier = Modifier.padding(bottom = 14.dp),
+                    modifier = Modifier.padding(bottom = GapM),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     repeat(posterCount.coerceAtLeast(1)) { i ->
@@ -305,178 +380,79 @@ fun LoginScreen(
                         // keyboard / nav bar is white — never a strip of background image.
                         // Union (not sum) avoids double-counting the nav bar.
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-                        .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 18.dp),
+                        .padding(start = GapL, end = GapL, top = GapM, bottom = GapL),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Authenticated: hold a short confirmation instead of cutting straight
+                    // to the app. The VM delays its success callback by the same beat.
+                    if (uiState.stage == LoginStage.Success) {
+                        LoginSuccessPanel(name = uiState.name)
+                        return@Column
+                    }
+
                     // Full branding only in the collapsed hero — hidden once the keyboard
                     // is up so the card stays compact and nothing clips at the top.
-                    val showBranding = uiState.stage == LoginStage.EnterPhone && !isDetailsInputVisible
+                    val showBranding = uiState.stage == LoginStage.EnterCredentials && !isDetailsInputVisible
 
                     // Grab handle.
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 12.dp)
+                            .padding(bottom = GapM)
                             .size(width = 36.dp, height = 4.dp)
                             .clip(RoundedCornerShape(2.dp))
                             .background(Stroke)
                     )
 
-                    if (showBranding) {
-                        // Hero — the decorative art (festival left / sports right) is a
-                        // full-bleed backdrop with a clear centre channel; the brand mark,
-                        // wordmark and tagline stack over that channel so the artwork frames
-                        // the branding as one unit, matching the reference design. Bleeds past
-                        // the card's 24dp side padding so the art reaches the card edges.
-                        Box(
-                            modifier = Modifier
-                                .layout { measurable, constraints ->
-                                    val bleed = 24.dp.roundToPx()
-                                    val fullWidth = constraints.maxWidth + bleed * 2
-                                    val placeable = measurable.measure(
-                                        constraints.copy(minWidth = fullWidth, maxWidth = fullWidth)
-                                    )
-                                    // Report the ORIGINAL width so the parent keeps this node in
-                                    // its normal centred slot; the content overflows symmetrically
-                                    // by `bleed` on each side to reach both card edges.
-                                    layout(constraints.maxWidth, placeable.height) {
-                                        placeable.place(-bleed, 0)
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Full art (not cropped) so the festival/sports clusters and their
-                            // waves run down the left/right sides of the card instead of leaving
-                            // empty margins.
-                            Image(
-                                painter = painterResource(id = R.drawable.login_card_art),
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxWidth(),
-                                contentScale = ContentScale.FillWidth
-                            )
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // Brand mark — blue H in a soft tinted tile.
-                                Box(
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(BlueTint),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.haraan_copy),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(30.dp),
-                                        contentScale = ContentScale.Fit,
-                                        colorFilter = ColorFilter.tint(Accent)
-                                    )
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                // Brand wordmark image — replaces the text wordmark.
-                                Image(
-                                    painter = painterResource(id = R.drawable.haraan_wordmark),
-                                    contentDescription = com.haraan.app.ui.theme.Brand.name,
-                                    modifier = Modifier.height(46.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                            }
-                        }
-                        // Tagline + subtitle on clean white, flanked by matching accent
-                        // motifs (blue left / green right) drawn into the side margins so the
-                        // empty lower sides of the card carry the artwork downward.
-                        Spacer(Modifier.height(8.dp))
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            LoginSideAccents(modifier = Modifier.matchParentSize())
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = com.haraan.app.ui.theme.Brand.tagline.uppercase(),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Text2,
-                                    letterSpacing = 1.4.sp,
-                                    maxLines = 1,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                Text(
-                                    text = "Login or sign up to continue",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Text2,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    } else {
-                        // Compact header for the email / OTP / profile steps — keeps the brand
-                        // mark for identity but drops the full artwork so the card stays tight.
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(BlueTint),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.haraan_copy),
-                                contentDescription = null,
-                                modifier = Modifier.size(26.dp),
-                                contentScale = ContentScale.Fit,
-                                colorFilter = ColorFilter.tint(Accent)
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = com.haraan.app.ui.theme.Brand.name,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Text1,
-                            letterSpacing = (-0.5).sp
-                        )
-                        Spacer(Modifier.height(16.dp))
-                    }
+                    // Brand once, then get out of the way. The card previously stacked a
+                    // tinted "H" tile, the wordmark, an all-caps tagline AND a subtitle
+                    // before the first button — four elements all saying "this is Haraan".
+                    // The wordmark alone carries identity; the poster carries personality.
+                    // The decorative festival/sports line-art is gone for the same reason:
+                    // it duplicated what the hero image already communicates, and sitting
+                    // behind the wordmark it cost contrast for nothing.
+                    Image(
+                        painter = painterResource(id = R.drawable.haraan_wordmark),
+                        contentDescription = com.haraan.app.ui.theme.Brand.name,
+                        modifier = Modifier.height(if (showBranding) 40.dp else 32.dp),
+                        contentScale = ContentScale.Fit
+                    )
 
-                    // On the branding landing the subtitle is rendered inside the accent box
-                    // above; here it covers every other stage (email entry / OTP / profile),
-                    // flanked by the same accent motifs so these cards aren't blank either.
-                    if (!showBranding) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            LoginSideAccents(modifier = Modifier.matchParentSize())
-                            Text(
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(vertical = 6.dp),
-                                text = when (uiState.stage) {
-                                    LoginStage.EnterPhone ->
-                                        if (!isDetailsInputVisible) "Login or sign up to continue"
-                                        else "Enter your WhatsApp number to get a code"
-                                    LoginStage.VerifyOtp -> "Enter the 6-digit code sent to your WhatsApp"
-                                    else -> ""
-                                },
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Text2,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
+                    Spacer(Modifier.height(GapS))
 
-                    Spacer(Modifier.height(18.dp))
+                    // One line of copy, sized as the screen's single headline. It states
+                    // what this screen is for — the tagline said what the brand is for,
+                    // which the user did not ask about at the moment of signing in.
+                    Text(
+                        text = when {
+                            // Kept short on purpose: at 24sp "…to continue" ran the full
+                            // width of a 411dp screen and would wrap to two lines on a
+                            // 360dp phone, which turns the headline into a paragraph.
+                            !isDetailsInputVisible -> "Login or sign up"
+                            uiState.isSignUp -> "Create your account"
+                            else -> "Sign in to continue"
+                        },
+                        fontSize = if (showBranding) TitleSize else BodySize,
+                        fontWeight = FontWeight.Bold,
+                        color = Text1,
+                        textAlign = TextAlign.Center,
+                        lineHeight = if (showBranding) 30.sp else 22.sp
+                    )
+
+                    Spacer(Modifier.height(GapL))
 
                     val fieldColors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
                         unfocusedBorderColor = Stroke,
                         focusedContainerColor = FieldBg,
-                        unfocusedContainerColor = FieldBg
+                        unfocusedContainerColor = FieldBg,
+                        focusedLabelColor = Accent,
+                        unfocusedLabelColor = Text3
                     )
 
-                    when (uiState.stage) {
-                        // ── Step 1: email only ────────────────────────────────────────────
-                        LoginStage.EnterPhone -> {
+                    // Landing offers the two ways in; tapping the email option expands
+                    // this same card into the credentials form. There is no second step —
+                    // the backend signs up an unknown email, exactly as the website does.
+                    run {
                             if (!isDetailsInputVisible) {
                                 // Primary CTA — "Continue with Google" (when a Web client ID is
                                 // configured). Email drops to a secondary text link below.
@@ -508,24 +484,24 @@ fun LoginScreen(
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
-                                        Spacer(Modifier.width(10.dp))
+                                        Spacer(Modifier.width(GapS))
                                         Text(
                                             "Continue with Google",
-                                            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                                            fontSize = BodySize, fontWeight = FontWeight.Bold, color = Color.White,
                                             maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
                                         )
                                     }
 
                                     if (!uiState.errorMessage.isNullOrEmpty()) {
-                                        Spacer(Modifier.height(12.dp))
-                                        Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                        Spacer(Modifier.height(GapM))
+                                        Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                     }
 
-                                    // Secondary — WhatsApp OTP as a plain text link.
-                                    Spacer(Modifier.height(16.dp))
+                                    // Secondary — email + password as a plain text link.
+                                    Spacer(Modifier.height(GapM))
                                     Text(
-                                        text = "Continue with WhatsApp",
-                                        fontSize = 14.sp,
+                                        text = "Continue with email",
+                                        fontSize = CaptionSize,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Accent,
                                         textAlign = TextAlign.Center,
@@ -535,10 +511,10 @@ fun LoginScreen(
                                                 view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                                                 isDetailsInputVisible = true
                                             }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            .padding(horizontal = GapM, vertical = GapS)
                                     )
                                 } else {
-                                    // No Google client configured — WhatsApp is the primary CTA.
+                                    // No Google client configured — email is the primary CTA.
                                     val ci = remember { MutableInteractionSource() }
                                     Button(
                                         onClick = {
@@ -551,119 +527,170 @@ fun LoginScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = Accent)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Outlined.Chat,
+                                            imageVector = Icons.Outlined.Email,
                                             contentDescription = null,
                                             tint = Color.White,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        Spacer(Modifier.width(10.dp))
+                                        Spacer(Modifier.width(GapS))
                                         Text(
-                                            "Continue with WhatsApp",
-                                            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                                            "Continue with email",
+                                            fontSize = BodySize, fontWeight = FontWeight.Bold, color = Color.White,
                                             maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
                                         )
                                     }
 
                                     if (!uiState.errorMessage.isNullOrEmpty()) {
-                                        Spacer(Modifier.height(12.dp))
-                                        Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                        Spacer(Modifier.height(GapM))
+                                        Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                     }
                                 }
                             } else {
-                                // +91 is fixed, as on the website's login: the bridge dials
-                                // exactly what it's sent, and the VM prepends the same code.
+                                // Name is asked only when the user chose "Create account".
+                                // On plain sign-in an unknown email still creates the account
+                                // (as on the website) and the name defaults to the local part.
+                                // Labels float above the value instead of being placeholders:
+                                // a placeholder disappears the moment you type, leaving two
+                                // identical-looking boxes with no way to re-check which is which.
+                                if (uiState.isSignUp) {
+                                    OutlinedTextField(
+                                        value = uiState.name,
+                                        onValueChange = onNameChange,
+                                        label = { Text("Your name") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(16.dp),
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Text,
+                                            imeAction = ImeAction.Next
+                                        ),
+                                        singleLine = true,
+                                        colors = fieldColors
+                                    )
+                                    Spacer(Modifier.height(GapM))
+                                }
+
+                                // Inline validation only after the user has actually typed —
+                                // a pristine empty field must never be shouted at.
+                                val emailTouched = uiState.email.isNotEmpty()
+                                val emailBad = emailTouched && !uiState.isEmailValid
                                 OutlinedTextField(
-                                    value = uiState.phone,
-                                    onValueChange = onPhoneChange,
-                                    placeholder = { Text("Mobile number", color = Text3) },
-                                    leadingIcon = {
-                                        Text(
-                                            "+91",
-                                            color = Text2,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(start = 14.dp)
-                                        )
-                                    },
+                                    value = uiState.email,
+                                    onValueChange = onEmailChange,
+                                    label = { Text("Email address") },
+                                    isError = emailBad,
+                                    supportingText = if (emailBad) {
+                                        { Text("Enter a valid email address", fontSize = CaptionSize) }
+                                    } else null,
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(16.dp),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Email,
+                                        imeAction = ImeAction.Next
+                                    ),
+                                    singleLine = true,
+                                    colors = fieldColors
+                                )
+
+                                Spacer(Modifier.height(GapM))
+
+                                var passwordVisible by remember { mutableStateOf(false) }
+                                val passwordTouched = uiState.password.isNotEmpty()
+                                val passwordBad = passwordTouched && !uiState.isPasswordValid
+                                OutlinedTextField(
+                                    value = uiState.password,
+                                    onValueChange = onPasswordChange,
+                                    label = { Text("Password") },
+                                    isError = passwordBad,
+                                    // Says why the button is inert, instead of leaving a dead
+                                    // grey button and no explanation.
+                                    supportingText = if (passwordBad) {
+                                        { Text("At least 6 characters", fontSize = CaptionSize) }
+                                    } else null,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Password,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    keyboardActions = KeyboardActions(onDone = { if (uiState.canSubmit) onSubmitClick() }),
+                                    visualTransformation =
+                                        if (passwordVisible) VisualTransformation.None
+                                        else PasswordVisualTransformation(),
+                                    trailingIcon = {
+                                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                            Icon(
+                                                imageVector =
+                                                    if (passwordVisible) Icons.Outlined.VisibilityOff
+                                                    else Icons.Outlined.Visibility,
+                                                contentDescription =
+                                                    if (passwordVisible) "Hide password" else "Show password",
+                                                tint = Text3
+                                            )
+                                        }
+                                    },
                                     singleLine = true,
                                     colors = fieldColors
                                 )
 
                                 if (!uiState.errorMessage.isNullOrEmpty()) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
+                                    Spacer(Modifier.height(GapM))
+                                    Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
                                 }
 
-                                Spacer(Modifier.height(14.dp))
+                                Spacer(Modifier.height(GapL))
 
                                 val pi = remember { MutableInteractionSource() }
                                 Button(
                                     onClick = {
                                         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                        onContinueClick()
+                                        onSubmitClick()
                                     },
                                     interactionSource = pi,
                                     modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(pi),
                                     shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
-                                    enabled = uiState.canContinue
+                                    enabled = uiState.canSubmit
                                 ) {
                                     Text(
-                                        if (uiState.isLoading) "Please wait…" else "Get login code",
-                                        fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                        color = if (uiState.canContinue) Color.White else Text3
+                                        when {
+                                            uiState.isLoading -> "Please wait…"
+                                            uiState.isSignUp -> "Create account"
+                                            else -> "Sign in"
+                                        },
+                                        fontSize = BodySize, fontWeight = FontWeight.Bold,
+                                        color = if (uiState.canSubmit) Color.White else Text3
                                     )
                                 }
+
+                                // Two different intents, so two different weights: the mode
+                                // switch is the accent-coloured one, recovery is quiet grey.
+                                // Previously both were equal-weight and read as a pair.
+                                Spacer(Modifier.height(GapS))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(onClick = { onSignUpToggle(!uiState.isSignUp) }) {
+                                        Text(
+                                            if (uiState.isSignUp) "I have an account" else "Create account",
+                                            color = Accent, fontSize = CaptionSize, fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    // Reset is web-only — the app opens the site's flow.
+                                    if (!uiState.isSignUp) {
+                                        TextButton(onClick = onForgotPasswordClick) {
+                                            Text(
+                                                "Forgot password?",
+                                                color = Text3, fontSize = CaptionSize, fontWeight = FontWeight.Normal
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        }
-
-                        // ── Step 2: verify the 6-digit code ───────────────────────────────
-                        LoginStage.VerifyOtp -> {
-                            OtpEntryRow(otp = uiState.otp, onOtpChange = onOtpChange, modifier = Modifier.fillMaxWidth())
-
-                            if (!uiState.errorMessage.isNullOrEmpty()) {
-                                Spacer(Modifier.height(12.dp))
-                                Text(uiState.errorMessage, color = Color(0xFFDC2626), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
-                            }
-                            if (!uiState.successMessage.isNullOrEmpty()) {
-                                Spacer(Modifier.height(12.dp))
-                                Text(uiState.successMessage, color = Color(0xFF16A34A), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
-                            }
-
-                            Spacer(Modifier.height(14.dp))
-
-                            val vi = remember { MutableInteractionSource() }
-                            Button(
-                                onClick = {
-                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                    onVerifyOtpClick()
-                                },
-                                interactionSource = vi,
-                                modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(vi),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
-                                enabled = uiState.isOtpValid && !uiState.isLoading
-                            ) {
-                                Text(
-                                    if (uiState.isLoading) "Verifying…" else "Verify & Proceed",
-                                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                    color = if (uiState.isOtpValid && !uiState.isLoading) Color.White else Text3
-                                )
-                            }
-
-                            Spacer(Modifier.height(4.dp))
-                            TextButton(onClick = onBackToPhoneClick) {
-                                Text("Change number", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
-                        else -> {}
                     }
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(GapM))
 
                     Text(
                         text = buildAnnotatedString {
@@ -672,10 +699,10 @@ fun LoginScreen(
                                 append("Terms & Conditions")
                             }
                         },
-                        fontSize = 12.sp,
+                        fontSize = CaptionSize,
                         color = Text3,
                         textAlign = TextAlign.Center,
-                        lineHeight = 17.sp
+                        lineHeight = 18.sp
                     )
                 }
             }
@@ -683,119 +710,61 @@ fun LoginScreen(
     }
 }
 
-@Composable
-fun OtpEntryRow(
-    otp: String,
-    onOtpChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    BasicTextField(
-        value = otp,
-        onValueChange = {
-            if (it.length <= 6) {
-                onOtpChange(it)
-            }
-        },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        decorationBox = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = modifier
-            ) {
-                repeat(6) { index ->
-                    val char = when {
-                        index >= otp.length -> ""
-                        else -> otp[index].toString()
-                    }
-                    val isFocused = otp.length == index
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(56.dp)
-                            .background(FieldBg, RoundedCornerShape(14.dp))
-                            .border(
-                                width = if (isFocused) 2.dp else 1.dp,
-                                color = if (isFocused) Accent else Stroke,
-                                shape = RoundedCornerShape(14.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = char,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Text1
-                        )
-                    }
-                }
-            }
-        }
-    )
-}
-
-// Art green sampled from the login artwork's sports (right) cluster.
-private val ArtGreen = Color(0xFF16A34A)
-
 /**
- * Decorative accent motifs — sparkles, a dotted path and a location pin — drawn into the
- * left/right side margins (blue on the left, green on the right) so the empty lower sides
- * of the login card echo the artwork instead of reading as blank white.
+ * The confirmation beat shown between a successful sign-in and the app taking over.
+ * Green, not blue: on this screen blue means "act", green means "committed" — the
+ * user has nothing left to do here.
+ *
+ * The check scales in once (spring, no bounce loop) so the moment registers without
+ * turning into an animation the user has to wait through; [LoginViewModel] holds the
+ * navigation for the same beat, so the panel is never cut off mid-transition.
  */
 @Composable
-private fun LoginSideAccents(modifier: Modifier = Modifier) {
-    val blue = Accent.copy(alpha = 0.55f)
-    val green = ArtGreen.copy(alpha = 0.55f)
-    Canvas(modifier = modifier) {
-        drawAccentCluster(size.width, size.height, mirror = false, color = blue)
-        drawAccentCluster(size.width, size.height, mirror = true, color = green)
-    }
-}
-
-/** Draws one side's cluster; [mirror] flips it horizontally for the opposite margin. */
-private fun DrawScope.drawAccentCluster(w: Float, h: Float, mirror: Boolean, color: Color) {
-    fun px(fx: Float) = if (mirror) w - w * fx else w * fx
-    val path = Path().apply {
-        moveTo(px(0.05f), h * 0.12f)
-        quadraticBezierTo(px(0.22f), h * 0.32f, px(0.10f), h * 0.62f)
-    }
-    drawPath(
-        path,
-        color,
-        style = DrawStroke(
-            width = 1.5.dp.toPx(),
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 8f))
-        )
+private fun LoginSuccessPanel(name: String) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val scale by animateFloatAsState(
+        targetValue = if (shown) 1f else 0.6f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "checkScale"
     )
-    drawSparkle(Offset(px(0.14f), h * 0.30f), 6.dp.toPx(), color)
-    drawSparkle(Offset(px(0.045f), h * 0.54f), 3.5.dp.toPx(), color)
-    drawPin(Offset(px(0.11f), h * 0.82f), 5.dp.toPx(), color)
-}
 
-/** A 4-point sparkle (concave star). */
-private fun DrawScope.drawSparkle(c: Offset, r: Float, color: Color) {
-    val i = r * 0.36f
-    val p = Path().apply {
-        moveTo(c.x, c.y - r)
-        lineTo(c.x + i, c.y - i)
-        lineTo(c.x + r, c.y)
-        lineTo(c.x + i, c.y + i)
-        lineTo(c.x, c.y + r)
-        lineTo(c.x - i, c.y + i)
-        lineTo(c.x - r, c.y)
-        lineTo(c.x - i, c.y - i)
-        close()
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = GapL),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .clip(CircleShape)
+                .background(SuccessTint),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+        Spacer(Modifier.height(GapM))
+        Text(
+            // The name is only known when they just signed up; returning users get the
+            // neutral line rather than a greeting built from a guessed value.
+            text = if (name.isNotBlank()) "Welcome, ${name.trim()}" else "You're signed in",
+            fontSize = TitleSize,
+            fontWeight = FontWeight.Bold,
+            color = Text1,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(GapS))
+        Text(
+            text = "Taking you in…",
+            fontSize = CaptionSize,
+            fontWeight = FontWeight.Normal,
+            color = Text2,
+            textAlign = TextAlign.Center
+        )
     }
-    drawPath(p, color)
-}
-
-/** A location pin (teardrop with a hollow centre via even-odd fill). */
-private fun DrawScope.drawPin(c: Offset, r: Float, color: Color) {
-    val p = Path().apply {
-        fillType = PathFillType.EvenOdd
-        moveTo(c.x, c.y + r * 1.9f)
-        cubicTo(c.x - r * 1.4f, c.y + r * 0.4f, c.x - r, c.y - r * 0.6f, c.x, c.y - r)
-        cubicTo(c.x + r, c.y - r * 0.6f, c.x + r * 1.4f, c.y + r * 0.4f, c.x, c.y + r * 1.9f)
-        addOval(Rect(c.x - r * 0.42f, c.y - r * 0.55f, c.x + r * 0.42f, c.y + r * 0.29f))
-    }
-    drawPath(p, color)
 }

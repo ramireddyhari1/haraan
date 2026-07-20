@@ -159,6 +159,34 @@ class HaraanAuthRepository(
     }
 
   /**
+   * Email + password sign-in — the same credential the website accepts, and the
+   * app's primary email path (it replaced WhatsApp OTP on the login screen).
+   * Mirrors the web: an unknown email creates the account, a known one is verified,
+   * so there is no separate "sign up" call. [name] is only used when creating.
+   */
+  suspend fun passwordLogin(email: String, password: String, name: String? = null): VerifyOtpResult =
+    withContext(Dispatchers.IO) {
+      val body = JSONObject()
+        .put("email", email.trim())
+        .put("password", password)
+      if (!name.isNullOrBlank()) body.put("name", name.trim())
+
+      val response = postJson(path = "/api/auth/password", jsonBody = body)
+
+      if (response.code !in 200..299) {
+        throw IllegalStateException(parseErrorMessage(response.body, "Couldn't sign you in. Please try again."))
+      }
+
+      val json = JSONObject(response.body)
+      val user = json.getJSONObject("user")
+      VerifyOtpResult(
+        token = json.getString("token"),
+        userName = user.optString("name", "Haraan user"),
+        message = json.optString("message", "Login successful."),
+      )
+    }
+
+  /**
    * "Continue with Google": exchange a Google ID token (from Credential Manager) for an app
    * JWT. The backend verifies the token with Google and creates the account on first sign-in,
    * so there's no separate profile step — the name comes from the Google account.
@@ -223,11 +251,19 @@ class HaraanAuthRepository(
 
   private fun parseErrorMessage(body: String, fallback: String): String {
     return try {
-      if (body.isBlank()) {
-        fallback
-      } else {
-        JSONObject(body).optString("error", fallback)
-      }
+      if (body.isBlank()) return fallback
+      val json = JSONObject(body)
+      // Our own handlers use {"error": …}; Laravel's validator (422) uses
+      // {"message": …, "errors": {field: [...]}} — prefer the specific field
+      // message so "Your password must be at least 6 characters." reaches the user.
+      json.optString("error").takeIf { it.isNotBlank() }
+        ?: json.optJSONObject("errors")?.let { errors ->
+          errors.keys().asSequence()
+            .mapNotNull { errors.optJSONArray(it)?.optString(0) }
+            .firstOrNull { it.isNotBlank() }
+        }
+        ?: json.optString("message").takeIf { it.isNotBlank() }
+        ?: fallback
     } catch (_: Exception) {
       fallback
     }

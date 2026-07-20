@@ -336,8 +336,8 @@ fun MainScreen(
   } else {
     com.haraan.app.ui.LoginRoute(
       onSkipClick = {
-        com.haraan.app.data.TokenStore.saveToken(context, "skipped_guest")
-        cachedToken = "skipped_guest"
+        com.haraan.app.data.TokenStore.saveToken(context, com.haraan.app.data.TokenStore.GUEST_TOKEN)
+        cachedToken = com.haraan.app.data.TokenStore.GUEST_TOKEN
       },
       onLoginSuccess = { token ->
         com.haraan.app.data.TokenStore.saveToken(context, token)
@@ -483,6 +483,7 @@ internal fun MainAppContainer(
     )
   }
   var showLocationSheet by remember { mutableStateOf(false) }
+  com.haraan.app.ui.DismissOnBack(showLocationSheet) { showLocationSheet = false }
   // Search radius for nearby content; 0 == "Any distance". (Phase 3)
   var searchRadiusKm by remember { mutableStateOf(10) }
   // Pull the latest city catalog (cities.json) once so the picker + normaliser are current.
@@ -923,6 +924,14 @@ internal fun MainAppContainer(
       }
     }
 
+    // Back unwinds these overlays from the topmost down. Order matters: the ticket
+    // pass renders above everything, so it must be the first to consume Back, and
+    // each lower layer is disabled while a higher one is open. AccountProfileScreen
+    // owns Back for its OWN sub-pages, so it is only listed here for its base state.
+    com.haraan.app.ui.DismissOnBack(ticketPass != null) { ticketPass = null }
+    com.haraan.app.ui.DismissOnBack(showNotifications && ticketPass == null) { showNotifications = false }
+    com.haraan.app.ui.DismissOnBack(showCricketProfile && ticketPass == null) { showCricketProfile = false }
+
     if (showAccountProfile) {
       com.haraan.app.ui.profile.AccountProfileScreen(
         onClose = { showAccountProfile = false },
@@ -935,6 +944,9 @@ internal fun MainAppContainer(
         onOpenPass = { b -> ticketPass = b },
         onOpenSupport = { showAccountProfile = false; onItemClick(com.haraan.app.SupportChat) },
         onSignOut = { showAccountProfile = false; onLogout() },
+        // Guests carry a marker, not a credential — the screen must invite them to
+        // sign in rather than call the API and surface the backend's 401.
+        isGuest = com.haraan.app.data.TokenStore.isGuest(token),
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -1557,6 +1569,9 @@ private fun GameHubTabScreen(
   // Full-screen search overlay (Phase 2): recents are kept for the session.
   var showSearch by remember { mutableStateOf(false) }
   var recentSearches by remember { mutableStateOf(listOf<String>()) }
+
+  // A full-screen overlay must swallow Back, or dismissing the search closes the app.
+  com.haraan.app.ui.DismissOnBack(showSearch) { showSearch = false }
 
   val sports = listOf("All", "Cricket", "Football", "Badminton", "Basketball")
   
@@ -3390,11 +3405,11 @@ fun MainScreenPreview() {
   ThannaTheme {
     com.haraan.app.ui.LoginScreen(
       uiState = com.haraan.app.ui.LoginUiState(),
-      onPhoneChange = {},
-      onOtpChange = {},
-      onContinueClick = {},
-      onVerifyOtpClick = {},
-      onBackToPhoneClick = {}
+      onEmailChange = {},
+      onPasswordChange = {},
+      onNameChange = {},
+      onSignUpToggle = {},
+      onSubmitClick = {}
     )
   }
 }
@@ -3405,11 +3420,11 @@ fun MainScreenPortraitPreview() {
   ThannaTheme {
     com.haraan.app.ui.LoginScreen(
       uiState = com.haraan.app.ui.LoginUiState(),
-      onPhoneChange = {},
-      onOtpChange = {},
-      onContinueClick = {},
-      onVerifyOtpClick = {},
-      onBackToPhoneClick = {}
+      onEmailChange = {},
+      onPasswordChange = {},
+      onNameChange = {},
+      onSignUpToggle = {},
+      onSubmitClick = {}
     )
   }
 }
@@ -3464,6 +3479,15 @@ private fun CrexMatchesScreen(
   var showProfile by remember { mutableStateOf(false) }
   var selectedLeaderboardPlayer by remember { mutableStateOf<LeaderboardPlayer?>(null) }
   val listState = rememberLazyListState()
+
+  // Back closes whatever is open here, topmost first. The create wizard is NOT listed:
+  // it owns Back itself so it can step backwards through the form instead of discarding
+  // a half-built match. Everything else is a simple dismiss.
+  com.haraan.app.ui.DismissOnBack(selectedLeaderboardPlayer != null) { selectedLeaderboardPlayer = null }
+  com.haraan.app.ui.DismissOnBack(showJoinDialog) { showJoinDialog = false }
+  com.haraan.app.ui.DismissOnBack(showSettings) { showSettings = false }
+  com.haraan.app.ui.DismissOnBack(showProfile) { showProfile = false }
+  com.haraan.app.ui.DismissOnBack(showMenu && !showSettings && !showProfile) { showMenu = false }
 
   // Real GameHub live feed — null = still loading. Any failure yields an empty list,
   // so the screen falls back to its demo leagues and never shows an error.

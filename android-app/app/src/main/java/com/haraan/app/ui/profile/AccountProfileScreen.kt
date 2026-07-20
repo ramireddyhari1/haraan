@@ -76,6 +76,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -161,6 +162,9 @@ private sealed interface AccountState {
     data object Loading : AccountState
     data class Error(val message: String) : AccountState
 
+    /** Browsing after "Skip" — there is no session to load, so this is not an error. */
+    data object Guest : AccountState
+
     /**
      * [player] is optional on purpose: the ActionBoard profile is a second endpoint,
      * and a user who has never played should still get a complete account screen.
@@ -226,6 +230,7 @@ fun AccountProfileScreen(
     onOpenSupport: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
+    isGuest: Boolean = false,
 ) {
     var state by remember { mutableStateOf<AccountState>(AccountState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
@@ -238,7 +243,11 @@ fun AccountProfileScreen(
     var showPrivacy by remember { mutableStateOf(false) }
     var legalSlug by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(reloadKey) {
+    LaunchedEffect(reloadKey, isGuest) {
+        if (isGuest) {
+            state = AccountState.Guest
+            return@LaunchedEffect
+        }
         state = AccountState.Loading
         state = try {
             val account = fetchAccount()
@@ -255,6 +264,7 @@ fun AccountProfileScreen(
     // above this never flips back to Loading — on success it swaps in fresh data, on
     // failure it keeps what's on screen — so there's no spinner flash mid-view.
     AutoRefresh(intervalMs = 30_000L) {
+        if (isGuest) return@AutoRefresh
         val account = runCatching { fetchAccount() }.getOrNull() ?: return@AutoRefresh
         val bookings = runCatching { fetchBookings() }.getOrDefault(emptyList())
         val player = runCatching { fetchPlayer() }.getOrNull()
@@ -267,6 +277,19 @@ fun AccountProfileScreen(
             onBooked = { showVenueSheet = false; reloadKey++ },
         )
     }
+
+    // Each sub-page and sheet is a place the user navigated into, so Back has to
+    // unwind it rather than fall through to the Activity (which closed the app).
+    // Innermost first: the venue sheet sits ON TOP of bookings, so while it is open
+    // Back must close only the sheet — hence the `!showVenueSheet` guards below.
+    com.haraan.app.ui.DismissOnBack(showVenueSheet) { showVenueSheet = false }
+    com.haraan.app.ui.DismissOnBack(legalSlug != null) { legalSlug = null }
+    com.haraan.app.ui.DismissOnBack(showPrivacy && !showVenueSheet) { showPrivacy = false }
+    com.haraan.app.ui.DismissOnBack(showBookings && !showVenueSheet) { showBookings = false }
+    // Nothing open → Back leaves the account screen entirely.
+    com.haraan.app.ui.DismissOnBack(
+        !showVenueSheet && !showPrivacy && !showBookings && legalSlug == null
+    ) { onClose() }
 
     // Full pages, each carrying its own header — never nested inside the account's.
     legalSlug?.let { slug ->
@@ -310,6 +333,24 @@ fun AccountProfileScreen(
 
         when (val s = state) {
             is AccountState.Loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = BlueBright) }
+            // Not signed in by choice, not a failure: an invitation, no "Retry".
+            is AccountState.Guest -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("You're browsing as a guest", color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Sign in to see your tickets, bookings and player profile.",
+                        color = Text2,
+                        fontSize = 13.5.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(BlueBright).clickable(onClick = onSignOut)
+                            .padding(horizontal = 24.dp, vertical = 11.dp),
+                    ) { Text("Sign in", color = Color.White, fontWeight = FontWeight.Bold) }
+                }
+            }
             is AccountState.Error -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(s.message, color = Text2, fontSize = 14.sp)

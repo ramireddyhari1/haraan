@@ -47,6 +47,9 @@ Route::get('/i18n/{locale}', [\App\Http\Controllers\Api\I18nController::class, '
 Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:auth');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth');
+    // Email + password for the Android app — same semantics as the website's
+    // /auth/password (unknown email signs up), but returns a JWT.
+    Route::post('/password', [AuthController::class, 'passwordLogin'])->middleware('throttle:auth');
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::middleware('auth.jwt')->get('/me', [AuthController::class, 'me']);
 });
