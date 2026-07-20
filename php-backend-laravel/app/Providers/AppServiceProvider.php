@@ -41,6 +41,11 @@ class AppServiceProvider extends ServiceProvider
             $table->emptyStateIcon('heroicon-o-inbox')->striped();
         });
 
+        // Cluster sections render as nested sidebar items rather than Filament's
+        // in-content sub-navigation. Registered once here (not per panel) because
+        // it resolves the current panel itself — twice would duplicate every item.
+        \App\Filament\Support\ClusterSidebarNavigation::register();
+
         $this->configureRateLimiters();
 
         // Share the viewer's selected city with every view so the header pill
