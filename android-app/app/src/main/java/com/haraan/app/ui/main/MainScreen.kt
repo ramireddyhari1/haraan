@@ -6688,12 +6688,19 @@ private fun CrexBottomBar(
     Triple("Player", Icons.Filled.Person, Icons.Outlined.Person),
   )
 
-  NavigationBar(
+  // Deliberately NOT Material3's NavigationBar: its item internals carry padding
+  // tuned for the 80dp default, so constraining the container to the 56dp spec left
+  // the icon+label stack sitting high (measured 6.1dp above / 8.0dp below). A plain
+  // Row owns the vertical rhythm instead, so the content is genuinely centred in
+  // whatever HaraanBottomBar.Height says.
+  val selectedColor = Color(0xFF2563EB)
+  val idleColor = Color(0xFF9AA0AC)
+
+  Row(
     modifier = Modifier
       .fillMaxWidth()
-      // Clear the system navigation first, THEN size the bar — so the 56dp is the
-      // bar itself and never swallows the inset. Material3's NavigationBar defaults
-      // to 80dp, which is what put this at 96dp of chrome above the gesture bar.
+      // Clear the system navigation FIRST, then size the bar — so the 56dp is the
+      // bar itself and never swallows the inset.
       .navigationBarsPadding()
       .padding(horizontal = 8.dp, vertical = 8.dp)
       .height(com.haraan.app.ui.theme.HaraanBottomBar.Height)
@@ -6704,60 +6711,72 @@ private fun CrexBottomBar(
         ambientColor = Color.Black.copy(alpha = 0.04f),
         spotColor = Color.Black.copy(alpha = 0.06f)
       )
-      .border(BorderStroke(1.dp, Color(0xFFEDEFF3)), RoundedCornerShape(26.dp)),
-    containerColor = Color.White,
-    tonalElevation = 0.dp,
-    contentColor = Color.White,
+      .background(Color.White, RoundedCornerShape(26.dp))
+      .border(BorderStroke(1.dp, Color(0xFFEDEFF3)), RoundedCornerShape(26.dp))
+      .clip(RoundedCornerShape(26.dp)),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     items.forEach { (label, filledIcon, outlinedIcon) ->
       val isSelected = label == selectedSport
-      NavigationBarItem(
-        selected = isSelected,
-        onClick = {
-          when (label) {
-            "Home" -> onHomeClick()
-            "Player" -> onOthersClick()
-            else -> onSportSelected(label)
-          }
-        },
-        icon = {
-          // Springy scale + lift on the active icon — the bit of motion that reads premium.
-          val sel by animateFloatAsState(
-            targetValue = if (isSelected) 1f else 0f,
-            animationSpec = spring(dampingRatio = 0.5f, stiffness = 320f),
-            label = "navSel",
-          )
+      // Springy scale + lift on the active icon — the bit of motion that reads premium.
+      val sel by animateFloatAsState(
+        targetValue = if (isSelected) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 320f),
+        label = "navSel",
+      )
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .fillMaxHeight()
+          // No ripple bounds to fight the pill's rounded corners; the indicator and
+          // the icon lift already answer the tap.
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+          ) {
+            when (label) {
+              "Home" -> onHomeClick()
+              "Player" -> onOthersClick()
+              else -> onSportSelected(label)
+            }
+          },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+      ) {
+        // Selection pill sized to the icon, so it can never crowd the label.
+        Box(
+          modifier = Modifier
+            .size(width = 40.dp, height = 24.dp)
+            .background(
+              color = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
+              shape = RoundedCornerShape(12.dp)
+            ),
+          contentAlignment = Alignment.Center,
+        ) {
           Icon(
             imageVector = if (isSelected) filledIcon else outlinedIcon,
             contentDescription = label,
+            tint = if (isSelected) selectedColor else idleColor,
             modifier = Modifier
-              .size(24.dp)
+              .size(20.dp)
               .graphicsLayer {
                 val s = 1f + 0.14f * sel
                 scaleX = s
                 scaleY = s
-                translationY = -4f * sel
               }
           )
-        },
-        label = {
-          Text(
-            text = label,
-            fontSize = 10.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false
-          )
-        },
-        alwaysShowLabel = true,
-        colors = NavigationBarItemDefaults.colors(
-          selectedIconColor = Color(0xFF2563EB),
-          unselectedIconColor = Color(0xFF9AA0AC),
-          selectedTextColor = Color(0xFF2563EB),
-          unselectedTextColor = Color(0xFF9AA0AC),
-          indicatorColor = Color(0xFFE8F0FE)
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+          text = label,
+          fontSize = 10.sp,
+          lineHeight = 12.sp,
+          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+          color = if (isSelected) selectedColor else idleColor,
+          maxLines = 1,
+          softWrap = false,
         )
-      )
+      }
     }
   }
 }
