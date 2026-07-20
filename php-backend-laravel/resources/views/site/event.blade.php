@@ -1233,6 +1233,10 @@
             document.querySelector('.dr-sched').classList.toggle('is-open', open);
             document.querySelector('.dr-sched__backdrop').classList.toggle('is-open', open);
             document.body.classList.toggle('dr-lock', open);
+            // Give the sheet a history entry so Back closes it instead of leaving
+            // the event page. See HaraanOverlay in site.js.
+            if (open) window.HaraanOverlay.push('sched', () => drSchedToggle(false));
+            else window.HaraanOverlay.pop('sched');
         }
     </script>
     @endif
@@ -1288,6 +1292,10 @@
             document.querySelector('.dr-tix').classList.toggle('is-open', open);
             document.querySelector('.dr-tix__backdrop').classList.toggle('is-open', open);
             document.body.classList.toggle('dr-lock', open);
+            // The booking path: pressing Back here used to abandon the event page
+            // entirely, mid-purchase. Now it just closes the ticket sheet.
+            if (open) window.HaraanOverlay.push('tix', () => drTixToggle(false));
+            else window.HaraanOverlay.pop('tix');
         }
         function drStep(btn, delta) {
             const input = btn.parentElement.querySelector('input');
@@ -1353,10 +1361,12 @@
         box.querySelector('img').src = btn.querySelector('img').src;
         box.classList.add('is-open');
         document.body.classList.add('dr-lock');
+        window.HaraanOverlay.push('lbx', drLbxClose);
     }
     function drLbxClose() {
         document.querySelector('.dr-lbx').classList.remove('is-open');
         document.body.classList.remove('dr-lock');
+        window.HaraanOverlay.pop('lbx');
     }
     function drToast(msg) {
         let t = document.querySelector('.dr-toast');

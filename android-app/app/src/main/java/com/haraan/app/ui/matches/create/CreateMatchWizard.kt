@@ -216,6 +216,13 @@ fun CreateMatchWizard(
     var step by remember { mutableStateOf(0) }
     val lastStep = 3
 
+    // System Back must do exactly what the top bar's ← does. Until this existed the
+    // press fell through to the Activity and closed the app mid-wizard, discarding
+    // the whole draft (teams, squads, captains) with no warning.
+    com.haraan.app.ui.DismissOnBack(enabled = true) {
+        if (step == 0) onDismiss() else step--
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()

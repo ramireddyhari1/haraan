@@ -8,6 +8,65 @@
  *   3. Phone-login form submission
  */
 
+/* -------------------------------------------------------------------------- */
+/*  0. Overlay history — makes Back and Escape close overlays                   */
+/* -------------------------------------------------------------------------- */
+/**
+ * Every modal/sheet on this site is opened by toggling classes, which puts
+ * nothing in the browser history. On mobile that means the hardware/gesture Back
+ * button LEAVES THE PAGE instead of closing the overlay — the user loses their
+ * place (worst on the event ticket sheet, mid-booking). On desktop, Escape did
+ * nothing either.
+ *
+ * This gives each overlay a history entry so Back unwinds it, and closes the
+ * topmost one on Escape. Overlays opt in by calling push() when they open and
+ * pop() when they close — see openLoginModal/closeLoginModal for the pattern:
+ *
+ *   function openThing() { ...show DOM...; HaraanOverlay.push('thing', closeThing); }
+ *   function closeThing() { ...hide DOM...; HaraanOverlay.pop('thing'); }
+ *
+ * Both directions route through here, so the ✕ button, the backdrop, Escape and
+ * Back all end in the same place and the history stack cannot drift.
+ *
+ * Exposed on `window` so page-level inline scripts (event detail's sheets) can
+ * use it without duplicating the logic.
+ */
+window.HaraanOverlay = (function () {
+    const stack = [];      // names of open overlays, innermost last
+    const closers = {};    // name -> the function that hides it
+    // True only while we're reacting to a real Back press, so pop() knows not to
+    // call history.back() again (which would eat a second, unrelated entry).
+    let handlingPop = false;
+
+    function push(name, closeFn) {
+        if (stack.indexOf(name) !== -1) return;
+        closers[name] = closeFn;
+        stack.push(name);
+        history.pushState({ haraanOverlay: name }, '');
+    }
+
+    function pop(name) {
+        const i = stack.lastIndexOf(name);
+        if (i === -1) return;           // already closed — keeps close() idempotent
+        stack.splice(i, 1);
+        if (!handlingPop) history.back();
+    }
+
+    window.addEventListener('popstate', function () {
+        const name = stack[stack.length - 1];
+        if (!name) return;              // not our entry; let the browser navigate
+        handlingPop = true;
+        try { (closers[name] || function () {})(); } finally { handlingPop = false; }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || stack.length === 0) return;
+        (closers[stack[stack.length - 1]] || function () {})();
+    });
+
+    return { push: push, pop: pop, isOpen: function (n) { return stack.indexOf(n) !== -1; } };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     /* ------------------------------------------------------------------ */
     /*  1. Location Modal                                                  */
@@ -35,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
         locationModal.setAttribute('aria-hidden', 'false');
         locationModal.style.display = 'block';
         locationCard?.classList.add('show');
+        window.HaraanOverlay.push('location', closeLocationModal);
         locationSearch?.focus();
         // Now that the list has layout, reset to the top and light up the
         // matching A-Z letter (syncing before this point sees zero offsets).
@@ -47,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
         locationModal.setAttribute('aria-hidden', 'true');
         locationModal.style.display = 'none';
         locationCard?.classList.remove('show');
+        window.HaraanOverlay.pop('location');
     }
 
     /**
@@ -562,6 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loginModal.style.display = 'grid';
         // Now that the slot has a measurable width, GIS can size its button to fit.
         renderGoogleButtonIfNeeded();
+        window.HaraanOverlay.push('login', closeLoginModal);
         setTimeout(() => loginCard?.classList.add('show'), 20);
     }
 
@@ -569,6 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeLoginModal() {
         if (!loginModal) return;
         loginCard?.classList.remove('show');
+        window.HaraanOverlay.pop('login');
         setTimeout(() => {
             loginModal.setAttribute('aria-hidden', 'true');
             loginModal.style.display = 'none';
