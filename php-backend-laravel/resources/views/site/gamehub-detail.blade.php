@@ -1065,10 +1065,14 @@
         });
         modal.hidden = false;
         document.body.classList.add('mven-locked');
+        // Booking path: without a history entry, Back abandoned the venue page
+        // mid-booking instead of closing this sheet. See HaraanOverlay in site.js.
+        window.HaraanOverlay.push('mven', close);
     };
     const close = () => {
         modal.hidden = true;
         document.body.classList.remove('mven-locked');
+        window.HaraanOverlay.pop('mven');
         // Put every moved node back exactly where it was.
         for (const [node, at] of home) at.parent.insertBefore(node, at.next);
         home.clear();
