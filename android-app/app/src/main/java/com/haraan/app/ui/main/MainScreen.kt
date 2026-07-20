@@ -6691,8 +6691,12 @@ private fun CrexBottomBar(
   NavigationBar(
     modifier = Modifier
       .fillMaxWidth()
+      // Clear the system navigation first, THEN size the bar — so the 56dp is the
+      // bar itself and never swallows the inset. Material3's NavigationBar defaults
+      // to 80dp, which is what put this at 96dp of chrome above the gesture bar.
       .navigationBarsPadding()
       .padding(horizontal = 8.dp, vertical = 8.dp)
+      .height(com.haraan.app.ui.theme.HaraanBottomBar.Height)
       // Softer, lighter float — refined elevation + a single hairline border.
       .shadow(
         elevation = 7.dp,
