@@ -82,6 +82,8 @@ class PartnerPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
+                \App\Filament\Pages\Partner\PartnerSupport::class,
+                \App\Filament\Pages\Partner\PartnerNotifications::class,
             ])
             ->widgets([
                 AccountWidget::class,
