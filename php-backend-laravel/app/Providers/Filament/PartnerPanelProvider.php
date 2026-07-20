@@ -6,7 +6,6 @@ namespace App\Providers\Filament;
 
 use App\Http\Responses\PartnerLogoutResponse;
 use Filament\Auth\Http\Responses\Contracts\LogoutResponse;
-use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
@@ -91,7 +90,8 @@ class PartnerPanelProvider extends PanelProvider
                 DispatchServingFilamentEvent::class,
             ])
             ->authMiddleware([
-                Authenticate::class,
+                // Same 403 as Filament's, but with a way out (see the middleware).
+                \App\Http\Middleware\AuthenticateFilamentPanel::class,
             ]);
     }
 }

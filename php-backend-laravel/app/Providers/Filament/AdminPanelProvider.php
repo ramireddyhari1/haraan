@@ -2,7 +2,6 @@
 
 namespace App\Providers\Filament;
 
-use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
@@ -84,7 +83,8 @@ class AdminPanelProvider extends PanelProvider
                 DispatchServingFilamentEvent::class,
             ])
             ->authMiddleware([
-                Authenticate::class,
+                // Same 403 as Filament's, but with a way out (see the middleware).
+                \App\Http\Middleware\AuthenticateFilamentPanel::class,
             ])
             // Real-time refresh: subscribe the panel to the Reverb "content" channel so
             // dashboard widgets + live pages update in seconds when content changes. No-op
