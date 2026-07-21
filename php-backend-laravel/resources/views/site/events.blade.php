@@ -351,7 +351,13 @@
                         <img src="{{ $posterUrl }}" alt="{{ $event->title }}">
                     </div>
                     <div class="event-list-card__content">
-                        <p class="event-list-card__date">{{ optional($event->date)->format('D, j M, g:i A') }}</p>
+                        @php
+                            // Many events have no real start time (defaults to midnight);
+                            // showing "12:00 AM" everywhere reads as broken — drop it then.
+                            $dt = $event->date;
+                            $dLabel = $dt ? $dt->format('D, j M') . ($dt->format('H:i') !== '00:00' ? $dt->format(', g:i A') : '') : 'Date TBA';
+                        @endphp
+                        <p class="event-list-card__date">{{ $dLabel }}</p>
                         <h3 class="event-list-card__title">{{ $event->title }}</h3>
                         <p class="event-list-card__venue">{{ $event->venue }}</p>
                         <p class="event-list-card__price">₹{{ number_format((float) $event->price) }} onwards</p>
