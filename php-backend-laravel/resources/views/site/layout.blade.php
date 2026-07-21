@@ -87,7 +87,7 @@
         }
     </style>
 </head>
-<body class="@yield('body_class')">
+<body class="@yield('body_class') {{ request()->is('gamehub*') ? 'aurora-hub' : '' }}">
     <header class="topbar {{ request()->is('events*') || request()->is('/') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">

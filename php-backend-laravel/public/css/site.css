@@ -69,6 +69,19 @@ a {
 	}
 }
 
+/* GameHub is green-themed (--gamehub-cta) — re-tint the same aurora emerald so
+   the glow matches the page identity instead of clashing brand-blue. Inherits
+   the fixed position + breathing animation from the body::before rule above. */
+@media (min-width: 1200px) {
+	body.aurora-hub::before {
+		background-image:
+			radial-gradient(620px circle at 10% 18%, rgba(0, 200, 83, 0.18), rgba(0, 200, 83, 0) 58%),
+			radial-gradient(560px circle at 92% 26%, rgba(16, 185, 129, 0.16), rgba(16, 185, 129, 0) 55%),
+			radial-gradient(520px circle at 88% 92%, rgba(0, 200, 83, 0.11), rgba(0, 200, 83, 0) 60%),
+			linear-gradient(180deg, #f7fdf9, #ecf6ef);
+	}
+}
+
 /* Motion is decorative — honour users who ask for less of it. */
 @media (prefers-reduced-motion: reduce) {
 	body::before { animation: none; }
