@@ -107,56 +107,72 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 26px;
+            gap: 22px;
             transform: translateY(-2%);
         }
-        .hloader__logo {
+        /* Color-fill wordmark: the logo IS the progress bar. A faint grey "ghost"
+           copy of the wordmark sits under a blue copy that fills in left→right,
+           holds, then fades back — both painted through the logo's alpha as a mask,
+           so only the letterforms are ever coloured. */
+        .hloader__mark {
             position: relative;
-            width: clamp(180px, 42vw, 300px);
-            line-height: 0;
-            animation: hl-pop 0.7s cubic-bezier(0.16, 1, 0.3, 1) both,
-                       hl-float 2.8s ease-in-out 0.7s infinite;
+            width: clamp(190px, 44vw, 320px);
+            aspect-ratio: 1680 / 445; /* haraan-logo.png intrinsic ratio */
+            animation: hl-pop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
-        .hloader__logo img { width: 100%; height: auto; display: block; }
-        /* Shine sweep — a translucent white streak travels across the wordmark.
-           Screen-blended, so it only lifts the blue letters (it's a no-op over the
-           near-white plate): the gloss appears to run *through* the letterforms. */
-        .hloader__shine {
+        .hloader__ghost,
+        .hloader__fill {
             position: absolute;
             inset: 0;
-            pointer-events: none;
-            background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.92) 50%, transparent 60%);
-            background-size: 220% 100%;
-            background-repeat: no-repeat;
-            mix-blend-mode: screen;
-            animation: hl-shine 1.9s ease-in-out 0.5s infinite;
+            -webkit-mask: var(--logo) center / contain no-repeat;
+                    mask: var(--logo) center / contain no-repeat;
         }
-        .hloader__bar {
+        .hloader__ghost { background: #dbe3ef; }
+        .hloader__fill {
+            background: linear-gradient(90deg, #60a5fa 0%, #3b82f6 46%, #2563EB 100%);
+            clip-path: inset(0 100% 0 0);
+            will-change: clip-path, opacity;
+            animation: hl-fill 1.7s cubic-bezier(0.62, 0.02, 0.34, 1) infinite;
+        }
+        /* Meaning line under the mark: a thin track whose blue segment fills in
+           lockstep with the wordmark, reinforcing the "loading" read. */
+        .hloader__meter {
             position: relative;
             width: clamp(120px, 26vw, 190px);
-            height: 4px;
+            height: 3px;
             border-radius: 99px;
             background: rgba(37, 99, 235, 0.14);
             overflow: hidden;
         }
-        .hloader__bar span {
+        .hloader__meter::after {
+            content: "";
             position: absolute;
-            top: 0;
-            left: -45%;
-            height: 100%;
-            width: 42%;
+            inset: 0;
             border-radius: 99px;
             background: linear-gradient(90deg, #3b82f6, #2563EB);
-            animation: hl-bar 1.25s cubic-bezier(0.65, 0.05, 0.36, 1) infinite;
+            transform-origin: left center;
+            transform: scaleX(0);
+            animation: hl-meter 1.7s cubic-bezier(0.62, 0.02, 0.34, 1) infinite;
         }
-        @keyframes hl-pop { 0% { opacity: 0; transform: scale(0.86); } 100% { opacity: 1; transform: scale(1); } }
-        @keyframes hl-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-        @keyframes hl-shine { 0% { background-position: 130% 0; } 55%, 100% { background-position: -30% 0; } }
-        @keyframes hl-bar { 0% { left: -45%; width: 42%; } 50% { width: 58%; } 100% { left: 100%; width: 42%; } }
+        @keyframes hl-pop { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes hl-fill {
+            0%   { clip-path: inset(0 100% 0 0); opacity: 1; }
+            52%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+            74%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+            92%  { clip-path: inset(0 0 0 0);    opacity: 0; }
+            100% { clip-path: inset(0 100% 0 0); opacity: 0; }
+        }
+        @keyframes hl-meter {
+            0%   { transform: scaleX(0);    opacity: 1; }
+            52%  { transform: scaleX(1);    opacity: 1; }
+            74%  { transform: scaleX(1);    opacity: 1; }
+            92%  { transform: scaleX(1);    opacity: 0; }
+            100% { transform: scaleX(0);    opacity: 0; }
+        }
         @media (prefers-reduced-motion: reduce) {
-            .hloader__logo { animation: hl-pop 0.01s both; }
-            .hloader__shine { display: none; }
-            .hloader__bar span { animation-duration: 2s; }
+            .hloader__mark { animation: hl-pop 0.01s both; }
+            .hloader__fill { animation: none; clip-path: inset(0 0 0 0); }
+            .hloader__meter::after { animation: none; transform: scaleX(1); }
         }
     </style>
 </head>
@@ -166,11 +182,11 @@
          it never nags. Styles are inlined in <head> so it covers the first paint. --}}
     <div id="haraanLoader" class="hloader" role="status" aria-live="polite" aria-label="Loading Haraan">
         <div class="hloader__stage">
-            <div class="hloader__logo">
-                <img src="{{ $assetVer('images/haraan-loader.png') }}" alt="Haraan" width="300" height="100" fetchpriority="high">
-                <span class="hloader__shine" aria-hidden="true"></span>
+            <div class="hloader__mark" style="--logo:url('{{ $assetVer('images/haraan-logo.png') }}')" aria-hidden="true">
+                <span class="hloader__ghost"></span>
+                <span class="hloader__fill"></span>
             </div>
-            <div class="hloader__bar" aria-hidden="true"><span></span></div>
+            <div class="hloader__meter" aria-hidden="true"></div>
         </div>
     </div>
     <script>
