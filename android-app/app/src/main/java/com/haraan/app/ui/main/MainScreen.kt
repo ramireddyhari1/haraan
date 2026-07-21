@@ -3496,9 +3496,22 @@ private fun CrexMatchesScreen(
   val loadLiveFeed: suspend () -> Unit = remember {
     {
       val token = com.haraan.app.data.TokenStore.getToken(context)
+      // Rank by where the device already knows it is. Deliberately the *cached* fix,
+      // never a fresh detect: opening the scores tab must not throw a permission
+      // prompt at anyone. No cache → the server ranks by profile district instead.
+      val here = com.haraan.app.data.LocationRepository(context).cached()
+        as? com.haraan.app.data.LocationState.Resolved
       // On refresh, keep the last good feed if a fetch fails rather than flashing back
       // to the demo leagues; only the initial null shows the loading state.
-      runCatching { matchRepository.getLiveMatches(token) }.getOrNull()?.let { liveFeed = it }
+      runCatching {
+        matchRepository.getLiveMatches(
+          token = token,
+          latitude = here?.latitude,
+          longitude = here?.longitude,
+          locality = here?.area.orEmpty(),
+          district = here?.district.orEmpty(),
+        )
+      }.getOrNull()?.let { liveFeed = it }
     }
   }
   LaunchedEffect(Unit) { loadLiveFeed() }
@@ -3592,32 +3605,21 @@ private fun CrexMatchesScreen(
           // ── LIVE: in-progress matches first, then what's coming up ──
           when (selectedSport) {
             "Cricket" -> {
-              // Real live feed surfaces first. The server already scopes it to the
-              // viewer: their own district's LOCAL matches + platform-wide FEATURED
-              // ones. We split those into two sections so "your district" reads as a
-              // distinct, local-identity space above the curated Featured matches.
+              // ONE list, already ranked by the server: starred → nearest → live →
+              // freshest. Splitting it into sections was the thing making curation
+              // and locality compete for the same slot; the ⭐ on the card carries
+              // "an admin picked this" without costing a heading.
               when {
                 liveFeed == null -> item { GameHubFeedSkeleton() }
+                liveFeed!!.isEmpty() -> item {
+                  Box(modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
+                    Text("No matches yet", color = Color(0xFF94A3B8), fontSize = 13.sp)
+                  }
+                }
                 else -> {
-                  val districtMatches = liveFeed!!.filter { it.visibility == "LOCAL" }
-                  val featuredMatches = liveFeed!!.filter { it.visibility == "FEATURED" }
-                  if (districtMatches.isNotEmpty()) {
-                    item { CrexLeagueTitle("Live in your district") }
-                    item { LiveFeedGroup(rows = districtMatches, onMatchClick = onMatchClick) }
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
-                  }
-                  if (featuredMatches.isNotEmpty()) {
-                    item { CrexLeagueTitle("Featured matches") }
-                    item { LiveFeedGroup(rows = featuredMatches, onMatchClick = onMatchClick) }
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
-                  }
-                  if (districtMatches.isEmpty() && featuredMatches.isEmpty()) {
-                    item {
-                      Box(modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                        Text("No live matches in your area yet", color = Color(0xFF94A3B8), fontSize = 13.sp)
-                      }
-                    }
-                  }
+                  item { CrexLeagueTitle("Matches near you") }
+                  item { LiveFeedGroup(rows = liveFeed!!, onMatchClick = onMatchClick) }
+                  item { Spacer(modifier = Modifier.height(8.dp)) }
                 }
               }
             }
@@ -3689,6 +3691,9 @@ private fun CrexMatchesScreen(
                     teamBEmblem = emblems.getOrNull(draft.teamBEmblem)?.key,
                     venueBookingId = draft.venueBookingId,
                     isPrivate = draft.isPrivate,
+                    latitude = draft.latitude,
+                    longitude = draft.longitude,
+                    district = draft.locationDistrict,
                   )
                   // Upload any custom team crests now that the match (and its id) exist.
                   // A failed upload doesn't fail the whole creation — the emblem stands in.
@@ -6078,6 +6083,12 @@ private fun MatchLiveContent(
   // True when the viewer created this match — tints the row and shows a "YOU" badge so
   // they can spot their own match in the feed.
   isMine: Boolean = false,
+  // Admin-curated. Shown as a ⭐ leading the meta line rather than as its own feed
+  // section, so the list stays one column while curation stays visible to everyone.
+  isFeatured: Boolean = false,
+  // Measured km from the viewer. Null whenever either side lacks a GPS fix — every
+  // match created before coordinates were required. Never show a guessed distance.
+  distanceKm: Double? = null,
   onClick: (() -> Unit)? = null,
 ) {
   val team1YetToBat = cricketInnings && battingTeam != 1 && hasNotBatted(score1, overs1)
@@ -6104,6 +6115,16 @@ private fun MatchLiveContent(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+      // Admin-featured star. Amber, so it reads as "picked" and never competes with
+      // the red live beacon or the blue format label.
+      if (isFeatured) {
+        Icon(
+          imageVector = Icons.Filled.Star,
+          contentDescription = "Featured",
+          tint = Color(0xFFF59E0B),
+          modifier = Modifier.size(13.dp),
+        )
+      }
       // Live beacon: a red dot inside a soft red halo.
       Box(contentAlignment = Alignment.Center) {
         Box(Modifier.size(10.dp).clip(CircleShape).background(Color(0x33E11D2A)))
@@ -6118,7 +6139,10 @@ private fun MatchLiveContent(
       val locationText = run {
         val place = locality.takeIf { it.isNotBlank() }
           ?: venue.takeIf { it.isNotBlank() && !it.equals("Custom Match", ignoreCase = true) }
-        listOfNotNull(place, district.takeIf { it.isNotBlank() }).joinToString(" · ")
+        // Append the measured distance when we actually have one — it's the single
+        // most useful thing on this line for deciding whether to walk over.
+        val far = distanceKm?.let { if (it < 1.0) "under 1 km" else "${"%.1f".format(it)} km" }
+        listOfNotNull(place, district.takeIf { it.isNotBlank() }, far).joinToString(" · ")
       }
       if (locationText.isNotBlank()) {
         Box(Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFCBD5E1)))
@@ -6240,6 +6264,8 @@ private fun LiveFeedGroup(
         battingTeam = 1,
         cricketInnings = true,
         isMine = m.isMine,
+        isFeatured = m.isFeatured,
+        distanceKm = m.distanceKm,
       )
     }
   }

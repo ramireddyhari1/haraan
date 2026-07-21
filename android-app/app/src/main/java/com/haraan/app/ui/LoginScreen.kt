@@ -57,15 +57,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.haraan.app.R
 import kotlinx.coroutines.delay
@@ -217,35 +215,33 @@ fun LoginScreen(
         animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing), label = "cardShift"
     )
 
-    // Ken-Burns — a slow continuous zoom so the hero breathes instead of sitting flat.
-    val kenBurns = rememberInfiniteTransition(label = "kenBurns")
-    val posterZoom by kenBurns.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "posterZoom"
-    )
-
     // Poster images — fetched from the admin API; falls back to local drawables if offline.
-    // Re-fetched every time the screen resumes (repeatOnLifecycle at RESUMED), so an admin
-    // change in /control shows up on the next foreground, not only on a cold app restart.
+    // AUTO-REFRESH: fetch on resume + re-poll every 6s while the login screen is visible, so
+    // an admin change in /control appears here within seconds — no need to background/reopen.
+    // AutoRefresh binds to RESUMED, so it pauses in the background and costs nothing off-screen.
     val localPosters = listOf(R.drawable.poster1, R.drawable.poster2, R.drawable.poster3)
-    val lifecycleOwner = LocalLifecycleOwner.current
     var remotePosters by remember { mutableStateOf<List<String>>(emptyList()) }
-    LaunchedEffect(lifecycleOwner) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val json = java.net.URL("${ApiConfig.BASE_URL}/api/login-posters").readText()
-                    val arr = JSONArray(json)
-                    (0 until arr.length()).mapNotNull { i ->
-                        arr.getJSONObject(i).optString("image").takeIf { it.isNotBlank() }
-                    }
+    com.haraan.app.ui.components.AutoRefresh(intervalMs = 6_000L) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                // Cache-bust so no proxy/HTTP cache can serve a stale list — freshness is the
+                // whole point. Payload is a few hundred bytes, so a 6s poll is cheap.
+                val url = "${ApiConfig.BASE_URL}/api/login-posters?t=${System.currentTimeMillis()}"
+                val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 8000; readTimeout = 8000
+                    setRequestProperty("Cache-Control", "no-cache")
                 }
+                val json = conn.inputStream.bufferedReader().use { it.readText() }
+                val arr = JSONArray(json)
+                (0 until arr.length()).mapNotNull { i ->
+                    arr.getJSONObject(i).optString("image").takeIf { it.isNotBlank() }
+                }
+            }
             // Only overwrite on a successful fetch: a network failure keeps the posters we
             // already have (no flicker to the local fallback), while an empty-but-successful
-            // response correctly reflects the admin having removed every poster.
-            }.onSuccess { remotePosters = it }
+            // response correctly reflects the admin having removed every poster. Skip the
+            // reassignment when unchanged so we don't recompose the pager needlessly.
+            .onSuccess { fresh -> if (fresh != remotePosters) remotePosters = fresh }
         }
     }
     val hasRemote = remotePosters.isNotEmpty()
@@ -256,7 +252,7 @@ fun LoginScreen(
             .fillMaxSize()
             .background(Ink)
     ) {
-        // 1. Full-bleed, slowly-zooming poster pager.
+        // 1. Full-bleed poster pager (static image, auto-advancing carousel).
         val pageCount = Int.MAX_VALUE
         val pagerState = rememberPagerState(
             initialPage = (pageCount / 2) - ((pageCount / 2) % posterCount.coerceAtLeast(1)),
@@ -271,9 +267,9 @@ fun LoginScreen(
         }
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val actualPage = page % posterCount.coerceAtLeast(1)
-            val imgModifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { scaleX = posterZoom; scaleY = posterZoom }
+            // Static poster — no Ken-Burns zoom (fixed in place, by request). The
+            // carousel still slides between posters; only the per-poster zoom is gone.
+            val imgModifier = Modifier.fillMaxSize()
             // Anchor the crop to the TOP: the card covers the lower ~45% of the screen,
             // and posters put their subject's face in the upper half. Centre-cropping
             // pushed faces behind the card and sliced them at the card edge.
@@ -693,10 +689,20 @@ fun LoginScreen(
                     Spacer(Modifier.height(GapM))
 
                     Text(
+                        // Real tappable links (not just styled text) — each opens the live
+                        // document so the legal copy is reachable before a user signs up.
                         text = buildAnnotatedString {
                             append("By continuing, you agree to our ")
-                            withStyle(SpanStyle(color = Accent, fontWeight = FontWeight.SemiBold)) {
-                                append("Terms & Conditions")
+                            withLink(androidx.compose.ui.text.LinkAnnotation.Url("${ApiConfig.BASE_URL}/legal/terms")) {
+                                withStyle(SpanStyle(color = Accent, fontWeight = FontWeight.SemiBold)) {
+                                    append("Terms & Conditions")
+                                }
+                            }
+                            append(" and ")
+                            withLink(androidx.compose.ui.text.LinkAnnotation.Url("${ApiConfig.BASE_URL}/legal/privacy")) {
+                                withStyle(SpanStyle(color = Accent, fontWeight = FontWeight.SemiBold)) {
+                                    append("Privacy Policy")
+                                }
                             }
                         },
                         fontSize = CaptionSize,

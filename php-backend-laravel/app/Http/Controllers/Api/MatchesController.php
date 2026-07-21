@@ -103,9 +103,18 @@ final class MatchesController extends Controller
             // (and state, for the future STATE tier). Reach beyond the district is
             // granted by an admin — never chosen at creation.
             'visibility'          => LiveMatch::VIS_LOCAL,
-            'district'            => $authUser->district,
+            // District comes from the GPS fix taken at creation when we have one —
+            // that's where the match actually is. The creator's profile district is
+            // only a fallback (it's where they signed up, not necessarily where they
+            // are playing today).
+            'district'            => $v['district'] ?? $authUser->district,
             'state'               => $authUser->state,
             'locality'            => $v['locality'] ?? null,
+
+            // The GPS fix itself — mandatory for public matches. Powers distance
+            // sorting in the near-me feed; a place name alone can't be measured.
+            'latitude'            => $v['latitude'] ?? null,
+            'longitude'           => $v['longitude'] ?? null,
         ]);
 
         return response()->json([

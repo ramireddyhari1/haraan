@@ -44,6 +44,42 @@ a {
 	text-decoration: none;
 }
 
+/* Premium blue dot-grid in the page gutters (BookMyShow-style). Fixed backdrop
+   behind all content; the horizontal mask reveals dots only in the empty strips
+   either side of the centred 1280px content column and hides them beneath it.
+   Self-hides on narrower screens (the transparent band spans the whole width). */
+@media (min-width: 1200px) {
+	body::before {
+		content: "";
+		position: fixed;
+		inset: 0;
+		z-index: -1;
+		pointer-events: none;
+		background-image: radial-gradient(circle, rgba(37, 99, 235, 0.16) 1.7px, transparent 1.8px);
+		background-size: 26px 26px;
+		-webkit-mask-image: linear-gradient(90deg,
+			#000 0, #000 calc(50% - 690px),
+			transparent calc(50% - 620px), transparent calc(50% + 620px),
+			#000 calc(50% + 690px), #000 100%);
+		        mask-image: linear-gradient(90deg,
+			#000 0, #000 calc(50% - 690px),
+			transparent calc(50% - 620px), transparent calc(50% + 620px),
+			#000 calc(50% + 690px), #000 100%);
+		/* Calm continuous drift; one tile (26px) loops seamlessly forever. */
+		animation: gutter-dots-drift 14s linear infinite;
+	}
+
+	@keyframes gutter-dots-drift {
+		from { background-position: 0 0; }
+		to   { background-position: 26px 26px; }
+	}
+}
+
+/* Motion is decorative — honour users who ask for less of it. */
+@media (prefers-reduced-motion: reduce) {
+	body::before { animation: none; }
+}
+
 .container {
 	width: min(1280px, calc(100% - 32px));
 	margin: 0 auto;

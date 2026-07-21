@@ -43,6 +43,20 @@ data class LiveMatchRow(
   val team2Emblem: String = "",
   /** True when the signed-in viewer created this match (server-scoped) — tags "mine" in the feed. */
   val isMine: Boolean = false,
+  /**
+   * True when this match sits in the viewer's own district. Everyone sees every
+   * public match, so this is a *grouping* hint only — never an access rule.
+   * Always false for guests, collapsing their feed to Featured + All matches.
+   */
+  val isLocalToViewer: Boolean = false,
+  /** Admin-curated — drawn as a ⭐ on the card, not as a separate section. */
+  val isFeatured: Boolean = false,
+  /**
+   * Measured km from the viewer, or null when either side has no GPS fix (every
+   * match created before coordinates were required). Null must render as *nothing* —
+   * an unmeasurable distance is never estimated.
+   */
+  val distanceKm: Double? = null,
 )
 
 /**
@@ -75,6 +89,11 @@ class MatchRepository(
     teamBEmblem: String? = null,
     venueBookingId: Long? = null,
     isPrivate: Boolean = false,
+    /** GPS fix taken at creation — required by the server for public matches. */
+    latitude: Double? = null,
+    longitude: Double? = null,
+    /** District resolved from that fix; the server prefers it over the profile's. */
+    district: String = "",
   ): CreateMatchResult = withContext(Dispatchers.IO) {
     val body = JSONObject()
       .put("sport", sport.lowercase())
@@ -91,6 +110,13 @@ class MatchRepository(
       .put("squadB", squadJson(squadB))
     // Optional area/village — omitted for private matches (they're hidden from feeds).
     if (locality.isNotBlank()) body.put("locality", locality)
+    // The GPS fix. The server requires it on public matches; a private match may
+    // legitimately have none, so only send what we actually hold.
+    if (latitude != null && longitude != null) {
+      body.put("latitude", latitude)
+      body.put("longitude", longitude)
+    }
+    if (district.isNotBlank()) body.put("district", district)
     if (!teamAEmblem.isNullOrBlank()) body.put("teamAEmblem", teamAEmblem)
     if (!teamBEmblem.isNullOrBlank()) body.put("teamBEmblem", teamBEmblem)
     if (venueBookingId != null) body.put("venueBookingId", venueBookingId)
@@ -171,18 +197,38 @@ class MatchRepository(
   }
 
   /**
-   * GET /api/live-matches — GameHub live-scores feed. When [token] is supplied the
-   * server scopes results to the viewer's district (plus FEATURED); guests get
-   * FEATURED only. [scope] ("local" | "featured" | "all") narrows that further.
+   * GET /api/live-matches — GameHub live-scores feed. Every public match is
+   * returned to every viewer, guests included; only private matches are withheld.
+   * Passing [token] doesn't widen the feed — it just tags rows (`isMine`,
+   * `isLocalToViewer`) so the app can group them. [scope] ("local" | "featured"
+   * | "all") narrows to one slice.
    * Returns an empty list on any failure so the screen can fall back to its demo
    * content without ever showing an error.
    */
   suspend fun getLiveMatches(
     token: String? = null,
     scope: String? = null,
+    /**
+     * Where the viewer is, for proximity ranking. Sent by guests too — that's the
+     * point: "matches near me" must not require an account. Omitted when unknown,
+     * in which case the server falls back to the profile district (or nothing).
+     */
+    latitude: Double? = null,
+    longitude: Double? = null,
+    locality: String = "",
+    district: String = "",
   ): List<LiveMatchRow> = withContext(Dispatchers.IO) {
     try {
-      val query = if (scope.isNullOrBlank()) "" else "?scope=$scope"
+      val params = buildList {
+        if (!scope.isNullOrBlank()) add("scope=$scope")
+        if (latitude != null && longitude != null) {
+          add("lat=$latitude")
+          add("lng=$longitude")
+        }
+        if (locality.isNotBlank()) add("locality=${java.net.URLEncoder.encode(locality, "UTF-8")}")
+        if (district.isNotBlank()) add("district=${java.net.URLEncoder.encode(district, "UTF-8")}")
+      }
+      val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
       // Conditional GET: an unchanged feed comes back 304 and is served from cache, so
       // the 20s AutoRefresh poll re-downloads nothing when nothing's happening.
       val body = ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/live-matches$query", token)
@@ -211,6 +257,11 @@ class MatchRepository(
           team1Emblem = o.optString("team1Emblem", ""),
           team2Emblem = o.optString("team2Emblem", ""),
           isMine = o.optBoolean("isMine", false),
+          isLocalToViewer = o.optBoolean("isLocalToViewer", false),
+          isFeatured = o.optBoolean("isFeatured", false),
+          // optDouble yields NaN when absent — map that back to a real null so the
+          // card can tell "no fix" apart from "zero km away".
+          distanceKm = o.optDouble("distanceKm", Double.NaN).takeUnless { it.isNaN() },
         )
       }
     } catch (_: Exception) {

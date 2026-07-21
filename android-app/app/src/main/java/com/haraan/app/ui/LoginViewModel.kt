@@ -124,7 +124,11 @@ class LoginViewModel : ViewModel() {
      * JWT. No profile step — the backend creates the account from the Google profile.
      */
     fun signInWithGoogle(idToken: String, onSuccess: (String) -> Unit) {
-        if (_uiState.value.isLoading) return
+        // NB: no `if (isLoading) return` guard here. The screen sets loading=true the
+        // moment the Credential Manager sheet opens (to disable the button), so by the
+        // time we get the token loading is ALWAYS true — an early-return would silently
+        // drop every Google sign-in after the account picker. Double-tap is already
+        // prevented by the button's `enabled = !isLoading`.
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
             runCatching { authRepository.googleSignIn(idToken) }

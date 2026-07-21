@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 
 class LiveMatch extends Model
 {
@@ -17,6 +18,23 @@ class LiveMatch extends Model
     protected string $contentDomain = 'matches';
 
     protected $guarded = [];
+
+    /**
+     * Delete cleanup. `player_match_stats` and `match_actions` cascade via FK, but
+     * `match_xp_ledger` and `reputation_events` carry only a plain `match_id` index
+     * — no FK, so they would be orphaned. The ledger especially MUST go: leaderboards
+     * rank on it, so a deleted match's XP would keep counting (and a deleted cheated
+     * match wouldn't undo the cheat). Runs for every delete path, admin or code.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (self $match): void {
+            DB::transaction(function () use ($match): void {
+                DB::table('match_xp_ledger')->where('match_id', $match->id)->delete();
+                DB::table('reputation_events')->where('match_id', $match->id)->delete();
+            });
+        });
+    }
 
     /** Reach tiers. STATE is reserved for a later phase (column already exists). */
     public const VIS_LOCAL = 'LOCAL';
@@ -50,15 +68,20 @@ class LiveMatch extends Model
     }
 
     /**
-     * The single source of truth for "who may see which match". Authorization is
-     * derived from the viewer (never trusted from the client); `$scope` only
-     * narrows *intent* within what they're already allowed to see.
+     * The single source of truth for "who may see which match".
      *
-     *   admin              → everything (optionally narrowed by scope)
-     *   signed-in (dist D) → FEATURED + LOCAL matches in D
-     *   guest              → FEATURED only
+     * Every PUBLIC match is visible to everyone, signed in or not (product
+     * decision 2026-07-21): a guest browsing the ActionBoard sees the whole
+     * public feed, not a teaser. Privacy is carried solely by `is_private`.
      *
-     * @param  string|null  $scope  'local' | 'featured' | 'all' | null (default blend)
+     *   everyone (incl. guests) → every non-private match
+     *   private                 → nobody here; creator / squad / join code only
+     *
+     * FEATURED no longer gates *visibility* — it is now purely a curation
+     * signal driving ordering and which group a match renders in. `$scope`
+     * still narrows intent for callers that want one slice.
+     *
+     * @param  string|null  $scope  'local' | 'featured' | 'all' | null (default: all public)
      */
     public function scopeVisibleTo(Builder $query, ?User $viewer, ?string $scope = null): Builder
     {
@@ -66,41 +89,22 @@ class LiveMatch extends Model
         // join code or direct detail lookup (see isVisibleTo / scopeByJoinCode).
         $query->where('is_private', false);
 
-        $isAdmin = $viewer?->isSuperAdmin() ?? false;
-        $district = $viewer?->district;
-
-        // Admins may explicitly ask for the god-view; otherwise admins still get
-        // the same blend so their default feed isn't a firehose.
-        if ($isAdmin && $scope === 'all') {
-            return $query;
-        }
-
         if ($scope === 'featured') {
             return $query->where('visibility', self::VIS_FEATURED);
         }
 
         if ($scope === 'local') {
-            // Local needs an identity. Guests get nothing here (prompt to sign in).
+            // An explicit district slice still needs an identity to resolve
+            // "local to whom"; a guest has no district, so it yields nothing.
             if ($viewer === null) {
                 return $query->whereRaw('1 = 0');
             }
             return $query->where('visibility', self::VIS_LOCAL)
-                ->where('district', $district);
+                ->where('district', $viewer->district);
         }
 
-        // Default blend: featured for all, plus your own district's locals.
-        if ($isAdmin) {
-            return $query;
-        }
-        if ($viewer === null) {
-            return $query->where('visibility', self::VIS_FEATURED);
-        }
-        return $query->where(function (Builder $w) use ($district): void {
-            $w->where('visibility', self::VIS_FEATURED)
-                ->orWhere(function (Builder $d) use ($district): void {
-                    $d->where('visibility', self::VIS_LOCAL)->where('district', $district);
-                });
-        });
+        // Default: the entire public feed, for every viewer.
+        return $query;
     }
 
     /** Find a match by its share/join code (private-match access path). */
@@ -136,15 +140,10 @@ class LiveMatch extends Model
             return $viewer !== null
                 && ((int) $this->user_id === (int) $viewer->id || $this->hasSquadMember($viewer));
         }
-        if ((string) $this->visibility === self::VIS_FEATURED) {
-            return true;
-        }
-        // LOCAL: same district, or the creator themselves.
-        if ($viewer === null) {
-            return false;
-        }
-        return (int) $this->user_id === (int) $viewer->id
-            || ((string) $this->district !== '' && $this->district === $viewer->district);
+        // Any public match (LOCAL or FEATURED) is open to everyone, guests
+        // included. Mirrors scopeVisibleTo: if it can appear in the feed it must
+        // be reachable by id, or tapping a card 404s.
+        return true;
     }
 
     /**

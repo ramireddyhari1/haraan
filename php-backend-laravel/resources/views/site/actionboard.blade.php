@@ -121,9 +121,10 @@
 {{-- #2563EB, T.BgPage #EBEBF0 on board tabs); change both together.    --}}
 {{-- ================================================================= --}}
 @php
+    // ONE list, already ranked by the server (starred → nearest → live → fresh).
+    // Admin curation shows as a ⭐ on the card instead of its own section, so the
+    // feed stays a single scannable column.
     $abFeedRows = collect($abFeed ?? []);
-    $abLocal    = $abFeedRows->where('visibility', 'LOCAL')->values();
-    $abFeatured = $abFeedRows->where('visibility', 'FEATURED')->values();
     $abSummary  = $abDistrictSummary ?? null;
     $abBoards   = [
         'district' => ['rows' => collect($abDistrictBoard ?? []), 'location' => $abSummary['district'] ?? (auth()->user()->district ?? null)],
@@ -172,8 +173,9 @@
     };
 
     $abGroups = [];
-    if ($abLocal->isNotEmpty())    $abGroups[] = ['title' => 'Live in your district', 'rows' => $abLocal];
-    if ($abFeatured->isNotEmpty()) $abGroups[] = ['title' => 'Featured matches',      'rows' => $abFeatured];
+    // A single location-ordered list. Named for what it is — calling it "Featured"
+    // when it holds everything would be a lie.
+    if ($abFeedRows->isNotEmpty()) $abGroups[] = ['title' => 'Matches near you', 'rows' => $abFeedRows];
 
     $abMedals = [
         1 => ['grad' => 'linear-gradient(180deg,#FFF3C0,#F3CB57,#CF9A1C)', 'rim' => '#FFEBA6', 'ink' => '#5A3F00'],
@@ -252,6 +254,12 @@
                             @if ($gi > 0)<div class="mab__gdiv"></div>@endif
                             <a class="mab__match" href="{{ route('site.gamehub.actionboard.match', ['id' => $m['id']]) }}">
                                 <div class="mab__mctx">
+                                    {{-- Admin-featured: a star, not a section. Visible to everyone. --}}
+                                    @if ($m['isFeatured'] ?? false)
+                                        <span class="mab__star" title="Featured by Haraan" aria-label="Featured">
+                                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.58 1.11 6.47L12 17.45 6.19 20.5 7.3 14.03 2.6 9.45l6.5-.95L12 2.6z"></path></svg>
+                                        </span>
+                                    @endif
                                     @if ($m['isLive'])
                                         <span class="mab__beacon"><span></span></span>
                                         <span class="mab__mlive">LIVE</span>
@@ -266,6 +274,11 @@
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
                                             {{ $loc }}
                                         </span>
+                                    @endif
+                                    {{-- Only ever a measured distance — never a guess. --}}
+                                    @if (($m['distanceKm'] ?? null) !== null)
+                                        <span class="mab__mdot"></span>
+                                        <span class="mab__mkm">{{ $m['distanceKm'] < 1 ? 'Under 1 km' : $m['distanceKm'] . ' km' }}</span>
                                     @endif
                                     @if ($m['isMine'])
                                         <span class="mab__you">
@@ -2793,6 +2806,11 @@ main.container {
         font-size: 11px; color: #94A3B8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .mab__mloc svg { width: 12px; height: 12px; flex: 0 0 auto; }
+    /* Measured distance — quieter than the place name it follows. */
+    .mab__mkm { font-size: 11px; color: #94A3B8; white-space: nowrap; flex: 0 0 auto; }
+    /* Admin-featured star. Amber reads as "picked", not as a live/status colour. */
+    .mab__star { display: inline-flex; align-items: center; color: #F59E0B; flex: 0 0 auto; }
+    .mab__star svg { width: 13px; height: 13px; }
     .mab__you {
         display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
         background: #2563EB; color: #fff; border-radius: 6px; padding: 2px 6px;

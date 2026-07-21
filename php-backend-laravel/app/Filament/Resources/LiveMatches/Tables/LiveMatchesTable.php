@@ -4,6 +4,9 @@ namespace App\Filament\Resources\LiveMatches\Tables;
 
 use App\Models\LiveMatch;
 use Filament\Actions\Action;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -97,6 +100,26 @@ class LiveMatchesTable
                             ]);
                         }
                     }),
+
+                // Permanently remove a match. Super-admin only, and irreversible —
+                // spam, tests, or abusive matches. The model's `deleting` hook also
+                // clears the XP ledger + reputation rows so the match's ranking
+                // influence vanishes with it (see LiveMatch::booted).
+                DeleteAction::make()
+                    // Authorize on isSuperAdmin() rather than the Shield `Delete:LiveMatch`
+                    // permission: some admins carry the ADMIN/COADMIN role (→ isSuperAdmin)
+                    // without the `super_admin` spatie role that the policy requires, so a
+                    // policy-gated button would show and then 403. This keeps "can see" and
+                    // "can do" identical for every super-admin.
+                    ->authorize(fn (): bool => auth()->user()?->isSuperAdmin() ?? false)
+                    ->modalHeading(fn (LiveMatch $r): string => 'Delete "' . trim(($r->home ?? '') . ' vs ' . ($r->away ?? '')) . '"?')
+                    ->modalDescription('This permanently removes the match, its ball-by-ball data, player stats, and any XP it awarded. This cannot be undone.'),
+            ])
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    DeleteBulkAction::make()
+                        ->authorize(fn (): bool => auth()->user()?->isSuperAdmin() ?? false),
+                ]),
             ]);
     }
 }

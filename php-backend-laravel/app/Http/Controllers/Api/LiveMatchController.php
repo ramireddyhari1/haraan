@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\User;
+use App\Support\MatchProximity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,21 +25,27 @@ class LiveMatchController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        // Optional auth: signed-in users get their district's LOCAL matches plus
-        // FEATURED; guests get FEATURED only. ?scope=local|featured|all narrows it.
+        // Every public match is returned to every viewer, guests included.
+        // ?scope=local|featured|all narrows to one slice.
         $viewer = $request->attributes->get('auth_user');
         $viewer = $viewer instanceof User ? $viewer : null;
         $scope = $request->query('scope');
         $scope = is_string($scope) ? strtolower($scope) : null;
 
+        $near = $this->viewerPosition($request, $viewer);
+
+        // Ranking happens in PHP, not SQL: the sort blends a haversine distance
+        // with place-name tiers, which no portable ORDER BY can express. We pull a
+        // bounded candidate set (freshest first) and rank that.
         $matches = LiveMatch::query()
             ->visibleTo($viewer, $scope)
-            ->orderByRaw("CASE WHEN LOWER(status) = 'live' THEN 0 ELSE 1 END")
             ->orderByDesc('updated_at')
-            ->limit(20)
+            ->limit(200)
             ->get();
 
-        $data = $matches->map(function (LiveMatch $m) use ($viewer): array {
+        $matches = $near->sort($matches)->take(40);
+
+        $data = $matches->map(function (LiveMatch $m) use ($viewer, $near): array {
             // Which side is batting (latest over's tag)? Drives score/overs attribution and
             // lets the app put the batting side on top of the card.
             $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
@@ -77,10 +84,57 @@ class LiveMatchController extends Controller
                 // Whether the signed-in viewer created this match — lets the app tag their
                 // own matches in the feed so they can spot them at a glance.
                 'isMine'      => $viewer !== null && (int) $m->user_id === (int) $viewer->id,
+                // Everyone sees every public match now, so "district" is a grouping
+                // hint, not an access rule: true only when this match sits in the
+                // viewer's own district. Always false for guests (no district).
+                'isLocalToViewer' => $viewer !== null
+                    && (string) ($viewer->district ?? '') !== ''
+                    && (string) $m->district === (string) $viewer->district,
+
+                // Admin curation, shown as a ⭐ on the card rather than its own
+                // section — the list stays one scannable column.
+                'isFeatured'  => (string) $m->visibility === LiveMatch::VIS_FEATURED,
+                // Measured km from the viewer, or null when either side has no GPS
+                // fix (every match created before 2026-07-21). The app shows the
+                // chip only when this is present — never a guessed distance.
+                'distanceKm'  => $this->roundKm($near->distanceKm($m)),
             ];
         })->all();
 
         return response()->json(['data' => $data]);
+    }
+
+    /**
+     * Where the viewer is, for ranking. Device location (sent by the app on every
+     * feed fetch) wins over the profile, because the profile records where someone
+     * signed up — not where they are standing today. Guests supply device location
+     * too, which is the whole point: proximity must not require an account.
+     */
+    private function viewerPosition(Request $request, ?User $viewer): MatchProximity
+    {
+        $num = static function ($v): ?float {
+            return is_numeric($v) ? (float) $v : null;
+        };
+        $str = static function ($v): string {
+            return is_string($v) ? trim($v) : '';
+        };
+
+        $lat = $num($request->query('lat'));
+        $lng = $num($request->query('lng'));
+
+        return new MatchProximity(
+            latitude: ($lat !== null && $lat >= -90 && $lat <= 90) ? $lat : null,
+            longitude: ($lng !== null && $lng >= -180 && $lng <= 180) ? $lng : null,
+            locality: $str($request->query('locality')),
+            district: $str($request->query('district')) ?: (string) ($viewer->district ?? ''),
+            state: $str($request->query('state')) ?: (string) ($viewer->state ?? ''),
+        );
+    }
+
+    /** One decimal is all a distance chip needs; null stays null. */
+    private function roundKm(?float $km): ?float
+    {
+        return $km === null ? null : round($km, 1);
     }
 
     public function show(Request $request, string $id): JsonResponse

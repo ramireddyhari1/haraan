@@ -20,7 +20,7 @@ class LoginPosterForm
                 Hidden::make('placement')->default('login_poster'),
 
                 Section::make('Poster image')
-                    ->description('Upload an image OR paste a link to one already hosted online. Tall portrait art works best — it fills the top of the login screen behind the sign-in card.')
+                    ->description('Upload an image OR paste a link to one already hosted online. Use tall portrait art — recommended 1080 × 1920 px (9:16). Keep the main subject in the top ~60%; the sign-in card covers the lower part of the screen.')
                     ->schema([
                         FileUpload::make('image')
                             ->label('Upload image')
@@ -33,7 +33,7 @@ class LoginPosterForm
                             ->disk('public')
                             ->directory('login-posters')
                             ->visibility('public')
-                            ->helperText('JPG, PNG or WebP, up to 15 MB.'),
+                            ->helperText('JPG, PNG or WebP · recommended 1080 × 1920 px (portrait 9:16) · up to 15 MB.'),
 
                         TextInput::make('image_url')
                             ->label('…or paste an image URL')

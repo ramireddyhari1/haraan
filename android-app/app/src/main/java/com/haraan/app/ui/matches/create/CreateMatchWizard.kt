@@ -167,9 +167,19 @@ class CreateMatchDraft {
     var ball by mutableStateOf(BallType.TENNIS)
     var playersPerSide by mutableStateOf(11)
     var venue by mutableStateOf("")
-    // Village / town / area — finer than the profile district; optional, typed or
-    // auto-filled from GPS. Shown with the venue on the live card.
+    // Village / town / area — finer than the profile district. Auto-filled from the
+    // GPS fix below, then editable: the reverse geocoder often returns the nearest
+    // *town* ("Pulivendula") when the ground is a village ("keerthipalle"), and only
+    // the creator knows the name locals actually use. Shown on the live card.
     var locality by mutableStateOf("")
+    // The GPS fix. Mandatory for public matches — it's what makes "matches near me"
+    // measurable; the typed label above can't be sorted by distance. Null until the
+    // creator grants location and a fix lands.
+    var latitude by mutableStateOf<Double?>(null)
+    var longitude by mutableStateOf<Double?>(null)
+    // District resolved from that same fix — where the match actually is, which beats
+    // the creator's profile district for feed scoping.
+    var locationDistrict by mutableStateOf("")
     var onHaraanTurf by mutableStateOf(false)
     // When the match was played on a booked Haraan turf, the creator picks which
     // booking it was — the backend validates ownership + CONFIRMED status and
@@ -346,9 +356,11 @@ private fun SportComingSoon(sport: String, onDismiss: () -> Unit, modifier: Modi
 }
 
 private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
-    // Area/Village is mandatory for public matches (they feed a local-first list).
-    // Private matches are hidden from feeds, so it's optional there.
-    1 -> d.overs > 0 && d.playersPerSide > 0 && (d.isPrivate || d.locality.trim().length >= 2)
+    // A public match needs BOTH a GPS fix (so it can be found by distance) and a
+    // readable place name (so the card means something). Private matches never
+    // reach a feed, so neither is required there.
+    1 -> d.overs > 0 && d.playersPerSide > 0 &&
+        (d.isPrivate || (d.latitude != null && d.longitude != null && d.locality.trim().length >= 2))
     2 -> d.teamA.isNotBlank() && d.teamB.isNotBlank()
     else -> true
 }
@@ -362,6 +374,7 @@ private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
     1 -> when {
         d.overs <= 0 -> "the number of overs"
         d.playersPerSide <= 0 -> "players per side"
+        !d.isPrivate && (d.latitude == null || d.longitude == null) -> "your match location"
         !d.isPrivate && d.locality.trim().length < 2 -> "the area or village"
         else -> null
     }
@@ -688,9 +701,32 @@ private fun StepRules(draft: CreateMatchDraft, loadBookings: suspend () -> List<
         )
         Spacer(Modifier.height(20.dp))
 
-        // One combined place field — venue/ground OR village/area. Type it manually or
-        // share your location. Drives both the venue label and the district-find locality.
-        FieldLabel("Venue / Area / Village *")
+        // Location is captured from GPS, not typed. The fix is what makes this match
+        // findable by distance; the name below is only how it reads on the card. A
+        // private match skips all of it (it never reaches a feed).
+        if (!draft.isPrivate) {
+            FieldLabel("Match location *")
+            MatchLocationField(
+                latitude = draft.latitude,
+                longitude = draft.longitude,
+                onResolved = { lat, lng, area, district ->
+                    draft.latitude = lat
+                    draft.longitude = lng
+                    draft.locationDistrict = district
+                    // Seed the name from the fix, but never overwrite a name the
+                    // creator already corrected by hand.
+                    if (draft.locality.isBlank() && area.isNotBlank()) {
+                        draft.locality = area
+                        draft.venue = area
+                    }
+                },
+            )
+            Spacer(Modifier.height(16.dp))
+        }
+
+        // The readable place name. Auto-filled from the fix above and editable —
+        // the geocoder frequently names the nearest town, not the actual ground.
+        FieldLabel(if (draft.isPrivate) "Venue / Area / Village" else "Ground or village name *")
         var placeTouched by remember { mutableStateOf(false) }
         WizardTextField(
             value = draft.locality,
@@ -699,21 +735,16 @@ private fun StepRules(draft: CreateMatchDraft, loadBookings: suspend () -> List<
             modifier = Modifier.onFocusChanged { if (it.isFocused) placeTouched = true },
         )
         Spacer(Modifier.height(6.dp))
-        val localityInvalid = placeTouched && draft.locality.trim().length < 2
+        val localityInvalid = !draft.isPrivate && placeTouched && draft.locality.trim().length < 2
         Text(
-            text = if (localityInvalid)
-                "Required — so locals can find this match in their district."
-            else
-                "Type a ground/area, or share your location so locals can find it.",
+            text = when {
+                localityInvalid -> "Required — so locals recognise the ground."
+                draft.isPrivate -> "Optional for a private match."
+                else -> "Correct this if the detected name isn't what locals call it."
+            },
             color = if (localityInvalid) Color(0xFFDC2626) else Text3,
             fontSize = 12.sp,
             lineHeight = 16.sp,
-        )
-        Spacer(Modifier.height(8.dp))
-        UseCurrentLocationButton(
-            label = "Share my location",
-            resolver = ::resolveCurrentLocality,
-            onResolved = { draft.locality = it; draft.venue = it },
         )
         Spacer(Modifier.height(12.dp))
         ToggleRow(
@@ -793,6 +824,174 @@ private fun TurfBookingPicker(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Mandatory GPS capture for a public match. The fix — not the typed name — is what
+ * makes a match findable by distance, so this gates Continue.
+ *
+ * Every failure path stays actionable: a denied permission offers the system
+ * settings, a missing fix offers a retry. The one thing this must never do is leave
+ * the creator staring at a disabled button with no way forward.
+ */
+@Composable
+private fun MatchLocationField(
+    latitude: Double?,
+    longitude: Double?,
+    onResolved: (Double, Double, String, String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repo = remember { com.haraan.app.data.LocationRepository(context) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var denied by remember { mutableStateOf(false) }
+    var detectedLabel by remember { mutableStateOf("") }
+
+    fun detect() {
+        loading = true
+        error = null
+        scope.launch {
+            when (val state = repo.detectCurrent()) {
+                is com.haraan.app.data.LocationState.Resolved -> {
+                    val lat = state.latitude
+                    val lng = state.longitude
+                    if (lat == null || lng == null) {
+                        error = "Couldn't pin your position. Try again in the open."
+                    } else {
+                        denied = false
+                        // Prefer the finest label available: area → city.
+                        detectedLabel = listOf(state.area, state.city)
+                            .firstOrNull { it.isNotBlank() && !it.equals("Unknown", true) }
+                            .orEmpty()
+                        onResolved(lat, lng, detectedLabel, state.district)
+                    }
+                }
+                com.haraan.app.data.LocationState.Denied -> {
+                    denied = true
+                    error = "Location permission is off."
+                }
+                com.haraan.app.data.LocationState.Unavailable ->
+                    error = "No GPS signal yet. Turn on location and try again."
+                else -> error = "Couldn't read your location. Try again."
+            }
+            loading = false
+        }
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            denied = false
+            detect()
+        } else {
+            denied = true
+            error = "Location permission is off."
+        }
+    }
+
+    fun request() {
+        if (repo.hasPermission()) detect() else permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    val hasFix = latitude != null && longitude != null
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (hasFix) Color(0xFFF0FDF4) else Color(0xFFF8FAFC))
+            .border(
+                1.dp,
+                if (hasFix) Color(0xFFBBF7D0) else Color(0xFFE2E8F0),
+                RoundedCornerShape(12.dp),
+            )
+            .padding(14.dp),
+    ) {
+        if (hasFix) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Location captured",
+                        color = Color(0xFF15803D),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = detectedLabel.ifBlank { "Nearby players can find this match" },
+                        color = Text3,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (loading) "Updating…" else "Update location",
+                color = Blue,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = !loading) { request() }
+                    .padding(vertical = 4.dp, horizontal = 2.dp),
+            )
+        } else {
+            Text(
+                text = "Allow location to create this match",
+                color = Text1,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "We stamp where the match is played so players nearby can find it. Shown only as the area name — never your exact address.",
+                color = Text3,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    // Once denied, the OS won't re-prompt — send them to settings.
+                    if (denied && !repo.hasPermission()) {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", context.packageName, null),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    } else {
+                        request()
+                    }
+                },
+                enabled = !loading,
+                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Getting location…", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                } else {
+                    Icon(Icons.Filled.MyLocation, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (denied) "Open settings" else "Allow location",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+
+        error?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(text = it, color = Color(0xFFDC2626), fontSize = 12.sp, lineHeight = 16.sp)
         }
     }
 }

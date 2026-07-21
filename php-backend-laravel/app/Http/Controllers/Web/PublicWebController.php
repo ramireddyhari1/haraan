@@ -237,11 +237,20 @@ final class PublicWebController extends Controller
         $viewer = auth()->user();
         $feed = LiveMatch::query()
             ->visibleTo($viewer)
-            ->orderByRaw("CASE WHEN LOWER(status) = 'live' THEN 0 ELSE 1 END")
             ->orderByDesc('updated_at')
-            ->limit(20)
-            ->get()
-            ->map(function (LiveMatch $m) use ($viewer): array {
+            ->limit(200)
+            ->get();
+
+        // Same ranking as the app. The server-rendered page has no device GPS, so
+        // proximity here leans on the signed-in profile; a guest simply gets the
+        // starred-then-live order (adding browser geolocation is a later pass).
+        $near = new \App\Support\MatchProximity(
+            district: (string) ($viewer->district ?? ''),
+            state: (string) ($viewer->state ?? ''),
+        );
+        $feed = $near->sort($feed)
+            ->take(40)
+            ->map(function (LiveMatch $m) use ($viewer, $near): array {
                 // Which side is batting (latest over's tag)? Drives score/overs
                 // attribution and puts the batting side on top of the card.
                 $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
@@ -272,6 +281,13 @@ final class PublicWebController extends Controller
                     'district'    => (string) ($m->district ?? ''),
                     'locality'    => (string) ($m->locality ?? ''),
                     'isMine'      => $viewer !== null && (int) $m->user_id === (int) $viewer->id,
+                    // Grouping hint only (see Api\LiveMatchController::index) —
+                    // everyone sees every public match; false for guests.
+                    'isLocalToViewer' => $viewer !== null
+                        && (string) ($viewer->district ?? '') !== ''
+                        && (string) $m->district === (string) $viewer->district,
+                    'isFeatured'  => (string) $m->visibility === LiveMatch::VIS_FEATURED,
+                    'distanceKm'  => ($d = $near->distanceKm($m)) === null ? null : round($d, 1),
                 ];
             })
             ->values();

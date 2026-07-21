@@ -341,9 +341,14 @@ fun PlayerProfileSetupScreen(
     val scope = rememberCoroutineScope()
 
     // Per-step completeness — drives the Continue button and small, frequent wins.
-    val step1Valid = name.isNotBlank() && gender.isNotBlank() && dobIso.isNotBlank() &&
-        height.isNotBlank() && nationality.isNotBlank()
-    val step2Valid = state.isNotBlank() && district.isNotBlank() && birthPlace.isNotBlank()
+    // Gate ONLY on what the server actually requires (PlayersController: name, state,
+    // district, primary_sport, sport_attributes). Everything else is nullable there, so
+    // demanding it here was inventing friction — and height/nationality sat below the
+    // fold, which turned that invented rule into a dead end.
+    // Date of birth and gender stay required: they're two taps and they drive the
+    // player card and age-group features, unlike height and nationality.
+    val step1Valid = name.isNotBlank() && gender.isNotBlank() && dobIso.isNotBlank()
+    val step2Valid = state.isNotBlank() && district.isNotBlank()
     val step3Valid = primarySport.isNotBlank() &&
         SPORT_REQUIRED[primarySport].orEmpty().all { !sportAttrs[it].isNullOrBlank() }
     val currentStepValid = when (step) {
@@ -365,14 +370,11 @@ fun PlayerProfileSetupScreen(
             name.isBlank() -> "your name"
             dobIso.isBlank() -> "your date of birth"
             gender.isBlank() -> "your gender"
-            height.isBlank() -> "your height"
-            nationality.isBlank() -> "your nationality"
             else -> null
         }
         1 -> when {
             state.isBlank() -> "your state"
             district.isBlank() -> "your district"
-            birthPlace.isBlank() -> "your birth place"
             else -> null
         }
         else -> when {
@@ -467,15 +469,8 @@ fun PlayerProfileSetupScreen(
                         Spacer(Modifier.height(16.dp))
 
                         FieldLabel("Gender")
-                        ChipWrap(GENDERS, gender) { gender = it }
-                        Spacer(Modifier.height(16.dp))
-
-                        FieldLabel("Height")
-                        Dropdown(height, HEIGHTS, "Select height") { height = it }
-                        Spacer(Modifier.height(16.dp))
-
-                        FieldLabel("Nationality")
-                        Dropdown(nationality, NATIONALITIES, "Select nationality") { nationality = it }
+                        // One row instead of a 2+1 grid, which left an orphan tile.
+                        SegmentedChoice(GENDERS, gender) { gender = it }
                     }
 
                     1 -> {
@@ -492,10 +487,35 @@ fun PlayerProfileSetupScreen(
                             placeholder = if (state.isBlank()) "Select state first" else "Select district",
                             enabled = districtOptions.isNotEmpty(),
                         ) { district = it }
-                        Spacer(Modifier.height(16.dp))
+
+                        // Everything below is genuinely optional — the backend stores these
+                        // as nullable. They used to be mandatory gates on step 1, sitting
+                        // below the fold, which is what made Continue look broken. Grouped
+                        // and labelled here so nobody is blocked by them again.
+                        Spacer(Modifier.height(24.dp))
+                        Text(
+                            "A few extras",
+                            color = Text1,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "Optional — these show on your player card. You can add them later.",
+                            color = Text3,
+                            fontSize = 12.5.sp,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 14.dp),
+                        )
 
                         FieldLabel("Birth place")
                         Field(birthPlace, { birthPlace = it }, "City, State")
+                        Spacer(Modifier.height(16.dp))
+
+                        FieldLabel("Height")
+                        Dropdown(height, HEIGHTS, "Select height") { height = it }
+                        Spacer(Modifier.height(16.dp))
+
+                        FieldLabel("Nationality")
+                        Dropdown(nationality, NATIONALITIES, "Select nationality") { nationality = it }
                     }
 
                     else -> {
@@ -818,18 +838,26 @@ private fun DateField(display: String, placeholder: String, onPicked: (iso: Stri
                 add(java.util.Calendar.YEAR, -25)
             }.timeInMillis
         }
+        // MUST be remembered: rememberDatePickerState treats this as an input, so a
+        // freshly-allocated object each composition made it rebuild its state, which
+        // recomposed, which allocated again — an infinite loop that ANR'd the app and
+        // showed up as multi-MB GC churn every few seconds while idle.
+        val selectable = remember(todayMillis, thisYear) {
+            object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= todayMillis
+                override fun isSelectableYear(year: Int) = year <= thisYear
+            }
+        }
         val pickerState = rememberDatePickerState(
             initialSelectedDateMillis = null,
             initialDisplayedMonthMillis = openAtMillis,
             // 120 years is the widest plausible span for a living player.
             yearRange = (thisYear - 120)..thisYear,
-            selectableDates = object : androidx.compose.material3.SelectableDates {
-                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= todayMillis
-                override fun isSelectableYear(year: Int) = year <= thisYear
-            },
+            selectableDates = selectable,
         )
         DatePickerDialog(
             onDismissRequest = { open = false },
+            colors = androidx.compose.material3.DatePickerDefaults.colors(containerColor = Color.White),
             confirmButton = {
                 TextButton(onClick = {
                     pickerState.selectedDateMillis?.let { millis ->
@@ -847,7 +875,28 @@ private fun DateField(display: String, placeholder: String, onPicked: (iso: Stri
                 TextButton(onClick = { open = false }) { Text("Cancel", color = Text2) }
             },
         ) {
-            DatePicker(state = pickerState)
+            // Stock Material3 renders this in its own purple-grey tonal palette, which
+            // read as a different app dropped into the flow. Restate it in the screen's
+            // own colours instead.
+            DatePicker(
+                state = pickerState,
+                title = null,
+                colors = androidx.compose.material3.DatePickerDefaults.colors(
+                    containerColor = Color.White,
+                    titleContentColor = Text2,
+                    headlineContentColor = Text1,
+                    weekdayContentColor = Text3,
+                    subheadContentColor = Text2,
+                    navigationContentColor = Text2,
+                    yearContentColor = Text1,
+                    currentYearContentColor = Blue,
+                    selectedYearContainerColor = Blue,
+                    dayContentColor = Text1,
+                    selectedDayContainerColor = Blue,
+                    todayContentColor = Blue,
+                    todayDateBorderColor = Blue,
+                ),
+            )
         }
     }
 }
@@ -889,6 +938,47 @@ private fun Dropdown(
                 DropdownMenuItem(
                     text = { Text(opt, color = Text1, fontSize = 14.sp) },
                     onClick = { onSelect(opt); open = false },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A single-row segmented control. [ChipWrap] chunks into pairs, which for a
+ * three-option set (Male / Female / Other) left a lone tile on a second row —
+ * visually ragged, and it made the gender question look bigger than it is.
+ * Use this for short, mutually-exclusive sets that fit one line.
+ */
+@Composable
+private fun SegmentedChoice(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(12.dp))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        options.forEach { opt ->
+            val isSel = opt == selected
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (isSel) Blue else Color.Transparent)
+                    .clickable { onSelect(opt) }
+                    .padding(vertical = 11.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    opt,
+                    color = if (isSel) Color.White else Text2,
+                    fontSize = 13.5.sp,
+                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
                 )
             }
         }

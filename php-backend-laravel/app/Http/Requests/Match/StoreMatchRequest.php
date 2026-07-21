@@ -39,6 +39,14 @@ final class StoreMatchRequest extends FormRequest
             // Area/Village is mandatory for public matches (they appear in the district
             // feed). Private matches are hidden from feeds, so it's optional there.
             'locality'       => [Rule::requiredIf(fn (): bool => !$this->boolean('isPrivate')), 'nullable', 'string', 'max:120'],
+            // A real GPS fix is mandatory for public matches — it's what powers the
+            // "near me" feed; a typed place name alone can't be sorted by distance.
+            // Private matches never appear in a feed, so they don't need one.
+            'latitude'       => [Rule::requiredIf(fn (): bool => !$this->boolean('isPrivate')), 'nullable', 'numeric', 'between:-90,90'],
+            'longitude'      => [Rule::requiredIf(fn (): bool => !$this->boolean('isPrivate')), 'nullable', 'numeric', 'between:-180,180'],
+            // District resolved from that same fix. Preferred over the creator's
+            // profile district, which is often stale or simply where they signed up.
+            'district'       => ['nullable', 'string', 'max:120'],
             'onHaraanTurf'   => ['nullable', 'boolean'],
             'venueBookingId' => ['nullable', 'integer'],
 
@@ -64,8 +72,10 @@ final class StoreMatchRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'locality.required' => 'Please add the area or village where the match is played.',
-            'locality.min'      => 'The area/village name is too short.',
+            'locality.required'  => 'Please add the area or village where the match is played.',
+            'locality.min'       => 'The area/village name is too short.',
+            'latitude.required'  => 'Turn on location so players nearby can find this match.',
+            'longitude.required' => 'Turn on location so players nearby can find this match.',
         ];
     }
 
