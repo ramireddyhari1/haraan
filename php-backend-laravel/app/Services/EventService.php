@@ -69,11 +69,16 @@ final class EventService
         return $events->map(function (object $event): array {
             $date = $event->date;
             $metaStr = 'Upcoming';
+            // Drop the time when an event has no real start time (defaults to
+            // midnight) — "• 12:00 AM" on every banner reads as broken data.
+            $fmtMeta = static function (\Carbon\Carbon $d): string {
+                return $d->format('H:i') !== '00:00' ? $d->format('D, j M • g:i A') : $d->format('D, j M');
+            };
             if ($date instanceof \Carbon\Carbon) {
-                $metaStr = $date->format('D, j M • g:i A');
+                $metaStr = $fmtMeta($date);
             } elseif (is_string($date)) {
                 try {
-                    $metaStr = \Illuminate\Support\Carbon::parse($date)->format('D, j M • g:i A');
+                    $metaStr = $fmtMeta(\Illuminate\Support\Carbon::parse($date));
                 } catch (\Throwable) {
                     $metaStr = $date;
                 }
