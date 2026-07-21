@@ -32,9 +32,9 @@ body {
 	margin: 0;
 	color: var(--foreground);
 	font-family: Inter, Arial, Helvetica, sans-serif;
-	background:
-		radial-gradient(circle at top left, rgba(15, 23, 42, 0.05), transparent 34%),
-		linear-gradient(180deg, #fafbfc 0%, #F4F7FB 100%);
+	/* Clean, flat page surface. The colour lives only in the top gradient band
+	   (body::before) — District-style — everything below stays clean. */
+	background: #F5F7FC;
 	min-height: 100vh;
 	overflow-x: clip; /* see html rule: keep sticky headers working */
 }
@@ -44,29 +44,30 @@ a {
 	text-decoration: none;
 }
 
-/* Premium aurora background (District/BookMyShow-grade). A fixed full-viewport
-   soft wash: two large, low-alpha top glows over a cohesive light-blue base, so
-   the whole page reads as one even tinted surface. (Earlier the glow pooled in
-   the gutters over a near-white base — with flat content that made the centre
-   look like a phantom white card, so the wash is deliberately even now.)
-   Desktop-only; breathes slowly for quiet life. */
+/* Premium top gradient band (District/BookMyShow-style). Colour lives only at
+   the TOP of the page — a soft brand-blue/indigo glow that fades to nothing by
+   ~640px — and everything below is the clean flat page surface. Absolute (not
+   fixed), so it scrolls away as you go down. Desktop-only; breathes softly. */
 @media (min-width: 1200px) {
 	body::before {
 		content: "";
-		position: fixed;
-		inset: 0;
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 640px;
 		z-index: -1;
 		pointer-events: none;
 		background-image:
-			radial-gradient(1500px 1000px at 22% -18%, rgba(37, 99, 235, 0.13), transparent 72%),
-			radial-gradient(1300px 900px at 108% -8%, rgba(99, 102, 241, 0.11), transparent 68%),
-			linear-gradient(180deg, #eef2fb, #e7edf9);
+			radial-gradient(1200px 640px at 28% -40%, rgba(37, 99, 235, 0.22), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(99, 102, 241, 0.18), transparent 66%),
+			linear-gradient(180deg, #e7eefb 0%, rgba(231, 238, 251, 0) 100%);
 		animation: aurora-breathe 22s ease-in-out infinite alternate;
 	}
 
 	@keyframes aurora-breathe {
-		from { background-position: 0% 0%, 0% 0%, 0% 0%, 0 0; opacity: 0.9; }
-		to   { background-position: 3% 2%, -3% 3%, 2% -2%, 0 0; opacity: 1; }
+		from { background-position: 0% 0%, 0% 0%, 0 0; opacity: 0.9; }
+		to   { background-position: 2% 0%, -2% 0%, 0 0; opacity: 1; }
 	}
 }
 
@@ -76,9 +77,9 @@ a {
 @media (min-width: 1200px) {
 	body.aurora-hub::before {
 		background-image:
-			radial-gradient(1500px 1000px at 22% -18%, rgba(0, 200, 83, 0.12), transparent 72%),
-			radial-gradient(1300px 900px at 108% -8%, rgba(16, 185, 129, 0.10), transparent 68%),
-			linear-gradient(180deg, #eef7f0, #e6f2ea);
+			radial-gradient(1200px 640px at 28% -40%, rgba(0, 200, 83, 0.20), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(16, 185, 129, 0.16), transparent 66%),
+			linear-gradient(180deg, #e7f6ee 0%, rgba(231, 246, 238, 0) 100%);
 	}
 }
 
@@ -87,9 +88,9 @@ a {
 @media (min-width: 1200px) {
 	body.event-detail-page::before {
 		background-image:
-			radial-gradient(1500px 1000px at 22% -18%, rgba(37, 99, 235, 0.18), transparent 72%),
-			radial-gradient(1300px 900px at 108% -8%, rgba(99, 102, 241, 0.15), transparent 68%),
-			linear-gradient(180deg, #e9eefb, #dfe7f7);
+			radial-gradient(1200px 640px at 28% -40%, rgba(37, 99, 235, 0.26), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(99, 102, 241, 0.20), transparent 66%),
+			linear-gradient(180deg, #e4ebfb 0%, rgba(228, 235, 251, 0) 100%);
 	}
 }
 
