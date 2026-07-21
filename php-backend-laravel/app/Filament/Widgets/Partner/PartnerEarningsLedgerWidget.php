@@ -9,6 +9,8 @@ use App\Filament\Resources\Venues\VenueResource;
 use App\Filament\Support\BookingTablePresenter;
 use App\Models\Booking;
 use Filament\Facades\Filament;
+use Filament\Tables\Columns\Layout\Split;
+use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
@@ -64,34 +66,51 @@ class PartnerEarningsLedgerWidget extends TableWidget
             ->emptyStateHeading('No earnings yet')
             ->emptyStateDescription('Paid bookings against your events and venues will appear here.')
             ->emptyStateIcon('heroicon-o-banknotes')
+            // One money row = one card (what/who, then a meta row of amount ·
+            // type · status · settlement · date). Reads as a ledger list on
+            // phones instead of a 6-column table that scrolls sideways.
+            ->contentGrid(['default' => 1])
             ->columns([
-                TextColumn::make('created_at')
-                    ->label('Date')
-                    ->date('d M Y')
-                    ->sortable(),
-                TextColumn::make('id')
-                    ->label('For')
-                    ->formatStateUsing(fn (Booking $r): string => $r->event?->title ?? $r->venue?->name ?? '—')
-                    ->description(fn (Booking $r): ?string => $r->user?->name)
-                    ->wrap(),
-                TextColumn::make('id')
-                    ->label('Type')
-                    ->badge()
-                    ->formatStateUsing(fn (Booking $r): string => $r->venue_id ? 'Turf' : 'Event')
-                    ->color(fn (Booking $r): string => $r->venue_id ? 'success' : 'primary'),
-                TextColumn::make('total_amount')
-                    ->label('Amount')
-                    ->money('INR')
-                    ->weight('bold')
-                    ->alignEnd()
-                    ->sortable(),
-                BookingTablePresenter::statusColumn(),
-                TextColumn::make('payout.status')
-                    ->label('Settlement')
-                    ->badge()
-                    ->placeholder('Pending')
-                    ->formatStateUsing(fn (?string $s): string => $s ? ucfirst(strtolower($s)) : 'Pending')
-                    ->color(fn (?string $s): string => in_array(strtolower((string) $s), ['paid', 'processed', 'completed'], true) ? 'success' : 'warning'),
+                Split::make([
+                    Stack::make([
+                        TextColumn::make('for_title')
+                            ->state(fn (Booking $r): string => $r->event?->title ?? $r->venue?->name ?? '—')
+                            ->description(fn (Booking $r): ?string => $r->user?->name)
+                            ->weight('bold')
+                            ->wrap(),
+
+                        Split::make([
+                            TextColumn::make('total_amount')
+                                ->money('INR')
+                                ->weight('bold')
+                                ->color('primary')
+                                ->sortable()
+                                ->grow(false),
+
+                            TextColumn::make('booking_type')
+                                ->badge()
+                                ->state(fn (Booking $r): string => $r->venue_id ? 'Turf' : 'Event')
+                                ->color(fn (Booking $r): string => $r->venue_id ? 'success' : 'primary')
+                                ->grow(false),
+
+                            BookingTablePresenter::statusColumn()
+                                ->grow(false),
+
+                            TextColumn::make('payout.status')
+                                ->badge()
+                                ->placeholder('Unsettled')
+                                ->formatStateUsing(fn (?string $s): string => $s ? ucfirst(strtolower($s)) : 'Unsettled')
+                                ->color(fn (?string $s): string => in_array(strtolower((string) $s), ['paid', 'processed', 'completed'], true) ? 'success' : 'warning')
+                                ->grow(false),
+
+                            TextColumn::make('created_at')
+                                ->date('d M Y')
+                                ->color('gray')
+                                ->size('sm')
+                                ->sortable(),
+                        ])->grow(false),
+                    ]),
+                ]),
             ]);
     }
 }
