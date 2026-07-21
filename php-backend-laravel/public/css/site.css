@@ -45,9 +45,11 @@ a {
 }
 
 /* Premium aurora background (District/BookMyShow-grade). A fixed full-viewport
-   layer of soft, blurred brand-blue/indigo glows that pool in the page gutters
-   and add depth behind the translucent content cards. Desktop-only. The glows
-   "breathe" — a slow, subtle per-layer drift + opacity pulse — for quiet life. */
+   soft wash: two large, low-alpha top glows over a cohesive light-blue base, so
+   the whole page reads as one even tinted surface. (Earlier the glow pooled in
+   the gutters over a near-white base — with flat content that made the centre
+   look like a phantom white card, so the wash is deliberately even now.)
+   Desktop-only; breathes slowly for quiet life. */
 @media (min-width: 1200px) {
 	body::before {
 		content: "";
@@ -56,10 +58,9 @@ a {
 		z-index: -1;
 		pointer-events: none;
 		background-image:
-			radial-gradient(620px circle at 10% 18%, rgba(37, 99, 235, 0.20), rgba(37, 99, 235, 0) 58%),
-			radial-gradient(560px circle at 92% 26%, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0) 55%),
-			radial-gradient(520px circle at 88% 92%, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0) 60%),
-			linear-gradient(180deg, #fafbff, #eef2fb);
+			radial-gradient(1500px 1000px at 22% -18%, rgba(37, 99, 235, 0.13), transparent 72%),
+			radial-gradient(1300px 900px at 108% -8%, rgba(99, 102, 241, 0.11), transparent 68%),
+			linear-gradient(180deg, #eef2fb, #e7edf9);
 		animation: aurora-breathe 22s ease-in-out infinite alternate;
 	}
 
@@ -75,10 +76,9 @@ a {
 @media (min-width: 1200px) {
 	body.aurora-hub::before {
 		background-image:
-			radial-gradient(620px circle at 10% 18%, rgba(0, 200, 83, 0.18), rgba(0, 200, 83, 0) 58%),
-			radial-gradient(560px circle at 92% 26%, rgba(16, 185, 129, 0.16), rgba(16, 185, 129, 0) 55%),
-			radial-gradient(520px circle at 88% 92%, rgba(0, 200, 83, 0.11), rgba(0, 200, 83, 0) 60%),
-			linear-gradient(180deg, #f7fdf9, #ecf6ef);
+			radial-gradient(1500px 1000px at 22% -18%, rgba(0, 200, 83, 0.12), transparent 72%),
+			radial-gradient(1300px 900px at 108% -8%, rgba(16, 185, 129, 0.10), transparent 68%),
+			linear-gradient(180deg, #eef7f0, #e6f2ea);
 	}
 }
 
@@ -87,10 +87,9 @@ a {
 @media (min-width: 1200px) {
 	body.event-detail-page::before {
 		background-image:
-			radial-gradient(680px circle at 8% 16%, rgba(37, 99, 235, 0.32), rgba(37, 99, 235, 0) 60%),
-			radial-gradient(600px circle at 94% 24%, rgba(99, 102, 241, 0.28), rgba(99, 102, 241, 0) 57%),
-			radial-gradient(560px circle at 90% 92%, rgba(37, 99, 235, 0.20), rgba(37, 99, 235, 0) 62%),
-			linear-gradient(180deg, #f6f9ff, #e6ecfb);
+			radial-gradient(1500px 1000px at 22% -18%, rgba(37, 99, 235, 0.18), transparent 72%),
+			radial-gradient(1300px 900px at 108% -8%, rgba(99, 102, 241, 0.15), transparent 68%),
+			linear-gradient(180deg, #e9eefb, #dfe7f7);
 	}
 }
 
