@@ -873,26 +873,10 @@
     .mhome {
         font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
         color: #0F172A;
-        /* District/BookMyShow-style top gradient band — the same blue→indigo
-           aurora the desktop paints below its header, tuned for the phone: two
-           soft brand glows at the very top that fade into the slate canvas by
-           ~360px, so the "Haraan special" + For You zone sits on colour instead
-           of flat white. Breathes slowly like the desktop band. */
-        background-color: #F4F7FB;
-        background-image:
-            radial-gradient(560px 320px at 20% -16%, rgba(37, 99, 235, 0.22), transparent 70%),
-            radial-gradient(480px 300px at 110% -10%, rgba(99, 102, 241, 0.17), transparent 68%),
-            linear-gradient(180deg, #e9f0fd 0%, rgba(233, 240, 253, 0) 360px);
-        background-repeat: no-repeat;
+        /* Plain white surface fading into the slate canvas (user: white only) —
+           the fade just kills the header/content seam. */
+        background: linear-gradient(180deg, #FFFFFF 0%, #F4F7FB 260px);
         padding: 14px 16px 8px;
-        animation: mhome-aurora 22s ease-in-out infinite alternate;
-    }
-    @keyframes mhome-aurora {
-        from { background-position: 0% 0%, 0% 0%, 0 0; }
-        to   { background-position: 3% 0%, -3% 0%, 0 0; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-        .mhome { animation: none; }
     }
 
     /* Centered brand lockup at the top of the feed (user-placed: between the
@@ -904,23 +888,15 @@
     .mbrandmark {
         position: relative;
         display: flex; align-items: flex-end; justify-content: center;
-        padding: 22px 0 16px;
+        padding: 34px 0 26px;
         overflow: visible;
-    }
-    /* Soft blue spotlight behind the wordmark — ties the scattered dots together
-       and lifts the lockup off the flat white so the block reads as designed. */
-    .mbrandmark::before {
-        content: ""; position: absolute; left: 50%; top: 52%;
-        width: 260px; height: 92px; transform: translate(-50%, -50%);
-        background: radial-gradient(closest-side, rgba(37, 99, 235, 0.13), rgba(37, 99, 235, 0) 72%);
-        z-index: 0; pointer-events: none;
     }
     /* Wordmark rendered pure black (the PNG is navy). */
     .mbrandmark img { height: 30px; width: auto; display: block; filter: brightness(0); position: relative; z-index: 2; }
     /* The script tucks in close against the wordmark's tail — user picked this
        over a wider, fully-clearing gap. Keep the offset. */
     .mbrandmark span {
-        position: absolute; left: 50%; bottom: 10px; z-index: 2;
+        position: absolute; left: 50%; bottom: 22px; z-index: 2;
         margin-left: 52px; white-space: nowrap;
         font-family: 'Great Vibes', 'Segoe Script', cursive;
         font-size: 26px; line-height: 1; letter-spacing: 0.01em;
@@ -929,26 +905,36 @@
     }
 
     /* Blue dots scattered around the name — a light constellation that twinkles
-       (scale + fade on a stagger). Sits behind the wordmark; placed to the sides
-       and above/below so it frames "Haraan special" without crowding the letters. */
+       (scale + fade on a stagger). Spread across the full width of the white band
+       and above/below, sitting behind the wordmark so it fills the space without
+       crowding the letters. */
     .mbrandmark__dots { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
     .mbrandmark__dots i {
         position: absolute; border-radius: 50%;
         animation: mbd-twinkle 3s ease-in-out infinite;
     }
-    /* left cluster */
-    .mbrandmark__dots i:nth-child(1) { left: 25%; top: 16px;  width: 6px; height: 6px; background: #2563EB; animation-delay: 0s;   }
-    .mbrandmark__dots i:nth-child(2) { left: 33%; top: 44px;  width: 4px; height: 4px; background: #60A5FA; animation-delay: .45s; }
-    .mbrandmark__dots i:nth-child(3) { left: 19%; top: 33px;  width: 7px; height: 7px; background: #93C5FD; animation-delay: .9s;  }
-    .mbrandmark__dots i:nth-child(4) { left: 30%; top: 8px;   width: 3px; height: 3px; background: #2563EB; animation-delay: 1.3s; }
-    /* right cluster */
-    .mbrandmark__dots i:nth-child(5) { left: 71%; top: 12px;  width: 6px; height: 6px; background: #60A5FA; animation-delay: .2s;  }
-    .mbrandmark__dots i:nth-child(6) { left: 77%; top: 40px;  width: 4px; height: 4px; background: #2563EB; animation-delay: .65s; }
-    .mbrandmark__dots i:nth-child(7) { left: 83%; top: 24px;  width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.05s;}
-    .mbrandmark__dots i:nth-child(8) { left: 67%; top: 48px;  width: 3px; height: 3px; background: #60A5FA; animation-delay: 1.5s; }
-    /* top & bottom accents */
-    .mbrandmark__dots i:nth-child(9)  { left: 50%; top: 4px;  width: 3px; height: 3px; background: #93C5FD; animation-delay: .55s; }
-    .mbrandmark__dots i:nth-child(10) { left: 50%; top: 60px; width: 4px; height: 4px; background: #2563EB; animation-delay: .95s; }
+    /* left half */
+    .mbrandmark__dots i:nth-child(1)  { left: 8%;  top: 20px; width: 6px; height: 6px; background: #2563EB; animation-delay: 0s;   }
+    .mbrandmark__dots i:nth-child(2)  { left: 15%; top: 46px; width: 4px; height: 4px; background: #60A5FA; animation-delay: .5s;  }
+    .mbrandmark__dots i:nth-child(3)  { left: 22%; top: 12px; width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.0s; }
+    .mbrandmark__dots i:nth-child(4)  { left: 12%; top: 68px; width: 5px; height: 5px; background: #2563EB; animation-delay: .3s;  }
+    .mbrandmark__dots i:nth-child(5)  { left: 28%; top: 36px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .8s;  }
+    .mbrandmark__dots i:nth-child(6)  { left: 19%; top: 82px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.3s; }
+    /* right half */
+    .mbrandmark__dots i:nth-child(7)  { left: 92%; top: 18px; width: 6px; height: 6px; background: #60A5FA; animation-delay: .2s;  }
+    .mbrandmark__dots i:nth-child(8)  { left: 85%; top: 48px; width: 4px; height: 4px; background: #2563EB; animation-delay: .7s;  }
+    .mbrandmark__dots i:nth-child(9)  { left: 78%; top: 10px; width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.1s; }
+    .mbrandmark__dots i:nth-child(10) { left: 88%; top: 70px; width: 5px; height: 5px; background: #60A5FA; animation-delay: .4s;  }
+    .mbrandmark__dots i:nth-child(11) { left: 73%; top: 36px; width: 3px; height: 3px; background: #2563EB; animation-delay: .95s; }
+    .mbrandmark__dots i:nth-child(12) { left: 81%; top: 84px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.45s;}
+    /* top row */
+    .mbrandmark__dots i:nth-child(13) { left: 40%; top: 4px;  width: 3px; height: 3px; background: #93C5FD; animation-delay: .6s;  }
+    .mbrandmark__dots i:nth-child(14) { left: 60%; top: 6px;  width: 3px; height: 3px; background: #2563EB; animation-delay: 1.0s; }
+    .mbrandmark__dots i:nth-child(15) { left: 50%; top: 2px;  width: 4px; height: 4px; background: #60A5FA; animation-delay: .35s; }
+    /* bottom row */
+    .mbrandmark__dots i:nth-child(16) { left: 42%; top: 82px; width: 3px; height: 3px; background: #2563EB; animation-delay: .55s; }
+    .mbrandmark__dots i:nth-child(17) { left: 58%; top: 84px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.2s; }
+    .mbrandmark__dots i:nth-child(18) { left: 50%; top: 88px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .9s;  }
 
     @keyframes mbd-twinkle {
         0%, 100% { transform: scale(0.6); opacity: 0.3; }

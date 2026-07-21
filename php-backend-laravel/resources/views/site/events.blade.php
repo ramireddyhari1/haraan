@@ -29,7 +29,7 @@
     {{-- Centered brand lockup between the tabs and the feed (user-placed;
          replaces the old top strip so the wordmark appears exactly once). --}}
     <div class="mbrandmark" aria-hidden="true">
-        <div class="mbrandmark__dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="mbrandmark__dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
         <span>special</span>
     </div>
