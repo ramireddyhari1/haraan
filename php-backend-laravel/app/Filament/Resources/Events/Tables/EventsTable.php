@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Events\Tables;
 
+use App\Filament\Resources\Events\Pages\CreateEvent;
 use App\Filament\Resources\Events\Pages\EventAnalytics;
 use App\Models\Event;
 use Filament\Actions\Action;
@@ -124,6 +125,18 @@ class EventsTable
                         ->orderBy('category')
                         ->pluck('category', 'category')
                         ->all()),
+            ])
+            // Warm first-run state instead of Filament's bare "No records" — a new
+            // partner lands here with zero events, so point them straight at Create.
+            ->emptyStateIcon('heroicon-o-ticket')
+            ->emptyStateHeading('No events yet')
+            ->emptyStateDescription('Publish your first event to start taking bookings and checking guests in at the gate.')
+            ->emptyStateActions([
+                Action::make('createFirstEvent')
+                    ->label('Create your first event')
+                    ->icon('heroicon-m-plus')
+                    ->button()
+                    ->url(fn (): string => CreateEvent::getUrl()),
             ])
             // Tapping the card opens the read-only analytics dashboard, not the
             // edit form. Editing stays a deliberate, explicit action.
