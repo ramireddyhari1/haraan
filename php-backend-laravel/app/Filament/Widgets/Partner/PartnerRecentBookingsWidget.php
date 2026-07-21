@@ -6,6 +6,8 @@ namespace App\Filament\Widgets\Partner;
 
 use App\Filament\Support\BookingTablePresenter;
 use App\Models\Booking;
+use Filament\Tables\Columns\Layout\Split;
+use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
@@ -54,27 +56,47 @@ class PartnerRecentBookingsWidget extends TableWidget
             ->emptyStateHeading('No bookings yet')
             ->emptyStateDescription('Bookings from the app and walk-ins will appear here as they come in.')
             ->emptyStateIcon('heroicon-o-calendar-days')
+            // One booking = one card (avatar + who/what, then a meta row of
+            // amount · qty · status · when). Reads as a clean list on phones
+            // instead of a 6-column table that scrolls sideways.
+            ->contentGrid(['default' => 1])
             ->columns([
-                BookingTablePresenter::customerAvatarColumn(),
-                TextColumn::make('user.name')
-                    ->label('Customer')
-                    ->weight('bold')
-                    ->description(fn (Booking $r): ?string => $this->lineFor($r))
-                    ->placeholder('Guest'),
-                TextColumn::make('quantity')
-                    ->label('Qty')
-                    ->numeric()
-                    ->alignEnd(),
-                TextColumn::make('total_amount')
-                    ->label('Amount')
-                    ->money('INR')
-                    ->weight('bold')
-                    ->alignEnd(),
-                BookingTablePresenter::statusColumn(),
-                TextColumn::make('created_at')
-                    ->label('When')
-                    ->since()
-                    ->tooltip(fn (Booking $r): string => $r->created_at->format('d M Y, H:i')),
+                Split::make([
+                    BookingTablePresenter::customerAvatarColumn()
+                        ->grow(false),
+
+                    Stack::make([
+                        TextColumn::make('user.name')
+                            ->label('Customer')
+                            ->weight('bold')
+                            ->description(fn (Booking $r): ?string => $this->lineFor($r))
+                            ->placeholder('Guest')
+                            ->wrap(),
+
+                        Split::make([
+                            TextColumn::make('total_amount')
+                                ->money('INR')
+                                ->weight('bold')
+                                ->color('primary')
+                                ->grow(false),
+
+                            TextColumn::make('quantity')
+                                ->badge()
+                                ->color('gray')
+                                ->formatStateUsing(fn (?int $state): string => '×' . max(1, (int) $state))
+                                ->grow(false),
+
+                            BookingTablePresenter::statusColumn()
+                                ->grow(false),
+
+                            TextColumn::make('created_at')
+                                ->since()
+                                ->color('gray')
+                                ->size('sm')
+                                ->tooltip(fn (Booking $r): string => $r->created_at->format('d M Y, H:i')),
+                        ])->grow(false),
+                    ]),
+                ]),
             ]);
     }
 
