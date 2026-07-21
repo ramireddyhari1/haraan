@@ -14,10 +14,19 @@
 }
 
 /* Apply to key components */
-.theme-events .hero-feature,
+.theme-events .hero-feature {
+    background: linear-gradient(180deg, var(--surface), var(--surface));
+}
+
+/* Events content stays FLAT on the aurora page — no white section/page boxes.
+   (This rule used to paint .events-section and .page-shell white, which is what
+   made the page read as stacked white cards; keep them transparent to match the
+   flattened .events-section in site.css.) */
 .theme-events .events-section,
 .theme-events .page-shell {
-    background: linear-gradient(180deg, var(--surface), var(--surface));
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
 }
 
 .theme-events .hero-feature__content {
