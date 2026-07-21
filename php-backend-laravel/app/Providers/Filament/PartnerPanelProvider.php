@@ -10,9 +10,13 @@ use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use App\Filament\Pages\Dashboard;
+use App\Filament\Auth\PartnerLogin;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Facades\FilamentView;
+use Filament\View\PanelsRenderHook;
+use Illuminate\Support\Facades\Blade;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -45,6 +49,15 @@ class PartnerPanelProvider extends PanelProvider
         // Send partners back to the website login area on logout, instead of the
         // bare Filament panel "Sign in" page (the response self-scopes to /partner).
         $this->app->bind(LogoutResponse::class, PartnerLogoutResponse::class);
+
+        // BookMyShow-style split brand panel on the left of the partner sign-in
+        // screen. Scoped to PartnerLogin so /control — which shares the same
+        // compiled theme — and every other simple page stay untouched.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::SIMPLE_LAYOUT_START,
+            fn (): string => Blade::render('@include(\'filament.partner.auth-brand\')'),
+            scopes: PartnerLogin::class,
+        );
     }
 
     public function panel(Panel $panel): Panel
@@ -61,7 +74,7 @@ class PartnerPanelProvider extends PanelProvider
             // primary colour, so the blue lane stays blue.
             ->font('Inter')
             ->viteTheme('resources/css/filament/control/theme.css')
-            ->login()
+            ->login(PartnerLogin::class)
             ->passwordReset()
             ->profile()
             ->colors([
