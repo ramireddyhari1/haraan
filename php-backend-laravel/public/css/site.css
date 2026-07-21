@@ -82,6 +82,18 @@ a {
 	}
 }
 
+/* Event detail is a pristine-white minimal page, so its gutters read faint —
+   push the blue aurora stronger here so the glow is clearly present. */
+@media (min-width: 1200px) {
+	body.event-detail-page::before {
+		background-image:
+			radial-gradient(680px circle at 8% 16%, rgba(37, 99, 235, 0.32), rgba(37, 99, 235, 0) 60%),
+			radial-gradient(600px circle at 94% 24%, rgba(99, 102, 241, 0.28), rgba(99, 102, 241, 0) 57%),
+			radial-gradient(560px circle at 90% 92%, rgba(37, 99, 235, 0.20), rgba(37, 99, 235, 0) 62%),
+			linear-gradient(180deg, #f6f9ff, #e6ecfb);
+	}
+}
+
 /* Motion is decorative — honour users who ask for less of it. */
 @media (prefers-reduced-motion: reduce) {
 	body::before { animation: none; }
