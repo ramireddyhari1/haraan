@@ -47,7 +47,7 @@
 </style>
 
 <div class="bk-wrap">
-    <a class="bk-back" href="/events/{{ $event->id }}">
+    <a class="bk-back" id="bkBack" href="/events/{{ $event->id }}">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
         Back to event
     </a>
@@ -128,4 +128,28 @@
         <button type="submit" class="bk-cta">Confirm booking — ₹{{ number_format($total, 2) }}</button>
     </form>
 </div>
+
+{{-- "Back to event" must POP the event-detail entry the user came from, not push
+     a fresh one. Pushing a second event-detail entry created a loop: Back-to-event
+     → event detail, then the browser Back button → back HERE (Review booking).
+     So: if we arrived straight from the event page, history.back() returns to that
+     exact entry (Back again then goes to the events list). If we got here another
+     way (reload / deep link / a validation-error redirect), replace the current
+     entry with the event page so a review-booking entry is never left behind. --}}
+<script>
+    (function () {
+        var back = document.getElementById('bkBack');
+        if (!back) return;
+        back.addEventListener('click', function (e) {
+            var url = back.getAttribute('href');
+            var ref = (document.referrer || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+            e.preventDefault();
+            if (ref && ref.endsWith(url) && window.history.length > 1) {
+                window.history.back();
+            } else {
+                window.location.replace(url);
+            }
+        });
+    })();
+</script>
 @endsection
