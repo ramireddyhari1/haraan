@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\Venues\Tables;
 
+use App\Filament\Resources\Venues\Pages\CreateVenue;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -70,6 +72,17 @@ class VenuesTable
                     ->options(['Cricket' => 'Cricket', 'Football' => 'Football', 'Badminton' => 'Badminton', 'Basketball' => 'Basketball']),
                 TernaryFilter::make('is_bookable')->label('Bookable'),
                 TernaryFilter::make('is_active')->label('Live'),
+            ])
+            // First-run state for a new venue-owner partner — mirror the events list.
+            ->emptyStateIcon('heroicon-o-building-storefront')
+            ->emptyStateHeading('No venues yet')
+            ->emptyStateDescription('Add your first turf or venue to start taking bookings and listing it in the app.')
+            ->emptyStateActions([
+                Action::make('createFirstVenue')
+                    ->label('Add your first venue')
+                    ->icon('heroicon-m-plus')
+                    ->button()
+                    ->url(fn (): string => CreateVenue::getUrl()),
             ])
             ->recordActions([
                 EditAction::make(),
