@@ -332,7 +332,7 @@
         <div class="section-shell__header">
             <div>
                 <p class="eyebrow eyebrow--soft">Handpicked experiences</p>
-                <h2>Popular in {{ $selectedCity ?? 'India' }}</h2>
+                <h2>Popular Near You</h2>
             </div>
         </div>
 
@@ -360,18 +360,21 @@
                             }
                         @endphp
                         <img src="{{ $posterUrl }}" alt="{{ $event->title }}">
-                    </div>
-                    <div class="event-list-card__content">
                         @php
                             // Many events have no real start time (defaults to midnight);
                             // showing "12:00 AM" everywhere reads as broken — drop it then.
                             $dt = $event->date;
                             $dLabel = $dt ? $dt->format('D, j M') . ($dt->format('H:i') !== '00:00' ? $dt->format(', g:i A') : '') : 'Date TBA';
                         @endphp
-                        <p class="event-list-card__date">{{ $dLabel }}</p>
+                        <span class="event-list-card__datebadge">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                            {{ $dLabel }}
+                        </span>
+                    </div>
+                    <div class="event-list-card__content">
                         <h3 class="event-list-card__title">{{ $event->title }}</h3>
                         <p class="event-list-card__venue">{{ $event->venue }}</p>
-                        <p class="event-list-card__price">₹{{ number_format((float) $event->price) }} onwards</p>
+                        <p class="event-list-card__price">₹{{ number_format((float) $event->price) }} <span>onwards</span></p>
                     </div>
                 </a>
             @empty
