@@ -1339,33 +1339,33 @@ main.container {
 	gap: 12px;
 }
 
-/* Trending rail — desktop ranked row (District/BMS-style oversized numerals over
-   posters). Horizontal scroll; the mobile .mtrends serves ≤720px. */
-.trend-rail {
-	display: flex;
-	gap: 26px;
-	overflow-x: auto;
-	padding: 8px 2px 14px;
-	scroll-snap-type: x proximity;
-	scrollbar-width: thin;
+/* Trending — desktop Top-5 ranked grid (District/BMS-style oversized numerals
+   over posters). Full width, 5 equal columns, so there's no empty gutter. The
+   mobile .mtrends serves ≤720px. */
+.trend-grid {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: 20px;
 }
-.trend-rail::-webkit-scrollbar { height: 6px; }
-.trend-rail::-webkit-scrollbar-thumb { background: rgba(18,22,32,0.18); border-radius: 6px; }
 .trend-card {
-	flex: 0 0 190px;
 	display: flex;
 	flex-direction: column;
-	scroll-snap-align: start;
 	text-decoration: none;
 }
 .trend-card__media {
 	position: relative;
-	height: 244px;
+	width: 100%;
+	aspect-ratio: 3 / 4;
 	border-radius: 18px;
 	background-size: cover;
 	background-position: center;
 	box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
 	overflow: hidden;
+	transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.trend-card:hover .trend-card__media {
+	transform: translateY(-4px);
+	box-shadow: 0 24px 48px rgba(15, 23, 42, 0.2);
 }
 .trend-card__grad {
 	position: absolute;
@@ -1410,11 +1410,6 @@ main.container {
 	font-weight: 700;
 	color: #0F172A;
 }
-.trend-card:hover .trend-card__media {
-	transform: translateY(-3px);
-	box-shadow: 0 22px 44px rgba(15, 23, 42, 0.2);
-}
-.trend-card__media { transition: transform 140ms ease, box-shadow 140ms ease; }
 
 .event-explore-grid {
 	display: grid;

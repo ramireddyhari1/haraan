@@ -287,20 +287,31 @@
         </div>
     </section>
 
-    {{-- Trending — the desktop twin of the mobile ranked row (.mtrends). Real data:
-         events ranked by actual ticket sales (PublicWebController::trendingFeed()).
+    {{-- Trending — a Top-5 ranked grid (District/BMS-style), full width so there's
+         no empty gutter. Real data first: events ranked by actual ticket sales
+         (PublicWebController::trendingFeed()); when fewer than 5 qualify, top up
+         with the next popular events so the row is always a complete Top 5.
          Hidden ≤720px by the .events-page swap rule; the .mhome feed shows its own. --}}
-    @if($mTrending->count())
+    @php
+        $topFive = $mTrending->take(5)->values();
+        if ($topFive->count() < 5) {
+            $have = $topFive->pluck('id')->all();
+            $topFive = $topFive
+                ->concat($mEvents->reject(fn ($e) => in_array($e->id, $have))->take(5 - $topFive->count()))
+                ->values();
+        }
+    @endphp
+    @if($topFive->count())
     <section class="events-section events-trending">
         <div class="section-shell__header">
             <div>
                 <p class="eyebrow eyebrow--soft">Selling fast right now</p>
-                <h2>Trending</h2>
+                <h2>Top 5 Trending</h2>
             </div>
             <a href="/events" class="dsec__link">See all</a>
         </div>
-        <div class="trend-rail">
-            @foreach($mTrending as $ev)
+        <div class="trend-grid">
+            @foreach($topFive as $ev)
                 @php $timg = $ev->heroImageUrl() ?? asset('events.png'); @endphp
                 <a class="trend-card" href="/events/{{ $ev->id }}">
                     <div class="trend-card__media" style="background-image:url('{{ $timg }}')">
