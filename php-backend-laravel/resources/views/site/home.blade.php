@@ -11,6 +11,7 @@
 <div class="mhome">
     {{-- Centered brand lockup at the top of the feed (matches /events). --}}
     <div class="mbrandmark" aria-hidden="true">
+        <div class="mbrandmark__dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
         <span>special</span>
     </div>
