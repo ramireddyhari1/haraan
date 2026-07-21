@@ -1312,21 +1312,31 @@ main.container {
 	border-color: #111827;
 }
 
+/* Flat, un-boxed sections (District/BookMyShow-style): the page is the surface,
+   sections flow on it separated by whitespace, and only the posters/cards inside
+   carry elevation. No per-section card chrome. */
 .events-section {
 	display: grid;
-	gap: 14px;
-	padding: 22px;
-	border-radius: 24px;
-	border: 1px solid var(--border);
-	background: var(--surface);
-	box-shadow: 0 18px 40px rgba(18, 22, 32, 0.06);
+	gap: 16px;
+	padding: 8px 2px 10px;
+	border-radius: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
 }
 
 .events-section--filters {
-	padding: 12px;
+	padding: 4px 2px 8px;
 	background: transparent;
 	border: 0;
 	box-shadow: none;
+}
+
+/* More air between the now-flat sections, so they read as distinct without
+   needing box walls (the District/BMS rhythm). */
+.page-shell.events-page,
+.page-shell.gamehub-page {
+	gap: 26px;
 }
 
 /* Trending rail — desktop ranked row (District/BMS-style oversized numerals over

@@ -297,6 +297,7 @@
                 <p class="eyebrow eyebrow--soft">Selling fast right now</p>
                 <h2>Trending</h2>
             </div>
+            <a href="/events" class="dsec__link">See all</a>
         </div>
         <div class="trend-rail">
             @foreach($mTrending as $ev)
