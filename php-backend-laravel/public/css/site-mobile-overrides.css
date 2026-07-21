@@ -873,10 +873,26 @@
     .mhome {
         font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
         color: #0F172A;
-        /* White wash fading into the slate canvas (user preference over the
-           app's sky-blue) — the fade is what kills the header/content seam. */
-        background: linear-gradient(180deg, #FFFFFF 0%, #F4F7FB 220px);
+        /* District/BookMyShow-style top gradient band — the same blue→indigo
+           aurora the desktop paints below its header, tuned for the phone: two
+           soft brand glows at the very top that fade into the slate canvas by
+           ~360px, so the "Haraan special" + For You zone sits on colour instead
+           of flat white. Breathes slowly like the desktop band. */
+        background-color: #F4F7FB;
+        background-image:
+            radial-gradient(560px 320px at 20% -16%, rgba(37, 99, 235, 0.22), transparent 70%),
+            radial-gradient(480px 300px at 110% -10%, rgba(99, 102, 241, 0.17), transparent 68%),
+            linear-gradient(180deg, #e9f0fd 0%, rgba(233, 240, 253, 0) 360px);
+        background-repeat: no-repeat;
         padding: 14px 16px 8px;
+        animation: mhome-aurora 22s ease-in-out infinite alternate;
+    }
+    @keyframes mhome-aurora {
+        from { background-position: 0% 0%, 0% 0%, 0 0; }
+        to   { background-position: 3% 0%, -3% 0%, 0 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .mhome { animation: none; }
     }
 
     /* Centered brand lockup at the top of the feed (user-placed: between the
