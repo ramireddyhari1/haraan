@@ -85,9 +85,115 @@
             border-color: #16a34a !important;
             box-shadow: 0 10px 20px rgba(22, 163, 74, 0.12) !important;
         }
+
+        /* ── Brand splash loader (BookMyShow-style) ───────────────────────────
+           Critical, inlined so it paints on the first frame — before site.css.
+           Full-screen wash tuned to the logo's own #FEFEFE plate so the wordmark
+           has no visible box; a light streak sweeps through the letters, a slim
+           EventsBlue bar runs beneath. Shown once per browser session. */
+        .hloader {
+            position: fixed;
+            inset: 0;
+            z-index: 3000;
+            display: grid;
+            place-items: center;
+            background: radial-gradient(120% 120% at 50% 42%, #ffffff 0%, #fdfefe 34%, #eef2f7 100%);
+            opacity: 1;
+            transition: opacity 0.55s ease, visibility 0.55s ease;
+        }
+        .hloader.is-done { opacity: 0; visibility: hidden; pointer-events: none; }
+        .hloader.is-instant { display: none !important; }
+        .hloader__stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 26px;
+            transform: translateY(-2%);
+        }
+        .hloader__logo {
+            position: relative;
+            width: clamp(180px, 42vw, 300px);
+            line-height: 0;
+            animation: hl-pop 0.7s cubic-bezier(0.16, 1, 0.3, 1) both,
+                       hl-float 2.8s ease-in-out 0.7s infinite;
+        }
+        .hloader__logo img { width: 100%; height: auto; display: block; }
+        /* Shine sweep — a translucent white streak travels across the wordmark.
+           Screen-blended, so it only lifts the blue letters (it's a no-op over the
+           near-white plate): the gloss appears to run *through* the letterforms. */
+        .hloader__shine {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.92) 50%, transparent 60%);
+            background-size: 220% 100%;
+            background-repeat: no-repeat;
+            mix-blend-mode: screen;
+            animation: hl-shine 1.9s ease-in-out 0.5s infinite;
+        }
+        .hloader__bar {
+            position: relative;
+            width: clamp(120px, 26vw, 190px);
+            height: 4px;
+            border-radius: 99px;
+            background: rgba(37, 99, 235, 0.14);
+            overflow: hidden;
+        }
+        .hloader__bar span {
+            position: absolute;
+            top: 0;
+            left: -45%;
+            height: 100%;
+            width: 42%;
+            border-radius: 99px;
+            background: linear-gradient(90deg, #3b82f6, #2563EB);
+            animation: hl-bar 1.25s cubic-bezier(0.65, 0.05, 0.36, 1) infinite;
+        }
+        @keyframes hl-pop { 0% { opacity: 0; transform: scale(0.86); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes hl-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+        @keyframes hl-shine { 0% { background-position: 130% 0; } 55%, 100% { background-position: -30% 0; } }
+        @keyframes hl-bar { 0% { left: -45%; width: 42%; } 50% { width: 58%; } 100% { left: 100%; width: 42%; } }
+        @media (prefers-reduced-motion: reduce) {
+            .hloader__logo { animation: hl-pop 0.01s both; }
+            .hloader__shine { display: none; }
+            .hloader__bar span { animation-duration: 2s; }
+        }
     </style>
 </head>
 <body class="@yield('body_class') {{ request()->is('gamehub*') ? 'aurora-hub' : '' }}">
+    {{-- Brand splash loader — a premium first-open moment (BookMyShow-style).
+         Shown once per browser session; later in-session navigations skip it so
+         it never nags. Styles are inlined in <head> so it covers the first paint. --}}
+    <div id="haraanLoader" class="hloader" role="status" aria-live="polite" aria-label="Loading Haraan">
+        <div class="hloader__stage">
+            <div class="hloader__logo">
+                <img src="{{ $assetVer('images/haraan-loader.png') }}" alt="Haraan" width="300" height="100" fetchpriority="high">
+                <span class="hloader__shine" aria-hidden="true"></span>
+            </div>
+            <div class="hloader__bar" aria-hidden="true"><span></span></div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            var el = document.getElementById('haraanLoader');
+            if (!el) return;
+            // Once per session: repeat navigations within the session skip the splash.
+            if (sessionStorage.getItem('haraanSplashShown')) { el.classList.add('is-instant'); return; }
+            sessionStorage.setItem('haraanSplashShown', '1');
+            var start = Date.now(), MIN = 650, done = false;
+            function hide() {
+                if (done) return; done = true;
+                var wait = Math.max(0, MIN - (Date.now() - start)); // let the animation breathe
+                setTimeout(function () {
+                    el.classList.add('is-done');
+                    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 600);
+                }, wait);
+            }
+            window.addEventListener('load', hide);
+            setTimeout(hide, 4000); // safety: never trap the page behind the splash
+        })();
+    </script>
+    <noscript><style>.hloader{display:none !important;}</style></noscript>
     <header class="topbar {{ request()->is('events*') || request()->is('/') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">
