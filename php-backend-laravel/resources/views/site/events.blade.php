@@ -287,6 +287,34 @@
         </div>
     </section>
 
+    {{-- Trending — the desktop twin of the mobile ranked row (.mtrends). Real data:
+         events ranked by actual ticket sales (PublicWebController::trendingFeed()).
+         Hidden ≤720px by the .events-page swap rule; the .mhome feed shows its own. --}}
+    @if($mTrending->count())
+    <section class="events-section events-trending">
+        <div class="section-shell__header">
+            <div>
+                <p class="eyebrow eyebrow--soft">Selling fast right now</p>
+                <h2>Trending</h2>
+            </div>
+        </div>
+        <div class="trend-rail">
+            @foreach($mTrending as $ev)
+                @php $timg = $ev->heroImageUrl() ?? asset('events.png'); @endphp
+                <a class="trend-card" href="/events/{{ $ev->id }}">
+                    <div class="trend-card__media" style="background-image:url('{{ $timg }}')">
+                        <span class="trend-card__grad" aria-hidden="true"></span>
+                        <span class="trend-card__rank" aria-hidden="true">{{ $loop->iteration }}</span>
+                    </div>
+                    <h3 class="trend-card__title">{{ $ev->title }}</h3>
+                    <p class="trend-card__venue">{{ $ev->venue }}</p>
+                    <p class="trend-card__price">{{ $ev->price ? '₹'.number_format($ev->price).' onwards' : 'Free' }}</p>
+                </a>
+            @endforeach
+        </div>
+    </section>
+    @endif
+
 
     <section class="events-section">
         <div class="section-shell__header">
