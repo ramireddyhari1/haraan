@@ -3,12 +3,15 @@
 namespace App\Filament\Resources\Events\Tables;
 
 use App\Filament\Resources\Events\Pages\CreateEvent;
+use App\Filament\Resources\Events\Pages\EditEvent;
 use App\Filament\Resources\Events\Pages\EventAnalytics;
 use App\Models\Event;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Filament\Support\Enums\Alignment;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\Layout\Split;
@@ -147,6 +150,15 @@ class EventsTable
                     ->icon('heroicon-m-chart-bar')
                     ->color('gray')
                     ->url(fn ($record): string => EventAnalytics::getUrl(['record' => $record])),
+                Action::make('duplicate')
+                    ->label('Duplicate')
+                    ->icon('heroicon-m-document-duplicate')
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->modalHeading('Duplicate this event?')
+                    ->modalDescription('Creates an editable draft copy with the same details and ticket tiers. Bookings, sales and ratings are not carried over — you get a clean event to re-date and publish.')
+                    ->modalSubmitActionLabel('Duplicate')
+                    ->action(fn (Event $record) => self::duplicate($record)),
                 EditAction::make(),
             ])
             ->toolbarActions([
@@ -227,6 +239,44 @@ class EventsTable
             'Selling' => 'info',
             default => 'gray',
         };
+    }
+
+    /**
+     * Clone an event into a fresh editable draft: same details + ticket tiers,
+     * but a clean slate on everything that belongs to the original's own run —
+     * status resets to draft, capacity is freed, sales/ratings are dropped, and
+     * (in the partner console) ownership is stamped to the current partner. Drops
+     * the host straight on the copy's Edit page to re-date and publish.
+     */
+    private static function duplicate(Event $record): \Illuminate\Http\RedirectResponse
+    {
+        $copy = $record->replicate(['created_at', 'updated_at']);
+        $copy->title = mb_substr((string) $record->title, 0, 240) . ' (Copy)';
+        $copy->status = 'draft';
+        $copy->available_slots = max(0, (int) $record->total_slots);
+        $copy->rating = null;
+        $copy->ratings_count = 0;
+
+        if (Filament::getCurrentPanel()?->getId() === 'partner') {
+            $copy->partner_id = auth()->user()?->effectivePartnerId();
+        }
+
+        $copy->save();
+
+        // Carry the ticket tiers so pricing is ready to go on the copy.
+        foreach ($record->ticketTypes as $tier) {
+            $clone = $tier->replicate(['created_at', 'updated_at']);
+            $clone->event_id = $copy->id;
+            $clone->save();
+        }
+
+        Notification::make()
+            ->success()
+            ->title('Event duplicated')
+            ->body('An editable draft copy was created — set a new date and publish when ready.')
+            ->send();
+
+        return redirect(EditEvent::getUrl(['record' => $copy]));
     }
 
     /** A neutral rounded placeholder for events without a poster (self-contained). */
