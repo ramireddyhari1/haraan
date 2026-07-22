@@ -1,11 +1,35 @@
 {{-- Partner home action bar: greeting + a row of lane-aware quick-launch buttons.
      Inline styles (theme-agnostic, dark-aware) keep it self-contained like the
      other bespoke summary strips in this panel. --}}
+@php
+    $t = $this->getToday();
+    // Indian grouping: ₹18,42,900
+    $inr = function (float $n): string {
+        $n = round($n); $sign = $n < 0 ? '-' : ''; $n = abs($n); $str = (string) $n;
+        if (strlen($str) <= 3) return $sign . '₹' . $str;
+        $last3 = substr($str, -3); $rest = substr($str, 0, -3);
+        $rest = preg_replace('/\B(?=(\d{2})+(?!\d))/', ',', $rest);
+        return $sign . '₹' . $rest . ',' . $last3;
+    };
+    $unit = $t['isEvent'] ? 'booking' : 'booking';
+@endphp
+
 <x-filament-widgets::widget>
     <div class="pqa">
         <div class="pqa-hi">
             <div class="pqa-greet">{{ $this->getGreeting() }} 👋</div>
-            <div class="pqa-sub">Here’s your business at a glance.</div>
+            <div class="pqa-today">
+                <span class="pqa-amt">{{ $inr($t['revenue']) }}</span>
+                <span class="pqa-today-lab">earned today</span>
+            </div>
+            <div class="pqa-meta">
+                <span class="pqa-chip">{{ $t['count'] }} {{ \Illuminate\Support\Str::plural($unit, $t['count']) }} today</span>
+                @if ($t['weekDelta'] !== null)
+                    <span class="pqa-chip pqa-mom {{ $t['weekDelta'] < 0 ? 'is-down' : 'is-up' }}">
+                        {{ $t['weekDelta'] < 0 ? '▼' : '▲' }} {{ abs($t['weekDelta']) }}% this week
+                    </span>
+                @endif
+            </div>
         </div>
 
         <div class="pqa-actions">
@@ -36,8 +60,17 @@
             background-size:40px 40px;
             -webkit-mask-image:radial-gradient(120% 100% at 20% 0%,#000 30%,transparent 72%);
             mask-image:radial-gradient(120% 100% at 20% 0%,#000 30%,transparent 72%);}
-        .pqa-greet{font-size:19px;font-weight:800;letter-spacing:-.015em;color:#fff;}
-        .pqa-sub{font-size:13px;color:rgba(224,232,255,.72);margin-top:3px;}
+        .pqa-greet{font-size:16px;font-weight:700;letter-spacing:-.01em;color:rgba(224,232,255,.82);}
+        .pqa-today{display:flex;align-items:baseline;gap:8px;margin-top:5px;}
+        .pqa-amt{font-size:32px;font-weight:800;letter-spacing:-.03em;color:#fff;line-height:1.02;
+            font-variant-numeric:tabular-nums;}
+        .pqa-today-lab{font-size:13px;font-weight:600;color:rgba(224,232,255,.66);}
+        .pqa-meta{display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap;}
+        .pqa-chip{font-size:12px;font-weight:600;color:#eaf0ff;
+            padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.10);
+            box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);font-variant-numeric:tabular-nums;}
+        .pqa-mom.is-up{color:#7ff0bd;background:rgba(16,185,129,.16);box-shadow:inset 0 0 0 1px rgba(16,185,129,.3);}
+        .pqa-mom.is-down{color:#ffcf9a;background:rgba(245,158,11,.16);box-shadow:inset 0 0 0 1px rgba(245,158,11,.3);}
         .pqa-actions{display:flex;gap:10px;flex-wrap:wrap;}
         .pqa-btn{display:inline-flex;align-items:center;gap:7px;
             font-size:13.5px;font-weight:600;color:#eaf0ff;text-decoration:none;

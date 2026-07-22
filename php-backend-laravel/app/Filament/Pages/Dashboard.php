@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Filament\Widgets\Partner\PartnerDailyEarningsWidget;
 use App\Filament\Widgets\Partner\PartnerKpiHeroWidget;
 use App\Filament\Widgets\Partner\PartnerNeedsAttentionWidget;
 use App\Filament\Widgets\Partner\PartnerOrganizerScoreWidget;
@@ -67,6 +68,9 @@ class Dashboard extends BaseDashboard
             // Premium "money hero" (dominant revenue + supporting KPIs), lane-aware
             // internally — supersedes the generic Events/GameHub stats strip here.
             PartnerKpiHeroWidget::class,
+            // "Money by day" — a 7-day earnings bar strip that reads at a glance on
+            // a phone (best day highlighted, today pulses).
+            PartnerDailyEarningsWidget::class,
             // "Needs you" — sellout risk · pending settlement · refund watch.
             PartnerNeedsAttentionWidget::class,
             PartnerRevenueTrendWidget::class,

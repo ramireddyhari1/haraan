@@ -58,6 +58,24 @@ class PartnerPanelProvider extends PanelProvider
             fn (): string => Blade::render('@include(\'filament.partner.auth-brand\')'),
             scopes: PartnerLogin::class,
         );
+
+        // The brand logo lives in the sidebar header, which is collapsed behind the
+        // hamburger on mobile — so on a phone the console opened with no Haraan mark
+        // at all. Paint it into the top bar too, but only below the desktop breakpoint
+        // (where the sidebar logo already shows), so it never doubles up.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::TOPBAR_START,
+            fn (): string => Blade::render(<<<'BLADE'
+                <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
+                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan Partner">
+                </a>
+                <style>
+                    .hrn-topbar-logo{display:none;align-items:center;height:100%;margin-inline-start:.25rem;}
+                    .hrn-topbar-logo img{height:1.6rem;width:auto;display:block;}
+                    @media (max-width:1023px){.hrn-topbar-logo{display:flex;}}
+                </style>
+            BLADE),
+        );
     }
 
     public function panel(Panel $panel): Panel

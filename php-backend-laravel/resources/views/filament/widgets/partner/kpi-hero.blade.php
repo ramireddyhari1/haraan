@@ -51,17 +51,17 @@
 
         {{-- Supporting KPIs --}}
         <div class="pkh-side">
-            <div class="pkh-kpi">
+            <div class="pkh-kpi" data-accent="blue">
                 <div class="pkh-klab">{{ $ticketLabel }}</div>
                 <div class="pkh-kval">{{ number_format($s['tickets']) }}</div>
                 <div class="pkh-ksub">last 14 days</div>
             </div>
-            <div class="pkh-kpi">
+            <div class="pkh-kpi" data-accent="indigo">
                 <div class="pkh-klab">Checked in</div>
                 <div class="pkh-kval">{{ $s['checkedInRate'] !== null ? $s['checkedInRate'] . '%' : '—' }}</div>
                 <div class="pkh-ksub">of paid bookings</div>
             </div>
-            <div class="pkh-kpi">
+            <div class="pkh-kpi" data-accent="{{ $s['refundRate'] >= 5 ? 'amber' : 'slate' }}">
                 <div class="pkh-klab">Refund rate</div>
                 <div class="pkh-kval {{ $s['refundRate'] >= 5 ? 'is-warn' : '' }}">{{ number_format($s['refundRate'], 1) }}%</div>
                 <div class="pkh-ksub">last 14 days</div>
@@ -83,8 +83,14 @@
         .pkh-vs{font-size:12px;color:#9aa2b1;}
         .pkh-spark{margin-top:auto;width:100%;height:38px;display:block;padding-top:10px;}
 
+        .pkh-hero{border-top:3px solid #0f9d63;}
         .pkh-side{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
-        .pkh-kpi{padding:16px 18px;display:flex;flex-direction:column;gap:3px;}
+        .pkh-kpi{padding:16px 18px;display:flex;flex-direction:column;gap:3px;position:relative;
+            border-top:3px solid transparent;}
+        .pkh-kpi[data-accent="blue"]{border-top-color:#5aa2f5;}
+        .pkh-kpi[data-accent="indigo"]{border-top-color:#7c86f0;}
+        .pkh-kpi[data-accent="amber"]{border-top-color:#e0a010;}
+        .pkh-kpi[data-accent="slate"]{border-top-color:#cbd2dd;}
         .pkh-klab{font-size:12.5px;color:#6b7382;font-weight:600;}
         .pkh-kval{font-size:26px;font-weight:800;color:#0b1220;letter-spacing:-.03em;
             font-variant-numeric:tabular-nums;line-height:1.1;}
