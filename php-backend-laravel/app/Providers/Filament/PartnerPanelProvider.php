@@ -62,7 +62,9 @@ class PartnerPanelProvider extends PanelProvider
         // The brand logo lives in the sidebar header, which is collapsed behind the
         // hamburger on mobile — so on a phone the console opened with no Haraan mark
         // at all. Paint it into the top bar too, but only below the desktop breakpoint
-        // (where the sidebar logo already shows), so it never doubles up.
+        // (where the sidebar logo already shows), so it never doubles up. On mobile
+        // it's absolutely centred, so the layout reads: ☰ (far left) · Haraan (centre)
+        // · search + profile (right).
         FilamentView::registerRenderHook(
             PanelsRenderHook::TOPBAR_START,
             fn (): string => Blade::render(<<<'BLADE'
@@ -72,8 +74,79 @@ class PartnerPanelProvider extends PanelProvider
                 <style>
                     .hrn-topbar-logo{display:none;align-items:center;height:100%;margin-inline-start:.25rem;}
                     .hrn-topbar-logo img{height:1.6rem;width:auto;display:block;}
-                    @media (max-width:1023px){.hrn-topbar-logo{display:flex;}}
+                    @media (max-width:1023px){
+                        .fi-topbar{position:relative;}
+                        /* Centre the logo over the bar; the hamburger falls to the far
+                           left in flow, the search icon + profile group sits on the right. */
+                        .hrn-topbar-logo{display:flex;position:absolute;left:50%;top:50%;
+                            transform:translate(-50%,-50%);z-index:5;margin:0;pointer-events:auto;}
+                        .hrn-topbar-logo img{height:1.5rem;}
+                    }
                 </style>
+            BLADE),
+        );
+
+        // Mobile: collapse the global search into a magnifier icon that sits beside the
+        // profile menu; tapping it drops the real search field down as a full-width bar
+        // under the top bar (and auto-focuses it). Desktop keeps the inline search field.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::GLOBAL_SEARCH_BEFORE,
+            fn (): string => Blade::render(<<<'BLADE'
+                <button type="button" class="hrn-search-btn" aria-label="Search"
+                        onclick="window.hrnToggleSearch(event)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.2-4.2"/>
+                    </svg>
+                </button>
+                <style>
+                    .hrn-search-btn{display:none;align-items:center;justify-content:center;
+                        width:2.25rem;height:2.25rem;border:0;background:transparent;color:inherit;
+                        cursor:pointer;border-radius:.6rem;padding:0;}
+                    .hrn-search-btn:hover{background:rgba(120,130,150,.14);}
+                    .hrn-search-btn svg{width:1.35rem;height:1.35rem;}
+                    @media (max-width:1023px){
+                        .fi-topbar-ctn{position:relative;}
+                        .hrn-search-btn{display:inline-flex;}
+                        /* Hide the inline search field until the icon opens it. */
+                        .fi-topbar .fi-global-search-ctn{display:none;}
+                        html.hrn-search-open .fi-topbar .fi-global-search-ctn{
+                            display:block;position:absolute;left:0;right:0;top:100%;z-index:40;
+                            padding:.6rem .8rem;
+                            background:var(--fi-color-white,#fff);
+                            border-top:1px solid rgba(120,130,150,.18);
+                            box-shadow:0 14px 26px -16px rgba(0,0,0,.4);}
+                        html.hrn-search-open .fi-topbar .fi-global-search-field .fi-input-wrp{width:100%;}
+                        html.hrn-search-open .hrn-search-btn{color:var(--fi-color-primary-600,#2563eb);}
+                    }
+                    @media (min-width:1024px){.hrn-search-btn{display:none!important;}}
+                    .dark html.hrn-search-open .fi-topbar .fi-global-search-ctn,
+                    :is(.dark) html.hrn-search-open .fi-topbar .fi-global-search-ctn{
+                        background:var(--fi-color-gray-900,#111722);border-top-color:rgba(120,130,150,.24);}
+                </style>
+                <script>
+                    (function () {
+                        if (window.hrnToggleSearch) return; // guard against SPA re-inits
+                        window.hrnToggleSearch = function (e) {
+                            if (e) { e.preventDefault(); e.stopPropagation(); }
+                            var open = document.documentElement.classList.toggle('hrn-search-open');
+                            if (open) {
+                                requestAnimationFrame(function () {
+                                    var inp = document.querySelector('.fi-topbar .fi-global-search input[type=search]');
+                                    if (inp) inp.focus();
+                                });
+                            }
+                        };
+                        document.addEventListener('click', function (e) {
+                            if (!document.documentElement.classList.contains('hrn-search-open')) return;
+                            if (e.target.closest('.hrn-search-btn') || e.target.closest('.fi-global-search-ctn')) return;
+                            document.documentElement.classList.remove('hrn-search-open');
+                        });
+                        document.addEventListener('keydown', function (e) {
+                            if (e.key === 'Escape') document.documentElement.classList.remove('hrn-search-open');
+                        });
+                    })();
+                </script>
             BLADE),
         );
     }
