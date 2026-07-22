@@ -93,6 +93,27 @@ class PartnerPanelProvider extends PanelProvider
             BLADE),
         );
 
+        // Desktop twin of the mobile tag: a handwritten "partner" under the Haraan
+        // wordmark in the sidebar header. The header is a flex row holding just the
+        // logo (its collapse buttons are skipped when a topbar exists), so flex-wrap
+        // + a full-basis tag drops it onto its own line directly beneath the logo.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::SIDEBAR_LOGO_AFTER,
+            fn (): string => Blade::render(<<<'BLADE'
+                <span class="hrn-sidebar-tag">partner</span>
+                <style>
+                    .fi-sidebar-header{flex-wrap:wrap;}
+                    .fi-sidebar-header-logo-ctn{flex:0 0 auto;}
+                    .hrn-sidebar-tag{flex-basis:100%;font-size:13px;line-height:1;
+                        color:#2f6bff;margin-top:3px;letter-spacing:.02em;
+                        font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
+                        "Brush Script MT","Comic Sans MS",cursive;
+                        transform:rotate(-3deg);transform-origin:left center;}
+                    .dark .hrn-sidebar-tag{color:#7fb0ff;}
+                </style>
+            BLADE),
+        );
+
         // Mobile: collapse the global search into a magnifier icon that sits beside the
         // profile menu; tapping it drops the real search field down as a full-width bar
         // under the top bar (and auto-focuses it). Desktop keeps the inline search field.
