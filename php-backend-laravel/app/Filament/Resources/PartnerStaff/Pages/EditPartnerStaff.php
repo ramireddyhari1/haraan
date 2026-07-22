@@ -31,7 +31,7 @@ class EditPartnerStaff extends EditRecord
                 }),
             Action::make('toggleStatus')
                 ->label(fn (): string => $this->isSuspended() ? 'Reactivate' : 'Suspend')
-                ->icon(fn (): string => $this->isSuspended() ? Heroicon::OutlinedCheckCircle : Heroicon::OutlinedNoSymbol)
+                ->icon(fn (): \BackedEnum => $this->isSuspended() ? Heroicon::OutlinedCheckCircle : Heroicon::OutlinedNoSymbol)
                 ->color(fn (): string => $this->isSuspended() ? 'success' : 'warning')
                 ->requiresConfirmation()
                 ->action(function (): void {

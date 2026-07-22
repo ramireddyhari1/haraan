@@ -315,7 +315,7 @@ class PartnerStaffResource extends Resource
                     }),
                 Action::make('toggleStatus')
                     ->label(fn (User $r): string => self::isSuspended($r) ? 'Reactivate' : 'Suspend')
-                    ->icon(fn (User $r): string => self::isSuspended($r) ? Heroicon::OutlinedCheckCircle : Heroicon::OutlinedNoSymbol)
+                    ->icon(fn (User $r): BackedEnum => self::isSuspended($r) ? Heroicon::OutlinedCheckCircle : Heroicon::OutlinedNoSymbol)
                     ->color(fn (User $r): string => self::isSuspended($r) ? 'success' : 'warning')
                     ->requiresConfirmation()
                     ->modalDescription(fn (User $r): string => self::isSuspended($r)
