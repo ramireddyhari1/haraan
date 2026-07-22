@@ -114,6 +114,78 @@ class PartnerPanelProvider extends PanelProvider
             BLADE),
         );
 
+        // Premium sidebar pass: an identity card pinned to the footer (who + which
+        // workspace + quiet sign-out) plus a nav polish sheet — accent-rail active
+        // state, more breathing room, and clearer section labels.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::SIDEBAR_FOOTER,
+            fn (): string => Blade::render(<<<'BLADE'
+                @php
+                    $u = auth()->user();
+                    $name = $u?->name ?: 'Partner';
+                    $parts = preg_split('/\s+/', trim($name)) ?: [$name];
+                    $init = strtoupper(mb_substr($parts[0] ?? '', 0, 1) . (count($parts) > 1 ? mb_substr((string) end($parts), 0, 1) : ''));
+                    $init = $init !== '' ? $init : 'P';
+                    $hue = crc32($name) % 360;
+                    $lane = ($u?->partner_type === 'event') ? 'Event organiser' : 'Venue owner';
+                @endphp
+                <div class="hrn-acct">
+                    <span class="hrn-acct-av" style="background:hsl({{ $hue }} 52% 46%)">{{ $init }}</span>
+                    <span class="hrn-acct-meta">
+                        <span class="hrn-acct-name">{{ $name }}</span>
+                        <span class="hrn-acct-lane">{{ $lane }}</span>
+                    </span>
+                    <form method="POST" action="{{ route('filament.partner.auth.logout') }}" class="hrn-acct-form">
+                        @csrf
+                        <button type="submit" class="hrn-acct-out" title="Sign out" aria-label="Sign out">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M15 17l5-5-5-5M20 12H9M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+                <style>
+                    /* ---- account card ---- */
+                    .hrn-acct{display:flex;align-items:center;gap:10px;margin:8px;padding:9px 10px;
+                        border-radius:13px;background:#f4f7fb;box-shadow:inset 0 0 0 1px #e9edf4;}
+                    .hrn-acct-av{width:34px;height:34px;border-radius:50%;flex:none;display:flex;
+                        align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;
+                        letter-spacing:.02em;}
+                    .hrn-acct-meta{min-width:0;flex:1;display:flex;flex-direction:column;line-height:1.2;}
+                    .hrn-acct-name{font-size:13px;font-weight:700;color:#0b1220;white-space:nowrap;
+                        overflow:hidden;text-overflow:ellipsis;}
+                    .hrn-acct-lane{font-size:11px;color:#7a8394;margin-top:1px;}
+                    .hrn-acct-form{margin:0;flex:none;}
+                    .hrn-acct-out{display:flex;align-items:center;justify-content:center;width:30px;height:30px;
+                        border-radius:9px;color:#9aa2b1;background:transparent;border:0;cursor:pointer;
+                        transition:background .15s,color .15s;}
+                    .hrn-acct-out:hover{background:#e7ebf2;color:#c2410c;}
+                    .hrn-acct-out svg{width:17px;height:17px;}
+                    .dark .hrn-acct{background:#141b28;box-shadow:inset 0 0 0 1px #1e2633;}
+                    .dark .hrn-acct-name{color:#eef1f6;} .dark .hrn-acct-lane{color:#8b94a5;}
+                    .dark .hrn-acct-out:hover{background:#1e2633;color:#fb923c;}
+
+                    /* ---- nav polish ---- */
+                    .fi-sidebar-nav .fi-sidebar-item-btn{padding-top:.5rem;padding-bottom:.5rem;border-radius:11px;}
+                    .fi-sidebar-nav .fi-sidebar-item-label{font-weight:500;}
+                    .fi-sidebar-nav .fi-sidebar-group-label{font-size:10.5px;letter-spacing:.09em;
+                        font-weight:700;text-transform:uppercase;opacity:.8;}
+                    /* accent-rail active state */
+                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn{position:relative;
+                        background:rgba(47,107,255,.11);font-weight:700;}
+                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn::before{content:"";position:absolute;
+                        inset-inline-start:5px;top:20%;bottom:20%;width:3px;border-radius:3px;
+                        background:linear-gradient(#3b82f6,#1e50e6);}
+                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-label{color:#1e50e6;font-weight:700;}
+                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-icon{color:#1e50e6;}
+                    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn{background:rgba(59,130,246,.16);}
+                    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-label,
+                    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-icon{color:#7fb0ff;}
+                </style>
+            BLADE),
+        );
+
         // Mobile: collapse the global search into a magnifier icon that sits beside the
         // profile menu; tapping it drops the real search field down as a full-width bar
         // under the top bar (and auto-focuses it). Desktop keeps the inline search field.

@@ -46,6 +46,11 @@ class PartnerNotifications extends Page
         return $count > 0 ? (string) $count : null;
     }
 
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'danger';
+    }
+
     /** @return Collection<int, Notification> */
     public function getItemsProperty(): Collection
     {

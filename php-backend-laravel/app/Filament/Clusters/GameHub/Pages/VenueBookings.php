@@ -48,6 +48,43 @@ class VenueBookings extends Page
         return ($user?->canManage('gamehub') ?? false) && $user->hasPartnerPermission('bookings');
     }
 
+    /** Live "booked today" count on the partner nav (scoped to the partner's venues). */
+    public static function getNavigationBadge(): ?string
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            return null;
+        }
+
+        $ids = $user->scopedVenueIds();
+        $venueIds = Venue::query()
+            ->where('partner_id', $user->effectivePartnerId())
+            ->when($ids !== null, fn ($q) => $q->whereIn('id', $ids))
+            ->pluck('id');
+
+        if ($venueIds->isEmpty()) {
+            return null;
+        }
+
+        $count = Booking::query()
+            ->where('booking_type', 'venue')
+            ->whereIn('venue_id', $venueIds)
+            ->whereDate('created_at', today())
+            ->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'primary';
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Booked today';
+    }
+
     public function mount(): void
     {
         $this->date = now()->toDateString();

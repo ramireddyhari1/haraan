@@ -59,6 +59,28 @@ class BookingResource extends Resource
         return ($user?->canManage('events') ?? false) && $user->hasPartnerPermission('bookings');
     }
 
+    /** Live "booked today" count on the partner nav (scoped to the partner's events). */
+    public static function getNavigationBadge(): ?string
+    {
+        if (Filament::getCurrentPanel()?->getId() !== 'partner') {
+            return null;
+        }
+
+        $count = static::getEloquentQuery()->whereDate('created_at', today())->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'primary';
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Booked today';
+    }
+
     // Bookings have no name, so search by id / customer / coupon and render a useful title.
     protected static ?string $recordTitleAttribute = 'id';
 
