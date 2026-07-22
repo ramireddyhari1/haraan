@@ -128,13 +128,22 @@ class PartnerPanelProvider extends PanelProvider
                     $init = $init !== '' ? $init : 'P';
                     $hue = crc32($name) % 360;
                     $lane = ($u?->partner_type === 'event') ? 'Event organiser' : 'Venue owner';
+                    $photo = \App\Support\MediaUrl::resolve($u?->avatar);
+                    $profileUrl = \Filament\Facades\Filament::getProfileUrl();
+                    $tag = $profileUrl ? 'a' : 'span';
                 @endphp
                 <div class="hrn-acct">
-                    <span class="hrn-acct-av" style="background:hsl({{ $hue }} 52% 46%)">{{ $init }}</span>
-                    <span class="hrn-acct-meta">
-                        <span class="hrn-acct-name">{{ $name }}</span>
-                        <span class="hrn-acct-lane">{{ $lane }}</span>
-                    </span>
+                    <{{ $tag }} @if ($profileUrl) href="{{ $profileUrl }}" @endif class="hrn-acct-link" title="View profile">
+                        @if ($photo)
+                            <img src="{{ $photo }}" alt="{{ $name }}" class="hrn-acct-av hrn-acct-av-img">
+                        @else
+                            <span class="hrn-acct-av" style="background:hsl({{ $hue }} 52% 46%)">{{ $init }}</span>
+                        @endif
+                        <span class="hrn-acct-meta">
+                            <span class="hrn-acct-name">{{ $name }}</span>
+                            <span class="hrn-acct-lane">{{ $lane }}</span>
+                        </span>
+                    </{{ $tag }}>
                     <form method="POST" action="{{ route('filament.partner.auth.logout') }}" class="hrn-acct-form">
                         @csrf
                         <button type="submit" class="hrn-acct-out" title="Sign out" aria-label="Sign out">
@@ -147,12 +156,17 @@ class PartnerPanelProvider extends PanelProvider
                 </div>
                 <style>
                     /* ---- account card ---- */
-                    .hrn-acct{display:flex;align-items:center;gap:10px;margin:8px;padding:9px 10px;
+                    .hrn-acct{display:flex;align-items:center;gap:8px;margin:8px;padding:9px 10px;
                         border-radius:13px;background:#f4f7fb;box-shadow:inset 0 0 0 1px #e9edf4;}
+                    .hrn-acct-link{display:flex;align-items:center;gap:10px;flex:1;min-width:0;
+                        text-decoration:none;border-radius:9px;}
                     .hrn-acct-av{width:34px;height:34px;border-radius:50%;flex:none;display:flex;
                         align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;
-                        letter-spacing:.02em;}
+                        letter-spacing:.02em;overflow:hidden;}
+                    .hrn-acct-av-img{object-fit:cover;display:block;}
                     .hrn-acct-meta{min-width:0;flex:1;display:flex;flex-direction:column;line-height:1.2;}
+                    .hrn-acct-link:hover .hrn-acct-name{color:#1e50e6;}
+                    .dark .hrn-acct-link:hover .hrn-acct-name{color:#7fb0ff;}
                     .hrn-acct-name{font-size:13px;font-weight:700;color:#0b1220;white-space:nowrap;
                         overflow:hidden;text-overflow:ellipsis;}
                     .hrn-acct-lane{font-size:11px;color:#7a8394;margin-top:1px;}
