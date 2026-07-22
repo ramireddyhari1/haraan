@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Policies\EventPolicy;
 use App\Services\SupportChat;
 use App\Support\CityResolver;
+use Filament\Resources\Pages\CreateRecord;
 use Filament\Tables\Table;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -33,6 +34,12 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(Event::class, EventPolicy::class);
+
+        // Hide the "Create & create another" button on every create form in both
+        // panels. Records here are created one at a time, so the rapid multi-add
+        // affordance only added clutter. Set on the base page — no subclass
+        // redeclares $canCreateAnother, so all 19 create pages inherit it.
+        CreateRecord::disableCreateAnother();
 
         // Consistent empty-state affordance across every Filament table (both panels):
         // a friendlier icon + striped layout. Individual tables can still override, and
