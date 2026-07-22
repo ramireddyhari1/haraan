@@ -98,6 +98,21 @@ class TicketCheckIn extends Page
 
         try {
             $booking = $service->resolveByCode($actor, $code);
+
+            // Per-staff scoping (Phase 3): a desk person limited to specific events
+            // may only check in tickets for those events. Owners and unassigned
+            // staff have no restriction (scopedEventIds() is null for them).
+            $allowedEvents = $actor?->scopedEventIds();
+            if ($allowedEvents !== null && ! in_array((int) $booking->event_id, $allowedEvents, true)) {
+                $name = $booking->user?->name ?? ('Booking #' . $booking->id);
+                $eventTitle = $booking->event?->title ?? 'Event';
+                $detail = 'Not one of your assigned events';
+                $this->pushResult($name, $eventTitle, $detail, false);
+                Notification::make()->title('Not allowed')->body("{$eventTitle} — {$detail}")->danger()->send();
+
+                return;
+            }
+
             $before = (int) $booking->checked_in_count;
             $updated = $service->checkIn($actor, (string) $booking->id);
             $newlyIn = (int) $updated->checked_in_count - $before;
