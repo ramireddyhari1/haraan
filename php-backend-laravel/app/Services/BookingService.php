@@ -775,11 +775,11 @@ final class BookingService
      * Resolve a booking from its scannable ticket code — the payload the attendee's ticket QR
      * encodes as `haraan:ticket:<code>`. Used by the Filament host check-in scanner.
      *
-     * Access is gated to staff who manage the events or venues workspace (the check-in page
-     * itself is already behind `canManage('events')`); per-partner scoping is handled separately
-     * by the partner API path.
+     * Access is gated to staff who manage the events or venues workspace, and then
+     * tenant-scoped to the acting partner: the ticket must be for one of their own
+     * events/venues (and, for a scoped desk person, one assigned to them).
      *
-     * @throws AccessDeniedHttpException  When the actor may not manage attendance.
+     * @throws AccessDeniedHttpException  When the actor may not manage this ticket.
      * @throws NotFoundHttpException      When no booking matches the code.
      */
     public function resolveByCode(?User $actor, string $code): Booking
@@ -801,6 +801,9 @@ final class BookingService
             throw new NotFoundHttpException('Ticket not found');
         }
 
+        // $actor is non-null here (assertCanManageAttendance throws otherwise).
+        $this->assertCanManageBookingAttendance($actor, $booking);
+
         return $booking;
     }
 
@@ -819,12 +822,16 @@ final class BookingService
         $this->assertCanManageAttendance($actor);
 
         /** @var Booking $booking */
-        $booking = DB::transaction(static function () use ($bookingId): Booking {
+        $booking = DB::transaction(function () use ($bookingId, $actor): Booking {
             $booking = Booking::query()->lockForUpdate()->find($bookingId);
 
             if ($booking === null) {
                 throw new NotFoundHttpException('Booking not found');
             }
+
+            // Tenant-scope the mutation too, not just the resolve — checkIn takes a
+            // raw id and could be reached without resolveByCode.
+            $this->assertCanManageBookingAttendance($actor, $booking);
 
             if (in_array(strtolower((string) $booking->status), ['cancelled', 'refunded', 'failed'], true)) {
                 throw new ConflictHttpException('This ticket is '.strtolower((string) $booking->status));
@@ -861,6 +868,53 @@ final class BookingService
 
         if (! $allowed) {
             throw new AccessDeniedHttpException('You are not allowed to check in tickets');
+        }
+    }
+
+    /**
+     * Tenant-scope a specific ticket to the acting partner: the booking's event or
+     * venue must belong to them (bookings have no partner_id — ownership runs
+     * through the event/venue), and a desk person limited to specific events or
+     * venues may only touch those. Super-admins and internal /control staff keep
+     * their broad access (they've already passed assertCanManageAttendance).
+     *
+     * @throws AccessDeniedHttpException  When the ticket isn't the partner's / assigned to them.
+     */
+    private function assertCanManageBookingAttendance(User $actor, Booking $booking): void
+    {
+        if ($actor->isSuperAdmin()) {
+            return;
+        }
+
+        // Only partner-side actors are tenant-scoped; internal department staff
+        // (FINANCE/MARKETING/OPS) manage across the platform as they did before.
+        $isPartnerActor = $actor->isDeskStaff() || $actor->hasRoleEither(['PARTNER']);
+        if (! $isPartnerActor) {
+            return;
+        }
+
+        $partnerId = $actor->effectivePartnerId();
+
+        $ownsEvent = $booking->event_id !== null
+            && Event::query()->whereKey($booking->event_id)->where('partner_id', $partnerId)->exists();
+        $ownsVenue = $booking->venue_id !== null
+            && Venue::query()->whereKey($booking->venue_id)->where('partner_id', $partnerId)->exists();
+
+        if (! $ownsEvent && ! $ownsVenue) {
+            throw new AccessDeniedHttpException('This ticket is not for your event');
+        }
+
+        // Per-staff assignment scoping (Phase 3): null means "all of the owner's".
+        if ($booking->event_id !== null
+            && ($allowedEvents = $actor->scopedEventIds()) !== null
+            && ! in_array((int) $booking->event_id, $allowedEvents, true)) {
+            throw new AccessDeniedHttpException('This event is not assigned to you');
+        }
+
+        if ($booking->venue_id !== null
+            && ($allowedVenues = $actor->scopedVenueIds()) !== null
+            && ! in_array((int) $booking->venue_id, $allowedVenues, true)) {
+            throw new AccessDeniedHttpException('This venue is not assigned to you');
         }
     }
 

@@ -222,6 +222,20 @@ class PartnerController extends Controller
             return response()->json(['error' => 'This ticket is not for your event'], 403);
         }
 
+        // Per-staff assignment scoping (Phase 3): a desk person limited to specific
+        // events/venues may only check in those; null means all of the owner's.
+        $actor = $request->user();
+        if ($booking->event_id !== null
+            && ($allowedEvents = $actor->scopedEventIds()) !== null
+            && ! in_array((int) $booking->event_id, $allowedEvents, true)) {
+            return response()->json(['error' => 'This event is not assigned to you'], 403);
+        }
+        if ($booking->venue_id !== null
+            && ($allowedVenues = $actor->scopedVenueIds()) !== null
+            && ! in_array((int) $booking->venue_id, $allowedVenues, true)) {
+            return response()->json(['error' => 'This venue is not assigned to you'], 403);
+        }
+
         if (in_array(strtolower((string) $booking->status), ['cancelled', 'refunded', 'failed'], true)) {
             return response()->json(['status' => 'invalid', 'booking' => $this->bookingSummary($booking)], 409);
         }
