@@ -8,16 +8,41 @@ use App\Filament\Resources\Bookings\Pages\ListBookings;
 use App\Filament\Resources\Bookings\Schemas\BookingForm;
 use App\Filament\Resources\Bookings\Tables\BookingsTable;
 use App\Filament\Concerns\ScopesToOrganization;
+use App\Filament\Resources\Events\EventResource;
 use App\Models\Booking;
 use BackedEnum;
+use Filament\Facades\Filament;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class BookingResource extends Resource
 {
-    use ScopesToOrganization;
+    // Alias the org-scoping query so /control keeps its organization scoping; the
+    // partner console overrides it below (bookings have no partner_id column).
+    use ScopesToOrganization {
+        getEloquentQuery as protected scopedByOrgQuery;
+    }
+
+    /**
+     * Bookings carry no partner_id, so the generic partner_id scoping would hide
+     * every row from a partner. Own them through the event instead: EventResource's
+     * query is already scoped to the partner (and to any per-staff event
+     * assignment), so bookings inherit both. /control still scopes by organization.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        $user = auth()->user();
+
+        if (Filament::getCurrentPanel()?->getId() === 'partner' && $user !== null && ! $user->isSuperAdmin()) {
+            return Booking::query()
+                ->whereIn('event_id', EventResource::getEloquentQuery()->select('events.id'));
+        }
+
+        return static::scopedByOrgQuery();
+    }
 
     protected static ?string $model = Booking::class;
 
