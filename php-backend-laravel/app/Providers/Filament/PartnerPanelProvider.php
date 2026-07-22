@@ -186,6 +186,46 @@ class PartnerPanelProvider extends PanelProvider
             BLADE),
         );
 
+        // A prominent, lane-aware "+ Create" CTA at the top of the nav so the console
+        // opens on an action, not just a menu. Uses the resource's own canCreate()
+        // gate, so a desk person without listings access never sees it.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::SIDEBAR_NAV_START,
+            fn (): string => Blade::render(<<<'BLADE'
+                @php
+                    $isEvent = auth()->user()?->partner_type === 'event';
+                    if ($isEvent) {
+                        $url = \App\Filament\Resources\Events\EventResource::canCreate()
+                            ? \App\Filament\Resources\Events\EventResource::getUrl('create') : null;
+                        $label = 'Create event';
+                    } else {
+                        $url = \App\Filament\Resources\Venues\VenueResource::canCreate()
+                            ? \App\Filament\Resources\Venues\VenueResource::getUrl('create') : null;
+                        $label = 'Add venue';
+                    }
+                @endphp
+                @if ($url)
+                    <a href="{{ $url }}" class="hrn-create-cta">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                        <span>{{ $label }}</span>
+                    </a>
+                    <style>
+                        .hrn-create-cta{display:flex;align-items:center;justify-content:center;gap:8px;
+                            margin:2px 8px 12px;padding:10px 14px;border-radius:12px;text-decoration:none;
+                            background:linear-gradient(180deg,#2f6bff,#1e50e6);color:#fff;
+                            font-size:13.5px;font-weight:600;letter-spacing:.01em;
+                            box-shadow:0 8px 18px -8px rgba(37,99,235,.6);transition:filter .15s,transform .05s;}
+                        .hrn-create-cta:hover{filter:brightness(1.06);}
+                        .hrn-create-cta:active{transform:translateY(1px);}
+                        .hrn-create-cta svg{width:17px;height:17px;}
+                    </style>
+                @endif
+            BLADE),
+        );
+
         // Mobile: collapse the global search into a magnifier icon that sits beside the
         // profile menu; tapping it drops the real search field down as a full-width bar
         // under the top bar (and auto-focuses it). Desktop keeps the inline search field.
