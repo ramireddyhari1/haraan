@@ -70,17 +70,24 @@ class PartnerPanelProvider extends PanelProvider
             fn (): string => Blade::render(<<<'BLADE'
                 <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
                     <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan Partner">
+                    <span class="hrn-topbar-tag">partner</span>
                 </a>
                 <style>
-                    .hrn-topbar-logo{display:none;align-items:center;height:100%;margin-inline-start:.25rem;}
-                    .hrn-topbar-logo img{height:1.6rem;width:auto;display:block;}
+                    .hrn-topbar-logo{display:none;flex-direction:column;align-items:center;
+                        justify-content:center;height:100%;line-height:1;text-decoration:none;}
+                    .hrn-topbar-logo img{height:1.5rem;width:auto;display:block;}
+                    /* Handwritten "partner" tucked under the Haraan wordmark. */
+                    .hrn-topbar-tag{font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
+                        "Brush Script MT","Comic Sans MS",cursive;
+                        font-size:12px;line-height:1;color:#2f6bff;margin-top:2px;
+                        letter-spacing:.02em;transform:rotate(-3deg);}
+                    .dark .hrn-topbar-tag{color:#7fb0ff;}
                     @media (max-width:1023px){
                         .fi-topbar{position:relative;}
                         /* Centre the logo over the bar; the hamburger falls to the far
                            left in flow, the search icon + profile group sits on the right. */
                         .hrn-topbar-logo{display:flex;position:absolute;left:50%;top:50%;
                             transform:translate(-50%,-50%);z-index:5;margin:0;pointer-events:auto;}
-                        .hrn-topbar-logo img{height:1.5rem;}
                     }
                 </style>
             BLADE),
