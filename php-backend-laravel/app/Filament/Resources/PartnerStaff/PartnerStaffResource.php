@@ -334,7 +334,17 @@ class PartnerStaffResource extends Resource
             ])
             ->emptyStateHeading('No team members yet')
             ->emptyStateDescription('Add desk or gate staff and choose exactly what they can do.')
-            ->emptyStateIcon(Heroicon::OutlinedUsers);
+            ->emptyStateIcon(Heroicon::OutlinedUsers)
+            ->emptyStateActions([
+                // Plain link to the create page (no model-policy gate to trip on),
+                // so the empty state always offers a clear way in.
+                Action::make('createStaff')
+                    ->label('Create staff')
+                    ->icon(Heroicon::OutlinedPlus)
+                    ->button()
+                    ->visible(fn (): bool => static::canCreate())
+                    ->url(fn (): string => static::getUrl('create')),
+            ]);
     }
 
     /** How many venues/events (for the owner's lane) this member is limited to; 0 = all. */

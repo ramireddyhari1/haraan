@@ -7,6 +7,7 @@ namespace App\Filament\Resources\PartnerStaff\Pages;
 use App\Filament\Resources\PartnerStaff\PartnerStaffResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
+use Filament\Support\Icons\Heroicon;
 
 class ListPartnerStaff extends ListRecords
 {
@@ -15,7 +16,14 @@ class ListPartnerStaff extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make()->label('Add team member'),
+            // The model is User, whose admin-only policy denies `create` to a
+            // partner — which hid Filament's default create button even though the
+            // resource's own canCreate() allows it. Authorise against the resource
+            // gate (owner-only, partner panel) so owners get a visible button.
+            CreateAction::make()
+                ->label('Create staff')
+                ->icon(Heroicon::OutlinedPlus)
+                ->authorize(fn (): bool => PartnerStaffResource::canCreate()),
         ];
     }
 }
