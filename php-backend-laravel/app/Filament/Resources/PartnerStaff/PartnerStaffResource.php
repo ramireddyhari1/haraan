@@ -79,7 +79,14 @@ class PartnerStaffResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
-            ->where('parent_partner_id', auth()->user()?->effectivePartnerId());
+            ->where('parent_partner_id', auth()->user()?->effectivePartnerId())
+            ->withCount(['assignedVenues', 'assignedEvents']);
+    }
+
+    /** Is the owner managing this team an event organiser (vs a venue owner)? */
+    private static function ownerIsEventLane(): bool
+    {
+        return auth()->user()?->partner_type === 'event';
     }
 
     // The User model has an admin-only policy; bypass it here — access is the
@@ -195,6 +202,37 @@ class PartnerStaffResource extends Resource
                         ->helperText('Exactly what this team member can do — on the web console and in the app.'),
                 ]),
 
+            Section::make('Assigned to')
+                ->description('Optionally limit this member to specific ' . (self::ownerIsEventLane() ? 'events' : 'venues') . '. Leave empty to allow all of yours.')
+                ->schema([
+                    Select::make('assignedEvents')
+                        ->label('Events')
+                        ->relationship(
+                            'assignedEvents',
+                            'title',
+                            modifyQueryUsing: fn (Builder $query): Builder => $query
+                                ->where('partner_id', auth()->user()?->effectivePartnerId()),
+                        )
+                        ->multiple()
+                        ->preload()
+                        ->searchable()
+                        ->visible(fn (): bool => self::ownerIsEventLane())
+                        ->helperText('Leave empty to allow all your events.'),
+                    Select::make('assignedVenues')
+                        ->label('Venues')
+                        ->relationship(
+                            'assignedVenues',
+                            'name',
+                            modifyQueryUsing: fn (Builder $query): Builder => $query
+                                ->where('partner_id', auth()->user()?->effectivePartnerId()),
+                        )
+                        ->multiple()
+                        ->preload()
+                        ->searchable()
+                        ->visible(fn (): bool => ! self::ownerIsEventLane())
+                        ->helperText('Leave empty to allow all your venues.'),
+                ]),
+
             Section::make('Sign-in')
                 ->schema([
                     Toggle::make('send_invite')
@@ -242,6 +280,11 @@ class PartnerStaffResource extends Resource
                         $r->staff_permissions ?? [],
                     ))
                     ->color('gray'),
+                TextColumn::make('scope')
+                    ->label('Scope')
+                    ->badge()
+                    ->color(fn (User $r): string => self::scopeCount($r) === 0 ? 'success' : 'warning')
+                    ->getStateUsing(fn (User $r): string => self::scopeLabel($r)),
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
@@ -292,6 +335,27 @@ class PartnerStaffResource extends Resource
             ->emptyStateHeading('No team members yet')
             ->emptyStateDescription('Add desk or gate staff and choose exactly what they can do.')
             ->emptyStateIcon(Heroicon::OutlinedUsers);
+    }
+
+    /** How many venues/events (for the owner's lane) this member is limited to; 0 = all. */
+    private static function scopeCount(User $user): int
+    {
+        return self::ownerIsEventLane()
+            ? (int) ($user->assigned_events_count ?? $user->assignedEvents()->count())
+            : (int) ($user->assigned_venues_count ?? $user->assignedVenues()->count());
+    }
+
+    /** Human label for the scope column: "All events" / "2 venues" etc. */
+    private static function scopeLabel(User $user): string
+    {
+        $n = self::scopeCount($user);
+        $noun = self::ownerIsEventLane() ? 'event' : 'venue';
+
+        if ($n === 0) {
+            return 'All ' . $noun . 's';
+        }
+
+        return $n . ' ' . $noun . ($n === 1 ? '' : 's');
     }
 
     private static function isSuspended(User $user): bool

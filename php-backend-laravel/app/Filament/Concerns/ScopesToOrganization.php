@@ -45,7 +45,21 @@ trait ScopesToOrganization
                 return $query->whereRaw('1 = 0'); // no ownership column → show nothing
             }
 
-            return $query->where($table.'.'.$column, $user->effectivePartnerId());
+            $query->where($table.'.'.$column, $user->effectivePartnerId());
+
+            // Phase 3: a desk person can be limited to specific venues/events. When
+            // they are, narrow the owner-scoped query to just those; unassigned
+            // staff keep seeing everything. The partner dashboard widgets and
+            // booking queries build on these two resource queries, so they inherit
+            // the restriction automatically.
+            $model = $query->getModel();
+            if ($model instanceof \App\Models\Venue && ($venueIds = $user->scopedVenueIds()) !== null) {
+                $query->whereIn($table.'.id', $venueIds);
+            } elseif ($model instanceof \App\Models\Event && ($eventIds = $user->scopedEventIds()) !== null) {
+                $query->whereIn($table.'.id', $eventIds);
+            }
+
+            return $query;
         }
 
         $ids = $user->scopedOrganizationIds();

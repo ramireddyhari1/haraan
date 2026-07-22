@@ -61,7 +61,13 @@ class VenueBookings extends Page
         $user = auth()->user();
 
         if ($user !== null && ! $user->isSuperAdmin()) {
-            $query->where('partner_id', $user->id);
+            // effectivePartnerId so desk staff resolve to their owner's venues
+            // (they own none themselves), then narrow to any assigned subset.
+            $query->where('partner_id', $user->effectivePartnerId());
+
+            if (($venueIds = $user->scopedVenueIds()) !== null) {
+                $query->whereIn('id', $venueIds);
+            }
         }
 
         return $query;

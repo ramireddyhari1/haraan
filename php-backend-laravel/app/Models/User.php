@@ -193,6 +193,52 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return is_array($perms) && in_array($permission, $perms, true);
     }
 
+    /** Venues this desk person is explicitly limited to (Phase 3 scoping). */
+    public function assignedVenues(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Venue::class, 'staff_venues');
+    }
+
+    /** Events this desk person is explicitly limited to (Phase 3 scoping). */
+    public function assignedEvents(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Event::class, 'staff_events');
+    }
+
+    /**
+     * The venue ids this user is restricted to, or null for "all their owner's".
+     * Owners and non-desk users are never restricted. A desk person with no
+     * assignments still sees everything — assignment is an opt-in narrowing.
+     *
+     * @return array<int, int>|null
+     */
+    public function scopedVenueIds(): ?array
+    {
+        if (! $this->isDeskStaff()) {
+            return null;
+        }
+
+        $ids = $this->assignedVenues()->pluck('venues.id')->map(fn ($id): int => (int) $id)->all();
+
+        return $ids === [] ? null : $ids;
+    }
+
+    /**
+     * The event ids this user is restricted to, or null for "all their owner's".
+     *
+     * @return array<int, int>|null
+     */
+    public function scopedEventIds(): ?array
+    {
+        if (! $this->isDeskStaff()) {
+            return null;
+        }
+
+        $ids = $this->assignedEvents()->pluck('events.id')->map(fn ($id): int => (int) $id)->all();
+
+        return $ids === [] ? null : $ids;
+    }
+
     protected $fillable = [
         'player_id',
         'name',
