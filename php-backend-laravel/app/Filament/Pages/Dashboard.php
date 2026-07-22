@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
-use App\Filament\Clusters\Events\Widgets\EventsStatsWidget;
-use App\Filament\Clusters\GameHub\Widgets\GameHubStatsWidget;
+use App\Filament\Widgets\Partner\PartnerKpiHeroWidget;
 use App\Filament\Widgets\Partner\PartnerQuickActionsWidget;
 use App\Filament\Widgets\Partner\PartnerRecentBookingsWidget;
 use App\Filament\Widgets\Partner\PartnerRevenueTrendWidget;
@@ -60,11 +59,11 @@ class Dashboard extends BaseDashboard
             return parent::getWidgets();
         }
 
-        $isEventLane = auth()->user()?->partner_type === 'event';
-
         return [
             PartnerQuickActionsWidget::class,
-            $isEventLane ? EventsStatsWidget::class : GameHubStatsWidget::class,
+            // Premium "money hero" (dominant revenue + supporting KPIs), lane-aware
+            // internally — supersedes the generic Events/GameHub stats strip here.
+            PartnerKpiHeroWidget::class,
             PartnerRevenueTrendWidget::class,
             PartnerRecentBookingsWidget::class,
         ];
