@@ -6,7 +6,10 @@ namespace App\Filament\Resources\PartnerStaff\Pages;
 
 use App\Filament\Resources\PartnerStaff\PartnerStaffResource;
 use App\Models\User;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class CreatePartnerStaff extends CreateRecord
 {
@@ -35,6 +38,26 @@ class CreatePartnerStaff extends CreateRecord
             User::STAFF_PERMISSIONS,
         ));
 
+        // Inviting: no password was entered — set a random one now so the row is
+        // valid; the emailed link lets them choose their own. `send_invite` is a
+        // form-only toggle, read from the raw Livewire state.
+        if (($this->data['send_invite'] ?? false) && empty($data['password'])) {
+            $data['password'] = Hash::make(Str::random(40));
+        }
+
         return $data;
+    }
+
+    protected function afterCreate(): void
+    {
+        if ($this->data['send_invite'] ?? false) {
+            PartnerStaffResource::sendInvite($this->record);
+
+            Notification::make()
+                ->title('Invite sent')
+                ->body("{$this->record->email} can set their password from the email.")
+                ->success()
+                ->send();
+        }
     }
 }

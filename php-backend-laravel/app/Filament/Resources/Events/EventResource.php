@@ -31,7 +31,25 @@ class EventResource extends Resource
 
     public static function canAccess(): bool
     {
+        // Any operational desk staff can see the events list (they need it to work
+        // bookings / check-in); mutations are gated separately below.
         return auth()->user()?->canManage('events') ?? false;
+    }
+
+    /** Creating/editing/deleting a listing needs the 'pricing' (listings & pricing) capability. */
+    public static function canCreate(): bool
+    {
+        return static::canAccess() && (auth()->user()?->hasPartnerPermission('pricing') ?? false);
+    }
+
+    public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
+    {
+        return static::canAccess() && (auth()->user()?->hasPartnerPermission('pricing') ?? false);
+    }
+
+    public static function canDelete(\Illuminate\Database\Eloquent\Model $record): bool
+    {
+        return static::canAccess() && (auth()->user()?->hasPartnerPermission('pricing') ?? false);
     }
 
     protected static ?string $recordTitleAttribute = 'title';

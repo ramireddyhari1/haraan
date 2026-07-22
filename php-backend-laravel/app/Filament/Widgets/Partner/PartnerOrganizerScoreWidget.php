@@ -31,6 +31,12 @@ class PartnerOrganizerScoreWidget extends Widget
 
     protected static bool $isLazy = false;
 
+    /** Insight widget — desk staff need the 'reports' capability to see it. */
+    public static function canView(): bool
+    {
+        return auth()->user()?->hasPartnerPermission('reports') ?? false;
+    }
+
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 
     private function isEventLane(): bool

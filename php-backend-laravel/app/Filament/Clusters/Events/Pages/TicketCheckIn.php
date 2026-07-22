@@ -45,7 +45,9 @@ class TicketCheckIn extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->canManage('events') ?? false;
+        $user = auth()->user();
+
+        return ($user?->canManage('events') ?? false) && $user->hasPartnerPermission('checkin');
     }
 
     /** Called from JS when the camera decodes a QR. */

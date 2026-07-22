@@ -41,7 +41,9 @@ class VenueAnalytics extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        return auth()->user()?->canManage('gamehub') ?? false;
+        $user = auth()->user();
+
+        return ($user?->canManage('gamehub') ?? false) && $user->hasPartnerPermission('reports');
     }
 
     protected function getHeaderWidgets(): array

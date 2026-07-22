@@ -29,7 +29,9 @@ class BookingResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->canManage('events') ?? false;
+        $user = auth()->user();
+
+        return ($user?->canManage('events') ?? false) && $user->hasPartnerPermission('bookings');
     }
 
     // Bookings have no name, so search by id / customer / coupon and render a useful title.

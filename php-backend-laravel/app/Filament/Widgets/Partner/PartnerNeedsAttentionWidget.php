@@ -38,6 +38,12 @@ class PartnerNeedsAttentionWidget extends Widget
 
     protected static bool $isLazy = false;
 
+    /** Surfaces revenue/settlement/refund risk — desk staff need 'reports' to see it. */
+    public static function canView(): bool
+    {
+        return auth()->user()?->hasPartnerPermission('reports') ?? false;
+    }
+
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 
     private const SETTLED = ['paid', 'processed', 'completed'];

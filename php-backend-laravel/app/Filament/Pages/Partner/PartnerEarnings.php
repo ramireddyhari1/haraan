@@ -30,8 +30,13 @@ class PartnerEarnings extends Page
 
     public static function canAccess(): bool
     {
-        // Partner console only — never surface it in /control.
-        return Filament::getCurrentPanel()?->getId() === 'partner';
+        // Partner console only — never surface it in /control. Desk staff need the
+        // 'reports' capability to see earnings; owners always hold it.
+        $user = auth()->user();
+
+        return Filament::getCurrentPanel()?->getId() === 'partner'
+            && $user !== null
+            && $user->hasPartnerPermission('reports');
     }
 
     public static function shouldRegisterNavigation(): bool

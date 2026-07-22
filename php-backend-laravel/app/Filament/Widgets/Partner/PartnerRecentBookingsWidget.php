@@ -31,6 +31,12 @@ class PartnerRecentBookingsWidget extends TableWidget
     // Render eagerly — on the short dashboard grid a lazy table never intersects.
     protected static bool $isLazy = false;
 
+    /** Booking list — desk staff need the 'bookings' capability to see it. */
+    public static function canView(): bool
+    {
+        return auth()->user()?->hasPartnerPermission('bookings') ?? false;
+    }
+
     protected function getTableHeading(): ?string
     {
         return 'Recent bookings';

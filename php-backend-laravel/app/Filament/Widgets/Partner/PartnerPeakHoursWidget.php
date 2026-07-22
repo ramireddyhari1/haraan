@@ -28,6 +28,12 @@ class PartnerPeakHoursWidget extends Widget
 
     protected static bool $isLazy = false;
 
+    /** Insight widget — desk staff need the 'reports' capability to see it. */
+    public static function canView(): bool
+    {
+        return auth()->user()?->hasPartnerPermission('reports') ?? false;
+    }
+
     /** Hour buckets shown as columns — 6am → midnight, where real bookings live. */
     private const HOURS = [6, 8, 10, 12, 14, 16, 18, 20, 22];
 

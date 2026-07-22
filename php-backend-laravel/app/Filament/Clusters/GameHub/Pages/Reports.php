@@ -33,7 +33,9 @@ class Reports extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->canManage('gamehub') ?? false;
+        $user = auth()->user();
+
+        return ($user?->canManage('gamehub') ?? false) && $user->hasPartnerPermission('reports');
     }
 
     public function mount(): void

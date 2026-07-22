@@ -30,6 +30,12 @@ class PartnerDailyEarningsWidget extends Widget
 
     protected static bool $isLazy = false;
 
+    /** Money widget — desk staff need the 'reports' capability to see it. */
+    public static function canView(): bool
+    {
+        return auth()->user()?->hasPartnerPermission('reports') ?? false;
+    }
+
     /** Statuses that represent money actually collected. */
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 

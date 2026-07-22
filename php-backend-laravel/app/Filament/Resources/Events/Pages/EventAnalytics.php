@@ -85,7 +85,9 @@ class EventAnalytics extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        return auth()->user()?->canManage('events') ?? false;
+        $user = auth()->user();
+
+        return ($user?->canManage('events') ?? false) && $user->hasPartnerPermission('reports');
     }
 
     protected function getHeaderActions(): array

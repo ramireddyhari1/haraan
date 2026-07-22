@@ -113,6 +113,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         }
 
         if ($panel->getId() === 'partner') {
+            // A suspended desk person keeps their login but is locked out until an
+            // owner reactivates them (owners themselves are never auto-suspended here).
+            if ($this->isDeskStaff() && strtoupper((string) $this->status) === 'SUSPENDED') {
+                return false;
+            }
+
             return $this->hasRoleEither(['PARTNER']);
         }
 
@@ -133,6 +139,38 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
     /** Every capability a desk person can be granted (owners hold all of them). */
     public const STAFF_PERMISSIONS = ['bookings', 'checkin', 'pricing', 'reports'];
+
+    /**
+     * BookMyShow-style role presets: a named bundle of capabilities the owner can
+     * pick in one tap instead of ticking raw permissions. "Custom" is anything
+     * that doesn't match a preset exactly.
+     *
+     * @var array<string, array{label:string, permissions:array<int,string>}>
+     */
+    public const STAFF_ROLE_PRESETS = [
+        'manager' => ['label' => 'Manager', 'permissions' => ['bookings', 'checkin', 'pricing', 'reports']],
+        'box_office' => ['label' => 'Box office', 'permissions' => ['bookings', 'checkin']],
+        'gate' => ['label' => 'Gate staff', 'permissions' => ['checkin']],
+        'finance' => ['label' => 'Finance', 'permissions' => ['reports']],
+    ];
+
+    /**
+     * The preset key whose permission set exactly matches this staff member's
+     * capabilities, or 'custom' when it's a bespoke mix. Drives the list badge and
+     * the form's preset selector.
+     */
+    public function staffRolePreset(): string
+    {
+        $perms = collect($this->staff_permissions ?? [])->sort()->values()->all();
+
+        foreach (self::STAFF_ROLE_PRESETS as $key => $preset) {
+            if (collect($preset['permissions'])->sort()->values()->all() === $perms) {
+                return $key;
+            }
+        }
+
+        return 'custom';
+    }
 
     /** True when this user is a desk person under a partner owner. */
     public function isDeskStaff(): bool

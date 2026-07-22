@@ -43,7 +43,9 @@ class VenueBookings extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->canManage('gamehub') ?? false;
+        $user = auth()->user();
+
+        return ($user?->canManage('gamehub') ?? false) && $user->hasPartnerPermission('bookings');
     }
 
     public function mount(): void
