@@ -6,6 +6,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Widgets\Partner\PartnerKpiHeroWidget;
 use App\Filament\Widgets\Partner\PartnerNeedsAttentionWidget;
+use App\Filament\Widgets\Partner\PartnerOrganizerScoreWidget;
 use App\Filament\Widgets\Partner\PartnerPeakHoursWidget;
 use App\Filament\Widgets\Partner\PartnerQuickActionsWidget;
 use App\Filament\Widgets\Partner\PartnerRecentBookingsWidget;
@@ -69,7 +70,8 @@ class Dashboard extends BaseDashboard
             // "Needs you" — sellout risk · pending settlement · refund watch.
             PartnerNeedsAttentionWidget::class,
             PartnerRevenueTrendWidget::class,
-            // Insight analytics — when the audience actually buys.
+            // Insight analytics — a trust score and when the audience actually buys.
+            PartnerOrganizerScoreWidget::class,
             PartnerPeakHoursWidget::class,
             PartnerRecentBookingsWidget::class,
         ];
