@@ -25,6 +25,10 @@ class PartnerRevenueTrendWidget extends ChartWidget
 
     protected int | string | array $columnSpan = 'full';
 
+    // Controlled height — pairs with maintainAspectRatio:false for a calm, wide
+    // money chart rather than a tall default aspect ratio.
+    protected ?string $maxHeight = '260px';
+
     // Render eagerly — on the short dashboard grid a lazy chart never intersects.
     protected static bool $isLazy = false;
 
@@ -59,42 +63,40 @@ class PartnerRevenueTrendWidget extends ChartWidget
         $byDay = [];
         foreach ($rows as $row) {
             $key = $row->created_at->format('Y-m-d');
-            $byDay[$key]['count'] = ($byDay[$key]['count'] ?? 0) + max(1, (int) $row->quantity);
             $byDay[$key]['rev'] = ($byDay[$key]['rev'] ?? 0) + (float) $row->total_amount;
         }
 
         $labels = [];
-        $counts = [];
         $revenue = [];
-        $labelEvery = $days > 14 ? 2 : 1;
+        $labelEvery = $days > 14 ? 3 : 2;
 
         for ($i = 0; $i < $days; $i++) {
             $day = $start->copy()->addDays($i);
             $key = $day->format('Y-m-d');
-            $labels[] = $i % $labelEvery === 0 ? $day->format('d M') : '';
-            $counts[] = $byDay[$key]['count'] ?? 0;
+            // Label only every Nth day + always the last, so the axis stays clean.
+            $labels[] = ($i % $labelEvery === 0 || $i === $days - 1) ? $day->format('d M') : '';
             $revenue[] = round($byDay[$key]['rev'] ?? 0);
         }
+
+        // Emphasise only the final point — the "where we are now" dot.
+        $pointRadius = array_fill(0, $days, 0);
+        $pointRadius[$days - 1] = 5;
 
         return [
             'datasets' => [
                 [
-                    'label' => $this->isEventLane() ? 'Tickets sold' : 'Bookings',
-                    'data' => $counts,
-                    'borderColor' => '#22c55e',
-                    'backgroundColor' => 'rgba(34, 197, 94, 0.15)',
-                    'fill' => true,
-                    'tension' => 0.35,
-                    'yAxisID' => 'y',
-                ],
-                [
                     'label' => 'Revenue (₹)',
                     'data' => $revenue,
-                    'borderColor' => '#3b82f6',
-                    'backgroundColor' => 'rgba(59, 130, 246, 0.15)',
-                    'fill' => false,
-                    'tension' => 0.35,
-                    'yAxisID' => 'y1',
+                    'borderColor' => '#0f9d63',
+                    'backgroundColor' => 'rgba(15, 157, 99, 0.12)',
+                    'fill' => true,
+                    'tension' => 0.4,
+                    'borderWidth' => 2.5,
+                    'pointRadius' => $pointRadius,
+                    'pointHoverRadius' => 5,
+                    'pointBackgroundColor' => '#0f9d63',
+                    'pointBorderColor' => '#ffffff',
+                    'pointBorderWidth' => 2,
                 ],
             ],
             'labels' => $labels,
@@ -108,12 +110,23 @@ class PartnerRevenueTrendWidget extends ChartWidget
 
     protected function getOptions(): array
     {
+        // Single-axis, minimal grid, no legend — the money story with no noise.
         return [
             'scales' => [
-                'y' => ['position' => 'left', 'beginAtZero' => true, 'ticks' => ['precision' => 0]],
-                'y1' => ['position' => 'right', 'beginAtZero' => true, 'grid' => ['drawOnChartArea' => false]],
+                'y' => [
+                    'beginAtZero' => true,
+                    'border' => ['display' => false],
+                    'grid' => ['color' => 'rgba(120,130,150,0.12)'],
+                    'ticks' => ['precision' => 0, 'maxTicksLimit' => 5],
+                ],
+                'x' => [
+                    'border' => ['display' => false],
+                    'grid' => ['display' => false],
+                ],
             ],
-            'plugins' => ['legend' => ['display' => true]],
+            'plugins' => ['legend' => ['display' => false]],
+            'maintainAspectRatio' => false,
+            'elements' => ['line' => ['capBezierPoints' => true]],
         ];
     }
 }
