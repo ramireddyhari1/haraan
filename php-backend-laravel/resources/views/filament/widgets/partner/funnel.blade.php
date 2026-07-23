@@ -1,14 +1,10 @@
-{{-- Partner dashboard conversion funnel: Page Views → Sales → Conversion %.
-     Self-contained (markup + inline CSS, theme-aware). Data from
-     PartnerFunnelWidget::getFunnel(). --}}
+{{-- Partner dashboard conversion funnel: one connected tapering shape from
+     Page Views → Sales, with the conversion % called out in the middle.
+     Self-contained (markup + inline CSS, theme-aware). Data from getFunnel(). --}}
 @php
     $f = $this->getFunnel();
     $window = 'last ' . ($f['days'] ?? 30) . ' days';
     $nf = fn ($n) => number_format((int) $n);
-    // Bar widths: views is the full bar; sales is proportional to unique visitors
-    // so the narrowing reads as the real drop-off.
-    $base = max(1, (int) ($f['uniqueViews'] ?: $f['pageViews']));
-    $salesPct = min(100, (int) round(($f['sales'] / $base) * 100));
 @endphp
 
 <x-filament-widgets::widget>
@@ -24,76 +20,75 @@
                 views land here the moment people open them.
             </div>
         @else
-            <div class="pfn-grid">
-                {{-- Stage 1 — Page views --}}
-                <div class="pfn-stage" data-accent="blue">
-                    <div class="pfn-slab">Page views</div>
-                    <div class="pfn-sval">{{ $nf($f['pageViews']) }}</div>
-                    <div class="pfn-ssub">{{ $nf($f['uniqueViews']) }} unique visitors</div>
-                    <div class="pfn-bar"><span style="width:100%"></span></div>
-                </div>
+            @php
+                // The shape tapers from full height (page views) to a height
+                // proportional to the share of unique visitors who bought.
+                $base = max(1, (int) ($f['uniqueViews'] ?: $f['pageViews']));
+                $frac = min(1, $f['sales'] / $base);
+                $rightH = max(16, (int) round(84 * $frac));
+                $topY = round((84 - $rightH) / 2, 1);
+                $botY = round((84 + $rightH) / 2, 1);
+                $convTxt = $f['conversion'] !== null ? number_format($f['conversion'], 1) . '%' : '—';
+            @endphp
 
-                {{-- Stage 2 — Sales --}}
-                <div class="pfn-stage" data-accent="green">
-                    <div class="pfn-slab">Sales</div>
-                    <div class="pfn-sval">{{ $nf($f['sales']) }}</div>
-                    <div class="pfn-ssub">paid bookings</div>
-                    <div class="pfn-bar"><span style="width:{{ max(4, $salesPct) }}%"></span></div>
+            <div class="pfn-funnel">
+                <svg class="pfn-svg" viewBox="0 0 300 84" preserveAspectRatio="none" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="pfnGrad" x1="0" x2="1" y1="0" y2="0">
+                            <stop offset="0" stop-color="#3b82f6"/>
+                            <stop offset="1" stop-color="#0f9d63"/>
+                        </linearGradient>
+                    </defs>
+                    <polygon points="0,0 300,{{ $topY }} 300,{{ $botY }} 0,84" fill="url(#pfnGrad)"/>
+                </svg>
+                <div class="pfn-conv">
+                    <span class="pfn-conv-n">{{ $convTxt }}</span>
+                    <span class="pfn-conv-l">conversion</span>
                 </div>
+            </div>
 
-                {{-- Stage 3 — Conversion --}}
-                <div class="pfn-stage pfn-conv" data-accent="indigo">
-                    <div class="pfn-slab">Conversion</div>
-                    <div class="pfn-sval">{{ $f['conversion'] !== null ? number_format($f['conversion'], 1) . '%' : '—' }}</div>
-                    <div class="pfn-ssub">of unique visitors bought</div>
-                    <svg class="pfn-ring" viewBox="0 0 36 36" aria-hidden="true">
-                        <path class="pfn-ring-bg" d="M18 2.5a15.5 15.5 0 1 1 0 31 15.5 15.5 0 0 1 0-31"/>
-                        @php $pct = min(100, (float) ($f['conversion'] ?? 0)); $dash = round($pct / 100 * 97.4, 1); @endphp
-                        <path class="pfn-ring-fg" stroke-dasharray="{{ $dash }} 97.4"
-                              d="M18 2.5a15.5 15.5 0 1 1 0 31 15.5 15.5 0 0 1 0-31"/>
-                    </svg>
+            <div class="pfn-caps">
+                <div class="pfn-cap">
+                    <span class="pfn-cap-n">{{ $nf($f['pageViews']) }}</span>
+                    <span class="pfn-cap-l">Page views <span class="pfn-cap-s">· {{ $nf($f['uniqueViews']) }} unique</span></span>
+                </div>
+                <div class="pfn-cap pfn-cap-right">
+                    <span class="pfn-cap-n">{{ $nf($f['sales']) }}</span>
+                    <span class="pfn-cap-l">Sales <span class="pfn-cap-s">· paid</span></span>
                 </div>
             </div>
         @endif
     </div>
 
     <style>
-        .pfn{background:#fff;border:1px solid #e7e9ee;border-radius:16px;
+        .pfn{background:#fff;border:1px solid #e9ecf2;border-radius:16px;
             box-shadow:0 1px 2px rgba(11,18,32,.06);padding:18px 20px;}
         .pfn-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:14px;}
         .pfn-title{font-size:14px;font-weight:800;color:#0b1220;letter-spacing:-.01em;}
         .pfn-sub{font-size:11.5px;color:#9aa2b1;font-weight:600;}
         .pfn-empty{font-size:13px;color:#7a8394;line-height:1.5;padding:6px 0 2px;}
 
-        .pfn-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
-        .pfn-stage{position:relative;border:1px solid #eceef3;border-radius:13px;padding:14px 15px;
-            background:#fbfcfe;border-top:3px solid transparent;overflow:hidden;}
-        .pfn-stage[data-accent="blue"]{border-top-color:#5aa2f5;}
-        .pfn-stage[data-accent="green"]{border-top-color:#0f9d63;}
-        .pfn-stage[data-accent="indigo"]{border-top-color:#7c86f0;}
-        .pfn-slab{font-size:12px;color:#6b7382;font-weight:700;}
-        .pfn-sval{font-size:27px;font-weight:800;color:#0b1220;letter-spacing:-.03em;
-            font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px;}
-        .pfn-ssub{font-size:11px;color:#9aa2b1;margin-top:1px;}
-        .pfn-bar{margin-top:10px;height:6px;border-radius:6px;background:#eef1f6;overflow:hidden;}
-        .pfn-bar span{display:block;height:100%;border-radius:6px;
-            background:linear-gradient(90deg,#3b82f6,#1e50e6);}
-        .pfn-stage[data-accent="green"] .pfn-bar span{background:linear-gradient(90deg,#12b473,#0f9d63);}
+        .pfn-funnel{position:relative;}
+        .pfn-svg{display:block;width:100%;height:96px;border-radius:12px;}
+        .pfn-conv{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+            text-align:center;color:#fff;pointer-events:none;
+            text-shadow:0 1px 8px rgba(10,23,56,.5);}
+        .pfn-conv-n{display:block;font-size:30px;font-weight:800;letter-spacing:-.02em;
+            line-height:1;font-variant-numeric:tabular-nums;}
+        .pfn-conv-l{display:block;font-size:10.5px;font-weight:700;letter-spacing:.07em;
+            text-transform:uppercase;opacity:.92;margin-top:3px;}
 
-        .pfn-conv .pfn-ring{position:absolute;right:12px;top:12px;width:44px;height:44px;}
-        .pfn-ring-bg{fill:none;stroke:#eef1f6;stroke-width:3.4;}
-        .pfn-ring-fg{fill:none;stroke:#6a75ef;stroke-width:3.4;stroke-linecap:round;
-            transition:stroke-dasharray .5s ease;}
+        .pfn-caps{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-top:12px;}
+        .pfn-cap{display:flex;flex-direction:column;min-width:0;}
+        .pfn-cap-right{text-align:right;align-items:flex-end;}
+        .pfn-cap-n{font-size:20px;font-weight:800;color:#0b1220;letter-spacing:-.02em;
+            font-variant-numeric:tabular-nums;line-height:1.1;}
+        .pfn-cap-l{font-size:12px;font-weight:600;color:#374151;margin-top:1px;}
+        .pfn-cap-s{color:#9aa2b1;font-weight:500;}
 
         .dark .pfn{background:#111722;border-color:#1e2633;box-shadow:0 1px 2px rgba(0,0,0,.4);}
-        .dark .pfn-title,.dark .pfn-sval{color:#eef1f6;}
-        .dark .pfn-stage{background:#0e141e;border-color:#1e2633;}
-        .dark .pfn-slab{color:#8b94a5;} .dark .pfn-ssub,.dark .pfn-sub{color:#5e6675;}
-        .dark .pfn-empty{color:#8b94a5;}
-        .dark .pfn-bar{background:#1e2633;} .dark .pfn-ring-bg{stroke:#1e2633;}
-
-        @media (max-width:640px){
-            .pfn-grid{grid-template-columns:1fr;}
-        }
+        .dark .pfn-title,.dark .pfn-cap-n{color:#eef1f6;}
+        .dark .pfn-sub,.dark .pfn-cap-s{color:#5e6675;}
+        .dark .pfn-cap-l{color:#c3cad6;} .dark .pfn-empty{color:#8b94a5;}
     </style>
 </x-filament-widgets::widget>
