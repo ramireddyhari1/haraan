@@ -69,7 +69,7 @@ class PartnerPanelProvider extends PanelProvider
             PanelsRenderHook::TOPBAR_START,
             fn (): string => Blade::render(<<<'BLADE'
                 <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
-                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan Partner">
+                    <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan Partner">
                     <span class="hrn-topbar-tag">partner</span>
                 </a>
                 <style>
@@ -79,9 +79,9 @@ class PartnerPanelProvider extends PanelProvider
                     /* Handwritten "partner" tucked under the Haraan wordmark. */
                     .hrn-topbar-tag{font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
                         "Brush Script MT","Comic Sans MS",cursive;
-                        font-size:12px;line-height:1;color:#2f6bff;margin-top:2px;
+                        font-size:12px;line-height:1;color:#0b1220;margin-top:2px;
                         letter-spacing:.02em;transform:rotate(-3deg);}
-                    .dark .hrn-topbar-tag{color:#7fb0ff;}
+                    .dark .hrn-topbar-tag{color:#e6e9ef;}
                     @media (max-width:1023px){
                         .fi-topbar{position:relative;}
                         /* Centre the logo over the bar; the hamburger falls to the far
@@ -105,11 +105,11 @@ class PartnerPanelProvider extends PanelProvider
                     .fi-sidebar-header{flex-wrap:wrap;}
                     .fi-sidebar-header-logo-ctn{flex:0 0 auto;}
                     .hrn-sidebar-tag{flex-basis:100%;font-size:13px;line-height:1;
-                        color:#2f6bff;margin-top:3px;letter-spacing:.02em;
+                        color:#0b1220;margin-top:3px;letter-spacing:.02em;
                         font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
                         "Brush Script MT","Comic Sans MS",cursive;
                         transform:rotate(-3deg);transform-origin:left center;}
-                    .dark .hrn-sidebar-tag{color:#7fb0ff;}
+                    .dark .hrn-sidebar-tag{color:#e6e9ef;}
                 </style>
             BLADE),
         );
@@ -361,7 +361,9 @@ class PartnerPanelProvider extends PanelProvider
             ->id('partner')
             ->path('partner')
             ->brandName('Haraan Partner')
-            ->brandLogo(asset('images/haraan-logo.png'))
+            // Blue wordmark for the partner console (matches the "+ Create event"
+            // CTA); /control keeps the navy mark via its own provider.
+            ->brandLogo(asset('images/haraan-logo-blue.png'))
             ->brandLogoHeight('2.2rem')
             ->favicon(asset('images/haraan-logo.png'))
             // Same design system as /control — Inter + the compiled theme. The
