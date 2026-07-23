@@ -121,7 +121,7 @@ class PartnerPanelProvider extends PanelProvider
                         .hrn-sidebar-brand{display:none!important;}
                         .fi-sidebar-header{flex-direction:column;align-items:center;
                             justify-content:flex-start;height:auto;min-height:0;
-                            padding-top:1.35rem;padding-bottom:.85rem;row-gap:4px;}
+                            padding-top:2.5rem;padding-bottom:.85rem;row-gap:4px;}
                         .fi-sidebar-header-logo-ctn{margin:0 auto;}
                         .hrn-sidebar-tag{flex-basis:auto;margin-top:3px;text-align:center;
                             transform:rotate(-3deg);transform-origin:center center;}
