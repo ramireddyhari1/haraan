@@ -55,8 +55,8 @@
     {{-- "Today at a glance" strip — live snapshot below the hero. --}}
     <div class="pqt">
         @foreach ($this->getTodayStrip() as $tile)
-            <div class="pqt-tile">
-                <span class="pqt-ic">{{ $tile['icon'] }}</span>
+            <div class="pqt-tile" data-accent="{{ $tile['accent'] }}">
+                <span class="pqt-ic"><x-filament::icon :icon="$tile['icon']" /></span>
                 <span class="pqt-val">{{ $tile['value'] }}</span>
                 <span class="pqt-lab">{{ $tile['label'] }} <span class="pqt-sub">· {{ $tile['sub'] }}</span></span>
             </div>
@@ -105,15 +105,24 @@
         .pqa-alert-hot{background:#fff4ed;border-color:#ffd6bd;color:#9a3412;}
         .pqa-alert-info{background:#eef4ff;border-color:#d3e0fb;color:#1e50e6;}
 
-        /* "Today at a glance" strip — white tiles on the page bg, below the hero. */
+        /* "Today at a glance" strip — white tiles with a tinted icon chip per metric. */
         .pqt{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;}
-        .pqt-tile{background:#fff;border:1px solid #e7e9ee;border-radius:13px;padding:12px 14px;
-            display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(11,18,32,.05);}
-        .pqt-ic{font-size:14px;line-height:1;}
-        .pqt-val{font-size:20px;font-weight:800;color:#0b1220;letter-spacing:-.02em;
-            font-variant-numeric:tabular-nums;line-height:1.15;margin-top:5px;}
-        .pqt-lab{font-size:12px;font-weight:600;color:#374151;margin-top:1px;}
+        .pqt-tile{background:#fff;border:1px solid #e9ecf2;border-radius:14px;padding:13px 14px;
+            display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(11,18,32,.05);
+            transition:box-shadow .15s,transform .05s;}
+        .pqt-tile:hover{box-shadow:0 6px 16px -8px rgba(11,18,32,.18);transform:translateY(-1px);}
+        .pqt-ic{width:32px;height:32px;border-radius:10px;display:flex;align-items:center;
+            justify-content:center;margin-bottom:9px;}
+        .pqt-ic svg{width:18px;height:18px;stroke-width:1.9;}
+        .pqt-val{font-size:21px;font-weight:800;color:#0b1220;letter-spacing:-.02em;
+            font-variant-numeric:tabular-nums;line-height:1.1;}
+        .pqt-lab{font-size:12px;font-weight:600;color:#374151;margin-top:2px;}
         .pqt-sub{color:#9aa2b1;font-weight:500;}
+        /* Per-metric accent chips. */
+        .pqt-tile[data-accent="green"]  .pqt-ic{background:#e6f7ef;color:#0f9d63;}
+        .pqt-tile[data-accent="blue"]   .pqt-ic{background:#e8f0ff;color:#2f6bff;}
+        .pqt-tile[data-accent="indigo"] .pqt-ic{background:#ecedfe;color:#5257e0;}
+        .pqt-tile[data-accent="violet"] .pqt-ic{background:#f3ecfe;color:#7c3aed;}
         @media (max-width:640px){.pqt{grid-template-columns:1fr 1fr;}}
 
         /* Next-event spotlight card. */

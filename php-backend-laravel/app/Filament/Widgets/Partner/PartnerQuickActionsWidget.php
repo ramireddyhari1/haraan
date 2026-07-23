@@ -261,21 +261,21 @@ class PartnerQuickActionsWidget extends Widget
             ->sum(DB::raw('COALESCE(checked_in_count, 1)'));
 
         $tiles = [
-            ['icon' => '💰', 'value' => $this->inr((float) ($today->rev ?? 0)), 'label' => 'Earned', 'sub' => 'today'],
-            ['icon' => '🎟️', 'value' => number_format((int) ($today->cnt ?? 0)), 'label' => $this->isEventLane() ? 'Tickets' : 'Bookings', 'sub' => 'today'],
-            ['icon' => '✅', 'value' => number_format($checkins), 'label' => 'Check-ins', 'sub' => 'today'],
+            ['icon' => 'heroicon-o-banknotes', 'accent' => 'green', 'value' => $this->inr((float) ($today->rev ?? 0)), 'label' => 'Earned', 'sub' => 'today'],
+            ['icon' => 'heroicon-o-ticket', 'accent' => 'blue', 'value' => number_format((int) ($today->cnt ?? 0)), 'label' => $this->isEventLane() ? 'Tickets' : 'Bookings', 'sub' => 'today'],
+            ['icon' => 'heroicon-o-check-badge', 'accent' => 'indigo', 'value' => number_format($checkins), 'label' => 'Check-ins', 'sub' => 'today'],
         ];
 
         if ($this->isEventLane()) {
             $views = (int) (clone $this->scopedEventViewQuery())
                 ->where('created_at', '>=', $start)
                 ->count();
-            $tiles[] = ['icon' => '👁️', 'value' => number_format($views), 'label' => 'Views', 'sub' => 'today'];
+            $tiles[] = ['icon' => 'heroicon-o-eye', 'accent' => 'violet', 'value' => number_format($views), 'label' => 'Views', 'sub' => 'today'];
         } else {
             $newWk = (int) (clone $this->laneBookings())
                 ->where('created_at', '>=', now()->startOfDay()->subDays(6))
                 ->count();
-            $tiles[] = ['icon' => '📅', 'value' => number_format($newWk), 'label' => 'New', 'sub' => '7 days'];
+            $tiles[] = ['icon' => 'heroicon-o-calendar-days', 'accent' => 'violet', 'value' => number_format($newWk), 'label' => 'New', 'sub' => '7 days'];
         }
 
         return $tiles;
