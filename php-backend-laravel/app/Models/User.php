@@ -193,6 +193,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return is_array($perms) && in_array($permission, $perms, true);
     }
 
+    /** This partner's public organiser page (see {@see HostProfile}). */
+    public function hostProfile(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(HostProfile::class);
+    }
+
     /** Venues this desk person is explicitly limited to (Phase 3 scoping). */
     public function assignedVenues(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {

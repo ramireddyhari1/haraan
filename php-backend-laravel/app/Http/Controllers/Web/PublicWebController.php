@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use App\Models\Ad;
 use App\Models\Event;
+use App\Models\HostProfile;
 use App\Models\LiveMatch;
 use App\Models\User;
 use App\Models\Venue;
@@ -70,12 +71,36 @@ final class PublicWebController extends Controller
 
     public function eventDetail(string $id): View
     {
-        $event = Event::query()->findOrFail($id);
+        $event = Event::query()->with('partner.hostProfile')->findOrFail($id);
+
+        // Link "Hosted by" to the organiser's public page, but only if it's live.
+        $hostProfile = $event->partner?->hostProfile;
+        $hostProfile = $hostProfile && $hostProfile->isLive() ? $hostProfile : null;
 
         return view('site.event', [
             'title' => $event->title,
             'event' => $event,
             'id'    => $id,
+            'hostProfile' => $hostProfile,
+        ]);
+    }
+
+    /**
+     * A partner's public organiser page — hero, about and their upcoming events.
+     * 404s unless the profile exists and is live (opted in + name & about set).
+     */
+    public function hostProfile(string $slug): View
+    {
+        $profile = HostProfile::query()->where('slug', $slug)->first();
+
+        abort_if($profile === null || ! $profile->isLive(), 404);
+
+        $events = $profile->upcomingEventsQuery()->limit(24)->get();
+
+        return view('site.host', [
+            'title' => $profile->display_name . ' · Haraan',
+            'profile' => $profile,
+            'events' => $events,
         ]);
     }
 

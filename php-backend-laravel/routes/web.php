@@ -24,6 +24,7 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/home', 'home');
     Route::get('/events', 'events');
     Route::get('/events/{id}', 'eventDetail');
+    Route::get('/host/{slug}', 'hostProfile')->name('site.host');
     Route::get('/gamehub', 'gamehub')->name('site.gamehub');
     Route::get('/gamehub/{id}', 'gamehubDetail')->whereNumber('id');
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
