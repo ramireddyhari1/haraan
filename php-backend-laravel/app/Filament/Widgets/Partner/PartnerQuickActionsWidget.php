@@ -150,7 +150,7 @@ class PartnerQuickActionsWidget extends Widget
      * The organiser's soonest upcoming published event, with sell-through — the
      * "what's next" context that turns the hero into a command bar. Event lane only.
      *
-     * @return array{title:string, when:string, pct:?int, sold:int, total:int, url:string}|null
+     * @return array{id:int, title:string, when:string, date:?string, pct:?int, sold:int, total:int, poster:?string, url:string, checkInUrl:?string}|null
      */
     public function getNextEvent(): ?array
     {
@@ -162,7 +162,7 @@ class PartnerQuickActionsWidget extends Widget
             ->whereRaw('lower(status) = ?', ['published'])
             ->where('date', '>=', now()->startOfDay())
             ->orderBy('date')
-            ->first(['id', 'title', 'date', 'total_slots', 'available_slots']);
+            ->first();
 
         if (! $e) {
             return null;
@@ -173,12 +173,16 @@ class PartnerQuickActionsWidget extends Widget
         $days = (int) now()->startOfDay()->diffInDays($e->date, false);
 
         return [
+            'id' => (int) $e->id,
             'title' => (string) $e->title,
             'when' => $days <= 0 ? 'today' : ($days === 1 ? 'tomorrow' : "in {$days} days"),
+            'date' => $e->date ? \Illuminate\Support\Carbon::parse($e->date)->format('D, d M') : null,
             'pct' => $total > 0 ? (int) round($sold / $total * 100) : null,
             'sold' => $sold,
             'total' => $total,
-            'url' => EventResource::getUrl(),
+            'poster' => method_exists($e, 'heroImageUrl') ? $e->heroImageUrl() : null,
+            'url' => EventResource::getUrl('edit', ['record' => $e->id]),
+            'checkInUrl' => TicketCheckIn::canAccess() ? TicketCheckIn::getUrl() : null,
         ];
     }
 
