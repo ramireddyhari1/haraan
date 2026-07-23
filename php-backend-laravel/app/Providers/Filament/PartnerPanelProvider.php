@@ -129,6 +129,9 @@ class PartnerPanelProvider extends PanelProvider
                            the logo sits nudged down from the top edge with "partner"
                            centred directly beneath it (not crammed into the corner). The
                            2nd handwritten "Haraan" is dropped on mobile. */
+                        /* Narrower slide-out drawer on mobile (default is the desktop
+                           sidebar width); the backdrop covers the rest. */
+                        .fi-sidebar{width:16rem!important;max-width:82vw!important;}
                         .hrn-sidebar-brand{display:none!important;}
                         .fi-sidebar-header{flex-direction:column;align-items:center;
                             justify-content:flex-start;height:auto;min-height:0;
