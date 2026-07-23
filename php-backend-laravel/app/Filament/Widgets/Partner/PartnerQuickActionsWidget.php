@@ -235,6 +235,48 @@ class PartnerQuickActionsWidget extends Widget
         return null;
     }
 
+    /**
+     * A slim "today at a glance" strip below the hero: money in, volume, check-ins,
+     * and (event lane) views today — the live snapshot an operator scans first.
+     * Lane-aware + partner-scoped.
+     *
+     * @return array<int, array{icon:string, value:string, label:string, sub:string}>
+     */
+    public function getTodayStrip(): array
+    {
+        $start = now()->startOfDay();
+
+        $today = (clone $this->laneBookings())
+            ->whereIn(DB::raw('lower(status)'), self::PAID)
+            ->where('created_at', '>=', $start)
+            ->selectRaw('COALESCE(SUM(total_amount), 0) as rev, COUNT(*) as cnt')
+            ->first();
+
+        $checkins = (int) (clone $this->laneBookings())
+            ->where('checked_in_at', '>=', $start)
+            ->sum(DB::raw('COALESCE(checked_in_count, 1)'));
+
+        $tiles = [
+            ['icon' => '💰', 'value' => $this->inr((float) ($today->rev ?? 0)), 'label' => 'Earned', 'sub' => 'today'],
+            ['icon' => '🎟️', 'value' => number_format((int) ($today->cnt ?? 0)), 'label' => $this->isEventLane() ? 'Tickets' : 'Bookings', 'sub' => 'today'],
+            ['icon' => '✅', 'value' => number_format($checkins), 'label' => 'Check-ins', 'sub' => 'today'],
+        ];
+
+        if ($this->isEventLane()) {
+            $views = (int) (clone $this->scopedEventViewQuery())
+                ->where('created_at', '>=', $start)
+                ->count();
+            $tiles[] = ['icon' => '👁️', 'value' => number_format($views), 'label' => 'Views', 'sub' => 'today'];
+        } else {
+            $newWk = (int) (clone $this->laneBookings())
+                ->where('created_at', '>=', now()->startOfDay()->subDays(6))
+                ->count();
+            $tiles[] = ['icon' => '📅', 'value' => number_format($newWk), 'label' => 'New', 'sub' => '7 days'];
+        }
+
+        return $tiles;
+    }
+
     /** ₹18,42,900 — Indian grouping. */
     private function inr(float $n): string
     {

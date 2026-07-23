@@ -57,6 +57,17 @@
         </div>
     </div>
 
+    {{-- "Today at a glance" strip — live snapshot below the hero. --}}
+    <div class="pqt">
+        @foreach ($this->getTodayStrip() as $tile)
+            <div class="pqt-tile">
+                <span class="pqt-ic">{{ $tile['icon'] }}</span>
+                <span class="pqt-val">{{ $tile['value'] }}</span>
+                <span class="pqt-lab">{{ $tile['label'] }} <span class="pqt-sub">· {{ $tile['sub'] }}</span></span>
+            </div>
+        @endforeach
+    </div>
+
     <style>
         /* Smart alert ribbon above the hero — the one thing that needs the operator
            now (sellout risk / pending settlement). Light-theme bar on the page bg. */
@@ -74,6 +85,17 @@
         .pqa-next{text-decoration:none;max-width:100%;display:inline-flex;align-items:center;gap:4px;}
         .pqa-next:hover{background:rgba(255,255,255,.18);}
         .pqa-next-t{max-width:12rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+        /* "Today at a glance" strip — white tiles on the page bg, below the hero. */
+        .pqt{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;}
+        .pqt-tile{background:#fff;border:1px solid #e7e9ee;border-radius:13px;padding:12px 14px;
+            display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(11,18,32,.05);}
+        .pqt-ic{font-size:14px;line-height:1;}
+        .pqt-val{font-size:20px;font-weight:800;color:#0b1220;letter-spacing:-.02em;
+            font-variant-numeric:tabular-nums;line-height:1.15;margin-top:5px;}
+        .pqt-lab{font-size:12px;font-weight:600;color:#374151;margin-top:1px;}
+        .pqt-sub{color:#9aa2b1;font-weight:500;}
+        @media (max-width:640px){.pqt{grid-template-columns:1fr 1fr;}}
 
         /* Gradient "hero" band — same blue aurora as the partner sign-in, so the
            console opens with the brand feel the login set up. Always-dark, so it
