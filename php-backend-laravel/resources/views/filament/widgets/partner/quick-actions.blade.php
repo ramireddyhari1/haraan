@@ -12,9 +12,19 @@
         return $sign . '₹' . $rest . ',' . $last3;
     };
     $unit = $t['isEvent'] ? 'booking' : 'booking';
+    $alert = $this->getAlert();
+    $next = $this->getNextEvent();
 @endphp
 
 <x-filament-widgets::widget>
+    @if ($alert)
+        <a href="{{ $alert['url'] }}" class="pqa-alert pqa-alert-{{ $alert['tone'] }}">
+            <span class="pqa-alert-ic">{{ $alert['icon'] }}</span>
+            <span class="pqa-alert-tx">{{ $alert['text'] }}</span>
+            <span class="pqa-alert-cta">{{ $alert['cta'] }} →</span>
+        </a>
+    @endif
+
     <div class="pqa">
         <div class="pqa-hi">
             <div class="pqa-greet">{{ $this->getGreeting() }} 👋</div>
@@ -28,6 +38,11 @@
                     <span class="pqa-chip pqa-mom {{ $t['weekDelta'] < 0 ? 'is-down' : 'is-up' }}">
                         {{ $t['weekDelta'] < 0 ? '▼' : '▲' }} {{ abs($t['weekDelta']) }}% this week
                     </span>
+                @endif
+                @if ($next)
+                    <a href="{{ $next['url'] }}" class="pqa-chip pqa-next" title="{{ $next['title'] }}">
+                        📅 <span class="pqa-next-t">{{ $next['title'] }}</span> · {{ $next['when'] }}@if ($next['pct'] !== null) · {{ $next['pct'] }}% sold @endif
+                    </a>
                 @endif
             </div>
         </div>
@@ -43,6 +58,23 @@
     </div>
 
     <style>
+        /* Smart alert ribbon above the hero — the one thing that needs the operator
+           now (sellout risk / pending settlement). Light-theme bar on the page bg. */
+        .pqa-alert{display:flex;align-items:center;gap:10px;text-decoration:none;
+            padding:10px 14px;border-radius:12px;margin-bottom:12px;
+            font-size:13px;font-weight:600;border:1px solid;line-height:1.3;}
+        .pqa-alert-ic{font-size:15px;flex:none;}
+        .pqa-alert-tx{flex:1;min-width:0;}
+        .pqa-alert-cta{font-weight:800;white-space:nowrap;opacity:.9;}
+        .pqa-alert:hover{filter:brightness(.99);}
+        .pqa-alert-hot{background:#fff4ed;border-color:#ffd6bd;color:#9a3412;}
+        .pqa-alert-info{background:#eef4ff;border-color:#d3e0fb;color:#1e50e6;}
+
+        /* "Next event" chip — the command-bar context inside the hero. */
+        .pqa-next{text-decoration:none;max-width:100%;display:inline-flex;align-items:center;gap:4px;}
+        .pqa-next:hover{background:rgba(255,255,255,.18);}
+        .pqa-next-t{max-width:12rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
         /* Gradient "hero" band — same blue aurora as the partner sign-in, so the
            console opens with the brand feel the login set up. Always-dark, so it
            reads identically in light and dark theme. */

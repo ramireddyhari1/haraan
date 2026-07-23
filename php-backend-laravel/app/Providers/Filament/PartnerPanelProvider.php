@@ -288,8 +288,13 @@ class PartnerPanelProvider extends PanelProvider
 
                 return Blade::render(<<<'BLADE'
                     <style>
+                        /* Drop the redundant "Dashboard" page title so the hero command
+                           bar leads the page. (Partner dashboard only — this hook is
+                           scoped to it.) */
+                        .fi-header{display:none!important;}
+
                         /* Shrink the page filters form into a compact, right-aligned
-                           period pill under the page title. */
+                           period pill; it sits just under the hero card. */
                         [wire\:partial="table-filters-form"]{display:flex;justify-content:flex-end;
                             margin:.25rem 0 1.1rem;position:relative;z-index:1;}
                         [wire\:partial="table-filters-form"] > *{width:auto;min-width:12rem;max-width:16rem;}
@@ -307,14 +312,6 @@ class PartnerPanelProvider extends PanelProvider
                         @media (max-width:640px){
                             [wire\:partial="table-filters-form"]{justify-content:stretch;}
                             [wire\:partial="table-filters-form"] > *{width:100%;max-width:none;}
-                        }
-                        /* Desktop: float the period control up to the top-right, level
-                           with the page title (above the hero card). Mobile keeps it
-                           in flow beneath the hero. */
-                        @media (min-width:1024px){
-                            .fi-page{position:relative;}
-                            [wire\:partial="table-filters-form"]{position:absolute;top:.15rem;right:0;
-                                margin:0;width:15rem;z-index:20;}
                         }
                     </style>
                 BLADE);

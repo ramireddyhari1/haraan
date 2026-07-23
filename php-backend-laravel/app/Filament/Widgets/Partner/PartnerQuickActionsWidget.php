@@ -6,9 +6,11 @@ namespace App\Filament\Widgets\Partner;
 
 use App\Filament\Clusters\Events\Pages\TicketCheckIn;
 use App\Filament\Clusters\GameHub\Pages\VenueBookings;
+use App\Filament\Pages\Partner\PartnerEarnings;
 use App\Filament\Resources\Bookings\BookingResource;
 use App\Filament\Resources\Events\EventResource;
 use App\Filament\Resources\Venues\VenueResource;
+use App\Models\Event;
 use Filament\Widgets\Widget;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -142,5 +144,108 @@ class PartnerQuickActionsWidget extends Widget
         $part = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
 
         return "$part, " . str($name)->before(' ');
+    }
+
+    /**
+     * The organiser's soonest upcoming published event, with sell-through — the
+     * "what's next" context that turns the hero into a command bar. Event lane only.
+     *
+     * @return array{title:string, when:string, pct:?int, sold:int, total:int, url:string}|null
+     */
+    public function getNextEvent(): ?array
+    {
+        if (! $this->isEventLane()) {
+            return null;
+        }
+
+        $e = $this->scopedEventQuery()
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->where('date', '>=', now()->startOfDay())
+            ->orderBy('date')
+            ->first(['id', 'title', 'date', 'total_slots', 'available_slots']);
+
+        if (! $e) {
+            return null;
+        }
+
+        $total = max(0, (int) $e->total_slots);
+        $sold = $total > 0 ? max(0, $total - max(0, (int) $e->available_slots)) : 0;
+        $days = (int) now()->startOfDay()->diffInDays($e->date, false);
+
+        return [
+            'title' => (string) $e->title,
+            'when' => $days <= 0 ? 'today' : ($days === 1 ? 'tomorrow' : "in {$days} days"),
+            'pct' => $total > 0 ? (int) round($sold / $total * 100) : null,
+            'sold' => $sold,
+            'total' => $total,
+            'url' => EventResource::getUrl(),
+        ];
+    }
+
+    /**
+     * The single most urgent thing that needs the operator right now, or null when
+     * all's calm — a slim actionable ribbon at the very top. Sellout risk leads
+     * (time-sensitive), then money awaiting settlement. Reuses the same signals as
+     * the "Needs you" row, distilled to the one that matters most.
+     *
+     * @return array{icon:string, tone:string, text:string, cta:string, url:string}|null
+     */
+    public function getAlert(): ?array
+    {
+        // 1) Sellout risk — a soon, nearly-full event is the most time-sensitive nudge.
+        if ($this->isEventLane()) {
+            $risk = $this->scopedEventQuery()
+                ->whereRaw('lower(status) = ?', ['published'])
+                ->where('date', '>=', now()->startOfDay())
+                ->where('total_slots', '>', 0)
+                ->get(['id', 'title', 'date', 'total_slots', 'available_slots'])
+                ->filter(function (Event $e): bool {
+                    $sold = $e->total_slots - max(0, (int) $e->available_slots);
+                    return $e->available_slots > 0 && ($sold / $e->total_slots) >= 0.85;
+                })
+                ->sortBy('date')
+                ->first();
+
+            if ($risk) {
+                $left = max(0, (int) $risk->available_slots);
+                $pct = (int) round(($risk->total_slots - $left) / $risk->total_slots * 100);
+
+                return [
+                    'icon' => '🔥', 'tone' => 'hot',
+                    'text' => "“{$risk->title}” is {$pct}% sold — only {$left} left",
+                    'cta' => 'Review', 'url' => EventResource::getUrl(),
+                ];
+            }
+        }
+
+        // 2) Money collected but not yet paid out.
+        $pending = (float) (clone $this->laneBookings())
+            ->whereIn(DB::raw('lower(status)'), self::PAID)
+            ->whereDoesntHave('payout', fn (Builder $q) => $q->whereIn(DB::raw('lower(status)'), ['paid', 'processed', 'completed']))
+            ->sum('total_amount');
+
+        if ($pending > 0) {
+            return [
+                'icon' => '💸', 'tone' => 'info',
+                'text' => $this->inr($pending) . ' collected is awaiting settlement',
+                'cta' => 'Earnings', 'url' => PartnerEarnings::getUrl(),
+            ];
+        }
+
+        return null;
+    }
+
+    /** ₹18,42,900 — Indian grouping. */
+    private function inr(float $n): string
+    {
+        $n = (int) round($n);
+        $str = (string) abs($n);
+        if (strlen($str) <= 3) {
+            return '₹' . $str;
+        }
+        $last3 = substr($str, -3);
+        $rest = preg_replace('/\B(?=(\d{2})+(?!\d))/', ',', substr($str, 0, -3));
+
+        return '₹' . $rest . ',' . $last3;
     }
 }
