@@ -24,6 +24,8 @@ class PartnerKpiHeroWidget extends Widget
 {
     use \App\Filament\Concerns\ScopesToPartnerEvents;
     use \App\Filament\Concerns\ScopesToPartnerVenues;
+    // Reads the dashboard's global period control via $this->pageFilters['range'].
+    use \Filament\Widgets\Concerns\InteractsWithPageFilters;
 
     protected string $view = 'filament.widgets.partner.kpi-hero';
 
@@ -57,9 +59,17 @@ class PartnerKpiHeroWidget extends Widget
      *
      * @return array<string, mixed>
      */
+    /** The window (in days) from the dashboard's global period control. */
+    private function windowDays(): int
+    {
+        $range = (int) ($this->pageFilters['range'] ?? \App\Filament\Pages\Dashboard::DEFAULT_PERIOD);
+
+        return in_array($range, [7, 14, 30, 90], true) ? $range : \App\Filament\Pages\Dashboard::DEFAULT_PERIOD;
+    }
+
     public function getStats(): array
     {
-        $days = 14;
+        $days = $this->windowDays();
         $now = now();
         $curStart = $now->copy()->startOfDay()->subDays($days - 1);
         $prevStart = $curStart->copy()->subDays($days);
@@ -109,6 +119,7 @@ class PartnerKpiHeroWidget extends Widget
 
         return [
             'isEventLane' => $this->isEventLane(),
+            'days' => $days,
             'revenue' => $curRevenue,
             'delta' => $delta,
             'tickets' => $tickets,

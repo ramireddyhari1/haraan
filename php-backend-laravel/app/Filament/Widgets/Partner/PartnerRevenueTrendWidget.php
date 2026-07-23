@@ -18,6 +18,9 @@ class PartnerRevenueTrendWidget extends ChartWidget
 {
     use \App\Filament\Concerns\ScopesToPartnerEvents;
     use \App\Filament\Concerns\ScopesToPartnerVenues;
+    // Follows the dashboard's global period control (its own dropdown was removed
+    // so there's one place to change the window, not two).
+    use \Filament\Widgets\Concerns\InteractsWithPageFilters;
 
     protected static ?int $sort = 1;
 
@@ -41,21 +44,22 @@ class PartnerRevenueTrendWidget extends ChartWidget
     /** Statuses that represent money actually collected. */
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 
-    public ?string $filter = '14';
-
-    protected function getFilters(): ?array
-    {
-        return ['7' => 'Last 7 days', '14' => 'Last 14 days', '30' => 'Last 30 days'];
-    }
-
     private function isEventLane(): bool
     {
         return auth()->user()?->partner_type === 'event';
     }
 
+    /** The window (in days) from the dashboard's global period control. */
+    private function windowDays(): int
+    {
+        $range = (int) ($this->pageFilters['range'] ?? \App\Filament\Pages\Dashboard::DEFAULT_PERIOD);
+
+        return in_array($range, [7, 14, 30, 90], true) ? $range : \App\Filament\Pages\Dashboard::DEFAULT_PERIOD;
+    }
+
     protected function getData(): array
     {
-        $days = (int) ($this->filter ?? 14);
+        $days = $this->windowDays();
         $start = now()->startOfDay()->subDays($days - 1);
 
         $base = $this->isEventLane() ? $this->scopedBookingQuery() : $this->scopedVenueBookingQuery();
@@ -74,7 +78,8 @@ class PartnerRevenueTrendWidget extends ChartWidget
 
         $labels = [];
         $revenue = [];
-        $labelEvery = $days > 14 ? 3 : 2;
+        // Aim for ~7 axis labels regardless of window, so 90 days stays readable.
+        $labelEvery = max(1, (int) ceil($days / 7));
 
         for ($i = 0; $i < $days; $i++) {
             $day = $start->copy()->addDays($i);

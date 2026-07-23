@@ -240,6 +240,56 @@ class PartnerPanelProvider extends PanelProvider
             BLADE),
         );
 
+        // Dashboard: a warm greeting + a compact, right-aligned period control.
+        // The control itself is the page's global filters form (one Select that
+        // drives every money widget); this hook only adds the greeting row and the
+        // CSS that shrinks the full-width form field into a growezy-style pill in
+        // the top-right. Scoped to the Dashboard page and guarded to the partner
+        // panel, so /control is never touched.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::PAGE_START,
+            function (): string {
+                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
+                    return '';
+                }
+
+                return Blade::render(<<<'BLADE'
+                    @php
+                        $h = (int) now()->format('G');
+                        $part = $h < 12 ? 'Good morning' : ($h < 17 ? 'Good afternoon' : 'Good evening');
+                        $first = \Illuminate\Support\Str::of(auth()->user()?->name ?? '')->trim()->explode(' ')->first();
+                    @endphp
+                    <div class="hrn-dash-hi">
+                        <div>
+                            <h2 class="hrn-dash-hi-h">{{ $part }}{{ $first ? ', ' . $first : '' }}</h2>
+                            <p class="hrn-dash-hi-sub">Here's how your business is doing.</p>
+                        </div>
+                    </div>
+                    <style>
+                        .hrn-dash-hi{display:flex;align-items:flex-end;justify-content:space-between;
+                            gap:1rem;margin-bottom:.25rem;}
+                        .hrn-dash-hi-h{font-size:1.35rem;font-weight:800;letter-spacing:-.01em;
+                            color:#0b1220;line-height:1.15;}
+                        .hrn-dash-hi-sub{font-size:.85rem;color:#7a8394;margin-top:2px;}
+                        .dark .hrn-dash-hi-h{color:#eef1f6;} .dark .hrn-dash-hi-sub{color:#8b94a5;}
+
+                        /* Shrink the page filters form into a compact, right-aligned
+                           period pill that visually sits beside the greeting. */
+                        [wire\:partial="table-filters-form"]{display:flex;justify-content:flex-end;
+                            margin-top:-3.4rem;margin-bottom:1rem;position:relative;z-index:1;}
+                        [wire\:partial="table-filters-form"] > *{width:auto;min-width:11rem;max-width:15rem;}
+                        [wire\:partial="table-filters-form"] .fi-fo-field-wrp-label{font-size:.7rem;
+                            text-transform:uppercase;letter-spacing:.07em;font-weight:700;opacity:.7;}
+                        @media (max-width:640px){
+                            [wire\:partial="table-filters-form"]{margin-top:.25rem;justify-content:stretch;}
+                            [wire\:partial="table-filters-form"] > *{width:100%;max-width:none;}
+                        }
+                    </style>
+                BLADE);
+            },
+            scopes: \App\Filament\Pages\Dashboard::class,
+        );
+
         // Mobile: collapse the global search into a magnifier icon that sits beside the
         // profile menu; tapping it drops the real search field down as a full-width bar
         // under the top bar (and auto-focuses it). Desktop keeps the inline search field.

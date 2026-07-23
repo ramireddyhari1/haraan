@@ -19,20 +19,21 @@
     };
     $delta = $s['delta'];
     $ticketLabel = $s['isEventLane'] ? 'Tickets sold' : 'Bookings';
+    $window = 'last ' . ($s['days'] ?? 14) . ' days';
 @endphp
 
 <x-filament-widgets::widget>
     <div class="pkh">
         {{-- Revenue — the dominant figure --}}
         <div class="pkh-hero">
-            <div class="pkh-lab">Revenue · last 14 days</div>
+            <div class="pkh-lab">Revenue · {{ $window }}</div>
             <div class="pkh-val">{{ $inr($s['revenue']) }}</div>
             <div class="pkh-meta">
                 @if ($delta !== null)
                     <span class="pkh-delta {{ $delta < 0 ? 'is-down' : 'is-up' }}">
                         {{ $delta < 0 ? '▼' : '▲' }} {{ number_format(abs($delta), 1) }}%
                     </span>
-                    <span class="pkh-vs">vs previous 14 days</span>
+                    <span class="pkh-vs">vs previous {{ $s['days'] ?? 14 }} days</span>
                 @else
                     <span class="pkh-vs">Your collected revenue across paid bookings</span>
                 @endif
@@ -54,7 +55,7 @@
             <div class="pkh-kpi" data-accent="blue">
                 <div class="pkh-klab">{{ $ticketLabel }}</div>
                 <div class="pkh-kval">{{ number_format($s['tickets']) }}</div>
-                <div class="pkh-ksub">last 14 days</div>
+                <div class="pkh-ksub">{{ $window }}</div>
             </div>
             <div class="pkh-kpi" data-accent="indigo">
                 <div class="pkh-klab">Checked in</div>
@@ -64,7 +65,7 @@
             <div class="pkh-kpi" data-accent="{{ $s['refundRate'] >= 5 ? 'amber' : 'slate' }}">
                 <div class="pkh-klab">Refund rate</div>
                 <div class="pkh-kval {{ $s['refundRate'] >= 5 ? 'is-warn' : '' }}">{{ number_format($s['refundRate'], 1) }}%</div>
-                <div class="pkh-ksub">last 14 days</div>
+                <div class="pkh-ksub">{{ $window }}</div>
             </div>
         </div>
     </div>
