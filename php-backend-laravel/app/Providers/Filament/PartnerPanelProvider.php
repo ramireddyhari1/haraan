@@ -114,13 +114,17 @@ class PartnerPanelProvider extends PanelProvider
                     .hrn-sidebar-brand{font-size:15px;margin-top:4px;}
                     .dark .hrn-sidebar-tag{color:#e6e9ef;}
                     @media (max-width:1023px){
-                        /* Mobile slide-out drawer: the fixed-height header can't fit the
-                           logo + two handwritten lines, so it clipped the wordmark's top.
-                           Drop the 2nd "Haraan" line here and let the header grow with a
-                           little breathing room up top so the logo sits clean. */
+                        /* Mobile slide-out drawer: stack the header as a centred column so
+                           the logo sits nudged down from the top edge with "partner"
+                           centred directly beneath it (not crammed into the corner). The
+                           2nd handwritten "Haraan" is dropped on mobile. */
                         .hrn-sidebar-brand{display:none!important;}
-                        .fi-sidebar-header{height:auto;min-height:0;
-                            padding-top:1rem;padding-bottom:.6rem;align-content:flex-start;}
+                        .fi-sidebar-header{flex-direction:column;align-items:center;
+                            justify-content:flex-start;height:auto;min-height:0;
+                            padding-top:1.35rem;padding-bottom:.85rem;row-gap:4px;}
+                        .fi-sidebar-header-logo-ctn{margin:0 auto;}
+                        .hrn-sidebar-tag{flex-basis:auto;margin-top:3px;text-align:center;
+                            transform:rotate(-3deg);transform-origin:center center;}
                     }
                 </style>
             BLADE),
