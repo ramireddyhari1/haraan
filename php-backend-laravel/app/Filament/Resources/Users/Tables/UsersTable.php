@@ -131,6 +131,17 @@ class UsersTable
                         };
                     }),
 
+                SelectFilter::make('status')
+                    ->label('Status')
+                    ->options([
+                        'active'    => 'Active',
+                        'suspended' => 'Suspended',
+                    ])
+                    // Status casing is mixed in the DB (ACTIVE/active), so match case-insensitively.
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereRaw('lower(status) = ?', [strtolower($data['value'])])
+                        : $query),
+
                 SelectFilter::make('activity')
                     ->label('Activity')
                     ->options([
