@@ -181,7 +181,8 @@ class PartnerQuickActionsWidget extends Widget
             'sold' => $sold,
             'total' => $total,
             'poster' => method_exists($e, 'heroImageUrl') ? $e->heroImageUrl() : null,
-            'url' => EventResource::getUrl('edit', ['record' => $e->id]),
+            // Open the per-event analytics dashboard (not the edit form).
+            'url' => EventResource::getUrl('analytics', ['record' => $e->id]),
             'checkInUrl' => TicketCheckIn::canAccess() ? TicketCheckIn::getUrl() : null,
         ];
     }
