@@ -116,6 +116,15 @@ class PartnerPanelProvider extends PanelProvider
                     /* Handwritten "Haraan" tucked under "partner", black. */
                     .hrn-sidebar-brand{font-size:15px;margin-top:4px;}
                     .dark .hrn-sidebar-tag{color:#e6e9ef;}
+                    @media (max-width:1023px){
+                        /* Mobile slide-out drawer: the fixed-height header can't fit the
+                           logo + two handwritten lines, so it clipped the wordmark's top.
+                           Drop the 2nd "Haraan" line here and let the header grow with a
+                           little breathing room up top so the logo sits clean. */
+                        .hrn-sidebar-brand{display:none;}
+                        .fi-sidebar-header{height:auto;min-height:0;
+                            padding-top:1rem;padding-bottom:.6rem;align-content:flex-start;}
+                    }
                 </style>
             BLADE),
         );
