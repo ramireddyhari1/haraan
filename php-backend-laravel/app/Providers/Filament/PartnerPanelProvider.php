@@ -103,7 +103,16 @@ class PartnerPanelProvider extends PanelProvider
                 <span class="hrn-sidebar-tag">partner</span>
                 <span class="hrn-sidebar-tag hrn-sidebar-brand">Haraan</span>
                 <style>
-                    .fi-sidebar-header{flex-wrap:wrap;}
+                    /* Soft branded header band: a light blue→white wash + hairline
+                       divider frames the wordmark so the brand zone reads premium and
+                       the white nav below pops. Resets to transparent in dark mode so
+                       /control's dark theme is untouched. */
+                    .fi-sidebar-header{flex-wrap:wrap;
+                        background:linear-gradient(180deg,#eaf1ff 0%,#f4f8ff 55%,#ffffff 100%);
+                        border-bottom:1px solid #e8eefb;
+                        box-shadow:0 1px 0 rgba(47,107,255,.04);}
+                    .dark .fi-sidebar-header{background:transparent;
+                        border-bottom-color:rgba(255,255,255,.06);box-shadow:none;}
                     .fi-sidebar-header-logo-ctn{flex:0 0 auto;}
                     .hrn-sidebar-tag{flex-basis:100%;font-size:13px;line-height:1;
                         color:#0b1220;margin-top:3px;letter-spacing:.02em;
