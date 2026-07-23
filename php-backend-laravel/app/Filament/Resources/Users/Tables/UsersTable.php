@@ -70,7 +70,7 @@ class UsersTable
                     }),
 
                 TextColumn::make('status')
-                    ->label('Account')
+                    ->label('Status')
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => $state ? ucfirst(strtolower($state)) : '—')
                     ->color(fn (?string $state): string => match (strtolower((string) $state)) {
