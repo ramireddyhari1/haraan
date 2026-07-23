@@ -19,7 +19,7 @@
 <x-filament-widgets::widget>
     @if ($alert)
         <a href="{{ $alert['url'] }}" class="pqa-alert pqa-alert-{{ $alert['tone'] }}">
-            <span class="pqa-alert-ic">{{ $alert['icon'] }}</span>
+            <span class="pqa-alert-ic"><x-filament::icon :icon="$alert['icon']" /></span>
             <span class="pqa-alert-tx">{{ $alert['text'] }}</span>
             <span class="pqa-alert-cta">{{ $alert['cta'] }} →</span>
         </a>
@@ -69,7 +69,7 @@
             @if ($next['poster'])
                 <img src="{{ $next['poster'] }}" alt="" class="pns-poster">
             @else
-                <div class="pns-poster pns-poster-ph">🎫</div>
+                <div class="pns-poster pns-poster-ph"><x-filament::icon icon="heroicon-o-ticket" /></div>
             @endif
             <div class="pns-body">
                 <div class="pns-kicker">Next event · {{ $next['when'] }}</div>
@@ -95,15 +95,19 @@
     <style>
         /* Smart alert ribbon above the hero — the one thing that needs the operator
            now (sellout risk / pending settlement). Light-theme bar on the page bg. */
-        .pqa-alert{display:flex;align-items:center;gap:10px;text-decoration:none;
-            padding:10px 14px;border-radius:12px;margin-bottom:12px;
+        .pqa-alert{display:flex;align-items:center;gap:11px;text-decoration:none;
+            padding:10px 12px;border-radius:13px;margin-bottom:12px;
             font-size:13px;font-weight:600;border:1px solid;line-height:1.3;}
-        .pqa-alert-ic{font-size:15px;flex:none;}
+        .pqa-alert-ic{width:30px;height:30px;border-radius:9px;flex:none;
+            display:flex;align-items:center;justify-content:center;}
+        .pqa-alert-ic svg{width:17px;height:17px;stroke-width:1.9;}
         .pqa-alert-tx{flex:1;min-width:0;}
         .pqa-alert-cta{font-weight:800;white-space:nowrap;opacity:.9;}
         .pqa-alert:hover{filter:brightness(.99);}
         .pqa-alert-hot{background:#fff4ed;border-color:#ffd6bd;color:#9a3412;}
+        .pqa-alert-hot .pqa-alert-ic{background:#ffe0cc;color:#c2410c;}
         .pqa-alert-info{background:#eef4ff;border-color:#d3e0fb;color:#1e50e6;}
+        .pqa-alert-info .pqa-alert-ic{background:#dbe7fd;color:#1e50e6;}
 
         /* "Today at a glance" strip — white tiles with a tinted icon chip per metric. */
         .pqt{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;}
@@ -131,7 +135,8 @@
             box-shadow:0 1px 2px rgba(11,18,32,.05);}
         .pns-poster{width:52px;height:66px;border-radius:10px;object-fit:cover;flex:none;
             background:#eef2f8;box-shadow:0 1px 2px rgba(0,0,0,.08);}
-        .pns-poster-ph{display:flex;align-items:center;justify-content:center;font-size:22px;}
+        .pns-poster-ph{display:flex;align-items:center;justify-content:center;color:#9aa2b1;}
+        .pns-poster-ph svg{width:24px;height:24px;}
         .pns-body{flex:1;min-width:0;}
         .pns-kicker{font-size:10.5px;font-weight:800;letter-spacing:.08em;color:#2f6bff;
             text-transform:uppercase;}

@@ -215,7 +215,7 @@ class PartnerQuickActionsWidget extends Widget
                 $pct = (int) round(($risk->total_slots - $left) / $risk->total_slots * 100);
 
                 return [
-                    'icon' => '🔥', 'tone' => 'hot',
+                    'icon' => 'heroicon-o-fire', 'tone' => 'hot',
                     'text' => "“{$risk->title}” is {$pct}% sold — only {$left} left",
                     'cta' => 'Review', 'url' => EventResource::getUrl(),
                 ];
@@ -230,7 +230,7 @@ class PartnerQuickActionsWidget extends Widget
 
         if ($pending > 0) {
             return [
-                'icon' => '💸', 'tone' => 'info',
+                'icon' => 'heroicon-o-banknotes', 'tone' => 'info',
                 'text' => $this->inr($pending) . ' collected is awaiting settlement',
                 'cta' => 'Earnings', 'url' => PartnerEarnings::getUrl(),
             ];
