@@ -205,6 +205,13 @@
             <p class="mven__body">{{ $venue->description }}</p>
         @endif
 
+        @if($hostProfile ?? null)
+            <div class="mven__rule"></div>
+            <a href="{{ route('site.host', ['slug' => $hostProfile->slug]) }}" style="display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:#1e50e6;text-decoration:none;">
+                Managed by {{ $hostProfile->display_name }} →
+            </a>
+        @endif
+
         {{-- ── 7. Good to know ────────────────────────────────────────────── --}}
         @if(count($mvGoodToKnow))
             <div class="mven__rule"></div>

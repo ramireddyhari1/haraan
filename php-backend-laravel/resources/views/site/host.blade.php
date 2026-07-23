@@ -1,6 +1,8 @@
 @extends('site.layout')
 
 @php
+    $lane = $lane ?? 'event';
+    $isVenue = $lane === 'venue';
     $cover = $profile->coverUrl();
     $logo = $profile->logoUrl();
     $init = strtoupper(mb_substr(trim($profile->display_name), 0, 1)) ?: 'H';
@@ -45,7 +47,11 @@
                 @if ($profile->tagline)<p class="hp-tag">{{ $profile->tagline }}</p>@endif
                 <div class="hp-sub">
                     @if ($profile->city)<span class="hp-city">📍 {{ $profile->city }}</span>@endif
-                    <span class="hp-count">{{ $events->count() }} upcoming {{ \Illuminate\Support\Str::plural('event', $events->count()) }}</span>
+                    @if ($isVenue)
+                        <span class="hp-count">{{ ($venues ?? collect())->count() }} {{ \Illuminate\Support\Str::plural('venue', ($venues ?? collect())->count()) }}</span>
+                    @else
+                        <span class="hp-count">{{ $events->count() }} upcoming {{ \Illuminate\Support\Str::plural('event', $events->count()) }}</span>
+                    @endif
                     <span class="hp-followers"><strong>{{ number_format($followers ?? 0) }}</strong> {{ \Illuminate\Support\Str::plural('follower', $followers ?? 0) }}</span>
                     @if (($rating['avg'] ?? null) !== null)
                         <span class="hp-rating">★ {{ number_format($rating['avg'], 1) }} <span class="hp-rating-n">({{ number_format($rating['count']) }})</span></span>
@@ -86,6 +92,32 @@
         </section>
     @endif
 
+    @if ($isVenue)
+        <section class="hp-section">
+            <h2 class="hp-h2">Venues</h2>
+            @if (($venues ?? collect())->count())
+                <div class="hp-grid">
+                    @foreach ($venues as $venue)
+                        @php $img = \App\Support\MediaUrl::resolve(is_array($venue->images) ? ($venue->images[0] ?? null) : null); @endphp
+                        <a href="{{ url('/gamehub/'.$venue->id) }}" class="hp-card">
+                            <div class="hp-poster hp-poster-venue" @if ($img) style="background-image:url('{{ $img }}')" @endif>
+                                @if (! $img)<span>{{ strtoupper(mb_substr($venue->name, 0, 1)) }}</span>@endif
+                            </div>
+                            <div class="hp-cbody">
+                                <div class="hp-ctitle">{{ $venue->name }}</div>
+                                <div class="hp-cmeta">
+                                    @if ($venue->city){{ $venue->city }}@endif
+                                    @if ($venue->rating)<span> · ★ {{ number_format((float) $venue->rating, 1) }}</span>@endif
+                                </div>
+                            </div>
+                        </a>
+                    @endforeach
+                </div>
+            @else
+                <p class="hp-empty">No venues listed yet.</p>
+            @endif
+        </section>
+    @else
     <section class="hp-section">
         <h2 class="hp-h2">Upcoming events</h2>
         @if ($events->count())
@@ -130,6 +162,7 @@
             </div>
         </section>
     @endif
+    @endif {{-- /event lane --}}
 </div>
 
 <style>
@@ -182,6 +215,7 @@
         -webkit-box-orient:vertical;overflow:hidden;}
     .hp-cmeta{font-size:12px;color:#6b7382;margin-top:5px;}
     .hp-empty{font-size:14px;color:#6b7382;}
+    .hp-poster-venue{aspect-ratio:4/3;}
     .hp-card-past{opacity:.9;}
     .hp-card-past .hp-poster{filter:saturate(.85);}
 

@@ -95,8 +95,10 @@ final class PublicWebController extends Controller
 
         abort_if($profile === null || ! $profile->isLive(), 404);
 
-        $events = $profile->upcomingEventsQuery()->limit(24)->get();
-        $pastEvents = $profile->pastEventsQuery()->limit(12)->get();
+        $isVenue = $profile->isVenueLane();
+        $events = $isVenue ? collect() : $profile->upcomingEventsQuery()->limit(24)->get();
+        $pastEvents = $isVenue ? collect() : $profile->pastEventsQuery()->limit(12)->get();
+        $venues = $isVenue ? $profile->venuesQuery()->limit(24)->get() : collect();
         $viewer = auth()->user();
         $isOwner = $viewer !== null && $viewer->id === $profile->user_id;
 
@@ -110,8 +112,10 @@ final class PublicWebController extends Controller
         return view('site.host', [
             'title' => $profile->display_name . ' · Haraan',
             'profile' => $profile,
+            'lane' => $isVenue ? 'venue' : 'event',
             'events' => $events,
             'pastEvents' => $pastEvents,
+            'venues' => $venues,
             'followers' => $profile->followersCount(),
             'isFollowing' => $profile->isFollowedBy($viewer),
             'isOwner' => $isOwner,
@@ -269,10 +273,15 @@ final class PublicWebController extends Controller
     {
         $venue = Venue::query()
             ->where('is_active', true)
-            ->with(['reviews' => fn ($q) => $q->where('is_active', true)->latest()])
+            ->with(['reviews' => fn ($q) => $q->where('is_active', true)->latest(), 'partner.hostProfile'])
             ->findOrFail($id);
 
+        // Link to the owner's public page when they have a live one.
+        $hostProfile = $venue->partner?->hostProfile;
+        $hostProfile = $hostProfile && $hostProfile->isLive() ? $hostProfile : null;
+
         return view('site.gamehub-detail', [
+            'hostProfile' => $hostProfile,
             'title' => $venue->name,
             'id'    => $id,
             'venue' => $this->decorateVenueDetail($venue),

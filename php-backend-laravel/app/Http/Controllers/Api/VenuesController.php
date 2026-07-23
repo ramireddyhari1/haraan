@@ -14,6 +14,7 @@ final class VenuesController extends Controller
     public function index(): JsonResponse
     {
         $venues = Venue::query()
+            ->with('partner.hostProfile')
             ->where('is_active', true)
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
@@ -26,7 +27,7 @@ final class VenuesController extends Controller
     /** GET /api/venues/{id} — full detail incl. slots, reviews, amenities. */
     public function show(int $id): JsonResponse
     {
-        $venue = Venue::with(['slots', 'courts' => fn ($q) => $q->where('is_active', true), 'reviews' => fn ($q) => $q->where('is_active', true)])
+        $venue = Venue::with(['slots', 'courts' => fn ($q) => $q->where('is_active', true), 'reviews' => fn ($q) => $q->where('is_active', true), 'partner.hostProfile'])
             ->where('is_active', true)
             ->findOrFail($id);
 
@@ -106,6 +107,30 @@ final class VenuesController extends Controller
             'image' => \App\Support\MediaUrl::resolve(is_array($v->images) ? ($v->images[0] ?? null) : null),
             'is_bookable' => $v->is_bookable,
             'is_featured' => $v->is_featured,
+            // The owner's public page, when they have a live one (host-profile twin).
+            'host' => $this->hostPayload($v),
+        ];
+    }
+
+    /**
+     * The venue owner's public profile, or null when they don't have a live one.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function hostPayload(Venue $v): ?array
+    {
+        $profile = $v->partner?->hostProfile;
+
+        if ($profile === null || ! $profile->isLive()) {
+            return null;
+        }
+
+        return [
+            'name' => $profile->display_name,
+            'slug' => $profile->slug,
+            'logo' => $profile->logoUrl(),
+            'verified' => $profile->isVerified(),
+            'url' => url('/host/' . $profile->slug),
         ];
     }
 }

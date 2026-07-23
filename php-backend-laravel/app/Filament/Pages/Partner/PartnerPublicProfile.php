@@ -47,15 +47,14 @@ class PartnerPublicProfile extends Page implements HasForms
     /** View/follower analytics for the insights panel; empty until a profile exists. */
     public array $insights = [];
 
-    /** Owners of an event-organiser account, in the partner console only. */
+    /** Any partner owner (event organiser or venue owner), in the partner console only. */
     public static function canAccess(): bool
     {
         $user = auth()->user();
 
         return Filament::getCurrentPanel()?->getId() === 'partner'
             && $user !== null
-            && ! $user->isDeskStaff()
-            && $user->partner_type === 'event';
+            && ! $user->isDeskStaff();
     }
 
     public static function shouldRegisterNavigation(): bool

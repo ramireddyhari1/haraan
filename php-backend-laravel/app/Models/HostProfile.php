@@ -63,6 +63,23 @@ class HostProfile extends Model
         return filled($value) ? $value : null;
     }
 
+    /** Venue owners get a venue-oriented page; event organisers an event one. */
+    public function isVenueLane(): bool
+    {
+        return ($this->user?->partner_type ?? 'venue') !== 'event';
+    }
+
+    /** A venue owner's active venues — the venue-lane page's grid. */
+    public function venuesQuery(): Builder
+    {
+        return Venue::query()
+            ->where('partner_id', $this->user_id)
+            ->where('is_active', true)
+            ->orderByDesc('is_featured')
+            ->orderBy('sort_order')
+            ->orderBy('name');
+    }
+
     /** This host's published, upcoming events — the page's booking rail. */
     public function upcomingEventsQuery(): Builder
     {
@@ -183,8 +200,11 @@ class HostProfile extends Model
      */
     public function ratingSummary(): array
     {
-        $row = Event::query()
-            ->where('partner_id', $this->user_id)
+        $query = $this->isVenueLane()
+            ? Venue::query()->where('partner_id', $this->user_id)
+            : Event::query()->where('partner_id', $this->user_id);
+
+        $row = $query
             ->whereNotNull('rating')
             ->selectRaw('AVG(rating) AS a, SUM(ratings_count) AS c')
             ->first();
