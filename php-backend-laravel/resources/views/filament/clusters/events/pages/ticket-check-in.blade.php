@@ -14,7 +14,22 @@
         .tc-detail--ok{background:var(--hrn-ok-bg);color:var(--hrn-ok);}
         .tc-detail--warn{background:var(--hrn-warn-bg);color:var(--hrn-warn);}
         .tc-at{font-size:11px;color:var(--hrn-ink-3);white-space:nowrap;}
+        .tc-lock{display:flex;align-items:center;gap:10px;margin-bottom:1rem;padding:11px 14px;
+            border-radius:12px;background:#eef4ff;border:1px solid #d3e0fb;color:#1e50e6;
+            font-size:13px;font-weight:600;}
+        .tc-lock-ic{width:18px;height:18px;flex:none;}
+        .tc-lock strong{font-weight:800;}
+        .tc-lock-clear{margin-left:auto;white-space:nowrap;color:#1e50e6;font-weight:700;
+            text-decoration:underline;}
     </style>
+
+    @if ($event && $lockedTitle)
+        <div class="tc-lock">
+            <x-filament::icon icon="heroicon-o-lock-closed" class="tc-lock-ic" />
+            <span>Locked to <strong>{{ $lockedTitle }}</strong> — only this event's tickets will check in.</span>
+            <a href="{{ \App\Filament\Clusters\Events\Pages\TicketCheckIn::getUrl() }}" class="tc-lock-clear">Scan all events</a>
+        </div>
+    @endif
 
     <div class="grid gap-6 lg:grid-cols-2">
         {{-- Camera scanner --}}

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Filament\Clusters\Events\Pages;
 
 use App\Filament\Clusters\Events\EventsCluster;
+use App\Models\Event;
 use App\Services\BookingService;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Livewire\Attributes\Url;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
@@ -43,11 +45,44 @@ class TicketCheckIn extends Page
     /** Guards against the camera firing the same code many times a second. */
     public ?string $lastCode = null;
 
+    /**
+     * Optional event lock (?event=<id>). When set to one of the host's own events,
+     * the scanner only checks in tickets for that event and rejects the rest — so a
+     * gate person working one door can't accidentally admit another event's ticket.
+     */
+    #[Url]
+    public ?int $event = null;
+
+    /** The locked event's title, once validated as the host's own. */
+    public ?string $lockedTitle = null;
+
     public static function canAccess(): bool
     {
         $user = auth()->user();
 
         return ($user?->canManage('events') ?? false) && $user->hasPartnerPermission('checkin');
+    }
+
+    public function mount(): void
+    {
+        if ($this->event !== null) {
+            $e = Event::query()->whereKey($this->event)->first();
+
+            // Only honour a lock on the host's own event; otherwise drop it silently.
+            if ($e !== null && $this->ownsEvent($e)) {
+                $this->lockedTitle = (string) $e->title;
+            } else {
+                $this->event = null;
+            }
+        }
+    }
+
+    private function ownsEvent(Event $e): bool
+    {
+        $user = auth()->user();
+
+        return $user !== null
+            && ($user->isSuperAdmin() || (int) $e->partner_id === (int) $user->effectivePartnerId());
     }
 
     /** Called from JS when the camera decodes a QR. */
@@ -101,6 +136,19 @@ class TicketCheckIn extends Page
             // per-staff assignment) and throws AccessDeniedHttpException otherwise,
             // caught below — so the scanner refuses tickets outside this user's scope.
             $booking = $service->resolveByCode($actor, $code);
+
+            // Event lock: refuse tickets that belong to a different event.
+            if ($this->event !== null && (int) $booking->event_id !== $this->event) {
+                $wrong = $booking->event?->title ?? 'another event';
+                $this->pushResult($booking->user?->name ?? 'Ticket', $wrong, "Not for “{$this->lockedTitle}”", false);
+                Notification::make()
+                    ->title('Wrong event')
+                    ->body("This ticket is for “{$wrong}”, not “{$this->lockedTitle}”.")
+                    ->warning()->send();
+
+                return;
+            }
+
             $before = (int) $booking->checked_in_count;
             $updated = $service->checkIn($actor, (string) $booking->id);
             $newlyIn = (int) $updated->checked_in_count - $before;
