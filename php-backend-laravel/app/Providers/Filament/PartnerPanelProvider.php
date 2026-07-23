@@ -132,6 +132,10 @@ class PartnerPanelProvider extends PanelProvider
                         /* Narrower slide-out drawer on mobile (default is the desktop
                            sidebar width); the backdrop covers the rest. */
                         .fi-sidebar{width:16rem!important;max-width:82vw!important;}
+                        /* Frost the page behind the open drawer. */
+                        .fi-sidebar-close-overlay{
+                            backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+                            background-color:rgba(15,23,42,.35)!important;}
                         .hrn-sidebar-brand{display:none!important;}
                         .fi-sidebar-header{flex-direction:column;align-items:center;
                             justify-content:flex-start;height:auto;min-height:0;
