@@ -110,6 +110,26 @@
             <p class="hp-empty">No upcoming events right now — check back soon.</p>
         @endif
     </section>
+
+    @if (($pastEvents ?? collect())->count())
+        <section class="hp-section">
+            <h2 class="hp-h2">Past events</h2>
+            <div class="hp-grid hp-grid-past">
+                @foreach ($pastEvents as $event)
+                    @php $poster = $event->heroImageUrl(); @endphp
+                    <a href="{{ url('/events/'.$event->id) }}" class="hp-card hp-card-past">
+                        <div class="hp-poster" @if ($poster) style="background-image:url('{{ $poster }}')" @endif>
+                            @if (! $poster)<span>{{ strtoupper(mb_substr($event->title, 0, 1)) }}</span>@endif
+                        </div>
+                        <div class="hp-cbody">
+                            <div class="hp-ctitle">{{ $event->title }}</div>
+                            <div class="hp-cmeta">{{ optional($event->date)->format('d M Y') }}</div>
+                        </div>
+                    </a>
+                @endforeach
+            </div>
+        </section>
+    @endif
 </div>
 
 <style>
@@ -162,6 +182,8 @@
         -webkit-box-orient:vertical;overflow:hidden;}
     .hp-cmeta{font-size:12px;color:#6b7382;margin-top:5px;}
     .hp-empty{font-size:14px;color:#6b7382;}
+    .hp-card-past{opacity:.9;}
+    .hp-card-past .hp-poster{filter:saturate(.85);}
 
     @media (max-width:560px){
         .hp-cover{height:140px;border-radius:16px;}

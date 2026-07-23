@@ -44,6 +44,9 @@ class PartnerPublicProfile extends Page implements HasForms
 
     public ?int $profileId = null;
 
+    /** View/follower analytics for the insights panel; empty until a profile exists. */
+    public array $insights = [];
+
     /** Owners of an event-organiser account, in the partner console only. */
     public static function canAccess(): bool
     {
@@ -66,6 +69,15 @@ class PartnerPublicProfile extends Page implements HasForms
         $profile = $user->hostProfile;
 
         $this->profileId = $profile?->id;
+
+        if ($profile !== null) {
+            $this->insights = [
+                'views' => $profile->viewStats(),
+                'followers' => $profile->followerGrowth(),
+                'rating' => $profile->ratingSummary(),
+                'live' => $profile->isLive(),
+            ];
+        }
 
         $this->form->fill([
             'display_name' => $profile->display_name ?? $user->name,

@@ -96,15 +96,25 @@ final class PublicWebController extends Controller
         abort_if($profile === null || ! $profile->isLive(), 404);
 
         $events = $profile->upcomingEventsQuery()->limit(24)->get();
+        $pastEvents = $profile->pastEventsQuery()->limit(12)->get();
         $viewer = auth()->user();
+        $isOwner = $viewer !== null && $viewer->id === $profile->user_id;
+
+        // Count one view per visitor per day (owner's own visits don't count).
+        $seenKey = 'hpv_' . $profile->id . '_' . today()->toDateString();
+        if (! $isOwner && ! session()->has($seenKey)) {
+            $profile->recordView();
+            session()->put($seenKey, 1);
+        }
 
         return view('site.host', [
             'title' => $profile->display_name . ' · Haraan',
             'profile' => $profile,
             'events' => $events,
+            'pastEvents' => $pastEvents,
             'followers' => $profile->followersCount(),
             'isFollowing' => $profile->isFollowedBy($viewer),
-            'isOwner' => $viewer !== null && $viewer->id === $profile->user_id,
+            'isOwner' => $isOwner,
             'rating' => $profile->ratingSummary(),
         ]);
     }

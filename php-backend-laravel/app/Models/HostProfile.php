@@ -112,6 +112,70 @@ class HostProfile extends Model
         return true;
     }
 
+    /** This host's past (published, already-happened) events — the archive. */
+    public function pastEventsQuery(): Builder
+    {
+        return Event::query()
+            ->where('partner_id', $this->user_id)
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->where('date', '<', now()->startOfDay())
+            ->orderByDesc('date');
+    }
+
+    // ---- Analytics (Phase 3) -------------------------------------------------
+
+    /** Bump today's view counter (callers dedupe per session). */
+    public function recordView(): void
+    {
+        DB::table('host_profile_views')->upsert(
+            [['host_profile_id' => $this->id, 'day' => today()->toDateString(), 'views' => 1, 'created_at' => now(), 'updated_at' => now()]],
+            ['host_profile_id', 'day'],
+            ['views' => DB::raw('views + 1'), 'updated_at' => now()],
+        );
+    }
+
+    /**
+     * View totals + a 14-day daily series for the sparkline.
+     *
+     * @return array{total:int, last7:int, last30:int, daily:array<int,int>}
+     */
+    public function viewStats(): array
+    {
+        $rows = DB::table('host_profile_views')->where('host_profile_id', $this->id)->get(['day', 'views']);
+        $byDay = [];
+        foreach ($rows as $r) {
+            $byDay[(string) $r->day] = (int) $r->views;
+        }
+
+        $total = array_sum($byDay);
+        $sinceFn = fn (int $days): int => collect($byDay)
+            ->filter(fn ($v, $day): bool => $day >= now()->subDays($days - 1)->toDateString())
+            ->sum();
+
+        $daily = [];
+        for ($i = 13; $i >= 0; $i--) {
+            $daily[] = $byDay[now()->subDays($i)->toDateString()] ?? 0;
+        }
+
+        return ['total' => $total, 'last7' => $sinceFn(7), 'last30' => $sinceFn(30), 'daily' => $daily];
+    }
+
+    /**
+     * Follower totals + recent growth.
+     *
+     * @return array{total:int, new7:int, new30:int}
+     */
+    public function followerGrowth(): array
+    {
+        $base = DB::table('host_followers')->where('host_id', $this->user_id);
+
+        return [
+            'total' => (clone $base)->count(),
+            'new7' => (clone $base)->where('created_at', '>=', now()->subDays(6)->startOfDay())->count(),
+            'new30' => (clone $base)->where('created_at', '>=', now()->subDays(29)->startOfDay())->count(),
+        ];
+    }
+
     /**
      * Aggregate star rating across this host's rated events.
      *
