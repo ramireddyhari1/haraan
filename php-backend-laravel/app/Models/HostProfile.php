@@ -8,6 +8,7 @@ use App\Support\MediaUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 
 /**
  * A partner's public-facing organiser page (see {@see \App\Http\Controllers\Web\PublicWebController::hostProfile}).
@@ -70,5 +71,63 @@ class HostProfile extends Model
             ->whereRaw('lower(status) = ?', ['published'])
             ->where('date', '>=', now()->startOfDay())
             ->orderBy('date');
+    }
+
+    // ---- Followers (Phase 2) -------------------------------------------------
+
+    public function followersCount(): int
+    {
+        return DB::table('host_followers')->where('host_id', $this->user_id)->count();
+    }
+
+    public function isFollowedBy(?User $user): bool
+    {
+        return $user !== null && DB::table('host_followers')
+            ->where('host_id', $this->user_id)
+            ->where('user_id', $user->id)
+            ->exists();
+    }
+
+    /** Toggle a follow for $user; returns the new following state. No-op for self. */
+    public function toggleFollow(User $user): bool
+    {
+        if ($user->id === $this->user_id) {
+            return false;
+        }
+
+        if ($this->isFollowedBy($user)) {
+            DB::table('host_followers')
+                ->where('host_id', $this->user_id)->where('user_id', $user->id)->delete();
+
+            return false;
+        }
+
+        DB::table('host_followers')->insert([
+            'host_id' => $this->user_id,
+            'user_id' => $user->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Aggregate star rating across this host's rated events.
+     *
+     * @return array{avg: float|null, count: int}
+     */
+    public function ratingSummary(): array
+    {
+        $row = Event::query()
+            ->where('partner_id', $this->user_id)
+            ->whereNotNull('rating')
+            ->selectRaw('AVG(rating) AS a, SUM(ratings_count) AS c')
+            ->first();
+
+        return [
+            'avg' => $row && $row->a !== null ? round((float) $row->a, 1) : null,
+            'count' => (int) ($row->c ?? 0),
+        ];
     }
 }

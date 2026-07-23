@@ -115,7 +115,63 @@ final class Event extends Model
             'good_to_know'   => 'array',
             'schedule'       => 'array',
             'lineup'         => 'array',
+            'followers_notified_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Phase 2: the first time an event goes published, ping the host's followers.
+        static::saved(static function (self $event): void {
+            $event->maybeNotifyFollowers();
+        });
+    }
+
+    /**
+     * Notify this event's host's followers, exactly once, when it first becomes
+     * published. Best-effort: any failure is reported but never blocks the save.
+     */
+    public function maybeNotifyFollowers(): void
+    {
+        if (strtolower((string) $this->status) !== 'published'
+            || $this->followers_notified_at !== null
+            || $this->partner_id === null) {
+            return;
+        }
+
+        try {
+            $followerIds = \Illuminate\Support\Facades\DB::table('host_followers')
+                ->where('host_id', $this->partner_id)
+                ->pluck('user_id');
+
+            if ($followerIds->isNotEmpty()) {
+                $profile = $this->partner?->hostProfile;
+                $hostName = $profile?->display_name ?? $this->partner?->name ?? 'An organiser';
+
+                $notification = \App\Models\Notification::create([
+                    'title' => 'New event from ' . $hostName,
+                    'body' => $this->title,
+                    'deep_link' => $profile?->slug ? url('/host/' . $profile->slug) : url('/events/' . $this->id),
+                    'audience_type' => 'host_followers',
+                    'audience_value' => (string) $this->partner_id,
+                    'status' => 'sent',
+                    'sent_at' => now(),
+                    'created_by' => $this->partner_id,
+                ]);
+
+                \Illuminate\Support\Facades\DB::table('notification_recipients')->insert(
+                    $followerIds->map(fn ($uid): array => [
+                        'notification_id' => $notification->id,
+                        'user_id' => $uid,
+                    ])->all(),
+                );
+            }
+
+            // Stamp regardless (even with zero followers) so we never re-scan.
+            $this->forceFill(['followers_notified_at' => now()])->saveQuietly();
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     // -------------------------------------------------------------------------

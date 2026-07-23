@@ -46,7 +46,27 @@
                 <div class="hp-sub">
                     @if ($profile->city)<span class="hp-city">📍 {{ $profile->city }}</span>@endif
                     <span class="hp-count">{{ $events->count() }} upcoming {{ \Illuminate\Support\Str::plural('event', $events->count()) }}</span>
+                    <span class="hp-followers"><strong>{{ number_format($followers ?? 0) }}</strong> {{ \Illuminate\Support\Str::plural('follower', $followers ?? 0) }}</span>
+                    @if (($rating['avg'] ?? null) !== null)
+                        <span class="hp-rating">★ {{ number_format($rating['avg'], 1) }} <span class="hp-rating-n">({{ number_format($rating['count']) }})</span></span>
+                    @endif
                 </div>
+
+                <div class="hp-actions">
+                    @auth
+                        @unless ($isOwner ?? false)
+                            <form method="POST" action="{{ route('site.host.follow', ['slug' => $profile->slug]) }}">
+                                @csrf
+                                <button type="submit" class="hp-follow {{ ($isFollowing ?? false) ? 'is-on' : '' }}">
+                                    {{ ($isFollowing ?? false) ? '✓ Following' : '+ Follow' }}
+                                </button>
+                            </form>
+                        @endunless
+                    @else
+                        <a href="{{ url('/login') }}" class="hp-follow">+ Follow</a>
+                    @endauth
+                </div>
+
                 @if ($socials->count())
                     <div class="hp-socials">
                         @foreach ($socials as $s)
@@ -107,8 +127,19 @@
         margin:6px 0 2px;line-height:1.1;}
     .hp-verified{width:20px;height:20px;color:#1e50e6;flex:none;}
     .hp-tag{font-size:14.5px;color:#4b5563;margin:2px 0 0;}
-    .hp-sub{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:#6b7382;}
+    .hp-sub{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:13px;color:#6b7382;}
     .hp-count{font-weight:600;color:#0a7d4e;}
+    .hp-followers strong{color:#0b1220;}
+    .hp-rating{font-weight:700;color:#b45309;}
+    .hp-rating-n{font-weight:500;color:#9aa2b1;}
+    .hp-actions{margin-top:12px;}
+    .hp-follow{display:inline-flex;align-items:center;gap:6px;border:0;cursor:pointer;
+        font-size:13.5px;font-weight:700;padding:9px 20px;border-radius:999px;text-decoration:none;
+        background:linear-gradient(180deg,#2f6bff,#1e50e6);color:#fff;
+        box-shadow:0 8px 18px -8px rgba(37,99,235,.6);transition:filter .15s,transform .05s;}
+    .hp-follow:hover{filter:brightness(1.06);}
+    .hp-follow:active{transform:translateY(1px);}
+    .hp-follow.is-on{background:#eef3ff;color:#1e50e6;box-shadow:inset 0 0 0 1.5px #c7d7ff;}
     .hp-socials{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
     .hp-social{font-size:12.5px;font-weight:600;color:#1e50e6;text-decoration:none;
         padding:5px 11px;border-radius:999px;background:#eef3ff;}

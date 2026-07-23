@@ -51,6 +51,8 @@ final class EventResource extends JsonResource
             'rating'         => $this->rating !== null ? (float) $this->rating : null,
             'ratingsCount'   => (int) ($this->ratings_count ?? 0),
             'partnerId'      => $this->partner_id,
+            // The organiser's public page, when they have a live one (Phase 2).
+            'host'           => $this->hostPayload($request),
             'createdAt'      => $this->created_at,
             'infoNotes'      => array_values(array_filter(
                 (array) ($this->info_notes ?? []),
@@ -75,6 +77,30 @@ final class EventResource extends JsonResource
                 // Empty for flat-price tiers; drives the app's "Pricing Schedule" widget.
                 'phases'    => $t->phaseSchedule(),
             ])->values()),
+        ];
+    }
+
+    /**
+     * The event organiser's public profile, or null when they don't have a live one.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function hostPayload(Request $request): ?array
+    {
+        $profile = $this->resource->partner?->hostProfile;
+
+        if ($profile === null || ! $profile->isLive()) {
+            return null;
+        }
+
+        return [
+            'name'        => $profile->display_name,
+            'slug'        => $profile->slug,
+            'logo'        => $profile->logoUrl(),
+            'verified'    => $profile->isVerified(),
+            'url'         => url('/host/' . $profile->slug),
+            'followers'   => $profile->followersCount(),
+            'isFollowing' => $profile->isFollowedBy($request->user()),
         ];
     }
 }

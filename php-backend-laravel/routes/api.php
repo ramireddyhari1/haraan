@@ -99,6 +99,9 @@ Route::prefix('events')->group(function (): void {
     });
 });
 
+// Host (organiser) follow — Phase 2. The host object itself rides on each event.
+Route::middleware('auth.jwt')->post('/host/{slug}/follow', [\App\Http\Controllers\Api\HostController::class, 'follow']);
+
 // -------------------------------------------------------------------------
 //  Venues (public, read-only) — feeds GameHub browse + venue detail screens.
 //  Content managed in the Filament "Haraan Control" admin (/control/venues).

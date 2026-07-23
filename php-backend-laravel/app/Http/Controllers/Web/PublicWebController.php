@@ -96,12 +96,29 @@ final class PublicWebController extends Controller
         abort_if($profile === null || ! $profile->isLive(), 404);
 
         $events = $profile->upcomingEventsQuery()->limit(24)->get();
+        $viewer = auth()->user();
 
         return view('site.host', [
             'title' => $profile->display_name . ' · Haraan',
             'profile' => $profile,
             'events' => $events,
+            'followers' => $profile->followersCount(),
+            'isFollowing' => $profile->isFollowedBy($viewer),
+            'isOwner' => $viewer !== null && $viewer->id === $profile->user_id,
+            'rating' => $profile->ratingSummary(),
         ]);
+    }
+
+    /** Toggle following an organiser (auth). Returns to the page. */
+    public function followHost(Request $request, string $slug): \Illuminate\Http\RedirectResponse
+    {
+        $profile = HostProfile::query()->where('slug', $slug)->first();
+
+        abort_if($profile === null || ! $profile->isLive(), 404);
+
+        $profile->toggleFollow($request->user());
+
+        return back();
     }
 
     public function gamehub(): View
