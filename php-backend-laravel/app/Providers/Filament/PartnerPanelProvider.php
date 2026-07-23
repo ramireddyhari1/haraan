@@ -108,17 +108,19 @@ class PartnerPanelProvider extends PanelProvider
                        in its own framed card. Resets to plain in dark mode so /control's
                        dark theme is untouched. */
                     .fi-sidebar-header{flex-wrap:wrap;
+                        justify-content:center;text-align:center;padding:14px 12px 12px;
                         margin:10px;border-radius:16px;border:1px solid #e3e9f5;
                         background:linear-gradient(180deg,#eaf1ff 0%,#f4f8ff 55%,#ffffff 100%);
                         box-shadow:0 1px 2px rgba(11,18,32,.05);}
+                    .fi-sidebar-header .fi-sidebar-header-logo-ctn{margin-inline:auto;}
                     .dark .fi-sidebar-header{background:transparent;
                         border-color:rgba(255,255,255,.08);box-shadow:none;}
                     .fi-sidebar-header-logo-ctn{flex:0 0 auto;}
                     .hrn-sidebar-tag{flex-basis:100%;font-size:13px;line-height:1;
-                        color:#0b1220;margin-top:3px;letter-spacing:.02em;
+                        color:#0b1220;margin-top:3px;letter-spacing:.02em;text-align:center;
                         font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
                         "Brush Script MT","Comic Sans MS",cursive;
-                        transform:rotate(-3deg);transform-origin:left center;}
+                        transform:rotate(-3deg);transform-origin:center center;}
                     /* Handwritten "Haraan" tucked under "partner", black. */
                     .hrn-sidebar-brand{font-size:15px;margin-top:4px;}
                     .dark .hrn-sidebar-tag{color:#e6e9ef;}
