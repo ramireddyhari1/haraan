@@ -14,18 +14,32 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class UserResource extends Resource
 {
-    use ScopesToOrganization;
+    // Alias the org-scoping query so we can layer the staff-role filter on top.
+    use ScopesToOrganization {
+        getEloquentQuery as protected scopedOrgQuery;
+    }
+
+    /** Internal team roles — this resource is the staff list only (partners + app users have their own). */
+    public const STAFF_ROLES = ['ADMIN', 'COADMIN', 'OPS', 'FINANCE', 'MARKETING'];
 
     protected static ?string $model = User::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-users';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-shield-check';
 
     protected static string|\UnitEnum|null $navigationGroup = 'People';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 2;
+
+    /** Only internal staff accounts (role-scoped, case-insensitive), on top of org scoping. */
+    public static function getEloquentQuery(): Builder
+    {
+        return static::scopedOrgQuery()
+            ->whereRaw('upper(role) in (' . implode(',', array_fill(0, count(self::STAFF_ROLES), '?')) . ')', self::STAFF_ROLES);
+    }
 
     protected static ?string $recordTitleAttribute = 'name';
 
@@ -42,7 +56,11 @@ class UserResource extends Resource
         ]);
     }
 
-    protected static ?string $navigationLabel = 'Staff & users';
+    protected static ?string $navigationLabel = 'Staff';
+
+    protected static ?string $modelLabel = 'staff member';
+
+    protected static ?string $pluralModelLabel = 'staff';
 
     /** Super-admins and Operations can manage staff. */
     public static function canManageStaff(): bool
