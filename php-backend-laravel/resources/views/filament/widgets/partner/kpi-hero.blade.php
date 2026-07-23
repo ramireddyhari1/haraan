@@ -1,6 +1,6 @@
-{{-- Partner dashboard "money hero": dominant revenue + supporting KPIs.
-     Self-contained (markup + inline CSS, theme-aware) like the other bespoke
-     partner strips. Data comes from PartnerKpiHeroWidget::getStats(). --}}
+{{-- Partner dashboard "money hero": dominant revenue + supporting KPIs, framed as
+     a "Performance" section and sharing the icon-chip system of the Today strip.
+     Self-contained (markup + inline CSS, theme-aware). Data from getStats(). --}}
 @php
     $s = $this->getStats();
     // Indian grouping: ₹18,42,900
@@ -20,12 +20,20 @@
     $delta = $s['delta'];
     $ticketLabel = $s['isEventLane'] ? 'Tickets sold' : 'Bookings';
     $window = 'last ' . ($s['days'] ?? 14) . ' days';
+    // Only sound the refund alarm on a meaningful sample — 1 refund of 5 shouldn't
+    // read as a crisis. Amber needs ≥10 bookings AND ≥8% refunds; else it stays calm.
+    $refundHigh = ($s['bookingCount'] ?? 0) >= 10 && ($s['refundRate'] ?? 0) >= 8;
+    $refundCount = $s['refundCount'] ?? 0;
+    $bookingCount = $s['bookingCount'] ?? 0;
 @endphp
 
 <x-filament-widgets::widget>
+    <div class="pkh-sec">Performance <span class="pkh-sec-sub">· {{ $window }}</span></div>
+
     <div class="pkh">
         {{-- Revenue — the dominant figure --}}
-        <div class="pkh-hero">
+        <div class="pkh-hero" data-accent="green">
+            <span class="pkh-ic"><x-filament::icon icon="heroicon-o-banknotes" /></span>
             <div class="pkh-lab">Revenue · {{ $window }}</div>
             <div class="pkh-val">{{ $inr($s['revenue']) }}</div>
             <div class="pkh-meta">
@@ -35,7 +43,7 @@
                     </span>
                     <span class="pkh-vs">vs previous {{ $s['days'] ?? 14 }} days</span>
                 @else
-                    <span class="pkh-vs">Your collected revenue across paid bookings</span>
+                    <span class="pkh-vs">Collected across paid bookings</span>
                 @endif
             </div>
             <svg class="pkh-spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
@@ -53,56 +61,75 @@
         {{-- Supporting KPIs --}}
         <div class="pkh-side">
             <div class="pkh-kpi" data-accent="blue">
-                <div class="pkh-klab">{{ $ticketLabel }}</div>
+                <span class="pkh-ic"><x-filament::icon icon="heroicon-o-ticket" /></span>
                 <div class="pkh-kval">{{ number_format($s['tickets']) }}</div>
+                <div class="pkh-klab">{{ $ticketLabel }}</div>
                 <div class="pkh-ksub">{{ $window }}</div>
             </div>
             <div class="pkh-kpi" data-accent="indigo">
-                <div class="pkh-klab">Checked in</div>
+                <span class="pkh-ic"><x-filament::icon icon="heroicon-o-check-badge" /></span>
                 <div class="pkh-kval">{{ $s['checkedInRate'] !== null ? $s['checkedInRate'] . '%' : '—' }}</div>
+                <div class="pkh-klab">Checked in</div>
                 <div class="pkh-ksub">of paid bookings</div>
             </div>
-            <div class="pkh-kpi" data-accent="{{ $s['refundRate'] >= 5 ? 'amber' : 'slate' }}">
+            <div class="pkh-kpi" data-accent="{{ $refundHigh ? 'amber' : 'slate' }}">
+                <span class="pkh-ic"><x-filament::icon icon="heroicon-o-arrow-uturn-left" /></span>
+                <div class="pkh-kval {{ $refundHigh ? 'is-warn' : '' }}">{{ number_format($s['refundRate'], 1) }}%</div>
                 <div class="pkh-klab">Refund rate</div>
-                <div class="pkh-kval {{ $s['refundRate'] >= 5 ? 'is-warn' : '' }}">{{ number_format($s['refundRate'], 1) }}%</div>
-                <div class="pkh-ksub">{{ $window }}</div>
+                <div class="pkh-ksub">
+                    @if ($bookingCount > 0)
+                        {{ number_format($refundCount) }} of {{ number_format($bookingCount) }} {{ \Illuminate\Support\Str::plural('booking', $bookingCount) }}
+                    @else
+                        no bookings yet
+                    @endif
+                </div>
             </div>
         </div>
     </div>
 
     <style>
+        .pkh-sec{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+            color:#7a8394;margin:2px 2px 10px;}
+        .pkh-sec-sub{color:#aab2c0;font-weight:600;}
+
         .pkh{display:grid;grid-template-columns:1.6fr 2fr;gap:14px;}
-        .pkh-hero,.pkh-kpi{background:#fff;border:1px solid #e7e9ee;border-radius:16px;
-            box-shadow:0 1px 2px rgba(11,18,32,.06);}
-        .pkh-hero{padding:20px 22px;display:flex;flex-direction:column;position:relative;overflow:hidden;}
+        .pkh-hero,.pkh-kpi{background:#fff;border:1px solid #e9ecf2;border-radius:16px;
+            box-shadow:0 1px 2px rgba(11,18,32,.06);transition:box-shadow .15s,transform .05s;}
+        .pkh-kpi:hover,.pkh-hero:hover{box-shadow:0 6px 16px -8px rgba(11,18,32,.18);transform:translateY(-1px);}
+        .pkh-hero{padding:18px 20px;display:flex;flex-direction:column;position:relative;overflow:hidden;}
         .pkh-lab{font-size:12.5px;color:#6b7382;font-weight:600;}
-        .pkh-val{font-size:34px;font-weight:800;color:#0b1220;letter-spacing:-.03em;
-            font-variant-numeric:tabular-nums;margin-top:4px;line-height:1.05;}
+        .pkh-val{font-size:32px;font-weight:800;color:#0b1220;letter-spacing:-.03em;
+            font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.05;}
         .pkh-meta{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;}
         .pkh-delta{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;}
         .pkh-delta.is-up{color:#0a7d4e;} .pkh-delta.is-down{color:#c2790a;}
         .pkh-vs{font-size:12px;color:#9aa2b1;}
-        .pkh-spark{margin-top:auto;width:100%;height:38px;display:block;padding-top:10px;}
+        .pkh-spark{margin-top:auto;width:100%;height:36px;display:block;padding-top:10px;}
 
-        .pkh-hero{border-top:3px solid #0f9d63;}
         .pkh-side{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
-        .pkh-kpi{padding:16px 18px;display:flex;flex-direction:column;gap:3px;position:relative;
-            border-top:3px solid transparent;}
-        .pkh-kpi[data-accent="blue"]{border-top-color:#5aa2f5;}
-        .pkh-kpi[data-accent="indigo"]{border-top-color:#7c86f0;}
-        .pkh-kpi[data-accent="amber"]{border-top-color:#e0a010;}
-        .pkh-kpi[data-accent="slate"]{border-top-color:#cbd2dd;}
-        .pkh-klab{font-size:12.5px;color:#6b7382;font-weight:600;}
-        .pkh-kval{font-size:26px;font-weight:800;color:#0b1220;letter-spacing:-.03em;
+        .pkh-kpi{padding:15px 16px;display:flex;flex-direction:column;position:relative;}
+        .pkh-klab{font-size:12.5px;color:#374151;font-weight:600;margin-top:2px;}
+        .pkh-kval{font-size:24px;font-weight:800;color:#0b1220;letter-spacing:-.03em;
             font-variant-numeric:tabular-nums;line-height:1.1;}
-        .pkh-kval.is-warn{color:#c2790a;}
-        .pkh-ksub{font-size:11.5px;color:#9aa2b1;}
+        .pkh-kval.is-warn{color:#b26f04;}
+        .pkh-ksub{font-size:11.5px;color:#9aa2b1;margin-top:1px;}
+
+        /* Tinted icon chip per metric — same system as the Today strip. */
+        .pkh-ic{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;
+            justify-content:center;margin-bottom:9px;}
+        .pkh-ic svg{width:17px;height:17px;stroke-width:1.9;}
+        [data-accent="green"]  .pkh-ic{background:#e6f7ef;color:#0f9d63;}
+        [data-accent="blue"]   .pkh-ic{background:#e8f0ff;color:#2f6bff;}
+        [data-accent="indigo"] .pkh-ic{background:#ecedfe;color:#5257e0;}
+        [data-accent="amber"]  .pkh-ic{background:#fdf1dc;color:#b26f04;}
+        [data-accent="slate"]  .pkh-ic{background:#eef1f6;color:#64748b;}
 
         .dark .pkh-hero,.dark .pkh-kpi{background:#111722;border-color:#1e2633;box-shadow:0 1px 2px rgba(0,0,0,.4);}
         .dark .pkh-val,.dark .pkh-kval{color:#eef1f6;}
-        .dark .pkh-lab,.dark .pkh-klab{color:#8b94a5;}
+        .dark .pkh-lab{color:#8b94a5;} .dark .pkh-klab{color:#c3cad6;}
         .dark .pkh-vs,.dark .pkh-ksub{color:#5e6675;}
         .dark .pkh-delta.is-up{color:#28c882;}
+        .dark .pkh-sec{color:#8b94a5;} .dark .pkh-sec-sub{color:#5e6675;}
 
         @media (max-width:1024px){
             .pkh{grid-template-columns:1fr;}

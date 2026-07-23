@@ -125,6 +125,8 @@ class PartnerKpiHeroWidget extends Widget
             'tickets' => $tickets,
             'checkedInRate' => $paidCount > 0 ? (int) round($checkedIn / $paidCount * 100) : null,
             'refundRate' => $windowAll > 0 ? round($refunded / $windowAll * 100, 1) : 0.0,
+            'refundCount' => $refunded,
+            'bookingCount' => $windowAll,
             'spark' => $this->sparkPath($daily),
         ];
     }
