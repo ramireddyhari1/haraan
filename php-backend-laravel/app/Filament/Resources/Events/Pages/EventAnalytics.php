@@ -17,6 +17,7 @@ use App\Filament\Resources\Events\Widgets\EventRefundWidget;
 use App\Filament\Resources\Events\Widgets\EventRevenueByTypeWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesChartWidget;
 use App\Filament\Resources\Events\Widgets\EventSalesPacingWidget;
+use App\Filament\Resources\Events\Widgets\EventShareLinksWidget;
 use App\Filament\Resources\Events\Widgets\EventViewsWidget;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -113,6 +114,8 @@ class EventAnalytics extends Page
             EventAnalyticsStatsWidget::class,
             EventViewsWidget::class,
             EventFunnelWidget::class,
+            // The tool that fills Traffic sources cleanly: per-channel tagged links.
+            EventShareLinksWidget::class,
             EventComparisonWidget::class,
             EventRevenueByTypeWidget::class,
             EventSalesChartWidget::class,
