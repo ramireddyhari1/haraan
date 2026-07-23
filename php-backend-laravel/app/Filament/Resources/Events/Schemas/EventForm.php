@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Events\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Repeater;
@@ -122,6 +123,19 @@ class EventForm
         return $data;
     }
 
+    /**
+     * Whether platform-only controls should show. These fields — the host/organizer
+     * assignment, the editorial rating figures and the platform convenience fee —
+     * belong to Haraan staff in /control, not to the organiser filling in their own
+     * event in /partner. False in the partner console, true everywhere else. On
+     * create the partner's ownership is stamped server-side (CreateEvent), and the
+     * hidden fields keep their sensible defaults (fee "none", rating blank).
+     */
+    private static function adminOnly(): bool
+    {
+        return Filament::getCurrentPanel()?->getId() !== 'partner';
+    }
+
     public static function configure(Schema $schema): Schema
     {
         return $schema
@@ -134,8 +148,14 @@ class EventForm
                     self::ticketsStep(),
                     self::publishStep(),
                 ])
-                    ->columnSpanFull()
-                    ->skippable(),
+                    ->columnSpanFull(),
+                // NB: deliberately NOT ->skippable(). A skippable wizard lets a host
+                // jump straight to "Publish" past unfilled required steps; clicking
+                // Create then fails validation on those earlier steps, but Filament
+                // renders the errors on a hidden step and neither navigates to it nor
+                // flags the step header — so the button appears to do nothing. Keeping
+                // the wizard sequential validates each step on "Next", surfacing any
+                // error on the step the host is actually looking at.
             ]);
     }
 
@@ -185,6 +205,11 @@ class EventForm
                     ->seconds(false)
                     ->format('g:i A')       // store "7:00 PM" to match existing display strings
                     ->displayFormat('g:i A')
+                    // A real default (not just a placeholder). Previously "7:00 PM"
+                    // was only placeholder text, so the field looked pre-filled but
+                    // was actually empty — a required-field validation trap that
+                    // silently blocked Create for hosts who left it untouched.
+                    ->default('7:00 PM')
                     ->placeholder('7:00 PM'),
                 Select::make('city')
                     ->label('City')
@@ -391,6 +416,8 @@ class EventForm
                     ->default('none')
                     ->native(false)
                     ->live()
+                    // Platform fee — set by Haraan staff in /control, hidden from organisers.
+                    ->visible(self::adminOnly())
                     ->helperText('Added on top of the ticket subtotal at checkout.'),
                 TextInput::make('convenience_fee_value')
                     ->label(fn (Get $get): string => $get('convenience_fee_type') === 'percent' ? 'Fee percentage' : 'Fee amount')
@@ -399,7 +426,7 @@ class EventForm
                     ->default(0)
                     ->prefix(fn (Get $get): ?string => $get('convenience_fee_type') === 'flat' ? '₹' : null)
                     ->suffix(fn (Get $get): ?string => $get('convenience_fee_type') === 'percent' ? '%' : null)
-                    ->visible(fn (Get $get): bool => in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
+                    ->visible(fn (Get $get): bool => self::adminOnly() && in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
                     ->helperText('Buyers see this as a "Convenience fee" line on the order summary.'),
                 Toggle::make('seat_selection')
                     ->label('Assigned seating (reserved seats)')
@@ -483,11 +510,15 @@ class EventForm
                     ->default(['for_you', 'trending', 'nearby'])
                     ->native(false)
                     ->helperText('Which rails on the app\'s Events tab this event appears in. Leave all on to show it everywhere.'),
+                // Host assignment + editorial ratings are platform controls: hidden in
+                // /partner (a partner's own ownership is stamped server-side on create,
+                // see CreateEvent), shown only to Haraan staff in /control.
                 Select::make('partner_id')
                     ->label('Host / organizer')
                     ->relationship('partner', 'name')
                     ->searchable()
                     ->preload()
+                    ->visible(self::adminOnly())
                     ->default(fn () => auth()->id()),
                 TextInput::make('rating')
                     ->label('Rating')
@@ -496,12 +527,14 @@ class EventForm
                     ->maxValue(5)
                     ->step(0.1)
                     ->placeholder('e.g. 4.8')
+                    ->visible(self::adminOnly())
                     ->helperText('Shown on the event detail row. Leave blank to hide it.'),
                 TextInput::make('ratings_count')
                     ->label('Number of ratings')
                     ->numeric()
                     ->minValue(0)
                     ->default(0)
+                    ->visible(self::adminOnly())
                     ->helperText('How many people rated it (shown as "(123)" next to the star).'),
             ]);
     }
