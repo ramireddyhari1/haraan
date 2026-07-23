@@ -1,0 +1,32 @@
+package com.example.thanna.data.local
+
+import android.content.Context
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+
+@Database(entities = [PendingAction::class, SyncState::class], version = 1, exportSchema = false)
+abstract class HaraanDatabase : RoomDatabase() {
+
+    abstract fun pendingActionDao(): PendingActionDao
+    abstract fun syncStateDao(): SyncStateDao
+
+    companion object {
+        @Volatile
+        private var INSTANCE: HaraanDatabase? = null
+
+        fun getDatabase(context: Context): HaraanDatabase {
+            return INSTANCE ?: synchronized(this) {
+                val instance = Room.databaseBuilder(
+                    context.applicationContext,
+                    HaraanDatabase::class.java,
+                    "haraan_database"
+                )
+                .fallbackToDestructiveMigration()
+                .build()
+                INSTANCE = instance
+                instance
+            }
+        }
+    }
+}

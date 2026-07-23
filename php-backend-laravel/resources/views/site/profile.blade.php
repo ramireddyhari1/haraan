@@ -1,253 +1,192 @@
 @extends('site.layout')
 
 @section('content')
+{{--
+    The account screen — the web twin of the app's AccountProfileScreen.kt.
+    Same proposition, same order: one identity hero, two lanes (Tickets / Play),
+    a standing strip ONLY when there's something earned, then Account, Legal and
+    Sign out. Structure and rules are ported from the app deliberately; don't
+    "improve" the order here without changing it there too.
+--}}
 @php
-    $user = auth()->user();
-    
-    // Redirect if not logged in
-    if(!$user) {
-        header("Location: /");
-        exit();
-    }
-
-    $avatar = $user->avatar ?? null;
-    if (!empty($avatar) && !preg_match('/^(http|https):\/\//', $avatar) && strpos($avatar, '/') !== 0) {
+    $avatar = $user->avatar;
+    if (!empty($avatar) && !preg_match('#^(https?://|/)#', $avatar)) {
         $avatar = asset('storage/' . ltrim($avatar, '/'));
     }
-    if(empty($avatar)) {
-        $avatar = 'https://ui-avatars.com/api/?name='.urlencode($user->name).'&background=475569&color=fff&size=256';
-    }
 
-    $myMatches = \App\Models\LiveMatch::where('user_id', $user->id)->orderBy('id', 'desc')->get();
-    $myBookings = $user->bookings ?? [];
+    // Where you play and how long you've been here — the app's hero subtitle.
+    $place = filled($user->district) ? $user->district : null;
+    $since = $user->created_at ? 'Member since ' . $user->created_at->format('Y') : null;
+    $subtitle = implode(' · ', array_filter([$place, $since]));
+
+    // Standing is earned-only: an all-zero strip would be decoration, so absence
+    // is the honest state (matches the app's `rankedXp > 0 || careerMatches > 0`).
+    $xp = (int) ($user->ranked_xp ?? 0);
+    $matches = (int) ($user->career_matches ?? 0);
+    $showStanding = $xp > 0 || $matches > 0;
 @endphp
 
-<div class="profile-container" style="padding: 40px 0;">
-    <!-- Profile Header (Native Style) -->
-    <div class="detail-header" style="display: flex; align-items: center; gap: 24px; margin-bottom: 48px;">
-        <div style="position: relative; width: 120px; height: 120px; flex-shrink: 0;">
-            <img src="{{ $avatar }}" alt="{{ $user->name }}" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 4px solid #fff; box-shadow: 0 10px 30px rgba(18,22,32,0.08);">
-            <button class="action-round-btn" style="position: absolute; bottom: 0; right: 0; width: 32px; height: 32px;" title="Edit Avatar">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-            </button>
-        </div>
-        <div style="flex-grow: 1;">
-            <h1 class="detail-header__title" style="margin-bottom: 8px;">{{ $user->name }}</h1>
-            <div class="detail-header__meta">
-                <span class="detail-meta-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg> 
-                    {{ $user->email }}
-                </span>
-                @if($user->phone)
-                    <span class="detail-meta-divider">•</span>
-                    <span class="detail-meta-item">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg> 
-                        {{ $user->phone }}
-                    </span>
-                @endif
-                <span class="detail-meta-divider">•</span>
-                <span class="detail-badge" style="margin:0; background: #111827;">{{ ucfirst($user->role) }}</span>
-            </div>
-        </div>
-        <div>
-            <button class="btn btn--solid" style="background: #111827; color: #fff; display: flex; align-items: center; gap: 8px;" onclick="document.getElementById('editProfileModal').style.display='flex'">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-                Edit Profile
-            </button>
-        </div>
-    </div>
+<div class="aprof">
 
-    <!-- Edit Profile Modal -->
-    <div id="editProfileModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
-        <div style="background: #fff; padding: 32px; border-radius: 16px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.2);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                <h3 style="margin: 0; font-size: 20px; font-weight: 800;">Edit Profile Details</h3>
-                <button onclick="document.getElementById('editProfileModal').style.display='none'" style="background: none; border: none; cursor: pointer; color: #6b7280;">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-            </div>
-            <form action="{{ route('site.profile.update') }}" method="POST">
+    {{-- ── Identity hero — the one moment that dominates the screen ── --}}
+    <section class="aprof-hero">
+        <div class="aprof-hero__row">
+            {{-- The avatar is the hero's one action: upload a photo. --}}
+            <form method="POST" action="{{ route('site.profile.avatar') }}" enctype="multipart/form-data" id="avatarForm">
                 @csrf
-                @method('PUT')
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; color: #374151;">Full Name</label>
-                    <input type="text" name="name" value="{{ $user->name }}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px;" required>
-                </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; color: #374151;">Email Address</label>
-                    <input type="email" name="email" value="{{ $user->email }}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px;" required>
-                </div>
-                <div style="margin-bottom: 24px;">
-                    <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; color: #374151;">Phone Number</label>
-                    <input type="tel" name="phone" value="{{ $user->phone }}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px;">
-                </div>
-                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 12px;">
-                    <button type="button" onclick="document.getElementById('editProfileModal').style.display='none'" class="btn" style="background: #f1f5f9; color: #475569; border: none;">Cancel</button>
-                    <button type="submit" class="btn btn--solid" style="background: #111827; color: #fff; border: none;">Save Changes</button>
-                </div>
+                <label class="aprof-avatar" title="Upload photo">
+                    @if($avatar)
+                        <img src="{{ $avatar }}" alt="Profile photo">
+                    @else
+                        <span class="aprof-avatar__initial">{{ mb_strtoupper(mb_substr($user->name ?: '?', 0, 1)) }}</span>
+                    @endif
+                    <span class="aprof-avatar__badge" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                    </span>
+                    <input type="file" name="avatar" accept="image/jpeg,image/png,image/webp" hidden
+                           onchange="document.getElementById('avatarForm').submit()">
+                </label>
             </form>
+
+            <div class="aprof-hero__id">
+                <h1 class="aprof-hero__name">{{ $user->name ?: 'Haraan user' }}</h1>
+                @if($user->email)
+                    <p class="aprof-hero__email">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                        <span>{{ $user->email }}</span>
+                    </p>
+                @endif
+                @if($subtitle)
+                    <p class="aprof-hero__sub">{{ $subtitle }}</p>
+                @endif
+            </div>
         </div>
+
+        {{-- The member ID is the one genuinely distinctive thing here, so it gets its
+             own band: labelled, monospaced, tappable to copy — the way an airline
+             treats a frequent-flyer number. --}}
+        @if($user->player_id)
+            <div class="aprof-hero__rule"></div>
+            <button type="button" class="aprof-memberid" data-copy="{{ $user->player_id }}">
+                <span>
+                    <small>MEMBER ID</small>
+                    <b>{{ $user->player_id }}</b>
+                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+        @endif
+    </section>
+
+    {{-- ── The two lanes: one identity, two things to do with it. Each owns its
+         accent and its own number, so neither repeats what the hero already said. --}}
+    <div class="aprof-lanes">
+        <a class="aprof-lane" href="{{ route('site.bookings') }}">
+            <span class="aprof-lane__icon aprof-lane__icon--blue">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 5v2m0 4v2m0 4v2M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2z"></path></svg>
+            </span>
+            <span class="aprof-lane__label">Tickets</span>
+            @if($ticketsValue)
+                <span class="aprof-lane__value">{{ $ticketsValue }}</span>
+                <span class="aprof-lane__caption">{{ $ticketsCaption }}</span>
+            @else
+                {{-- An empty lane should read as a door, not as a zero. --}}
+                <span class="aprof-lane__invite aprof-lane__invite--blue">
+                    {{ $ticketsCaption }}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </span>
+            @endif
+        </a>
+
+        <a class="aprof-lane" href="{{ $user->player_id ? route('site.player.profile', ['player_id' => $user->player_id]) : route('site.gamehub.actionboard') }}">
+            <span class="aprof-lane__icon aprof-lane__icon--green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18.5 5.5 5.5 18.5"></path><circle cx="7" cy="17" r="3"></circle><path d="M14 3h7v7"></path><path d="M21 3 10 14"></path></svg>
+            </span>
+            <span class="aprof-lane__label">Play</span>
+            @if($matchesValue)
+                <span class="aprof-lane__value">{{ $matchesValue }}</span>
+                <span class="aprof-lane__caption">matches played</span>
+            @else
+                <span class="aprof-lane__invite aprof-lane__invite--green">
+                    Join a local match
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </span>
+            @endif
+        </a>
     </div>
 
-    <!-- Main Content Two-Column -->
-    <div class="detail-two-column">
-        
-        <!-- Main Column (Events & Matches) -->
-        <div>
-            
-            <!-- Bookings / Events Section -->
-            <div class="reviews-section-header">
-                <h3>My Event Bookings</h3>
-                <a href="{{ url('/events') }}" class="btn btn--solid" style="background: #ff9f1a; border-color: #ff9f1a; color: #fff;">Browse Events</a>
+    {{-- ── Standing — three numbers you can only get by playing. --}}
+    @if($showStanding)
+        <div class="aprof-standing">
+            <div class="aprof-stat">
+                <svg class="aprof-stat__icon" style="color:#2563EB" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                <b>{{ number_format($xp) }}</b>
+                <small>Match XP</small>
             </div>
-
-            @if(count($myBookings) > 0)
-                <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px;">
-                    <!-- Placeholder for actual bookings loop, using first as example if array wasn't empty -->
-                    @foreach($myBookings as $booking)
-                        <div class="detail-card-panel" style="padding: 24px; margin-bottom: 0; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #ff9f1a;">
-                            <div>
-                                <h4 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 800; color: #111827;">Booking #{{ $booking->id }}</h4>
-                                <span style="font-size: 14px; color: #6b7280;">Confirmed</span>
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
-            @else
-                <div class="detail-card-panel" style="text-align: center; padding: 40px 20px; margin-bottom: 48px; border-left: 4px solid #ff9f1a;">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff9f1a" stroke-width="1.5" style="margin-bottom: 16px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                    <h4 class="detail-card-panel__title" style="margin-bottom: 8px;">No event bookings</h4>
-                    <p class="detail-card-panel__text">You haven't booked any events yet. Check out what's happening nearby!</p>
-                </div>
-            @endif
-
-            <!-- GameHub / Live Matches Section -->
-            <div class="reviews-section-header">
-                <h3>My ActionBoard Matches</h3>
-                <a href="{{ route('site.gamehub.actionboard.create') }}" class="btn btn--solid" style="background: #16a34a; border-color: #16a34a; color: #fff;">+ Create Match</a>
+            <i class="aprof-stat__divider"></i>
+            <div class="aprof-stat">
+                <svg class="aprof-stat__icon" style="color:#00B140" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"></path><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"></path></svg>
+                <b>{{ $user->rank_district ? '#' . $user->rank_district : '—' }}</b>
+                <small>In district</small>
             </div>
-
-            <!-- ActionBoard Player Info -->
-            <div class="detail-card-panel" style="padding: 24px; margin-bottom: 24px; border-left: 4px solid #3b82f6;">
-                <h4 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 800; color: #111827;">My ActionBoard Profile</h4>
-                <form action="{{ route('site.profile.update') }}" method="POST">
-                    @csrf
-                    @method('PUT')
-                    <!-- Hidden inputs for general profile fields to pass validation -->
-                    <input type="hidden" name="name" value="{{ $user->name }}">
-                    <input type="hidden" name="email" value="{{ $user->email }}">
-                    <input type="hidden" name="phone" value="{{ $user->phone }}">
-                    
-                    <div style="display: flex; gap: 16px; align-items: flex-end;">
-                        <div style="flex: 1;">
-                            <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; color: #374151;">Player Role</label>
-                            <select name="player_role" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: #fff;">
-                                <option value="">Select Role</option>
-                                <option value="Batter" {{ ($user->player_role ?? '') == 'Batter' ? 'selected' : '' }}>Batter</option>
-                                <option value="Bowler" {{ ($user->player_role ?? '') == 'Bowler' ? 'selected' : '' }}>Bowler</option>
-                                <option value="All-Rounder" {{ ($user->player_role ?? '') == 'All-Rounder' ? 'selected' : '' }}>All-Rounder</option>
-                                <option value="Wicket-Keeper" {{ ($user->player_role ?? '') == 'Wicket-Keeper' ? 'selected' : '' }}>Wicket-Keeper</option>
-                            </select>
-                        </div>
-                        <div style="flex: 1;">
-                            <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; color: #374151;">Playing Style</label>
-                            <select name="playing_style" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: #fff;">
-                                <option value="">Select Style</option>
-                                <optgroup label="Batting">
-                                    <option value="Right-hand bat" {{ ($user->playing_style ?? '') == 'Right-hand bat' ? 'selected' : '' }}>Right-hand bat</option>
-                                    <option value="Left-hand bat" {{ ($user->playing_style ?? '') == 'Left-hand bat' ? 'selected' : '' }}>Left-hand bat</option>
-                                </optgroup>
-                                <optgroup label="Bowling">
-                                    <option value="Right-arm fast" {{ ($user->playing_style ?? '') == 'Right-arm fast' ? 'selected' : '' }}>Right-arm fast</option>
-                                    <option value="Right-arm medium" {{ ($user->playing_style ?? '') == 'Right-arm medium' ? 'selected' : '' }}>Right-arm medium</option>
-                                    <option value="Right-arm spin" {{ ($user->playing_style ?? '') == 'Right-arm spin' ? 'selected' : '' }}>Right-arm spin</option>
-                                    <option value="Left-arm fast" {{ ($user->playing_style ?? '') == 'Left-arm fast' ? 'selected' : '' }}>Left-arm fast</option>
-                                    <option value="Left-arm medium" {{ ($user->playing_style ?? '') == 'Left-arm medium' ? 'selected' : '' }}>Left-arm medium</option>
-                                    <option value="Left-arm spin" {{ ($user->playing_style ?? '') == 'Left-arm spin' ? 'selected' : '' }}>Left-arm spin</option>
-                                </optgroup>
-                            </select>
-                        </div>
-                        <button type="submit" class="btn btn--solid" style="background: #3b82f6; color: #fff; border: none; height: 48px; padding: 0 24px;">Update</button>
-                    </div>
-                </form>
-            </div>
-
-            @if(count($myMatches) > 0)
-                <div style="display: flex; flex-direction: column; gap: 16px;">
-                    @foreach($myMatches as $match)
-                        <div class="detail-card-panel" style="padding: 24px; margin-bottom: 0; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #16a34a;">
-                            <div>
-                                <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center;">
-                                    <span class="detail-badge detail-badge--dark">{{ $match->status }}</span>
-                                    <span style="font-size: 13px; color: #6b7280; font-weight: 600;">Overs: {{ $match->overs }}</span>
-                                </div>
-                                <h4 style="margin: 0; font-size: 18px; font-weight: 800; color: #111827; font-family: 'Plus Jakarta Sans', sans-serif;">
-                                    {{ $match->home }} ({{ $match->home_score }}) <span style="color:#9ca3af; font-size: 14px; margin: 0 8px;">vs</span> {{ $match->away }} ({{ $match->away_score }})
-                                </h4>
-                            </div>
-                            <div style="display: flex; gap: 12px;">
-                                <a href="{{ route('site.gamehub.actionboard.match', ['id' => $match->id]) }}" class="court-pill" style="text-decoration:none; display:flex; align-items:center; height: 42px;">View</a>
-                                <a href="{{ route('site.gamehub.actionboard.control', ['id' => $match->id]) }}" class="court-pill is-active" style="text-decoration:none; display:flex; align-items:center; height: 42px; background: #eab308; border-color: #eab308; color: #fff;">Control Room</a>
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
-            @else
-                <div class="detail-card-panel" style="text-align: center; padding: 40px 20px; border-left: 4px solid #16a34a;">
-                    <lord-icon src="https://cdn.lordicon.com/pbrgppbb.json" trigger="loop" delay="2000" colors="primary:#16a34a,secondary:#111827" style="width:48px;height:48px; margin-bottom: 16px;"></lord-icon>
-                    <h4 class="detail-card-panel__title" style="margin-bottom: 8px;">No matches created yet</h4>
-                    <p class="detail-card-panel__text">Start your first live game on the ActionBoard today.</p>
-                </div>
-            @endif
-        </div>
-
-        <!-- Sidebar Column (Stats & Settings) -->
-        <div>
-            <div class="detail-card-panel">
-                <h3 class="detail-card-panel__title" style="font-size: 18px;">Quick Stats</h3>
-                
-                <div style="display: flex; flex-direction: column; gap: 20px;">
-                    <div style="display: flex; align-items: center; gap: 16px;">
-                        <div class="action-round-btn" style="background: #f0fdf4; border-color: #bbf7d0; cursor: default;">
-                            <img src="https://cdn-icons-png.flaticon.com/512/7186/7186401.png" alt="Member" style="width: 20px; height: 20px;">
-                        </div>
-                        <div>
-                            <div style="font-size: 13px; color: #6b7280; font-weight: 600;">Member Since</div>
-                            <div style="font-size: 16px; font-weight: 800; color: #111827;">{{ $user->created_at->format('M Y') }}</div>
-                        </div>
-                    </div>
-
-                    <div style="display: flex; align-items: center; gap: 16px;">
-                        <div class="action-round-btn" style="background: #fff6ed; border-color: #fed7aa; cursor: default;">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                        </div>
-                        <div>
-                            <div style="font-size: 13px; color: #6b7280; font-weight: 600;">Event Bookings</div>
-                            <div style="font-size: 16px; font-weight: 800; color: #111827;">{{ count($myBookings) }}</div>
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; align-items: center; gap: 16px;">
-                        <div class="action-round-btn" style="background: #eff6ff; border-color: #bfdbfe; cursor: default;">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-                        </div>
-                        <div>
-                            <div style="font-size: 13px; color: #6b7280; font-weight: 600;">ActionBoard Matches</div>
-                            <div style="font-size: 16px; font-weight: 800; color: #111827;">{{ count($myMatches) }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="detail-card-panel">
-                <h3 class="detail-card-panel__title" style="font-size: 18px;">Account</h3>
-                <div style="display: flex; flex-direction: column; gap: 12px;">
-                    <a href="#" class="court-pill" style="text-align: center; text-decoration: none;">Account Settings</a>
-                    <a href="#" class="court-pill" style="text-align: center; text-decoration: none; color: #ef4444; background: #fef2f2; border-color: #fecaca;" onclick="alert('Logout functionality placeholder'); return false;">Log Out</a>
-                </div>
+            <i class="aprof-stat__divider"></i>
+            <div class="aprof-stat">
+                <svg class="aprof-stat__icon" style="color:#5A6473" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                <b>{{ (int) ($user->trust_score ?? 100) }}</b>
+                <small>Trust</small>
             </div>
         </div>
+    @endif
 
+    @if(session('success'))
+        <div class="aprof-flash">{{ session('success') }}</div>
+    @endif
+    @if($errors->any())
+        <div class="aprof-flash aprof-flash--err">{{ $errors->first() }}</div>
+    @endif
+
+    {{-- ── Account ── --}}
+    <h2 class="aprof-heading">Account</h2>
+    <div class="aprof-card">
+        <a class="aprof-row" href="{{ route('site.account.privacy') }}">
+            <svg class="aprof-row__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <span>Privacy</span>
+            <svg class="aprof-row__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </a>
+        <i class="aprof-hr"></i>
+        <a class="aprof-row" href="{{ route('site.support') }}">
+            <svg class="aprof-row__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+            <span>Support</span>
+            <svg class="aprof-row__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </a>
     </div>
+
+    {{-- Legal is its own group: these are documents you read, not settings you
+         change, and they're the two links an app store review looks for. --}}
+    <h2 class="aprof-heading">Legal</h2>
+    <div class="aprof-card">
+        <a class="aprof-row" href="{{ route('site.legal', ['slug' => 'terms']) }}">
+            <svg class="aprof-row__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="13" y2="17"></line></svg>
+            <span>Terms &amp; Conditions</span>
+            <svg class="aprof-row__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </a>
+        <i class="aprof-hr"></i>
+        <a class="aprof-row" href="{{ route('site.legal', ['slug' => 'privacy']) }}">
+            <svg class="aprof-row__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <span>Privacy Policy</span>
+            <svg class="aprof-row__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </a>
+    </div>
+
+    {{-- The destructive action gets its own container. It shouldn't share a card
+         edge with a help link. --}}
+    <form method="POST" action="{{ route('site.logout') }}" class="aprof-card aprof-card--signout">
+        @csrf
+        <button type="submit" class="aprof-row aprof-row--signout">
+            <svg class="aprof-row__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            <span>Sign out</span>
+        </button>
+    </form>
+
+    <p class="aprof-version">Haraan</p>
 </div>
 @endsection

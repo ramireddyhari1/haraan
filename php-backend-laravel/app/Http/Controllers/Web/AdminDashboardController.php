@@ -6,10 +6,17 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\RedirectResponse;
 
 final class AdminDashboardController extends Controller
 {
-    public function home(): View
+    // Single admin: the legacy Blade dashboard now hands off to the Filament Control panel.
+    public function home(): RedirectResponse
+    {
+        return redirect('/control');
+    }
+
+    public function legacyHome(): View
     {
         return view('admin.pages.home', [
             'title' => 'Admin Command Center',
@@ -139,7 +146,62 @@ final class AdminDashboardController extends Controller
 
     public function users(): View
     {
-        return view('admin.pages.users', ['title' => 'Users']);
+        // Executive Command Strip Stats
+        $totalUsers = \App\Models\User::count();
+        $activeToday = \App\Models\User::whereDate('updated_at', '>=', now()->toDateString())->count();
+        $newToday = \App\Models\User::whereDate('created_at', '>=', now()->toDateString())->count();
+        $partnersCount = \App\Models\User::whereIn('role', ['PARTNER', 'partner'])->count();
+        $staffCount = \App\Models\User::whereIn('role', ['ADMIN', 'COADMIN', 'WORKER', 'admin', 'coadmin', 'worker'])->count();
+        $suspendedCount = \App\Models\User::whereIn('status', ['SUSPENDED', 'suspended'])->count();
+
+        // Risk Center Stats
+        $suspiciousCount = \App\Models\User::where('trust_score', '<', 70)->count();
+        $pendingVerifications = \App\Models\Event::whereIn('status', ['PENDING', 'pending', 'DRAFT', 'draft'])->count();
+        $reportedOrganizers = \App\Models\User::where('is_organizer', true)->where('trust_score', '<', 80)->count();
+        $failedPayments = \App\Models\Booking::whereIn('status', ['FAILED', 'failed', 'CANCELLED', 'cancelled'])->count();
+
+        // Approval Center Stats
+        $partnerApps = \App\Models\User::whereIn('role', ['PARTNER', 'partner'])->whereIn('status', ['PENDING', 'pending', 'DRAFT', 'draft'])->count();
+        $workerReqs = \App\Models\User::whereIn('role', ['WORKER', 'worker'])->whereIn('status', ['PENDING', 'pending', 'DRAFT', 'draft'])->count();
+        $roleChanges = \App\Models\AdminAction::where('action', 'like', '%role%')->count();
+        $venueVerifications = \App\Models\Venue::where('is_active', false)->count();
+
+        // Platform Health Score
+        $avgTrust = (float) (\App\Models\User::avg('trust_score') ?? 95.0);
+        $pendingBacklog = $pendingVerifications + $venueVerifications + $partnerApps;
+        $healthScore = max(40, min(100, (int)($avgTrust - $pendingBacklog * 2)));
+
+        // Recent Audit logs / Activity Feed
+        $recentActivities = \App\Models\AdminAction::with('user')
+            ->orderByDesc('created_at')
+            ->limit(8)
+            ->get();
+
+        return view('admin.pages.users', [
+            'title' => 'Users Control Center',
+            'stats' => [
+                'total' => $totalUsers,
+                'active_today' => $activeToday,
+                'new_today' => $newToday,
+                'partners' => $partnersCount,
+                'staff' => $staffCount,
+                'suspended' => $suspendedCount,
+            ],
+            'risk' => [
+                'suspicious' => $suspiciousCount,
+                'pending_verifications' => $pendingVerifications,
+                'reported_organizers' => $reportedOrganizers,
+                'failed_payments' => $failedPayments,
+            ],
+            'approvals' => [
+                'partners' => $partnerApps,
+                'workers' => $workerReqs,
+                'role_changes' => $roleChanges,
+                'venues' => $venueVerifications,
+            ],
+            'health_score' => $healthScore,
+            'recent_activities' => $recentActivities,
+        ]);
     }
 
     public function withdraw(): View

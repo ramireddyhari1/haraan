@@ -2,6 +2,183 @@
 
 .topbar .mobile-menu-toggle { display: none; }
 
+@media (max-width: 640px) {
+    /* Location picker: the desktop layout crams a full-width search input,
+       a text button, and a close button into one flex row, and adds a
+       120px alphabet-index column — both blow out on a 375px viewport and
+       squeeze the search box down to nothing. Turn it into a clean
+       full-screen sheet: sticky search + actions on top, one scrollable body,
+       and city cards that wrap long names instead of clipping them. */
+    .location-modal__card {
+        grid-template-columns: 1fr;
+        margin: 0;
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+        padding: 0;
+        gap: 0;
+        overflow: hidden;               /* body region scrolls, not the card */
+    }
+    /* The card's first child wraps the header + both city sections and is the
+       scroll container; the header sticks to its top while cities scroll. */
+    .location-modal__card > div:first-child {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Sticky search + action bar. */
+    .location-modal__header {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 14px 16px;
+        margin: 0;
+        background: #fff;
+        border-bottom: 1px solid #eef2f7;
+    }
+    .location-search {
+        flex: initial !important;
+    }
+    .location-search input {
+        font-size: 16px;                /* ≥16px stops iOS auto-zoom on focus */
+    }
+    /* Button row sits under the search, full width. */
+    .location-modal__header > div:last-child {
+        margin-left: 0 !important;
+        display: flex;
+        gap: 8px;
+    }
+    #useCurrent {
+        flex: 1;
+        justify-content: center;
+        background: #2563EB;
+        border-color: #2563EB;
+        color: #fff;
+        font-weight: 700;
+        padding: 12px 14px;
+    }
+    #closeLocation {
+        flex: 0 0 auto;
+        padding: 12px 16px;
+    }
+    .alpha-index {
+        display: none;
+    }
+    /* City sections get side padding (header already has its own). */
+    .location-modal__card > div:first-child > section {
+        padding: 0 16px;
+    }
+    .location-modal__card > div:first-child > section:first-of-type {
+        margin-top: 14px;
+    }
+    .location-modal__card > div:first-child > section:last-of-type {
+        padding-bottom: 24px;
+    }
+    .popular-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }
+    /* Fixed 120px height clipped long city names; let cards grow and wrap. */
+    .city-card {
+        height: auto;
+        min-height: 92px;
+        padding: 12px 8px;
+        gap: 6px;
+    }
+    .city-card strong {
+        font-size: 12px;
+        line-height: 1.25;
+        text-align: center;
+        overflow-wrap: anywhere;        /* "Thiruvananthapuram" wraps, not clips */
+    }
+    .city-card .city-mono {
+        width: 38px;
+        height: 38px;
+        font-size: 17px;
+    }
+    .all-list {
+        max-height: none;               /* no nested scroll inside the sheet */
+        overflow: visible;
+    }
+
+    /* Profile header: the desktop row (120px avatar + name column + "Edit
+       Profile" button, all in one nowrap flex row) pushes the button almost
+       entirely off-screen at 375px — it's rendered but unreachable. Rebuild
+       as a compact gradient "identity hero" card, matching the app's
+       AccountProfileScreen IdentityHero (navy → green gradient, avatar +
+       name inline, no button squeeze). */
+    .profile-container .detail-header {
+        background: linear-gradient(135deg, #07111F 0%, #102B52 55%, #0A3D2A 100%) !important;
+        border-radius: 24px !important;
+        padding: 20px !important;
+        gap: 14px !important;
+        margin-bottom: 24px !important;
+        flex-wrap: wrap !important;
+    }
+    .profile-container .detail-header > div:first-child {
+        width: 64px !important;
+        height: 64px !important;
+    }
+    .profile-container .detail-header > div:first-child img {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+    }
+    .profile-container .detail-header > div:nth-child(2) {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+    .profile-container .detail-header .detail-header__title {
+        color: #fff !important;
+        font-size: 19px !important;
+        margin-bottom: 4px !important;
+        overflow-wrap: break-word;
+    }
+    .profile-container .detail-header .detail-header__meta {
+        color: rgba(255, 255, 255, 0.7) !important;
+        font-size: 12.5px !important;
+    }
+    .profile-container .detail-header .detail-header__meta svg {
+        stroke: rgba(255, 255, 255, 0.7) !important;
+    }
+    .profile-container .detail-header .detail-meta-divider {
+        color: rgba(255, 255, 255, 0.3) !important;
+    }
+    .profile-container .detail-header .detail-badge {
+        background: rgba(255, 255, 255, 0.15) !important;
+    }
+    .profile-container .detail-header > div:last-child {
+        width: 100%;
+        order: 3;
+    }
+    .profile-container .detail-header > div:last-child .btn {
+        width: 100%;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.12) !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    }
+
+    /* "My Event Bookings" / "My ActionBoard Matches" section headers:
+       heading + action button crammed into one row wraps awkwardly. */
+    .reviews-section-header {
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 20px !important;
+    }
+    .reviews-section-header h3 {
+        font-size: 19px !important;
+    }
+    .reviews-section-header .btn {
+        flex-shrink: 0;
+    }
+}
+
 @media (max-width: 1024px) {
     :root {
         --mobile-padding: 12px;
@@ -20,29 +197,156 @@
         z-index: 100;
         background: var(--surface);
         border-bottom: 1px solid var(--border);
+        transition: box-shadow 180ms ease, border-color 180ms ease;
+    }
+    /* Flat at the top, gains a subtle elevation once the page scrolls.
+       Toggled by JS (.is-scrolled) so it feels anchored, not floating. */
+    .topbar.is-scrolled {
+        border-bottom-color: transparent;
+        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
     }
     .topbar__inner {
         display: grid;
-        grid-template-columns: auto 1fr auto;
+        grid-template-columns: 1fr auto;
         grid-template-rows: auto auto auto;
         grid-template-areas:
-            "brand location icons"
-            "search search search"
-            "buttons buttons buttons";
+            "greet greet"
+            "search search"
+            "buttons buttons";
         align-items: center;
         row-gap: 8px;
         column-gap: 10px;
-        padding: 6px 12px;
+        /* No horizontal padding of its own — the .container's 16px already matches
+           the app's 16dp header inset. The extra 12px here pushed the content to
+           28px and squeezed the name column ~20px narrower than on device. */
+        padding: 6px 0;
     }
 
-    /* Brand: left, row 1 */
-    .brand {
-        grid-area: brand;
+    /* --- APP-MATCHED GREETING HEADER ---------------------------------------
+       Mirrors the Android GreetingHeader (MainScreen.kt): 44px avatar with a
+       ring, "Hey <first name>!" over a tappable location line, utility icons
+       right. Values below track the app's tokens — ink #0F172A, sub #64748B,
+       border #E2E8F0 — so the two headers read as one product. */
+    .app-greet {
+        grid-area: greet;
+        /* The grid sets justify-items:start, which would shrink-wrap this row and
+           strand the icons mid-header — stretch it so they sit at the far edge. */
+        justify-self: stretch;
+        width: 100%;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
+        min-width: 0;
+    }
+
+    /* The old pill and the account icon are replaced by the lockup above. */
+    .topbar .location-pill,
+    .topbar__actions { display: none; }
+
+    .app-greet__avatar {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: #E2E8F0;
+        border: 1.5px solid #E2E8F0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
         text-decoration: none;
-        color: inherit;
+    }
+    .app-greet__initial {
+        font-size: 18px;
+        font-weight: 700;
+        color: #0F172A;
+        line-height: 1;
+    }
+    .app-greet__photo {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 50%;
+    }
+
+    .app-greet__lockup {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .app-greet__hey {
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.2;
+        color: #0F172A;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .app-greet__loc {
+        display: inline-flex;
+        align-items: center;
+        align-self: flex-start;
+        max-width: 100%;
+        gap: 2px;
+        border-radius: 6px;
+        color: #64748B;
+        text-decoration: none;
+    }
+    .app-greet__loc-text {
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.2;
+        max-width: 180px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .app-greet__chevron { flex-shrink: 0; }
+
+    .app-greet__icons {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    /* 40px circular tap target around a 24px glyph — the app sizes these for
+       the accessibility minimum rather than leaving a bare 24px hit box. */
+    .app-greet__icon {
+        position: relative;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(15, 23, 42, 0.85);
+        text-decoration: none;
+    }
+    .app-greet__icon:active { background: rgba(15, 23, 42, 0.06); }
+
+    /* Unread dot: the app's 8dp LiveRed pip, ringed in the header background so
+       it separates from the glyph. Only rendered when a real count is non-zero. */
+    .app-greet__dot {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #D32F2F;
+        box-shadow: 0 0 0 1.5px var(--surface, #fff);
+    }
+
+    /* Brand (Haraan logo): hidden on mobile — the app header shows only the
+       location pill (left) and the profile icon (right). */
+    .brand {
+        display: none;
     }
     .brand__mark {
         width: 34px;
@@ -65,98 +369,37 @@
     }
     .brand__text { display: none; }
 
-    /* Location pill: next to logo, row 1 */
-    .location-pill {
-        grid-area: location;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        text-decoration: none;
-        color: inherit;
-        padding: 0 4px 0 0;
-        margin-left: 2px;
-    }
-    .location-pill__pin {
-        display: flex;
-        align-items: center;
-        width: 18px;
-        height: 18px;
-        flex-shrink: 0;
-        margin-right: 6px;
-    }
-    .location-pill__pin lord-icon { width: 18px !important; height: 18px !important; }
-    .location-pill__label { font-size: 12px; }
-    .location-pill__label strong { font-size: 12px; font-weight: 700; line-height: 1; }
-
-    /* Mobile: theme location pill by mode */
-    body.mode-events .location-pill__label strong,
-    body.mode-events .location-pill__label small {
-        color: #0057B8;
-    }
-
-    body.mode-gamehub .location-pill__label strong,
-    body.mode-gamehub .location-pill__label small {
-        color: #28a745;
-    }
-
-    /* Hide login button */
-    .topbar__actions .btn { display: none; }
-
-    /* Icons: right side, row 1 */
-    .topbar__actions {
-        grid-area: icons;
-        display: flex;
-        gap: 16px;
-        align-items: center;
-        justify-content: flex-end;
-        justify-self: end;
-        padding-left: 6px;
-    }
-
-    /* Remove pseudo icons; use real image for profile */
-    .topbar__actions::before,
-    .topbar__actions::after { display: none; }
-
-    .topbar__account {
-        width: 34px;
-        height: 34px;
-        border-radius: 50%;
-        object-fit: cover;
-        box-shadow: 0 1px 0 rgba(0,0,0,0.06);
-        background: #ffffff; /* neutral fallback */
-        border: 1px solid rgba(0,0,0,0.06);
-        filter: grayscale(100%) contrast(0.95) brightness(1);
-        display: inline-block;
-        margin-left: 4px;
-    }
-
+    /* Search bar: the app's 44dp white field — 20dp corners, #E2E8F0 hairline,
+       soft ambient shadow (MainScreen.kt). */
     .topbar__search {
         grid-area: search;
         display: flex;
         align-items: center;
         gap: 10px;
-        min-height: 50px;
+        min-height: 44px;
         background: #ffffff;
-        border-radius: 12px;
-        padding: 10px 14px;
-        border: 1px solid rgba(0,0,0,0.14);
-        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+        border-radius: 20px;
+        padding: 0 14px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         width: 100%;
         max-width: none;
         z-index: 8;
-        margin-top: 4px;
+        margin-top: 2px;
     }
     .topbar__search:focus-within {
-        border-color: rgba(0,0,0,0.14);
+        border-color: #CBD5E1;
         box-shadow: 0 6px 18px rgba(0,0,0,0.06);
         background: #fff;
     }
-    .search-icon { 
-        display: flex; 
+    /* Matches site.css's `.topbar__search .search-icon` specificity — a bare
+       `.search-icon` here loses to it and the glyph stays 28px. */
+    .topbar__search .search-icon {
+        display: flex;
         align-items: center;
         color: #9aa3b2;
-        width: 28px;
-        height: 28px;
+        width: 20px;
+        height: 20px;
         flex-shrink: 0;
         justify-content: center;
     }
@@ -169,8 +412,8 @@
         outline: none;
         color: #222;
     }
-    .topbar__search-input::placeholder { 
-        color: #c7c7c7; 
+    .topbar__search-input::placeholder {
+        color: #8a8f98; /* WCAG AA on white */
         font-size: 14px;
     }
 
@@ -188,15 +431,15 @@
         min-height: 48px;
         border-radius: 26px;
         border: none;
-        font-weight: 700;
-        font-size: 14px;
+        font-weight: 600;
+        font-size: 15px;
         cursor: pointer;
-        text-transform: uppercase;
+        text-transform: none;
         text-decoration: none;
         display: inline-block;
         text-align: center;
         transition: all 200ms ease;
-        letter-spacing: 0.3px;
+        letter-spacing: 0;
     }
     /* Button container style to appear like a switch */
     .topbar .mobile-action-buttons {
@@ -215,12 +458,12 @@
 
     /* Active states (switch thumb colors) */
     .mobile-action-btn.is-active.mobile-action-btn--events {
-        background: #0057B8; /* Mumbai Indians blue */
+        background: #2563EB; /* Mumbai Indians blue */
         color: #fff;
         box-shadow: 0 2px 6px rgba(0,87,184,0.18);
     }
     .mobile-action-btn.is-active.mobile-action-btn--gamehub {
-        background: #28a745; /* green */
+        background: #00C853; /* green */
         color: #fff;
         box-shadow: 0 2px 6px rgba(40,167,69,0.18);
     }
@@ -361,9 +604,85 @@
     .event-card__body {
         padding: 10px;
     }
-    .gamehub-venue-card__category { font-size: 12px; padding: 4px 8px; }
-    .gamehub-venue-card__price { font-size: 16px; font-weight: 700; }
-    .gamehub-venue-card__btn { padding: 8px 14px; font-size: 13px; }
+    /* Venue card — align to the app VenueListCard language (mobile) */
+    .gamehub-venue-card {
+        background: #fff; border: none; border-radius: 20px; overflow: hidden;
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.08);
+    }
+    .gamehub-venue-card .event-card__thumb { height: 150px; }
+    .gamehub-venue-card__body { padding: 14px; }
+    .gamehub-venue-card__category { font-size: 12px; padding: 4px 8px; color: #64748B; }
+    .gamehub-venue-card__star { color: #FFB000; }          /* gold rating, like the app */
+    .gamehub-venue-card__price { font-size: 17px; font-weight: 800; color: #0F172A; background: transparent; box-shadow: none; padding: 0; }
+    .gamehub-venue-card__btn {
+        padding: 10px 16px; font-size: 12px; font-weight: 700;
+        background: #00C853; border-radius: 12px;
+        box-shadow: 0 6px 14px rgba(0, 200, 83, 0.28);
+    }
+    .gamehub-venue-card .venue-badge {
+        top: 10px; left: 10px; border-radius: 8px; padding: 4px 10px; font-size: 10px;
+    }
+
+    /* Venue detail: rating stars gold, matching the app (stars are gold; green = actions). */
+    .detail-meta-star,
+    .review-star.is-active,
+    .rating-selector-stars .star-btn.is-active { color: #FFB000; }
+
+    /* --- Live now strip (mirrors the app ActionboardLiveStrip) --- */
+    .gh-live { display: block; margin: 2px 0 6px; }
+    .gh-live__head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 10px; }
+    .gh-live__title { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 800; color: #0F172A; }
+    .gh-live__dot { width: 8px; height: 8px; border-radius: 50%; background: #D32F2F; animation: gh-live-pulse 1.6s infinite; }
+    @keyframes gh-live-pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.45); }
+        70%  { box-shadow: 0 0 0 7px rgba(211, 47, 47, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
+    }
+    .gh-live__all { font-size: 13px; font-weight: 700; color: #00A046; text-decoration: none; }
+    .gh-live__scroll {
+        display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch; margin: 0 -16px; padding: 2px 16px 6px; scrollbar-width: none;
+    }
+    .gh-live__scroll::-webkit-scrollbar { display: none; }
+    .gh-live__card {
+        scroll-snap-align: start; flex: 0 0 82%; max-width: 300px;
+        background: #fff; border-radius: 16px; padding: 14px;
+        text-decoration: none; color: inherit;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+    .gh-live__cardhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .gh-live__comp { font-size: 11px; font-weight: 600; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gh-live__badge {
+        flex-shrink: 0; margin-left: 8px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.05em;
+        color: #fff; background: #D32F2F; padding: 3px 7px; border-radius: 5px;
+    }
+    .gh-live__team { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+    .gh-live__logo {
+        flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%;
+        background: #EEF2F6; color: #0F172A; font-size: 10px; font-weight: 800;
+        display: grid; place-items: center;
+    }
+    .gh-live__abbr { font-size: 14px; font-weight: 700; color: #0F172A; }
+    .gh-live__team.is-batting .gh-live__abbr { font-weight: 800; }
+    .gh-live__name { flex: 1; min-width: 0; font-size: 12px; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gh-live__score { font-size: 15px; font-weight: 700; color: #0F172A; font-variant-numeric: tabular-nums; }
+    .gh-live__team.is-batting .gh-live__score { font-weight: 800; }
+    .gh-live__ov { font-size: 11px; color: #94A3B8; font-variant-numeric: tabular-nums; }
+
+    /* Defensive hardening for GameHub mobile: constrain sections and images so
+       nothing can push the page wider than the screen. */
+    .gamehub-page { max-width: 100%; overflow-x: clip; }
+    .gamehub-page img { max-width: 100%; height: auto; }
+    .gamehub-page .events-section,
+    .gamehub-page .gamehub-hero,
+    .gamehub-page .section-shell__header,
+    .gamehub-page .search-strip { min-width: 0; max-width: 100%; }
+    .gamehub-page .section-shell__header h2,
+    .gamehub-page .gamehub-hero__copy p { overflow-wrap: anywhere; }
+    .event-card__thumb { overflow: hidden; }
+    .event-card__thumb img { width: 100%; height: 100%; object-fit: cover; }
+    /* search-strip is a grid, not flex — collapse it to one column on mobile */
+    .gamehub-page .search-strip { display: grid; grid-template-columns: 1fr; }
 
     /* --- DETAIL CARD PANELS --- */
     .detail-card-panel {
@@ -440,7 +759,7 @@
 
     /* Make event titles MI blue when in Events mode */
     body.mode-events .event-list-card__title {
-        color: #0057B8;
+        color: #2563EB;
     }
 
     .event-list-card__date,
@@ -472,7 +791,7 @@
 
     /* Mobile: Events heading color when in events mode */
     body.mode-events .section-shell__header h2 {
-        color: #0057B8;
+        color: #2563EB;
     }
     .text-link { display: inline-block; margin-top: 8px; }
 
@@ -539,4 +858,1483 @@
     .topbar .mobile-menu-toggle { display: none !important; }
     .mobile-nav, .mobile-nav-backdrop { display: none !important; }
     main.container { padding-bottom: unset; }
+}
+
+/* ================================================================= */
+/* APP-STYLE MOBILE HOME — mirrors the Android app (Haraan tokens)    */
+/*   bg #F4F7FB · surface #fff · text #0F172A/#64748B/#94A3B8         */
+/*   EventsBlue #2563EB · GameHubGreen #00C853 · LiveRed #D32F2F      */
+/* ================================================================= */
+@media (max-width: 720px) {
+    /* Slate app canvas + edge-to-edge feel */
+    body { background: #F4F7FB; }
+    main.container { padding: 0 0 88px; background: #F4F7FB; }
+
+    .mhome {
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+        color: #0F172A;
+        /* Plain white surface fading into the slate canvas (user: white only) —
+           the fade just kills the header/content seam. */
+        background: linear-gradient(180deg, #FFFFFF 0%, #F4F7FB 260px);
+        padding: 14px 16px 8px;
+    }
+
+    /* Centered brand lockup at the top of the feed (user-placed: between the
+       Events/GameHub tabs and "For You") — black wordmark with the blue
+       calligraphy flourish BESIDE it, dropped slightly below the baseline
+       like a signature (user: beside + a bit down, not underneath). */
+    /* The wordmark itself is centred on the page; the calligraphy accent hangs
+       off its right edge (absolute) so it can't pull the lockup off-centre. */
+    .mbrandmark {
+        position: relative;
+        display: flex; align-items: flex-end; justify-content: center;
+        padding: 22px 0 18px; /* tighter band (user: reduce some space) */
+        overflow: visible;
+    }
+    /* Wordmark rendered pure black (the PNG is navy). Nudged left so the whole
+       "Haraan special" lockup (wordmark + the script that hangs off the right)
+       is optically centred, not just the wordmark. */
+    .mbrandmark img { height: 30px; width: auto; display: block; filter: brightness(0); position: relative; z-index: 2; transform: translateX(-23px); }
+    /* The script tucks in close against the wordmark's tail — shifted left the
+       same 23px so it moves with the wordmark and the pair reads centred. */
+    .mbrandmark span {
+        position: absolute; left: 50%; bottom: 12px; z-index: 2;
+        margin-left: 29px; white-space: nowrap;
+        font-family: 'Great Vibes', 'Segoe Script', cursive;
+        font-size: 26px; line-height: 1; letter-spacing: 0.01em;
+        color: #2563EB;
+        transform: rotate(-2deg);
+    }
+
+    /* Blue dots scattered around the name — a light constellation that twinkles
+       (scale + fade on a stagger). 26 dots spread across the full width of the
+       band and above/below, sitting behind the wordmark so they fill the space
+       without crowding the letters. */
+    .mbrandmark__dots { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+    .mbrandmark__dots i {
+        position: absolute; border-radius: 50%;
+        animation: mbd-twinkle 3s ease-in-out infinite;
+    }
+    /* left gap */
+    .mbrandmark__dots i:nth-child(1)  { left: 5%;  top: 22px; width: 6px; height: 6px; background: #2563EB; animation-delay: 0s;   }
+    .mbrandmark__dots i:nth-child(2)  { left: 12%; top: 44px; width: 4px; height: 4px; background: #60A5FA; animation-delay: .5s;  }
+    .mbrandmark__dots i:nth-child(3)  { left: 20%; top: 12px; width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.0s; }
+    .mbrandmark__dots i:nth-child(4)  { left: 8%;  top: 58px; width: 5px; height: 5px; background: #2563EB; animation-delay: .3s;  }
+    .mbrandmark__dots i:nth-child(5)  { left: 25%; top: 34px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .8s;  }
+    .mbrandmark__dots i:nth-child(6)  { left: 16%; top: 62px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.3s; }
+    .mbrandmark__dots i:nth-child(7)  { left: 3%;  top: 40px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .65s; }
+    .mbrandmark__dots i:nth-child(8)  { left: 22%; top: 50px; width: 4px; height: 4px; background: #2563EB; animation-delay: 1.15s;}
+    /* right gap */
+    .mbrandmark__dots i:nth-child(9)  { left: 95%; top: 20px; width: 6px; height: 6px; background: #60A5FA; animation-delay: .2s;  }
+    .mbrandmark__dots i:nth-child(10) { left: 88%; top: 46px; width: 4px; height: 4px; background: #2563EB; animation-delay: .7s;  }
+    .mbrandmark__dots i:nth-child(11) { left: 80%; top: 12px; width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.1s; }
+    .mbrandmark__dots i:nth-child(12) { left: 92%; top: 60px; width: 5px; height: 5px; background: #60A5FA; animation-delay: .4s;  }
+    .mbrandmark__dots i:nth-child(13) { left: 75%; top: 34px; width: 3px; height: 3px; background: #2563EB; animation-delay: .95s; }
+    .mbrandmark__dots i:nth-child(14) { left: 84%; top: 64px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.45s;}
+    .mbrandmark__dots i:nth-child(15) { left: 97%; top: 42px; width: 3px; height: 3px; background: #2563EB; animation-delay: .6s;  }
+    .mbrandmark__dots i:nth-child(16) { left: 78%; top: 52px; width: 4px; height: 4px; background: #60A5FA; animation-delay: 1.2s; }
+    /* top row across */
+    .mbrandmark__dots i:nth-child(17) { left: 38%; top: 3px;  width: 3px; height: 3px; background: #93C5FD; animation-delay: .55s; }
+    .mbrandmark__dots i:nth-child(18) { left: 62%; top: 5px;  width: 3px; height: 3px; background: #2563EB; animation-delay: 1.0s; }
+    .mbrandmark__dots i:nth-child(19) { left: 50%; top: 1px;  width: 4px; height: 4px; background: #60A5FA; animation-delay: .35s; }
+    .mbrandmark__dots i:nth-child(20) { left: 30%; top: 6px;  width: 3px; height: 3px; background: #60A5FA; animation-delay: .85s; }
+    /* bottom row across */
+    .mbrandmark__dots i:nth-child(21) { left: 40%; top: 62px; width: 3px; height: 3px; background: #2563EB; animation-delay: .5s;  }
+    .mbrandmark__dots i:nth-child(22) { left: 58%; top: 64px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.2s; }
+    .mbrandmark__dots i:nth-child(23) { left: 50%; top: 66px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .9s;  }
+    .mbrandmark__dots i:nth-child(24) { left: 68%; top: 60px; width: 3px; height: 3px; background: #2563EB; animation-delay: 1.35s;}
+    /* sparse upper accents near the name */
+    .mbrandmark__dots i:nth-child(25) { left: 33%; top: 22px; width: 3px; height: 3px; background: #93C5FD; animation-delay: .75s; }
+    .mbrandmark__dots i:nth-child(26) { left: 66%; top: 24px; width: 3px; height: 3px; background: #60A5FA; animation-delay: 1.05s;}
+
+    @keyframes mbd-twinkle {
+        0%, 100% { transform: scale(0.6); opacity: 0.3; }
+        50%      { transform: scale(1);   opacity: 0.95; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .mbrandmark__dots i { animation: none; opacity: 0.7; }
+    }
+
+    /* --- Mobile footer: brand-gradient sheet (EventsBlue → GameHubGreen —
+       the two lanes of the product) with the app CTA + links + brand base --- */
+    .mfoot {
+        margin-top: 44px;
+        /* Linear EventsBlue → GameHubGreen ramp — user compared this against an
+           aurora/radial-glow variant and preferred the linear. Keep it. */
+        background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
+        color: #ffffff;
+        border-radius: 24px 24px 0 0;
+        padding: 26px 20px calc(30px + env(safe-area-inset-bottom, 0px));
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    }
+    /* The page's own bottom padding would leave a slate band above the footer. */
+    body:has(.mfoot) main.container { padding-bottom: 0; }
+
+    .mfoot__app {
+        display: flex; flex-direction: column; gap: 14px;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 18px; padding: 18px;
+    }
+    .mfoot__app strong {
+        display: block; font-size: 17px; font-weight: 800;
+        letter-spacing: -0.02em; color: #ffffff; margin-bottom: 4px;
+    }
+    .mfoot__app p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.85); }
+    .mfoot__play {
+        display: inline-flex; align-items: center; gap: 11px; width: fit-content;
+        background: #000000; border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 12px; padding: 9px 18px 9px 14px;
+        text-decoration: none; color: #ffffff;
+    }
+    .mfoot__play svg { width: 24px; height: 24px; flex-shrink: 0; }
+    .mfoot__play small {
+        display: block; font-size: 9.5px; font-weight: 600;
+        letter-spacing: 0.09em; text-transform: uppercase; color: #CBD5E1;
+    }
+    .mfoot__play b { display: block; font-size: 16px; font-weight: 700; line-height: 1.2; }
+    .mfoot__apk { font-size: 12.5px; font-weight: 700; color: #ffffff; text-decoration: underline; text-underline-offset: 3px; }
+
+    .mfoot__links { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 24px 2px 22px; }
+    .mfoot__links a { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.95); text-decoration: none; }
+
+    .mfoot__base {
+        display: flex; flex-direction: column; gap: 7px;
+        border-top: 1px solid rgba(255, 255, 255, 0.28); padding-top: 20px;
+    }
+    /* The navy wordmark inverts to white on the ink footer. */
+    .mfoot__base img { height: 16px; width: auto; align-self: flex-start; filter: brightness(0) invert(1); opacity: 0.92; }
+    .mfoot__base span {
+        font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: rgba(255, 255, 255, 0.8);
+    }
+    .mfoot__base small { font-size: 11px; color: rgba(255, 255, 255, 0.62); }
+
+    /* One canvas: at the top of the page the sticky header matches the white
+       the section below starts with (no border, so no band). Once scrolled
+       (.is-scrolled, toggled by JS) the solid surface + elevation return. */
+    .topbar.topbar--events {
+        background: #FFFFFF;
+        border-bottom-color: transparent;
+        transition: background-color 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+    .topbar.topbar--events.is-scrolled {
+        background: var(--surface, #fff);
+    }
+
+    /* --- Greeting --- */
+    .mhome__greet { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 16px; }
+    .mhome__hi { margin: 0; font-size: 13px; font-weight: 600; color: #64748B; }
+    .mhome__title { margin: 2px 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: #0F172A; line-height: 1.15; }
+
+    /* --- Section header --- */
+    .mhome__head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 2px 12px; }
+    .mhome__head h3 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: #0F172A; }
+    .mhome__head a { font-size: 13px; font-weight: 700; color: #2563EB; text-decoration: none; }
+
+    /* The app's SectionHeader: titleLarge (20sp Bold, lineHeight 26sp, -0.5sp
+       tracking) with 16dp/12dp padding, and no "See all" unless a rail passes an
+       action. Used by the For You rail so it matches the app exactly. */
+    .mhome__head--bare {
+        margin: 0;
+        padding: 12px 0;
+    }
+    .mhome__head--bare h3 {
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 26px;
+        letter-spacing: -0.025em;
+        color: #0F172A;
+    }
+
+    /* --- Horizontal scrollers --- */
+    .mhome__scroll {
+        display: flex; gap: 14px;
+        overflow-x: auto; scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -16px; padding: 2px 16px 6px;
+        scrollbar-width: none;
+    }
+    .mhome__scroll::-webkit-scrollbar { display: none; }
+
+    /* ===== "For You" rail — a 1:1 port of the app's InfiniteLoopBookPager +
+       HaraanEventCard (MainScreen.kt / HaraanEventCard.kt). Every number below is
+       the app's: card 72% of the page and aspectRatio 0.75, 32dp Hero radius, 16dp
+       insets, 44dp book button. If the app's card changes, change these too. ===== */
+    /* The rail. Plain scroll-snap: the browser owns the motion end to end, on the
+       compositor, so a swipe is as smooth as the page itself.
+
+       This deliberately drops the app's book-stack (InfiniteLoopBookPager's
+       graphicsLayer, where upcoming pages are dragged left 0.85×page and scaled).
+       That effect needs a transform recomputed on every scroll frame; on the web
+       that work lands on the main thread while the scroll itself runs on the
+       compositor, so the stacked card visibly lagged the one under your finger.
+       Compose drives both on the same frame and has no such split. A faithful port
+       of the effect cannot be smooth here — so the effect goes, not the smoothness. */
+    .mpager {
+        display: flex;
+        gap: 12px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        /* Full-bleed: cancels every ancestor gutter at once (.mhome's 16px and
+           main.container's) instead of guessing at them. */
+        margin-left: calc(50% - 50vw);
+        margin-right: calc(50% - 50vw);
+        /* Half the free space either side — the card is (100vw − 92px), so this is a
+           constant 46px at any width. It centres the poster and lets the first and
+           last card reach the middle. With `start` alignment and a 16px pad the card
+           sat against the left edge: a peek on the right, dead space on the left. */
+        padding: 4px 46px 8px;
+    }
+    .mpager::-webkit-scrollbar { display: none; }
+
+    /* One page = one card. Narrower than the screen so the next poster peeks, which
+       is what tells you the rail scrolls.
+
+       content-visibility keeps the off-screen cards out of every frame. The loop
+       clones the strip, so nine 1600×900 posters live in this rail — 13 megapixels of
+       decode and resample if the browser paints them all. Skipping the ones nobody can
+       see is the difference between a swipe that glides and one that hitches.
+       contain-intrinsic-size keeps their boxes the right size while skipped, so the
+       scroll width and the snap points don't move. */
+    .mfy__page {
+        position: relative;
+        flex: 0 0 calc(100vw - 92px);
+        /* Centred, like the app: a sliver of the previous poster on the left and the
+           next one on the right, ~34px each. */
+        scroll-snap-align: center;
+        content-visibility: auto;
+        contain-intrinsic-size: calc(100vw - 92px) calc((100vw - 92px) * 4 / 3);
+    }
+
+    /* The hero poster, at the app's real size — 283px at 375 (the page is
+       screen − 92). NB the app's card reads `.fillMaxWidth(0.72f)`, but the pager
+       hands it `Modifier.fillMaxWidth()` first, and Compose's fillMaxWidth(fraction)
+       coerces into the incoming constraints, which are already pinned to min = max.
+       So the 0.72 is dead code and the card fills its page; porting it literally made
+       this card 54% of the screen against the app's ~75%.
+
+       Shape is the app's aspectRatio(0.75f). 9:16 was tried and reverted: at that
+       height the card read tall-and-narrow, and a landscape banner center-cropped to
+       ~32% — a fragment. 3:4 keeps 42% of the same art, which is what the app shows
+       and why its posters still read. Ideal upload is 3:4 portrait (1080×1440). */
+    .mfy {
+        position: relative;
+        display: block;
+        width: 100%;
+        aspect-ratio: 3 / 4;
+        border-radius: 32px;                /* HaraanRadius.Hero */
+        overflow: hidden;
+        background: #0F172A;                /* backing while the poster loads */
+        text-decoration: none;
+        color: inherit;
+    }
+    .mfy__img {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;                  /* ContentScale.Crop */
+        display: block;
+    }
+    /* Scrim. Ramps late and lands deep: a tall poster has room, and the art above the
+       text stays untouched while the copy below stays legible on any poster. */
+    .mfy__grad {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom,
+            rgba(0,0,0,0) 52%,
+            rgba(0,0,0,0.35) 74%,
+            rgba(0,0,0,0.92) 100%);
+    }
+    /* Category tag: top-start, 12px inset (the art is shorter than the old portrait
+       card, so the app's 16dp crowded it), black 45%, pill. */
+    .mfy__cat {
+        position: absolute; top: 12px; left: 12px; z-index: 2;
+        background: rgba(0,0,0,0.45);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;                   /* LabelSmall = Bold */
+        letter-spacing: 0.05em;             /* 0.5sp at 10sp */
+        padding: 6px 12px;
+        border-radius: 999px;
+    }
+    /* Rating badge: top-end, 12px inset, black 60%, 12dp radius. */
+    .mfy__rating {
+        position: absolute; top: 12px; right: 12px; z-index: 2;
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(0,0,0,0.6);
+        border-radius: 12px;                /* HaraanRadius.Small */
+        padding: 5px 9px;
+    }
+    .mfy__rating i {
+        color: #F5A623; font-style: normal;
+        font-size: 11px; font-weight: 700;
+    }
+    .mfy__rating b {
+        color: #fff; font-size: 10px; font-weight: 700;
+        letter-spacing: 0.05em;
+    }
+    /* Facts, on the poster's scrim. 16dp inset (HaraanSpacing.Medium), stacked. */
+    .mfy__foot {
+        position: absolute; inset: auto 0 0 0; z-index: 2;
+        display: block;
+        padding: 16px;
+    }
+    .mfy__date {
+        display: block;
+        font-size: 10px; font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.9);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mfy__title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-top: 4px;
+        font-size: 16px;                    /* TitleMedium, as in the app's card */
+        font-weight: 700;
+        line-height: 20px;
+        letter-spacing: -0.015em;
+        color: #fff;
+    }
+    .mfy__venue {
+        display: block;
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(255,255,255,0.65);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* The fact that decides the tap — its own line, full white, never clipped. */
+    .mfy__price {
+        display: block;
+        margin-top: 3px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #fff;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* --- Poster card — used by /home (site/home.blade.php), which still renders
+       this markup. The /events rail moved to the app-matched .mfy pager above;
+       these rules stay so /home keeps rendering as it did. --- */
+    .mposter {
+        position: relative; display: block;
+        scroll-snap-align: start;
+        flex: 0 0 76%; max-width: 300px;
+        aspect-ratio: 3 / 4;
+        border-radius: 28px; overflow: hidden;
+        text-decoration: none; color: inherit;
+        background-size: cover; background-position: center; background-color: #0F172A;
+        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.20), 0 3px 8px rgba(15, 23, 42, 0.16);
+    }
+    .mposter__grad {
+        position: absolute; inset: 0;
+        background: linear-gradient(to top, rgba(8,12,22,0.92) 4%, rgba(8,12,22,0.35) 34%, rgba(8,12,22,0) 62%);
+    }
+    .mposter__cat {
+        position: absolute; top: 14px; left: 14px; z-index: 2;
+        background: rgba(8, 12, 22, 0.45); color: #fff; backdrop-filter: blur(6px);
+        font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+        padding: 5px 12px; border-radius: 999px;
+    }
+    .mposter__rating {
+        position: absolute; top: 14px; right: 14px; z-index: 2;
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(8, 12, 22, 0.55); color: #fff; backdrop-filter: blur(6px);
+        font-size: 11px; font-weight: 800; padding: 5px 9px; border-radius: 10px;
+    }
+    .mposter__rating i { color: #F5A623; font-style: normal; font-size: 11px; }
+    .mposter__rating--soon { font-weight: 800; letter-spacing: 0.02em; }
+    .mposter__overlay {
+        position: absolute; inset: auto 0 0 0; z-index: 2;
+        display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+        padding: 16px;
+    }
+    .mposter__text { min-width: 0; }
+    .mposter__date {
+        margin: 0 0 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+        text-transform: uppercase; color: rgba(255,255,255,0.9);
+    }
+    .mposter__overlay h4 {
+        margin: 0 0 6px; font-size: 16px; font-weight: 800; line-height: 1.2; color: #fff;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .mposter__meta {
+        margin: 0; font-size: 12px; color: rgba(255,255,255,0.66);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mposter__book {
+        flex: 0 0 44px; width: 44px; height: 44px; border-radius: 999px;
+        background: #fff; color: #2563EB;
+        display: grid; place-items: center;
+        box-shadow: 0 4px 12px rgba(8, 12, 22, 0.28);
+    }
+
+    /* --- Trending — the app's TrendingRowSection (MainScreen.kt). Card 140×160dp,
+       24dp radius, 32dp between cards, contentPadding start 36 / end 24. --- */
+    .mtrends {
+        display: flex;
+        gap: 32px;
+        overflow-x: auto;
+        /* No scroll-snap here: snap containers re-snap on every viewport resize,
+           and the URL bar collapsing during a vertical swipe IS a resize — the
+           rail kept jumping sideways mid-scroll. The app's row free-scrolls too. */
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        margin-left: calc(50% - 50vw);
+        margin-right: calc(50% - 50vw);
+        /* start 36 clears the rank number, which bleeds 24px off the first card. */
+        padding: 4px 24px 12px 36px;
+    }
+    .mtrends::-webkit-scrollbar { display: none; }
+    .mtrend {
+        position: relative;
+        flex: 0 0 140px;
+        text-decoration: none; color: inherit;
+    }
+    .mtrend__img {
+        position: relative; display: block;
+        height: 160px; border-radius: 24px; overflow: hidden;
+        background: #000;                   /* the Card's containerColor */
+        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);   /* elevation 2dp */
+    }
+    .mtrend__img img {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;
+    }
+    /* Brush.verticalGradient(Transparent → Black 85%) from 80px down. */
+    .mtrend__grad {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.85) 100%);
+    }
+    .mtrend__title {
+        position: absolute; z-index: 2;
+        left: 24px; right: 8px; bottom: 12px;   /* start 24 keeps clear of the rank */
+        font-size: 12px; font-weight: 700; line-height: 15px; color: #fff;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    /* The oversized rank, bleeding off the card's bottom-left (offset -24, +14). */
+    .mtrend__rank {
+        position: absolute; left: -24px; bottom: -14px; z-index: 5;
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        font-size: 96px; font-weight: 900; line-height: 1; letter-spacing: -0.04em;
+        color: #F4F7FB;
+        -webkit-text-stroke: 3px rgba(32, 58, 92, 0.7);
+        text-shadow: 0 6px 22px rgba(0, 0, 0, 0.2);
+        pointer-events: none;
+    }
+
+    /* --- Categories — left-aligned cards (mirrors HaraanCategoryCard) --- */
+    /* Categories — the app's HaraanCategoryCard row (16dp radius = HaraanRadius.Medium,
+       10dp gaps), line icons rather than emoji, active card accented in EventsBlue. */
+    /* Columns follow the card count — the row is built from categories that actually
+       have events, so it can be 2 or 3 wide. A fixed repeat(3) left a hole. */
+    .mhome__cats { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
+    .mcat {
+        display: flex; flex-direction: column; align-items: flex-start;
+        justify-content: space-between; gap: 12px; height: 96px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 16px;
+        padding: 12px; text-decoration: none; text-align: left;
+        transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+    .mcat__ico {
+        width: 36px; height: 36px; border-radius: 10px;
+        display: grid; place-items: center;
+        background: rgba(37, 99, 235, 0.10);
+        color: #2563EB;
+    }
+    .mcat__name { display: block; font-size: 13px; font-weight: 700; color: #0F172A; line-height: 1.2; }
+    .mcat__stat { display: block; font-size: 11px; color: #94A3B8; margin-top: 2px; }
+
+    /* Selected state, as in the app's `selected` + activeColor. */
+    .mcat.is-on {
+        background: #2563EB;
+        border-color: #2563EB;
+    }
+    .mcat.is-on .mcat__ico { background: rgba(255, 255, 255, 0.18); color: #fff; }
+    .mcat.is-on .mcat__name { color: #fff; }
+    .mcat.is-on .mcat__stat { color: rgba(255, 255, 255, 0.75); }
+
+    /* --- Sponsored slot (the app's AdSpaceBanner), only rendered for a real creative --- */
+    .mad {
+        display: flex; align-items: center; gap: 12px;
+        margin-bottom: 4px; padding: 12px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 20px;
+        text-decoration: none;
+        transition: transform 120ms ease;
+    }
+    .mad__img { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; flex-shrink: 0; }
+    .mad__body { min-width: 0; flex: 1; }
+    .mad__label {
+        display: block; font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #94A3B8;
+    }
+    .mad__title {
+        display: block; font-size: 14px; font-weight: 700; color: #0F172A; margin-top: 2px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mad__sub {
+        display: block; font-size: 12px; color: #64748B;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mad__cta {
+        flex-shrink: 0; padding: 8px 14px; border-radius: 999px;
+        background: #2563EB; color: #fff; font-size: 12px; font-weight: 700;
+    }
+
+    /* --- TOUCH FEEDBACK ------------------------------------------------------
+       The app ripples on every tappable surface; before this the whole mobile
+       stylesheet had one :active rule, so taps felt dead. A press-in is the web's
+       honest equivalent — no ripple, but the surface acknowledges the thumb. */
+    .mfy:active,
+    .mcat:active,
+    .mad:active,
+    .mcard:active,
+    .mposter:active {
+        transform: scale(0.975);
+    }
+    /* Trending gets NO press movement at all. Chrome fires :active the moment
+       a slow vertical swipe starts on a card, so any pressed-state transform
+       makes "the card move first" before the page scrolls — reported twice.
+       Stability beats feedback on this row; the tap still navigates. */
+    /* Safe on the pager: its per-frame transform lives on .mfy__page, so the card's
+       own press composes with it rather than fighting it. */
+    .mfy, .mtrend, .mcard, .mposter {
+        transition: transform 120ms ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* --- Explore Nearby: 2-col grid of vertical cards (mirrors EventListCard) --- */
+    .mhome__head--stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .mhome__eyebrow {
+        font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+        color: #94A3B8;
+    }
+    .mhome__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px 12px; }
+    .mcard { text-decoration: none; color: inherit; display: block; }
+    .mcard__img {
+        position: relative; width: 100%; aspect-ratio: 1 / 1;
+        border-radius: 16px; overflow: hidden;
+        background-size: cover; background-position: center; background-color: #F7F7F9;
+    }
+    .mcard__fast {
+        position: absolute; top: 10px; left: 10px;
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(8, 12, 22, 0.75); border: 0.5px solid rgba(255,255,255,0.15);
+        color: #fff; font-size: 9px; font-weight: 800; letter-spacing: 0.05em;
+        padding: 4px 8px; border-radius: 6px;
+    }
+    .mcard__fast i { color: #F6AD55; font-style: normal; font-size: 10px; }
+    .mcard__date {
+        margin: 8px 2px 2px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase; color: #2563EB;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mcard__title {
+        margin: 0 2px 2px; font-size: 14px; font-weight: 800; line-height: 1.25; color: #1A202C;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .mcard__venue {
+        margin: 0 2px 3px; font-size: 12px; color: #4A5568;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mcard__price { margin: 0 2px; font-size: 14px; font-weight: 800; color: #2563EB; letter-spacing: -0.01em; }
+    .mcard__price span { font-size: 11px; font-weight: 500; color: rgba(37, 99, 235, 0.8); }
+}
+
+/* --- Account pages: back header instead of the feed's topbar ------------
+   /profile is a place you went, not a stop on the feed — the greeting, search
+   and Events/GameHub tabs are noise there, exactly as they're absent from the
+   app's AccountProfileScreen. Swap the topbar for the app's PageHeader on the
+   phone; desktop (≥1025px) keeps the topbar since it's the only nav it has. */
+@media (max-width: 1024px) {
+    body:has(.pagebar) .topbar { display: none; }
+
+    .pagebar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        padding: 14px 16px;
+        background: #fff;
+        border-bottom: 1px solid var(--border, #E5E9F0);
+    }
+
+    /* The sub-pages' footer "← Account" link is the desktop's only way back;
+       with the back button present it's a second door to the same room. */
+    body:has(.pagebar) .aprof-doc__back { display: none; }
+}
+
+/* ================================================================= */
+/* APP-STYLE MOBILE GAMEHUB â€” mirrors MainScreen.kt GameHubTabScreen  */
+/*   canvas #E9EEF4 Â· GameHubDeep #1B5E20 Â· GameHubGreen #00C853      */
+/*   cards: white, 20px radius, premiumCardShadow (see Shapes.kt)     */
+/*   The desktop GameHub sections it replaces are hidden in site.css. */
+/* ================================================================= */
+@media (max-width: 720px) {
+    /* Cooler/deeper slate than the Events feed's #F4F7FB: white cards were
+       near-invisible against that, so the app gives GameHub its own surface
+       for the cards to lift off.
+       On main, not body: site-theme-overrides.css paints the body with an
+       !important gradient, so a body rule here would be dead code. main is the
+       whole content column, and the footer sheet covers the rest. */
+    body:has(.mhub) main.container { background: #E9EEF4; }
+
+    /* Full-bleed by widening the container, NOT by negative `50% - 50vw` margins:
+       vw includes the classic scrollbar, so those margins render .mhub ~15px wider
+       than the viewport, and the resulting horizontal overflow stretches the whole
+       page — footer and all. (It looks fine in a browser with overlay scrollbars,
+       which is exactly what makes it a trap.) .container is the only gutter here:
+       width: min(1280px, calc(100% - 32px)). */
+    body:has(.mhub) main.container { width: 100%; }
+
+    .mhub {
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+        color: #0F172A;
+        padding-bottom: 16px;
+    }
+
+    /* --- 1. Green hero = the page header --------------------------------
+       The app renders NO outer header on the GameHub tab; this band carries the
+       greeting, search and switch itself. So the site's white topbar goes, exactly
+       as the account pages swap it for their .pagebar. Keeping both stacked two
+       search bars and two tab controls on one screen. */
+    body:has(.mhub) .topbar { display: none; }
+
+    .mhub__hero {
+        position: relative;
+        overflow: hidden;
+        /* Own the status-bar/notch inset the topbar used to absorb. */
+        padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 24px;
+        border-radius: 0 0 32px 32px;
+        background: linear-gradient(180deg, #0F3D15 0%, #1B5E20 55%, #227A2B 100%);
+    }
+
+    /* The greeting row sits on the green: white ink, and the topbar's grid
+       placement doesn't apply outside the topbar. */
+    .mhub__hero .app-greet { grid-area: auto; margin-bottom: 16px; }
+    .app-greet--dark .app-greet__hey { color: #FFFFFF; }
+    .app-greet--dark .app-greet__loc { color: rgba(255, 255, 255, 0.85); }
+    .app-greet--dark .app-greet__initial { color: #FFFFFF; }
+    .app-greet--dark .app-greet__avatar {
+        background: rgba(255, 255, 255, 0.14);
+        border-color: rgba(255, 255, 255, 0.35);
+    }
+    .app-greet--dark .app-greet__icon { color: rgba(255, 255, 255, 0.92); }
+    .app-greet--dark .app-greet__icon:active { background: rgba(255, 255, 255, 0.12); }
+    /* The unread pip is ringed in the band's own green so it reads as a pip and
+       not a red smudge (the app rings it in GameHubDeep on dark). */
+    .app-greet--dark .app-greet__dot { box-shadow: 0 0 0 1.5px #1B5E20; }
+
+    /* GameHubSegmentedSwitch: 44px track, 22px radius, 3px inset, white active pill
+       with GameHubDeep text. Two links, since the web's lanes are two pages. */
+    .mhub__switch {
+        display: flex;
+        height: 44px;
+        margin-top: 12px;
+        padding: 3px;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.15);
+    }
+    .mhub__switch-tab {
+        flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 19px;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        color: rgba(255, 255, 255, 0.75);
+    }
+    .mhub__switch-tab.is-on {
+        background: #FFFFFF;
+        color: #1B5E20;
+        /* Soft lift, kept light: a heavy black shadow on the green band read as a
+           muddy halo. */
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.16);
+    }
+    /* Top sheen â€” a soft radial highlight so the band reads as a lit surface
+       with depth, not a flat green slab. */
+    .mhub__hero::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 70%);
+        pointer-events: none;
+    }
+    /* Brand watermark: the "H" bleeding off the top-right corner â€”
+       identity-as-texture, so the band isn't empty without competing. */
+    /* Height-bound, not width-bound: the app fits the monogram inside a 210dp box and
+       the "H" is taller than it is wide, so its height is what hits 210 first. */
+    .mhub__mark {
+        position: absolute;
+        top: -44px;
+        right: -58px;
+        height: 210px;
+        width: auto;
+        opacity: 0.11;
+        filter: brightness(0) invert(1);
+        pointer-events: none;
+    }
+
+    /* HaraanSearchBar: 48px tall, 24px radius, hairline border. */
+    .mhub__search {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 48px;
+        padding: 0 16px;
+        background: #fff;
+        border: 1px solid #E2E8F0;
+        border-radius: 24px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+    .mhub__search:focus-within { border-color: #00C853; }
+    .mhub__search svg { color: #64748B; flex-shrink: 0; }
+    .mhub__search input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: none;
+        font: inherit;
+        font-size: 14px;
+        color: #0F172A;
+    }
+    .mhub__search input::placeholder { color: #94A3B8; }
+
+    /* --- 2. ActionBoard: THE elevated card, straddling the green seam ---- */
+    /* Overlaps the green seam by 16px, not 32: the app's overlapAbove(32dp) is applied
+       on top of the LazyColumn's own 16dp item spacing, so the card's net lift onto the
+       hero is 32 − 16. Taking the 32 literally sat it 16px too high. */
+    .mhub__ab {
+        position: relative;
+        z-index: 2;
+        display: block;
+        margin: -16px 16px 0;
+        padding: 16px;
+        background: #fff;
+        border-radius: 20px;
+        text-decoration: none;
+        /* premiumCardShadow: a wide faint ambient halo + a tight contact layer
+           that grounds the card so it isn't a sticker. */
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.16);
+    }
+    .mhub__ab-head { display: flex; align-items: center; gap: 6px; }
+    .mhub__ab-head img { width: 22px; height: 22px; object-fit: contain; }
+    .mhub__ab-head strong {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        color: #0F172A;
+    }
+    /* Single live signal: the count. (The per-match LIVE pill below is enough.) */
+    .mhub__ab-live {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        color: #D32F2F;
+    }
+    .mhub__ab-live i { width: 6px; height: 6px; border-radius: 50%; background: #D32F2F; }
+
+    /* Flat content block, divided by a hairline â€” no nested bordered box, so
+       the card drops a level of container nesting. */
+    .mhub__ab-strip { margin-top: 10px; border-top: 1px solid #E2E8F0; padding-top: 10px; }
+    .mhub__ab-meta { margin: 0 0 8px; font-size: 11px; font-weight: 500; color: #64748B; }
+    .mhub__ab-empty { margin: 8px 0 0; font-size: 13px; color: #64748B; }
+
+    .mhub__ab-row { display: flex; align-items: center; gap: 6px; }
+    .mhub__ab-row + .mhub__ab-row { margin-top: 6px; }
+    .mhub__ab-logo {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        flex-shrink: 0;
+        margin-right: 2px;
+        border-radius: 50%;
+        background: #F1F5F9;
+        font-size: 9px;
+        font-weight: 800;
+        color: #475569;
+    }
+    .mhub__ab-abbr { font-size: 14px; font-weight: 700; color: #0F172A; }
+    .mhub__ab-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 500;
+        color: #64748B;
+    }
+    /* tnum: the score column's right edge must sit on one vertical line across
+       both rows (Crex-style dense alignment). */
+    .mhub__ab-score {
+        margin-left: auto;
+        font-size: 15px;
+        font-weight: 700;
+        color: #0F172A;
+        font-feature-settings: 'tnum';
+    }
+    .mhub__ab-ov {
+        min-width: 44px;
+        text-align: right;
+        font-size: 11px;
+        font-weight: 500;
+        color: #94A3B8;
+        font-feature-settings: 'tnum';
+    }
+    /* The batting side leads the card and carries the weight. */
+    .mhub__ab-row.is-batting .mhub__ab-abbr,
+    .mhub__ab-row.is-batting .mhub__ab-score { font-weight: 800; }
+
+    /* --- 3. Top Player -------------------------------------------------- */
+    .mhub__top {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 16px 16px 0;
+        padding: 16px;
+        background: #fff;
+        border-radius: 20px;
+        text-decoration: none;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.16);
+    }
+    .mhub__top-face {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+        overflow: hidden;
+        border-radius: 50%;
+        background: #FEF3C7;
+        color: #D4A017;
+    }
+    .mhub__top-face img { width: 100%; height: 100%; object-fit: cover; }
+    .mhub__top-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .mhub__top-copy strong { font-size: 14px; font-weight: 700; color: #0F172A; }
+    /* A player's "Name • +XP" gets one line (the app clamps it to 1); the empty
+       state is a sentence and gets two (the app allows 2), or it ellipsises to
+       "Play a ranked matc…". */
+    .mhub__top-line {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        color: #64748B;
+    }
+    .mhub__top-line--empty {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        white-space: normal;
+        line-height: 1.35;
+    }
+    .mhub__top-rank { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #1B5E20; }
+    .mhub__top-cta {
+        flex-shrink: 0;
+        padding: 6px 12px;
+        border-radius: 12px;
+        background: rgba(27, 94, 32, 0.08);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+        color: #1B5E20;
+    }
+
+    /* --- 4. Sport chips ------------------------------------------------- */
+    .mhub__chips {
+        display: flex;
+        gap: 10px;
+        margin-top: 16px;
+        padding: 0 16px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .mhub__chips::-webkit-scrollbar { display: none; }
+    .mhub__chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 36px;
+        flex-shrink: 0;
+        padding: 0 14px;
+        /* Filled slate when unselected: chips read as solid pills against the
+           page instead of floating on a faint hairline. */
+        background: #F1F5F9;
+        border: 1px solid #E2E8F0;
+        border-radius: 50px;
+        font-size: 14px;
+        font-weight: 500;
+        color: #64748B;
+        text-decoration: none;
+        white-space: nowrap;
+        transition: background-color 200ms ease, color 200ms ease;
+    }
+    .mhub__chip.is-on { background: #1B5E20; border-color: transparent; color: #fff; }
+
+    /* --- 5. Section headers --------------------------------------------- */
+    /* Asymmetric padding: space above (separates from the previous section),
+       none below (bonds the title to its own content), so sections read as
+       groups. The venues header bonds to the chips that filter it. */
+    .mhub__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px 0;
+    }
+    .mhub__head--tight { padding-top: 12px; }
+    .mhub__head h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; color: #0F172A; }
+    .mhub__head p { margin: 2px 0 0; font-size: 12px; font-weight: 500; color: #64748B; }
+    .mhub__head > a { flex-shrink: 0; font-size: 13px; font-weight: 700; color: #1B5E20; text-decoration: none; }
+    .mhub__empty { margin: 20px 16px; text-align: center; font-size: 13px; color: #64748B; }
+
+    /* Shared price lockup: value + a smaller "/hr" sitting on the baseline. */
+    .mhub__price { font-size: 15px; font-weight: 800; color: #0F172A; }
+    .mhub__price i { font-size: 11px; font-weight: 400; font-style: normal; color: #64748B; }
+    .mhub__price--lg { font-size: 17px; }
+    .mhub__price--lg i { font-size: 12px; }
+
+    /* Sports playable here â€” fills the gap between price and the card edge. */
+    .mhub__sports { display: inline-flex; align-items: center; gap: 4px; color: #1B5E20; }
+    .mhub__sports i { font-size: 11px; font-weight: 700; font-style: normal; color: #64748B; }
+
+    /* --- 5b. Popular Venues reel (PopularArenaCard, 220px wide) ---------- */
+    /* A free-scrolling rail, not a pager: the app's is a plain LazyRow with a 16dp
+       contentPadding and no snapping. (Snap also ate the 16px lead gutter — it aligns
+       a card to the container's start edge, padding and all.) */
+    .mhub__reel {
+        display: flex;
+        gap: 12px;
+        margin-top: 12px;
+        padding: 4px 16px 8px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .mhub__reel::-webkit-scrollbar { display: none; }
+    .mhub__arena {
+        display: block;
+        width: 220px;
+        flex-shrink: 0;
+        overflow: hidden;
+        background: #fff;
+        border-radius: 20px;
+        text-decoration: none;
+        box-shadow: 0 6px 14px rgba(15, 23, 42, 0.10), 0 1px 2px rgba(15, 23, 42, 0.16);
+    }
+    .mhub__arena-img { position: relative; display: block; height: 120px; background: #E2E8F0; }
+    .mhub__arena-img > img { width: 100%; height: 100%; object-fit: cover; }
+    /* Scrim for badge/rating legibility. */
+    .mhub__arena-scrim {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.30) 100%);
+    }
+    .mhub__arena-cat {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        padding: 4px 8px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
+        font-size: 11px;
+        font-weight: 700;
+        color: #1B5E20;
+    }
+    .mhub__arena-rate {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #fff;
+    }
+    .mhub__arena-rate i { font-style: normal; font-size: 12px; color: #FFC107; }
+    .mhub__arena-body { display: block; padding: 12px; }
+    .mhub__arena-title,
+    .mhub__arena-sub {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .mhub__arena-title { font-size: 14px; font-weight: 700; color: #0F172A; }
+    .mhub__arena-sub { margin-top: 2px; font-size: 11px; color: #64748B; }
+    .mhub__arena-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    /* --- 6. More venues (VenueListCard) --------------------------------- */
+    .mhub__list { display: flex; flex-direction: column; gap: 16px; margin: 12px 16px 0; }
+    .mhub__vcard {
+        display: block;
+        overflow: hidden;
+        background: #fff;
+        border-radius: 20px;
+        text-decoration: none;
+        box-shadow: 0 6px 14px rgba(15, 23, 42, 0.10), 0 1px 2px rgba(15, 23, 42, 0.16);
+    }
+    .mhub__vcard-img { position: relative; display: block; height: 150px; background: #E2E8F0; }
+    .mhub__vcard-img > img { width: 100%; height: 100%; object-fit: cover; }
+    /* Top + bottom scrim: badge legibility above, tagline below. */
+    .mhub__vcard-scrim {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0%, transparent 45%, rgba(0, 0, 0, 0.40) 100%);
+    }
+    .mhub__vcard-img .mhub__arena-cat { top: 10px; left: 10px; }
+    .mhub__vcard-tag {
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+    }
+    .mhub__vcard-body { display: block; padding: 16px; }
+    .mhub__vcard-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .mhub__vcard-id { min-width: 0; }
+    .mhub__vcard-id strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 16px;
+        font-weight: 700;
+        color: #0F172A;
+    }
+    .mhub__vcard-loc {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        font-size: 13px;
+        color: #64748B;
+    }
+    .mhub__vcard-loc svg { flex-shrink: 0; color: #94A3B8; }
+    .mhub__vcard-rate {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #0F172A;
+    }
+    .mhub__vcard-rate i { font-style: normal; font-size: 14px; color: #FFB000; }
+    .mhub__vcard-new { flex-shrink: 0; font-size: 12px; font-weight: 700; color: #94A3B8; }
+    .mhub__vcard-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 12px;
+    }
+    /* CTA in the bright "commit" green (reserved for actions), with a tighter
+       radius than the 20px card so it doesn't read as a nested card. */
+    .mhub__book {
+        flex-shrink: 0;
+        padding: 10px 16px;
+        border-radius: 12px;
+        background: #00C853;
+        font-size: 12px;
+        font-weight: 700;
+        color: #fff;
+    }
+}
+
+/* ================================================================= */
+/* APP-STYLE MOBILE VENUE DETAIL â€” mirrors VenueDetailScreen.kt       */
+/*   canvas #E9EEF4 Â· sheet #fff lapping 24px over a 280px hero       */
+/*   GameHubDeep #1B5E20 Â· GameHubGreen #00C853 Â· RatingGold #F5A623  */
+/*   The desktop two-column page it replaces is hidden in site.css.   */
+/* ================================================================= */
+@media (max-width: 720px) {
+    /* Like the app's VenueDetailScreen, this page has no site header â€” the
+       back/save/share circles float on the hero instead. */
+    body:has(.mven) .topbar { display: none; }
+    body:has(.mven) main.container { width: 100%; background: #E9EEF4; }
+    /* The feed's bottom padding would strand the sticky bar over dead slate. */
+    body:has(.mven) main.container { padding-bottom: 0; }
+    body.mven-locked { overflow: hidden; }
+
+    .mven {
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+        color: #0F172A;
+    }
+
+    /* --- 1. Hero gallery ------------------------------------------------ */
+    .mven__hero { position: relative; height: 280px; background: #E2E8F0; }
+    /* One shot per page, snapping â€” the app pages through them. */
+    .mven__shots {
+        display: flex;
+        height: 100%;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .mven__shots::-webkit-scrollbar { display: none; }
+    .mven__shot {
+        width: 100%;
+        height: 100%;
+        flex: 0 0 100%;
+        scroll-snap-align: center;
+        object-fit: cover;
+    }
+    /* Top + bottom scrims so the controls and dots stay legible on any photo. */
+    .mven__scrim {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, transparent 35%, transparent 65%, rgba(0, 0, 0, 0.25) 100%);
+    }
+    .mven__dots {
+        position: absolute;
+        left: 0;
+        right: 0;
+        /* Clear of the sheet, which laps 24px up over the hero. */
+        bottom: 38px;
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+    }
+    .mven__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5);
+    }
+    .mven__dot.is-on { width: 8px; height: 8px; background: #fff; }
+
+    .mven__controls {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: calc(12px + env(safe-area-inset-top, 0px)) 12px 12px;
+    }
+    .mven__controls-right { display: flex; gap: 10px; }
+    /* The app's CircleButton: a 40dp scrim disc, white glyph. */
+    .mven__circle {
+        width: 40px;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.35);
+        color: #fff;
+        cursor: pointer;
+    }
+    /* Saved reads in the app's LiveRed, the one "on" state a heart has. */
+    .mven__circle.is-on { color: #D32F2F; }
+
+    /* --- 2. Content sheet ----------------------------------------------- */
+    /* The room for the sticky bar belongs INSIDE the sheet (the app's 96dp spacer
+       sits inside its white column too) — as padding on .mven it would expose a
+       band of slate canvas under the last section. */
+    .mven__sheet {
+        position: relative;
+        min-height: calc(100vh - 280px);
+        margin-top: -24px;
+        padding: 16px 16px 96px;
+        border-radius: 24px 24px 0 0;
+        background: #fff;
+    }
+
+    .mven__head { display: flex; align-items: flex-start; gap: 12px; }
+    .mven__title {
+        flex: 1;
+        margin: 0;
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1.25;
+        letter-spacing: -0.02em;
+        color: #0F172A;
+    }
+    /* The trust signal sits where the eye lands â€” no background pill. */
+    .mven__score {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding-top: 4px;
+        color: #F5A623;
+    }
+    .mven__score b { font-size: 14px; font-weight: 700; color: #0F172A; }
+    .mven__score i { font-size: 12px; font-style: normal; color: #64748B; }
+
+    .mven__hours {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: #0F172A;
+    }
+    .mven__hours svg { flex-shrink: 0; color: #64748B; }
+
+    .mven__where { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; }
+    .mven__pin { flex-shrink: 0; margin-top: 2px; color: #64748B; }
+    .mven__addr { flex: 1; font-size: 13px; line-height: 18px; color: #64748B; }
+    .mven__mappill {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 6px;
+        padding: 8px 12px;
+        border: 1px solid #E2E8F0;
+        border-radius: 50px;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        text-decoration: none;
+        color: #0F172A;
+    }
+    .mven__mappill svg { color: #00C853; }
+
+    /* Sections are flat and divider-separated on one white sheet â€” not cards.
+       Asymmetric by design: 18px either side of the rule, 12px under a title. */
+    .mven__rule { height: 1px; margin: 18px 0; background: #E2E8F0; }
+    .mven__h2 { margin: 0 0 12px; font-size: 16px; font-weight: 700; color: #0F172A; }
+    .mven__body { margin: 0; font-size: 13px; line-height: 20px; color: #64748B; }
+
+    /* --- 3. Rating summary ---------------------------------------------- */
+    .mven__rating { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .mven__rating-copy { min-width: 0; }
+    .mven__rating-top { display: flex; align-items: center; gap: 8px; }
+    .mven__rating-top strong { font-size: 24px; font-weight: 800; color: #0F172A; }
+    .mven__stars { display: inline-flex; gap: 1px; color: #F5A623; }
+    .mven__rating-none { display: block; font-size: 15px; font-weight: 700; color: #0F172A; }
+    .mven__rating-sub { display: block; margin-top: 4px; font-size: 12px; color: #64748B; }
+    /* Outlined, not filled: rating is a secondary action â€” the green fill is
+       reserved for Book Now. */
+    .mven__rate {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 16px;
+        border: 1px solid #00C853;
+        border-radius: 50px;
+        background: none;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+        color: #1B5E20;
+        cursor: pointer;
+    }
+    .mven__rate svg { color: #00C853; }
+
+    /* --- 4. Available Sports -------------------------------------------- */
+    .mven__sport {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        width: 100%;
+        padding: 16px;
+        border: 1px solid #E2E8F0;
+        border-radius: 14px;
+        background: none;
+        text-align: left;
+        cursor: pointer;
+    }
+    .mven__sport-ico { flex-shrink: 0; display: inline-flex; color: #1B5E20; }
+    .mven__sport-copy { flex: 1; min-width: 0; }
+    .mven__sport-copy strong { display: block; font-size: 15px; font-weight: 700; color: #0F172A; }
+    .mven__sport-copy small { display: block; margin-top: 2px; font-size: 12px; color: #64748B; }
+    .mven__chev { flex-shrink: 0; color: #94A3B8; }
+
+    /* --- 5. Amenities ---------------------------------------------------- */
+    /* Two per row, each with its own icon, so the list reads as a real feature
+       set rather than a column of identical checkmarks. */
+    .mven__amenities { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 12px; }
+    .mven__amenity {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        font-size: 13px;
+        color: #0F172A;
+    }
+    .mven__amenity-ico {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: rgba(0, 200, 83, 0.10);
+        color: #1B5E20;
+    }
+
+    /* --- 7. Good to know -------------------------------------------------- */
+    .mven__know { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .mven__know li {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 13px;
+        line-height: 19px;
+        color: #64748B;
+    }
+    .mven__know svg { flex-shrink: 0; margin-top: 2px; color: #00C853; }
+
+    /* --- 8. Location ------------------------------------------------------ */
+    .mven__dir {
+        display: inline-block;
+        margin-top: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        color: #00C853;
+    }
+
+    /* --- 9. Reviews ------------------------------------------------------- */
+    .mven__reviews { display: flex; flex-direction: column; gap: 14px; }
+    .mven__review-head { display: flex; align-items: center; gap: 10px; }
+    .mven__review-face {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(0, 200, 83, 0.15);
+        font-size: 13px;
+        font-weight: 700;
+        color: #1B5E20;
+    }
+    .mven__review-who { flex: 1; min-width: 0; }
+    .mven__review-who strong { display: block; font-size: 13px; font-weight: 600; color: #0F172A; }
+    .mven__review-who small { display: block; font-size: 11px; color: #64748B; }
+    .mven__review-score { flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px; color: #F5A623; }
+    .mven__review-score b { font-size: 12px; font-weight: 700; color: #0F172A; }
+    .mven__review-text { margin: 6px 0 0; font-size: 13px; line-height: 19px; color: #64748B; }
+
+    /* --- 10. Sticky book bar ---------------------------------------------- */
+    /* A soft upward shadow so the bar reads as floating chrome over the content,
+       not another row under a hairline. */
+    .mven__bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+        background: #fff;
+        box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.10);
+    }
+    .mven__bar-price b { font-size: 22px; font-weight: 800; color: #0F172A; }
+    .mven__bar-price i { font-size: 13px; font-style: normal; color: #64748B; }
+    .mven__bar-noprice { font-size: 14px; font-weight: 600; color: #64748B; }
+    .mven__book {
+        height: 48px;
+        padding: 0 24px;
+        border: 0;
+        border-radius: 50px;
+        background: #00C853;
+        font-size: 15px;
+        font-weight: 700;
+        color: #fff;
+        cursor: pointer;
+    }
+    .mven__book:disabled { background: #CBD5E1; color: #fff; }
+
+    /* --- The sheet the real booking widget / review form move into -------- */
+    .mven__modal { display: block; position: fixed; inset: 0; z-index: 60; }
+    .mven__modal[hidden] { display: none; }
+    .mven__modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.5); }
+    .mven__modal-card {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        max-height: 92vh;
+        border-radius: 24px 24px 0 0;
+        background: #fff;
+    }
+    .mven__modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 16px 8px;
+        border-bottom: 1px solid #E2E8F0;
+    }
+    .mven__modal-title { margin: 0; font-size: 18px; font-weight: 800; color: #0F172A; }
+    .mven__modal-x {
+        display: inline-flex;
+        padding: 6px;
+        border: 0;
+        border-radius: 50%;
+        background: none;
+        color: #64748B;
+        cursor: pointer;
+    }
+    .mven__modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+        -webkit-overflow-scrolling: touch;
+    }
+    /* The moved widgets carry desktop panel chrome (card, shadow, wide padding)
+       that would nest a card inside the sheet â€” flatten it. */
+    .mven__modal-body .detail-card-panel,
+    .mven__modal-body .sticky-booking-card {
+        margin: 0 0 12px;
+        padding: 8px 4px;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: none;
+    }
+    .mven__modal-body .sticky-sidebar-container { position: static; }
 }

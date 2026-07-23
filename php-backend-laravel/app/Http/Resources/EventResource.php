@@ -27,16 +27,80 @@ final class EventResource extends JsonResource
             'bookingFormat'  => $this->booking_format,
             'visibility'     => $this->visibility,
             'location'       => $this->location,
+            'mapLink'        => $this->map_link,
+            'city'           => $this->city,
             'venue'          => $this->venue,
             'date'           => $this->date,
             'time'           => $this->time,
             'price'          => $this->price,
+            // Host-set convenience fee config — the app previews it, the server charges it.
+            'convenienceFee' => [
+                'type'  => $this->convenience_fee_type ?? 'none',
+                'value' => (float) ($this->convenience_fee_value ?? 0),
+            ],
             'totalSlots'     => $this->total_slots,
             'availableSlots' => $this->available_slots,
-            'images'         => $this->images,
+            'images'         => \App\Support\MediaUrl::resolveMany($this->images),
             'status'         => $this->status,
+            // Curated app rails this event appears in (e.g. ["for_you","trending"]).
+            'placements'     => array_values(array_filter(
+                (array) ($this->placements ?? []),
+                static fn ($p): bool => is_string($p) && trim($p) !== '',
+            )),
+            // Aggregate rating; null when unrated so the app shows nothing (no fake star).
+            'rating'         => $this->rating !== null ? (float) $this->rating : null,
+            'ratingsCount'   => (int) ($this->ratings_count ?? 0),
             'partnerId'      => $this->partner_id,
+            // The organiser's public page, when they have a live one (Phase 2).
+            'host'           => $this->hostPayload($request),
             'createdAt'      => $this->created_at,
+            'infoNotes'      => array_values(array_filter(
+                (array) ($this->info_notes ?? []),
+                static fn ($n): bool => is_string($n) && trim($n) !== '',
+            )),
+            'goodToKnow'     => $this->resource->goodToKnowRows(),
+            'schedule'       => $this->resource->scheduleRows(),
+            'lineup'         => $this->resource->lineupRows(),
+            'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes->map(fn ($t) => [
+                'id'        => $t->id,
+                'name'      => $t->name,
+                'kind'      => $t->kind,
+                // `price` is the live price a buyer pays now (current phase, else flat).
+                'price'     => $t->effectivePrice(),
+                'basePrice' => $t->price,
+                'admits'    => $t->admits,
+                'minPrice'  => $t->min_price,
+                'capacity'  => $t->capacity,
+                'sold'      => $t->sold,
+                'remaining' => $t->remaining(),
+                'onSale'    => $t->isOnSale(),
+                // Empty for flat-price tiers; drives the app's "Pricing Schedule" widget.
+                'phases'    => $t->phaseSchedule(),
+            ])->values()),
+        ];
+    }
+
+    /**
+     * The event organiser's public profile, or null when they don't have a live one.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function hostPayload(Request $request): ?array
+    {
+        $profile = $this->resource->partner?->hostProfile;
+
+        if ($profile === null || ! $profile->isLive()) {
+            return null;
+        }
+
+        return [
+            'name'        => $profile->display_name,
+            'slug'        => $profile->slug,
+            'logo'        => $profile->logoUrl(),
+            'verified'    => $profile->isVerified(),
+            'url'         => url('/host/' . $profile->slug),
+            'followers'   => $profile->followersCount(),
+            'isFollowing' => $profile->isFollowedBy($request->user()),
         ];
     }
 }

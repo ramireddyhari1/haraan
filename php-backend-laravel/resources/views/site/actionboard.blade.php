@@ -108,6 +108,356 @@
 @endphp
 
 <div class="actionboard-root-theme">
+
+{{-- ================================================================= --}}
+{{-- MOBILE APP-STYLE ACTIONBOARD (mirrors the Android app; ≤720px)     --}}
+{{--                                                                    --}}
+{{-- A port of MainScreen.kt CrexMatchesScreen: header (logo tile +     --}}
+{{-- wordmark, search / join-by-code / Create) → Live·Finished·District --}}
+{{-- ·State tabs with a sliding indicator → grouped live-feed cards     --}}
+{{-- ("Live in your district" / "Featured matches") → District Home     --}}
+{{-- card + ranked-XP podium/list boards → floating bottom bar.         --}}
+{{-- Values track the app's tokens (LightBackground #F5F5F5, accent     --}}
+{{-- #2563EB, T.BgPage #EBEBF0 on board tabs); change both together.    --}}
+{{-- ================================================================= --}}
+@php
+    // ONE list, already ranked by the server (starred → nearest → live → fresh).
+    // Admin curation shows as a ⭐ on the card instead of its own section, so the
+    // feed stays a single scannable column.
+    $abFeedRows = collect($abFeed ?? []);
+    $abSummary  = $abDistrictSummary ?? null;
+    $abBoards   = [
+        'district' => ['rows' => collect($abDistrictBoard ?? []), 'location' => $abSummary['district'] ?? (auth()->user()->district ?? null)],
+        'state'    => ['rows' => collect($abStateBoard ?? []),    'location' => auth()->user()->state ?? null],
+    ];
+
+    // Port of CrexUI.teamShortCode — compact codes (KP, PP) instead of long names.
+    $abCode = function (string $raw): string {
+        $name = trim($raw);
+        if ($name === '') return '?';
+        if (mb_strlen($name) <= 4 && $name === mb_strtoupper($name)) return $name;
+        $words = preg_split('/[\s\-_]+/u', $name, -1, PREG_SPLIT_NO_EMPTY);
+        if (count($words) >= 2) {
+            return implode('', array_map(fn ($w) => mb_strtoupper(mb_substr($w, 0, 1)), array_slice($words, 0, 4)));
+        }
+        $w = mb_strtolower(preg_replace('/[^\p{L}\p{N}]/u', '', $words[0]));
+        foreach (['palle','palli','pally','halli','nagaram','nagar','puram','palem','valasa','cherla','konda','gudem','peta','pet','wada','vada','giri','puri','pur','bad'] as $suf) {
+            if (mb_strlen($w) > mb_strlen($suf) + 1 && str_ends_with($w, $suf)) {
+                return mb_strtoupper(mb_substr($w, 0, 1) . mb_substr($suf, 0, 1));
+            }
+        }
+        return mb_strtoupper(mb_substr($w, 0, 3));
+    };
+
+    // Port of playerColor — stable identity hue per name (JVM String.hashCode).
+    $abColor = function (string $name): string {
+        $palette = ['#2563EB', '#6D28D9', '#0D9488', '#15803D', '#B45309', '#334155', '#0E7490', '#7C2D12'];
+        $h = 0;
+        foreach (preg_split('//u', $name, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+            $h = (int) ((($h * 31) + mb_ord($ch)) % 4294967296);
+            if ($h > 2147483647) $h -= 4294967296;
+        }
+        return $palette[abs($h) % count($palette)];
+    };
+
+    $abInitials = function (string $name): string {
+        $parts = preg_split('/\s+/u', trim($name), -1, PREG_SPLIT_NO_EMPTY);
+        return mb_strtoupper(implode('', array_map(fn ($p) => mb_substr($p, 0, 1), array_slice($parts, 0, 2))));
+    };
+
+    // A side "hasn't batted" when it holds no runs and no balls faced.
+    $abYetToBat = function (string $score, string $overs): bool {
+        $s = trim($score); $o = trim($overs);
+        return ($s === '' || $s === '0' || $s === '0-0' || $s === '0/0')
+            && ($o === '' || $o === '0' || str_starts_with($o, '0.0'));
+    };
+
+    $abGroups = [];
+    // A single location-ordered list. Named for what it is — calling it "Featured"
+    // when it holds everything would be a lie.
+    if ($abFeedRows->isNotEmpty()) $abGroups[] = ['title' => 'Matches near you', 'rows' => $abFeedRows];
+
+    $abMedals = [
+        1 => ['grad' => 'linear-gradient(180deg,#FFF3C0,#F3CB57,#CF9A1C)', 'rim' => '#FFEBA6', 'ink' => '#5A3F00'],
+        2 => ['grad' => 'linear-gradient(180deg,#F6F9FD,#D4DBE6,#A5AFC0)', 'rim' => '#FFFFFF', 'ink' => '#374052'],
+        3 => ['grad' => 'linear-gradient(180deg,#F6CFA3,#D99457,#A75F2B)', 'rim' => '#F8D8B4', 'ink' => '#4A2A0E'],
+    ];
+@endphp
+
+<div class="mab" id="mab">
+    {{-- Fixed app bar — lifts (shadow) as the list scrolls beneath it. --}}
+    <div class="mab__bar" id="mabBar">
+        <div class="mab__head">
+            <span class="mab__logo"><img src="{{ asset('images/haraan-mark.png') }}" alt="" onerror="this.style.display='none'"></span>
+            <span class="mab__word">Haraan</span>
+            <span class="mab__sp"></span>
+            <a class="mab__ic" href="/search" aria-label="Search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.2" y2="16.2"></line></svg>
+            </a>
+            <button class="mab__ic" type="button" onclick="mabJoinByCode()" aria-label="Join by code">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+            </button>
+            @auth
+                <a class="mab__create" href="{{ route('site.gamehub.actionboard.create') }}">
+            @else
+                <a class="mab__create" href="#" onclick="event.preventDefault();var b=document.getElementById('loginBtn');if(b)b.click();">
+            @endauth
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Create
+            </a>
+        </div>
+
+        {{-- Live / Finished / District / State strip with the sliding indicator. --}}
+        <div class="mab__tabs" role="tablist">
+            <button class="mab__tab is-on" role="tab" data-i="0" onclick="mabTab(0)">
+                <span class="mab__tabic">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+                    <span class="mab__pulse"></span>
+                </span>
+                Live
+            </button>
+            <button class="mab__tab" role="tab" data-i="1" onclick="mabTab(1)">
+                <span class="mab__tabic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"></path></svg></span>
+                Finished
+            </button>
+            <button class="mab__tab" role="tab" data-i="2" onclick="mabTab(2)">
+                <span class="mab__tabic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 11V3H7v4H3v14h8v-4h2v4h8V11h-4zM7 19H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm4 4H9v-2h2v2zm0-4H9V9h2v2zm0-4H9V5h2v2zm4 8h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm4 12h-2v-2h2v2zm0-4h-2v-2h2v2z"></path></svg></span>
+                District
+            </button>
+            <button class="mab__tab" role="tab" data-i="3" onclick="mabTab(3)">
+                <span class="mab__tabic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 2 7v2h20V7L12 2zM4 11v6h3v-6H4zm6.5 0v6h3v-6h-3zM17 11v6h3v-6h-3zM2 21h20v-2H2v2z"></path></svg></span>
+                State
+            </button>
+            <span class="mab__ind" id="mabInd"></span>
+        </div>
+    </div>
+
+    <div class="mab__body">
+        {{-- ── TAB 0: LIVE ─────────────────────────────────────────────── --}}
+        <div class="mab__panel is-on" id="mabPanel0">
+            <div class="mab__cricket">
+                @forelse ($abGroups as $group)
+                    <div class="mab__ltitle"><span class="mab__ldot"></span><span class="mab__ltxt">{{ $group['title'] }}</span><span class="mab__lsee">See all</span></div>
+                    <div class="mab__group">
+                        @foreach ($group['rows'] as $gi => $m)
+                            @php
+                                // Batting side on top (LiveFeedGroup) — top row is always the batting one.
+                                $swap = ($m['battingTeam'] ?? 1) === 2;
+                                $t1 = $swap ? $m['team2'] : $m['team1'];  $t2 = $swap ? $m['team1'] : $m['team2'];
+                                $s1 = $swap ? $m['score2'] : $m['score1']; $s2 = $swap ? $m['score1'] : $m['score2'];
+                                $o1 = $swap ? $m['overs2'] : $m['overs1']; $o2 = $swap ? $m['overs1'] : $m['overs2'];
+                                $c1 = $abCode($t1); $c2 = $abCode($t2);
+                                $yet2 = $abYetToBat($s2, $o2);
+                                $place = $m['locality'] !== '' ? $m['locality'] : (strcasecmp($m['venue'], 'Custom Match') !== 0 ? $m['venue'] : '');
+                                $loc = implode(' · ', array_filter([$place, $m['district']]));
+                            @endphp
+                            @if ($gi > 0)<div class="mab__gdiv"></div>@endif
+                            <a class="mab__match" href="{{ route('site.gamehub.actionboard.match', ['id' => $m['id']]) }}">
+                                <div class="mab__mctx">
+                                    {{-- Admin-featured: a star, not a section. Visible to everyone. --}}
+                                    @if ($m['isFeatured'] ?? false)
+                                        <span class="mab__star" title="Featured by Haraan" aria-label="Featured">
+                                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.58 1.11 6.47L12 17.45 6.19 20.5 7.3 14.03 2.6 9.45l6.5-.95L12 2.6z"></path></svg>
+                                        </span>
+                                    @endif
+                                    @if ($m['isLive'])
+                                        <span class="mab__beacon"><span></span></span>
+                                        <span class="mab__mlive">LIVE</span>
+                                    @else
+                                        <span class="mab__msched">{{ strtoupper($m['status'] ?: 'SCHEDULED') }}</span>
+                                    @endif
+                                    <span class="mab__mdot"></span>
+                                    <span class="mab__mcomp">{{ strtoupper($m['competition'] !== '' ? $m['competition'] : 'Match') }}</span>
+                                    @if ($loc !== '')
+                                        <span class="mab__mdot"></span>
+                                        <span class="mab__mloc">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+                                            {{ $loc }}
+                                        </span>
+                                    @endif
+                                    {{-- Only ever a measured distance — never a guess. --}}
+                                    @if (($m['distanceKm'] ?? null) !== null)
+                                        <span class="mab__mdot"></span>
+                                        <span class="mab__mkm">{{ $m['distanceKm'] < 1 ? 'Under 1 km' : $m['distanceKm'] . ' km' }}</span>
+                                    @endif
+                                    @if ($m['isMine'])
+                                        <span class="mab__you">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path></svg>
+                                            YOU
+                                        </span>
+                                    @endif
+                                </div>
+                                <div class="mab__hair"></div>
+                                <div class="mab__mbody">
+                                    <div class="mab__mteams">
+                                        <div class="mab__trow">
+                                            <span class="mab__tlogo" style="background: {{ $abColor($t1) }}">{{ mb_substr($c1, 0, 3) }}</span>
+                                            <span class="mab__tname is-bat">{{ $c1 }}</span>
+                                            <span class="mab__tscore is-bat">{{ $s1 }}@if ($o1 !== '')<small>{{ $o1 }}</small>@endif</span>
+                                        </div>
+                                        <div class="mab__trow">
+                                            <span class="mab__tlogo is-dim" style="background: {{ $abColor($t2) }}">{{ mb_substr($c2, 0, 3) }}</span>
+                                            <span class="mab__tname is-dim">{{ $c2 }}</span>
+                                            @if ($yet2)
+                                                <span class="mab__tyet">Yet to bat</span>
+                                            @else
+                                                <span class="mab__tscore is-dim">{{ $s2 }}@if ($o2 !== '')<small>{{ $o2 }}</small>@endif</span>
+                                            @endif
+                                        </div>
+                                    </div>
+                                    <div class="mab__vdiv"></div>
+                                    <div class="mab__mstat">
+                                        <b>{{ $m['isLive'] ? 'LIVE' : ($m['status'] !== '' ? $m['status'] : 'Scheduled') }}</b>
+                                        <span>{{ $m['competition'] }}</span>
+                                    </div>
+                                </div>
+                            </a>
+                        @endforeach
+                    </div>
+                @empty
+                    <div class="mab__empty">No live matches in your area yet</div>
+                @endforelse
+            </div>
+            <div class="mab__othersport mab__empty" hidden></div>
+        </div>
+
+        {{-- ── TAB 1: FINISHED — no real finished-match feed is wired yet. ── --}}
+        <div class="mab__panel" id="mabPanel1">
+            <div class="mab__empty" data-tpl="No finished {sport} matches yet">No finished Cricket matches yet</div>
+        </div>
+
+        {{-- ── TAB 2 / 3: DISTRICT & STATE boards ──────────────────────── --}}
+        @foreach (['district' => 2, 'state' => 3] as $scopeKey => $tabIndex)
+            @php $board = $abBoards[$scopeKey]; $rows = $board['rows']; @endphp
+            <div class="mab__panel" id="mabPanel{{ $tabIndex }}">
+                @if ($scopeKey === 'district' && $abSummary !== null)
+                    {{-- District Home — the local-identity snapshot. --}}
+                    <div class="mab__dcard">
+                        <div class="mab__drow1">
+                            <div class="mab__dwho">
+                                <span class="mab__dk">YOUR DISTRICT</span>
+                                <span class="mab__dname">{{ $abSummary['district'] }}</span>
+                            </div>
+                            @if (($abSummary['districtRank'] ?? null) !== null && !empty($abSummary['state']))
+                                <div class="mab__drank">
+                                    <b>#{{ $abSummary['districtRank'] }}</b>
+                                    <span>in {{ $abSummary['state'] }}</span>
+                                </div>
+                            @endif
+                        </div>
+                        <div class="mab__dtiles">
+                            <div class="mab__dtile"><b style="color:#00C853">{{ $abSummary['liveMatches'] }}</b><span>Live</span></div>
+                            <div class="mab__dtile"><b>{{ $abSummary['players'] }}</b><span>Players</span></div>
+                            <div class="mab__dtile"><b>{{ $abSummary['totalMatches'] }}</b><span>Matches</span></div>
+                        </div>
+                        @if (($abSummary['topBatter'] ?? null) !== null || ($abSummary['topBowler'] ?? null) !== null)
+                            <div class="mab__dsep"></div>
+                            @if (($abSummary['topBatter'] ?? null) !== null)
+                                <div class="mab__dleader"><span>Top Batter</span><b>{{ $abSummary['topBatter']['name'] ?: $abSummary['topBatter']['player_id'] }}</b><i>{{ $abSummary['topBatter']['value'] }} runs</i></div>
+                            @endif
+                            @if (($abSummary['topBowler'] ?? null) !== null)
+                                <div class="mab__dleader"><span>Top Bowler</span><b>{{ $abSummary['topBowler']['name'] ?: $abSummary['topBowler']['player_id'] }}</b><i>{{ $abSummary['topBowler']['value'] }} wkts</i></div>
+                            @endif
+                        @endif
+                    </div>
+                @endif
+
+                @php
+                    $top3 = $rows->filter(fn ($r) => ($r['rank'] ?? 99) <= 3)->sortBy('rank')->values();
+                    $rest = $rows->filter(fn ($r) => ($r['rank'] ?? 0) > 3)->sortBy('rank')->values();
+                    $boardTitle = $board['location']
+                        ? ($scopeKey === 'state' ? $board['location'] : $board['location'] . ' District')
+                        : ($scopeKey === 'state' ? 'State Board' : 'District Board');
+                @endphp
+
+                @if ($top3->isNotEmpty())
+                    {{-- Podium — 2nd | 1st | 3rd on metallic pedestals. --}}
+                    <div class="mab__podium">
+                        <div class="mab__phead">
+                            <div>
+                                <b>{{ $boardTitle }}</b>
+                                <span class="mab__pfresh"><i></i>Updated just now</span>
+                            </div>
+                            <span class="mab__pcount">{{ $rows->count() }} ranked {{ $rows->count() === 1 ? 'player' : 'players' }}</span>
+                        </div>
+                        <div class="mab__phair"></div>
+                        <div class="mab__pslots">
+                            @foreach ([2, 1, 3] as $rk)
+                                @php $p = $top3->firstWhere('rank', $rk); @endphp
+                                @if ($p === null)
+                                    <div class="mab__pslot"></div>
+                                @else
+                                    @php $medal = $abMedals[$rk]; $isFirst = $rk === 1; @endphp
+                                    <a class="mab__pslot" href="{{ !empty($p['playerId']) ? '/player/' . $p['playerId'] : '#' }}">
+                                        <span class="mab__pcrown">
+                                            @if ($isFirst)
+                                                <svg viewBox="0 0 28 16" fill="#F3CB57"><path d="M0 16 1.7 6.7 7.6 9.6 14 .6l6.4 9 5.9-2.9L28 16z"></path></svg>
+                                            @endif
+                                        </span>
+                                        <span class="mab__pav {{ $isFirst ? 'is-first' : '' }}" style="background: {{ $abColor($p['name']) }}; border-color: {{ $medal['rim'] }}">
+                                            {{ $abInitials($p['name']) }}
+                                            <span class="mab__pcoin" style="background: {{ $medal['grad'] }}; color: {{ $medal['ink'] }}">{{ $rk }}</span>
+                                        </span>
+                                        <span class="mab__pname {{ $isFirst ? 'is-first' : '' }}">{{ $p['name'] }}</span>
+                                        <span class="mab__pxp {{ $isFirst ? 'is-first' : '' }}" data-count="{{ (int) ($p['xp'] ?? 0) }}">{{ $p['xp'] ?? 0 }}</span>
+                                        <span class="mab__psub">{{ ($p['matches'] ?? 0) > 0 ? $p['matches'] . ' matches' : 'XP' }}</span>
+                                        <span class="mab__pped {{ $isFirst ? 'is-first' : '' }}" style="background: {{ $medal['grad'] }}"><i style="color: {{ $medal['ink'] }}">{{ $rk }}</i></span>
+                                    </a>
+                                @endif
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
+                @if ($rest->isNotEmpty())
+                    <div class="mab__list">
+                        @foreach ($rest as $ri => $p)
+                            @if ($ri > 0)<div class="mab__gdiv"></div>@endif
+                            <a class="mab__lrow" href="{{ !empty($p['playerId']) ? '/player/' . $p['playerId'] : '#' }}">
+                                <span class="mab__lrank">{{ $p['rank'] }}</span>
+                                <span class="mab__lav" style="background: {{ $abColor($p['name']) }}">{{ $abInitials($p['name']) }}</span>
+                                <span class="mab__lwho">
+                                    <b>{{ $p['name'] }}</b>
+                                    <span>{{ $scopeKey === 'state' ? ($p['district'] ?? '') : ($p['state'] ?? '') }}</span>
+                                </span>
+                                <span class="mab__lxp"><b>{{ $p['xp'] ?? 0 }}</b><span>XP</span></span>
+                            </a>
+                        @endforeach
+                    </div>
+                @endif
+
+                @if ($rows->isEmpty())
+                    <div class="mab__empty">No ranked players in this {{ $scopeKey }} yet</div>
+                @endif
+            </div>
+        @endforeach
+    </div>
+
+    {{-- Floating bottom bar — the app's CrexBottomBar. --}}
+    <nav class="mab__nav" aria-label="ActionBoard">
+        <a class="mab__navi" href="{{ route('site.gamehub') }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>
+            Home
+        </a>
+        <button class="mab__navi is-on" type="button" data-sport="Cricket" onclick="mabSport('Cricket', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle></svg>
+            Cricket
+        </button>
+        <button class="mab__navi" type="button" data-sport="Badminton" onclick="mabSport('Badminton', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="9.5" cy="9.5" rx="6.2" ry="5.2" transform="rotate(-45 9.5 9.5)"></ellipse><path d="M13.5 13.5 20 20"></path></svg>
+            Badminton
+        </button>
+        <button class="mab__navi" type="button" data-sport="Football" onclick="mabSport('Football', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path></svg>
+            Football
+        </button>
+        <a class="mab__navi" href="/profile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"></circle><path d="M5 20a7 7 0 0 1 14 0"></path></svg>
+            Player
+        </a>
+    </nav>
+</div>
+
     <!-- Custom Top Navigation Header (Desktop) -->
     <header class="actionboard-desktop-header">
         <div class="actionboard-header-container">
@@ -2329,5 +2679,370 @@ main.container {
             if (mobPanel) mobPanel.classList.add('active');
         }
     }
+</script>
+
+<style>
+/* =============================================================================
+   MOBILE APP-PARITY ACTIONBOARD (.mab) — port of MainScreen.kt CrexMatchesScreen.
+   Hidden on desktop; ≤720px it replaces the CREX dashboard entirely. Tokens track
+   the app: LightBackground #F5F5F5, accent #2563EB, tabs idle #94A3B8, T.BgPage
+   #EBEBF0 (District/State), card radius 14, bevel border #F3F6FA→#D9DFEA.
+   ========================================================================== */
+.mab { display: none; }
+
+@media (max-width: 720px) {
+    .mab { display: block; }
+    .actionboard-desktop-header,
+    .actionboard-mobile-nav,
+    .actionboard-dashboard-container { display: none !important; }
+    .actionboard-root-theme { background: #F5F5F5 !important; padding-bottom: 0; }
+    .actionboard-root-theme:has(.mab.is-board) { background: #EBEBF0 !important; }
+
+    .mab {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #0F172A;
+        min-height: 100vh;
+        padding-bottom: 108px; /* clears the floating bottom bar */
+        overflow-x: clip;
+        max-width: 100vw;
+    }
+
+    /* ── App bar (CrexHeaderSection) ─────────────────────────────────── */
+    .mab__bar {
+        position: sticky; top: 0; z-index: 60;
+        background: #F5F5F5;
+        padding: 12px 16px 0;
+        transition: box-shadow .25s ease, background .25s ease;
+    }
+    .mab.is-board .mab__bar { background: #EBEBF0; }
+    .mab__bar.is-lifted { box-shadow: 0 4px 14px rgba(15, 23, 42, .10); }
+    .mab__head { display: flex; align-items: center; gap: 8px; padding: 8px 0 12px; min-width: 0; }
+    .mab__logo {
+        width: 36px; height: 36px; border-radius: 12px; background: #F1F5F9;
+        display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    }
+    .mab__logo img { width: 22px; height: 22px; object-fit: contain; }
+    .mab__word { font-size: 18px; font-weight: 800; letter-spacing: -.5px; color: #111827; white-space: nowrap; }
+    .mab__sp { flex: 1; min-width: 0; }
+    .mab__ic {
+        width: 38px; height: 38px; border-radius: 12px; background: #F1F5F9; border: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: #6B7280; cursor: pointer; flex: 0 0 auto; padding: 0; text-decoration: none;
+    }
+    .mab__ic svg { width: 18px; height: 18px; }
+    .mab__create {
+        height: 38px; border-radius: 22px; background: #2563EB; color: #fff;
+        display: inline-flex; align-items: center; gap: 4px; padding: 0 12px;
+        font-size: 13px; font-weight: 700; text-decoration: none; flex: 0 0 auto;
+        white-space: nowrap;
+    }
+    .mab__create svg { width: 16px; height: 16px; }
+
+    /* ── Tabs strip (CrexTabsSection) ────────────────────────────────── */
+    .mab__tabs { position: relative; display: flex; padding-bottom: 0; }
+    .mab__tab {
+        flex: 1; background: none; border: 0; cursor: pointer;
+        display: flex; flex-direction: column; align-items: center; gap: 5px;
+        padding: 8px 0 10px; font-size: 12.5px; font-weight: 600; color: #94A3B8;
+        transition: color .2s ease;
+    }
+    .mab__tab.is-on { color: #2563EB; font-weight: 700; }
+    .mab__tabic { position: relative; width: 17px; height: 17px; }
+    .mab__tabic svg { width: 17px; height: 17px; display: block; }
+    .mab__pulse {
+        position: absolute; top: -3px; right: -5px; width: 7px; height: 7px;
+        border-radius: 50%; background: #E11D2A;
+        animation: mabPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes mabPulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    .mab__ind {
+        position: absolute; bottom: 0; left: 0; width: 12.5%; height: 2.5px;
+        background: #2563EB; border-radius: 2px 2px 0 0;
+        transform: translateX(50%); /* centred in slot 0 at rest: (25% − 12.5%)/2 = 6.25% of track = 50% of self */
+        transition: transform .3s cubic-bezier(.2, 0, 0, 1);
+    }
+    .mab__tabs::after {
+        content: ""; position: absolute; left: -16px; right: -16px; bottom: -1px;
+        height: 1px; background: #E2E8F0;
+    }
+
+    /* ── Panels ──────────────────────────────────────────────────────── */
+    .mab__body { padding: 4px 16px 0; }
+    .mab__panel { display: none; }
+    .mab__panel.is-on { display: block; }
+    .mab__empty { text-align: center; color: #94A3B8; font-size: 13px; padding: 40px 0; }
+
+    /* League title (CrexLeagueTitle) */
+    .mab__ltitle { display: flex; align-items: center; padding: 10px 0; }
+    .mab__ldot { width: 8px; height: 8px; border-radius: 50%; background: #2563EB; margin-right: 9px; }
+    .mab__ltxt { flex: 1; font-size: 15px; font-weight: 800; letter-spacing: -.4px; color: #0F172A; }
+    .mab__lsee { font-size: 12px; font-weight: 600; color: #2563EB; }
+
+    /* Match group (MatchGroup) — one surface, rows split by inset hairlines */
+    .mab__group {
+        background: #fff; border-radius: 14px; margin-bottom: 8px;
+        border: 1px solid #D9DFEA;
+        border-top-color: #F3F6FA; /* lit bevel: lighter top, darker bottom */
+        box-shadow: 0 8px 16px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .08);
+        overflow: hidden;
+    }
+    .mab__gdiv { height: 1px; background: #EEF0F4; margin: 0 14px; }
+
+    /* Match row (MatchLiveContent) */
+    .mab__match { display: block; text-decoration: none; color: inherit; }
+    .mab__match:active { transform: scale(.98); transition: transform .12s ease; }
+    .mab__mctx { display: flex; align-items: center; gap: 6px; padding: 9px 14px; min-width: 0; }
+    .mab__beacon {
+        width: 10px; height: 10px; border-radius: 50%; background: rgba(225, 29, 42, .2);
+        display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    }
+    .mab__beacon span { width: 6px; height: 6px; border-radius: 50%; background: #E11D2A; }
+    .mab__mlive { font-size: 10px; font-weight: 800; letter-spacing: .8px; color: #E11D2A; }
+    .mab__msched { font-size: 10px; font-weight: 700; letter-spacing: .6px; color: #94A3B8; }
+    .mab__mdot { width: 3px; height: 3px; border-radius: 50%; background: #CBD5E1; flex: 0 0 auto; }
+    .mab__mcomp { font-size: 10px; font-weight: 700; letter-spacing: .6px; color: #2563EB; white-space: nowrap; }
+    .mab__mloc {
+        display: inline-flex; align-items: center; gap: 3px; min-width: 0; flex: 1;
+        font-size: 11px; color: #94A3B8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mab__mloc svg { width: 12px; height: 12px; flex: 0 0 auto; }
+    /* Measured distance — quieter than the place name it follows. */
+    .mab__mkm { font-size: 11px; color: #94A3B8; white-space: nowrap; flex: 0 0 auto; }
+    /* Admin-featured star. Amber reads as "picked", not as a live/status colour. */
+    .mab__star { display: inline-flex; align-items: center; color: #F59E0B; flex: 0 0 auto; }
+    .mab__star svg { width: 13px; height: 13px; }
+    .mab__you {
+        display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
+        background: #2563EB; color: #fff; border-radius: 6px; padding: 2px 6px;
+        font-size: 9px; font-weight: 800; letter-spacing: .6px; flex: 0 0 auto;
+    }
+    .mab__you svg { width: 11px; height: 11px; }
+    .mab__hair { height: 1px; background: #F0F2F5; margin: 0 14px; }
+    .mab__mbody { display: flex; align-items: center; padding: 14px; }
+    .mab__mteams { flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .mab__trow { display: flex; align-items: center; min-width: 0; }
+    .mab__tlogo {
+        width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 10px; font-weight: 800;
+        border: 1px solid rgba(15, 23, 42, .1); margin-right: 10px;
+    }
+    .mab__tlogo.is-dim { opacity: .4; }
+    .mab__tname { flex: 1; font-size: 16px; font-weight: 600; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mab__tname.is-bat { font-weight: 800; }
+    .mab__tname.is-dim, .mab__tscore.is-dim { color: #B0BAC8; }
+    .mab__tscore {
+        display: flex; flex-direction: column; align-items: flex-end;
+        font-size: 18px; letter-spacing: -.5px; color: #0F172A;
+        font-variant-numeric: tabular-nums;
+    }
+    .mab__tscore.is-bat { font-weight: 800; }
+    .mab__tscore small { font-size: 11px; font-weight: 400; color: #B0BAC8; }
+    .mab__tyet { font-size: 13px; font-weight: 500; color: #B0BAC8; }
+    .mab__vdiv { width: 1px; height: 60px; background: #F0F2F5; margin: 0 14px; flex: 0 0 auto; }
+    .mab__mstat { width: 90px; flex: 0 0 auto; text-align: center; }
+    .mab__mstat b { display: block; font-size: 13px; font-weight: 800; color: #15803D; }
+    .mab__mstat span { display: block; margin-top: 3px; font-size: 11px; line-height: 15px; color: #94A3B8; }
+
+    /* ── District Home card (DistrictHomeCard) ───────────────────────── */
+    .mab__dcard {
+        background: #fff; border-radius: 16px; padding: 16px; margin: 8px 0;
+        border: 1px solid #D9DFEA; border-top-color: #F3F6FA;
+        box-shadow: 0 8px 16px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .08);
+    }
+    .mab__drow1 { display: flex; align-items: center; }
+    .mab__dwho { flex: 1; min-width: 0; }
+    .mab__dk { display: block; font-size: 11px; font-weight: 700; letter-spacing: .8px; color: #2563EB; }
+    .mab__dname { display: block; margin-top: 2px; font-size: 22px; font-weight: 800; color: #0A0A0A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mab__drank { border-radius: 12px; background: rgba(37, 99, 235, .08); padding: 8px 14px; text-align: center; flex: 0 0 auto; }
+    .mab__drank b { display: block; font-size: 20px; font-weight: 800; color: #2563EB; }
+    .mab__drank span { display: block; font-size: 10px; font-weight: 500; color: #9A9AA8; }
+    .mab__dtiles { display: flex; gap: 10px; margin-top: 14px; }
+    .mab__dtile { flex: 1; border-radius: 12px; background: #F5F6FA; padding: 12px 0; text-align: center; }
+    .mab__dtile b { display: block; font-size: 20px; font-weight: 800; color: #0A0A0A; }
+    .mab__dtile span { display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #9A9AA8; }
+    .mab__dsep { height: 1px; background: #EEF0F4; margin: 14px 0 12px; }
+    .mab__dleader { display: flex; align-items: center; margin-top: 10px; }
+    .mab__dleader:first-of-type { margin-top: 0; }
+    .mab__dleader span { width: 84px; flex: 0 0 auto; font-size: 12px; font-weight: 600; color: #9A9AA8; }
+    .mab__dleader b { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: #0A0A0A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mab__dleader i { font-style: normal; font-size: 13px; font-weight: 600; color: #2563EB; }
+
+    /* ── Podium (LeaderboardPodium) ──────────────────────────────────── */
+    .mab__podium {
+        background: #fff; border-radius: 20px; margin: 12px 0 10px;
+        box-shadow: 0 6px 14px rgba(0, 0, 0, .07);
+        overflow: hidden;
+    }
+    .mab__phead { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 10px; }
+    .mab__phead b { display: block; font-size: 13px; font-weight: 700; letter-spacing: -.2px; color: #0A0A0A; }
+    .mab__pfresh { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 9.5px; font-weight: 500; color: #9A9AA8; }
+    .mab__pfresh i { width: 5px; height: 5px; border-radius: 50%; background: #12824A; }
+    .mab__pcount { font-size: 10.5px; font-weight: 500; color: #9A9AA8; }
+    .mab__phair { height: 1px; background: #F2F2F5; }
+    .mab__pslots { display: flex; align-items: flex-end; padding: 20px 8px 0; }
+    .mab__pslot { flex: 1; display: flex; flex-direction: column; align-items: center; text-decoration: none; color: inherit; min-width: 0; }
+    .mab__pcrown { height: 18px; display: flex; align-items: center; margin-bottom: 4px; }
+    .mab__pcrown svg { width: 28px; height: 16px; }
+    .mab__pav {
+        position: relative; width: 48px; height: 48px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 13px; font-weight: 800;
+        border: 2.5px solid; box-shadow: 0 4px 10px rgba(0, 0, 0, .16);
+    }
+    .mab__pav.is-first { width: 62px; height: 62px; font-size: 17px; border-width: 3px; }
+    .mab__pcoin {
+        position: absolute; right: -2px; bottom: -2px; width: 19px; height: 19px;
+        border-radius: 50%; border: 1.5px solid #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 9.5px; font-weight: 900;
+    }
+    .mab__pav.is-first .mab__pcoin { width: 22px; height: 22px; font-size: 11px; }
+    .mab__pname {
+        margin-top: 7px; max-width: 100%; padding: 0 4px;
+        font-size: 11px; font-weight: 600; letter-spacing: -.2px; color: #0A0A0A;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+    }
+    .mab__pname.is-first { font-size: 12.5px; font-weight: 700; }
+    .mab__pxp { margin-top: 1px; font-size: 20px; font-weight: 800; letter-spacing: -1.5px; color: #0A0A0A; font-variant-numeric: tabular-nums; }
+    .mab__pxp.is-first { font-size: 27px; }
+    .mab__psub { margin-top: 3px; font-size: 10px; font-weight: 500; color: #9A9AA8; }
+    .mab__pped {
+        width: 100%; margin-top: 10px; height: 48px; border-radius: 10px 10px 0 0;
+        display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+    }
+    .mab__pped::before {
+        content: ""; position: absolute; inset: 0 0 auto; height: 46px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, .45), rgba(255, 255, 255, 0));
+    }
+    .mab__pslot:nth-child(1) .mab__pped { height: 64px; }
+    .mab__pped.is-first { height: 90px; }
+    .mab__pped i { font-style: normal; font-size: 30px; font-weight: 900; letter-spacing: -2px; opacity: .5; position: relative; }
+    .mab__pped.is-first i { font-size: 40px; }
+
+    /* ── List group (LeaderboardListGroup / LeaderboardRowContent) ───── */
+    .mab__list {
+        background: #fff; border-radius: 16px; margin-bottom: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+        overflow: hidden;
+    }
+    .mab__list .mab__gdiv { margin: 0 16px; background: #EBEBEF; }
+    .mab__lrow { display: flex; align-items: center; padding: 13px 12px; text-decoration: none; color: inherit; }
+    .mab__lrank { width: 24px; flex: 0 0 auto; text-align: center; font-size: 13px; font-weight: 700; color: #B0B0BE; font-variant-numeric: tabular-nums; }
+    .mab__lav {
+        width: 42px; height: 42px; border-radius: 50%; margin: 0 12px; flex: 0 0 auto;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 12.5px; font-weight: 700;
+        border: 2px solid rgba(37, 99, 235, .16); box-shadow: 0 2px 6px rgba(0, 0, 0, .12);
+    }
+    .mab__lwho { flex: 1; min-width: 0; }
+    .mab__lwho b { display: block; font-size: 14px; font-weight: 700; letter-spacing: -.2px; color: #0A0A0A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mab__lwho span { display: block; margin-top: 2px; font-size: 11px; color: #9A9AA8; }
+    .mab__lxp { text-align: right; flex: 0 0 auto; }
+    .mab__lxp b { display: block; font-size: 18px; font-weight: 800; letter-spacing: -.5px; color: #0A0A0A; font-variant-numeric: tabular-nums; }
+    .mab__lxp span { display: block; margin-top: 1px; font-size: 8.5px; font-weight: 600; letter-spacing: .5px; color: #9A9AA8; }
+
+    /* ── Floating bottom bar (CrexBottomBar) ─────────────────────────── */
+    .mab__nav {
+        position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 70;
+        height: 72px; background: #fff; border-radius: 26px; border: 1px solid #EDEFF3;
+        box-shadow: 0 7px 22px rgba(0, 0, 0, .09);
+        display: flex; align-items: center; justify-content: space-around;
+        padding: 0 4px;
+        padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    .mab__navi {
+        background: none; border: 0; cursor: pointer; text-decoration: none;
+        display: flex; flex-direction: column; align-items: center; gap: 3px;
+        font-size: 10px; font-weight: 500; color: #9AA0AC; width: 19%;
+        padding: 6px 0; font-family: inherit;
+    }
+    .mab__navi svg { width: 24px; height: 24px; transition: transform .25s cubic-bezier(.3, 1.4, .6, 1); }
+    .mab__navi.is-on { color: #2563EB; font-weight: 700; }
+    .mab__navi.is-on svg { transform: scale(1.14) translateY(-3px); }
+}
+</style>
+
+<script>
+(function () {
+    var mab = document.getElementById('mab');
+    if (!mab) return;
+
+    var currentTab = 0;
+    var currentSport = 'Cricket';
+
+    // App bar lifts (frost + elevation) once content scrolls beneath it.
+    var bar = document.getElementById('mabBar');
+    window.addEventListener('scroll', function () {
+        bar.classList.toggle('is-lifted', window.scrollY > 8);
+    }, { passive: true });
+
+    // Sliding tab indicator — emphasized easing lives in the CSS transition.
+    window.mabTab = function (i) {
+        currentTab = i;
+        mab.querySelectorAll('.mab__tab').forEach(function (t) {
+            t.classList.toggle('is-on', +t.dataset.i === i);
+        });
+        for (var p = 0; p < 4; p++) {
+            document.getElementById('mabPanel' + p).classList.toggle('is-on', p === i);
+        }
+        // Indicator is 12.5% wide; each slot 25% → offset = slot*i + (slot-ind)/2.
+        var ind = document.getElementById('mabInd');
+        ind.style.transform = 'translateX(' + (i * 200 + 50) + '%)';
+        // District/State sit on the app's cooler board background (T.BgPage).
+        mab.classList.toggle('is-board', i >= 2);
+        if (i >= 2) mabCountUp();
+        window.scrollTo({ top: 0 });
+    };
+
+    // Bottom-bar sport switch — only Cricket has a real feed today; other sports
+    // show an honest empty state instead of fabricated fixtures (app parity).
+    window.mabSport = function (sport, btn) {
+        currentSport = sport;
+        mab.querySelectorAll('.mab__navi[data-sport]').forEach(function (b) {
+            b.classList.toggle('is-on', b === btn);
+        });
+        var cricket = mab.querySelector('.mab__cricket');
+        var other = mab.querySelector('.mab__othersport');
+        var isCricket = sport === 'Cricket';
+        cricket.hidden = !isCricket;
+        other.hidden = isCricket;
+        if (!isCricket) other.textContent = 'No live ' + sport + ' matches yet';
+        var fin = document.querySelector('#mabPanel1 .mab__empty');
+        fin.textContent = fin.dataset.tpl.replace('{sport}', sport);
+    };
+
+    // Join a private match by its share code (the code itself is the grant).
+    window.mabJoinByCode = function () {
+        var code = prompt('Enter the match share code');
+        if (!code || !code.trim()) return;
+        fetch('/api/live-matches/code/' + encodeURIComponent(code.trim().toUpperCase()))
+            .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+            .then(function (j) {
+                var id = j.id || (j.data && j.data.id);
+                if (id) window.location = '/gamehub/actionboard/match/' + id;
+                else throw 0;
+            })
+            .catch(function () { alert('No match found for that code.'); });
+    };
+
+    // Count-up the podium headline scores so the board feels alive (PodiumSlot).
+    var counted = false;
+    function mabCountUp() {
+        if (counted) return;
+        counted = true;
+        mab.querySelectorAll('.mab__pxp[data-count]').forEach(function (el) {
+            var target = +el.dataset.count || 0;
+            var t0 = null;
+            function step(ts) {
+                if (t0 === null) t0 = ts;
+                var k = Math.min((ts - t0) / 850, 1);
+                el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3)));
+                if (k < 1) requestAnimationFrame(step);
+            }
+            requestAnimationFrame(step);
+        });
+    }
+})();
 </script>
 @endsection

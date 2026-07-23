@@ -1,0 +1,39 @@
+<resources>
+    <string name="action_score">स्कोर</string>
+    <string name="live">लाइव</string>
+    <string name="language">भाषा</string>
+    <string name="choose_language">अपनी भाषा चुनें</string>
+
+    <string name="tab_info">जानकारी</string>
+    <string name="tab_commentary">कमेंट्री</string>
+    <string name="tab_live">लाइव</string>
+    <string name="tab_scorecard">स्कोरकार्ड</string>
+
+    <string name="out">आउट</string>
+    <string name="start_second_innings">दूसरी पारी शुरू करें</string>
+    <string name="innings_start">पारी की शुरुआत</string>
+    <string name="over_complete">ओवर समाप्त</string>
+    <string name="select_opening_bowler">ओपनिंग गेंदबाज़ चुनें</string>
+    <string name="select_next_bowler">अगला गेंदबाज़ चुनें</string>
+    <string name="wicket">विकेट</string>
+    <string name="select_new_batsman">नया बल्लेबाज़ चुनें</string>
+    <string name="innings_complete_fmt">पारी समाप्त · %1$d ओवर</string>
+
+    <string name="toss_title">टॉस</string>
+    <string name="toss_later">बाद में</string>
+    <string name="toss_tap_coin">सिक्के को टैप करके उछालें</string>
+    <string name="toss_tails">टेल्स</string>
+    <string name="toss_who_won">टॉस किसने जीता?</string>
+    <string name="toss_elected_to">टॉस जीतकर टीम ने चुना?</string>
+    <string name="toss_bat">बल्लेबाज़ी</string>
+    <string name="toss_bowl">गेंदबाज़ी</string>
+    <string name="toss_need_help">मदद चाहिए?</string>
+    <string name="toss_lets_play">खेलें</string>
+    <string name="toss_help_hint">सिक्के को टैप करके उछालें, फिर दर्ज करें कि असल में टॉस किसने जीता और उन्होंने क्या चुना।</string>
+    <string name="toss_striker">स्ट्राइकर</string>
+    <string name="toss_non_striker">नॉन-स्ट्राइकर</string>
+    <string name="toss_opening_bowler">ओपनिंग गेंदबाज़</string>
+    <string name="toss_start_match">मैच शुरू करें</string>
+    <string name="toss_no_players">कोई खिलाड़ी नहीं जोड़ा गया — डिफ़ॉल्ट नाम उपयोग होगा।</string>
+    <string name="toss_line_fmt">%1$s ने टॉस जीता और %2$s चुना।</string>
+</resources>

@@ -1,0 +1,14 @@
+package com.example.thanna.data.network
+
+/**
+ * Process-wide holder for the current JWT, read by the OkHttp auth interceptor.
+ *
+ * Kept Context-free on purpose so the shared [ApiClient] needs no Android
+ * dependencies. Populate it on app start / login (from [com.example.thanna.data.TokenStore])
+ * and clear it on logout. Until Hilt lands, auth'd repos may still attach their
+ * own header — this holder is forward-compatible with that migration.
+ */
+object AuthTokenHolder {
+    @Volatile
+    var token: String? = null
+}

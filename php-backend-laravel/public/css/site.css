@@ -1,17 +1,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
-	--background: #f3f5f7;
-	--foreground: #121620;
-	--muted: #5e6777;
+	--background: #F4F7FB;
+	--foreground: #0F172A;
+	--muted: #64748B;
+	--muted-2: #94A3B8;
 	--surface: rgba(255, 255, 255, 0.86);
 	--surface-strong: #ffffff;
-	--border: rgba(18, 22, 32, 0.08);
-	--shadow: 0 20px 55px rgba(18, 22, 32, 0.08);
-	--accent: #121620;
+	--border: #E2E8F0;
+	--shadow: 0 20px 55px rgba(15, 23, 42, 0.08);
+	--accent: #0F172A;
 	--accent-ink: #ffffff;
-	--events: #cc7a14;
-	--gamehub: #1e7f4f;
+	--events: #2563EB;
+	--gamehub: #1B5E20;
+	--gamehub-cta: #00C853;
+	--live: #D32F2F;
 }
 
 * {
@@ -20,21 +23,80 @@
 
 html {
 	scroll-behavior: smooth;
+	/* `clip` (not `hidden`) stops horizontal scroll without turning the root
+	   into a scroll container — the latter silently breaks position: sticky. */
+	overflow-x: clip;
 }
 
 body {
 	margin: 0;
 	color: var(--foreground);
 	font-family: Inter, Arial, Helvetica, sans-serif;
-	background:
-		radial-gradient(circle at top left, rgba(18, 22, 32, 0.05), transparent 34%),
-		linear-gradient(180deg, #fafbfc 0%, #f3f5f7 100%);
+	/* Clean, flat page surface. The colour lives only in the top gradient band
+	   (body::before) — District-style — everything below stays clean. */
+	background: #F5F7FC;
 	min-height: 100vh;
+	overflow-x: clip; /* see html rule: keep sticky headers working */
 }
 
 a {
 	color: inherit;
 	text-decoration: none;
+}
+
+/* Premium top gradient band (District/BookMyShow-style). Colour lives only at
+   the TOP of the page — a soft brand-blue/indigo glow that fades to nothing by
+   ~640px — and everything below is the clean flat page surface. Absolute (not
+   fixed), so it scrolls away as you go down. Desktop-only; breathes softly. */
+@media (min-width: 1200px) {
+	body::before {
+		content: "";
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 640px;
+		z-index: -1;
+		pointer-events: none;
+		background-image:
+			radial-gradient(1200px 640px at 28% -40%, rgba(37, 99, 235, 0.22), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(99, 102, 241, 0.18), transparent 66%),
+			linear-gradient(180deg, #e7eefb 0%, rgba(231, 238, 251, 0) 100%);
+		animation: aurora-breathe 22s ease-in-out infinite alternate;
+	}
+
+	@keyframes aurora-breathe {
+		from { background-position: 0% 0%, 0% 0%, 0 0; opacity: 0.9; }
+		to   { background-position: 2% 0%, -2% 0%, 0 0; opacity: 1; }
+	}
+}
+
+/* GameHub is green-themed (--gamehub-cta) — re-tint the same aurora emerald so
+   the glow matches the page identity instead of clashing brand-blue. Inherits
+   the fixed position + breathing animation from the body::before rule above. */
+@media (min-width: 1200px) {
+	body.aurora-hub::before {
+		background-image:
+			radial-gradient(1200px 640px at 28% -40%, rgba(0, 200, 83, 0.20), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(16, 185, 129, 0.16), transparent 66%),
+			linear-gradient(180deg, #e7f6ee 0%, rgba(231, 246, 238, 0) 100%);
+	}
+}
+
+/* Event detail is a pristine-white minimal page, so its gutters read faint —
+   push the blue aurora stronger here so the glow is clearly present. */
+@media (min-width: 1200px) {
+	body.event-detail-page::before {
+		background-image:
+			radial-gradient(1200px 640px at 28% -40%, rgba(37, 99, 235, 0.26), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(99, 102, 241, 0.20), transparent 66%),
+			linear-gradient(180deg, #e4ebfb 0%, rgba(228, 235, 251, 0) 100%);
+	}
+}
+
+/* Motion is decorative — honour users who ask for less of it. */
+@media (prefers-reduced-motion: reduce) {
+	body::before { animation: none; }
 }
 
 .container {
@@ -92,6 +154,24 @@ a {
 	object-position: center 28%;
 }
 
+.brand__img {
+	display: block;
+	height: 34px;
+	width: auto;
+	object-fit: contain;
+	transition: filter 160ms ease;
+}
+
+/* Tint the header wordmark to the active section's brand colour (the PNG ships
+   navy). Filter chains approximate EventsBlue / GameHubDeep; neutral pages keep
+   the original navy. */
+.topbar--events .brand__img {
+	filter: brightness(0) saturate(100%) invert(29%) sepia(94%) saturate(1728%) hue-rotate(213deg) brightness(97%) contrast(94%);
+}
+.topbar--gamehub .brand__img {
+	filter: brightness(0) saturate(100%) invert(20%) sepia(84%) saturate(560%) hue-rotate(93deg) brightness(94%) contrast(92%);
+}
+
 .brand__text {
 	display: grid;
 	line-height: 1.05;
@@ -119,6 +199,69 @@ a {
     max-width: 220px; /* smaller search field on desktop */
     width: 100%;
     transition: all 160ms ease;
+    position: relative; /* anchor for the autocomplete dropdown */
+}
+
+/* --- Header search autocomplete dropdown --- */
+.search-suggest {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    z-index: 120;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+    padding: 6px;
+    max-height: 60vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.search-suggest[hidden] { display: none; }
+.search-suggest__group-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #94a3b8;
+    padding: 8px 10px 4px;
+}
+.search-suggest__item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+}
+.search-suggest__item:hover,
+.search-suggest__item.is-active {
+    background: #f1f5f9;
+}
+.search-suggest__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.search-suggest__meta {
+    font-size: 12px;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.search-suggest__empty {
+    padding: 14px 10px;
+    font-size: 13px;
+    color: #94a3b8;
+    text-align: center;
 }
 
 .topbar__search:focus-within {
@@ -192,29 +335,113 @@ a {
 	#mobileNav,
 	#mobileNavBackdrop,
 	.mobile-nav__close,
+	.app-greet,
 	.mobile-action-btn {
 		display: none !important;
 	}
 
 	.topnav {
 		display: flex !important;
-		position: absolute !important;
-		left: 50% !important;
-		transform: translateX(-50%) !important;
+		position: static !important;
+		left: auto !important;
+		transform: none !important;
+	}
+}
+
+/* --- Desktop header rebalance (≥1081px) ---------------------------------
+   The old grid (auto 1fr auto auto) parked the location pill in the flexible
+   column and pushed search + actions to the far right, leaving ~700px of dead
+   space center-left with the nav absolutely floating in it. Switch to a flex
+   row where SEARCH owns the flexible middle, and everything else groups to the
+   two ends: logo · pill · [ search ] · nav · actions. Scoped above the mobile
+   lockup breakpoint (≤1080px) so the phone/tablet layout is untouched. */
+@media (min-width: 1081px) {
+	.topbar__inner {
+		display: flex;
+		align-items: center;
+		gap: 18px;
+	}
+
+	.brand,
+	.location-pill,
+	.topnav,
+	.topbar__actions {
+		flex-shrink: 0;
+	}
+
+	.location-pill {
+		justify-self: auto; /* no longer in a grid column */
+	}
+
+	/* Search grows to fill the middle instead of hugging the right edge, but
+	   stays a search box — not an empty hero trough. Capped so the nav + actions
+	   keep real estate on the right. */
+	.topbar__search {
+		flex: 1 1 auto;
+		max-width: 460px;
+		min-width: 240px;
+	}
+
+	/* Actions pinned to the far right; nav sits just before them, in flow. A
+	   hairline divider separates "navigate" (nav) from "my account" (icons). */
+	.topbar__actions {
+		margin-left: 0;
+		padding-left: 16px;
+		border-left: 1px solid rgba(18, 22, 32, 0.1);
+	}
+
+	/* Lighten the location pill: it's a secondary control and shouldn't rival
+	   the logo. Smaller pin, single line — the "India" subtitle under an Indian
+	   city was redundant, so it's dropped up here. */
+	.topbar .location-pill {
+		gap: 8px;
+		padding: 6px 12px 6px 6px;
+	}
+	.topbar .location-pill__pin {
+		width: 24px;
+		height: 24px;
+	}
+	.topbar .location-pill__pin lord-icon {
+		width: 15px !important;
+		height: 15px !important;
+	}
+	.topbar .location-pill small {
+		display: none;
 	}
 }
 
 .topnav__link {
+	position: relative;
 	color: #3d4553;
 	font-weight: 700;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
-	font-size: 11px; /* slightly smaller nav labels */
+	font-size: 13px; /* reads as primary nav, not fine print */
+	padding: 4px 2px;
 }
 
 .topnav__link.is-active,
 .topnav__link:hover {
 	color: #111827;
+}
+
+/* Active/hovered tab gets a real indicator, not just a colour shift. The
+   section accent rules (.topbar--events / --gamehub) recolour this underline. */
+.topnav__link.is-active::after,
+.topnav__link:hover::after {
+	content: "";
+	position: absolute;
+	left: 2px;
+	right: 2px;
+	bottom: -2px;
+	height: 2px;
+	border-radius: 2px;
+	background: currentColor;
+}
+
+/* Hover on a non-active tab: hint the underline without full weight. */
+.topnav__link:hover:not(.is-active)::after {
+	opacity: 0.45;
 }
 
 .topbar__actions {
@@ -236,6 +463,7 @@ a {
 .location-pill {
     display: inline-flex;
     align-items: center;
+    justify-self: start; /* don't stretch across the 1fr grid column (was making the whole gap clickable) */
     gap: 10px;
     padding: 6px 12px 6px 6px; /* slightly narrower */
     border: 1px solid rgba(0, 0, 0, 0.05);
@@ -503,9 +731,320 @@ main.container {
 .event-card__details { display:flex; align-items:center; justify-content:flex-start; gap:10px; color:var(--muted); font-size:13px; }
 .event-card__date { font-weight:600; }
 
+/* ============================================================
+   Desktop home (>720px) — content-first, in the app's design
+   language: Slate + EventsBlue, a dark-poster featured event,
+   category tiles, and the live event grid. Replaces the old
+   marketing hero (.hero / .quick-grid / .feature-list, now unused).
+   ============================================================ */
+.dhero {
+	display: grid;
+	grid-template-columns: 1.05fr 0.95fr;
+	gap: 32px;
+	align-items: stretch;
+	margin: 20px 0 8px;
+}
+.dhero__copy {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	padding: 8px 4px;
+}
+.dhero__eyebrow {
+	font-size: 12px;
+	font-weight: 800;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--events);
+}
+.dhero__title {
+	margin: 14px 0 0;
+	font-size: clamp(38px, 4.2vw, 58px);
+	line-height: 1.02;
+	letter-spacing: -0.03em;
+	color: #0F172A;
+	max-width: 14ch;
+}
+.dhero__sub {
+	margin: 18px 0 0;
+	max-width: 46ch;
+	font-size: 17px;
+	line-height: 1.6;
+	color: var(--muted);
+}
+.dhero__actions {
+	display: flex;
+	gap: 12px;
+	margin-top: 28px;
+	flex-wrap: wrap;
+}
+.dbtn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 13px 24px;
+	border-radius: 999px;
+	font-size: 15px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+.dbtn:hover { transform: translateY(-2px); }
+.dbtn--events {
+	background: var(--events);
+	color: #fff;
+	box-shadow: 0 12px 26px rgba(37, 99, 235, 0.28);
+}
+.dbtn--gamehub {
+	background: #fff;
+	color: #16a34a;
+	border: 1.5px solid #dcfce7;
+	box-shadow: 0 8px 20px rgba(22, 163, 74, 0.10);
+}
+.dbtn--gamehub:hover { border-color: #16a34a; }
+.dhero__stats {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 12px;
+	margin-top: 34px;
+}
+.dhero__stats div {
+	padding: 16px 18px;
+	border-radius: 18px;
+	background: #fff;
+	border: 1px solid var(--border);
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+.dhero__stats strong {
+	display: block;
+	font-size: 24px;
+	line-height: 1;
+	letter-spacing: -0.03em;
+	color: #0F172A;
+}
+.dhero__stats span {
+	display: block;
+	margin-top: 8px;
+	font-size: 12.5px;
+	color: var(--muted-2);
+}
+
+/* Featured event — a widened .mposter (dark art, scrim, glass pills, book CTA). */
+.dfeat {
+	position: relative;
+	display: block;
+	overflow: hidden;
+	border-radius: 28px;
+	min-height: 460px;
+	background-size: cover;
+	background-position: center;
+	background-color: #0F172A;
+	box-shadow: 0 24px 50px rgba(15, 23, 42, 0.28), 0 4px 12px rgba(15, 23, 42, 0.16);
+	color: #fff;
+	transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.dfeat:hover {
+	transform: translateY(-4px);
+	box-shadow: 0 30px 62px rgba(15, 23, 42, 0.34);
+}
+.dfeat__grad {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(to top, rgba(8, 12, 22, 0.94) 6%, rgba(8, 12, 22, 0.30) 42%, rgba(8, 12, 22, 0) 70%);
+}
+.dfeat__cat {
+	position: absolute;
+	top: 18px;
+	left: 18px;
+	z-index: 2;
+	background: rgba(8, 12, 22, 0.45);
+	backdrop-filter: blur(6px);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	padding: 6px 14px;
+	border-radius: 999px;
+}
+.dfeat__rating {
+	position: absolute;
+	top: 18px;
+	right: 18px;
+	z-index: 2;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: rgba(8, 12, 22, 0.55);
+	backdrop-filter: blur(6px);
+	font-size: 12px;
+	font-weight: 800;
+	padding: 6px 11px;
+	border-radius: 10px;
+}
+.dfeat__rating i { color: #F5A623; font-style: normal; }
+.dfeat__body {
+	position: absolute;
+	inset: auto 0 0 0;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 26px;
+}
+.dfeat__date {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.85);
+}
+.dfeat__name {
+	font-size: 26px;
+	font-weight: 800;
+	line-height: 1.12;
+	letter-spacing: -0.02em;
+}
+.dfeat__meta {
+	font-size: 13.5px;
+	color: rgba(255, 255, 255, 0.72);
+}
+.dfeat__cta {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	align-self: flex-start;
+	margin-top: 12px;
+	background: #fff;
+	color: var(--events);
+	font-size: 14px;
+	font-weight: 700;
+	padding: 11px 20px;
+	border-radius: 999px;
+	box-shadow: 0 8px 20px rgba(8, 12, 22, 0.28);
+}
+
+/* Section heads shared across the desktop home sections. */
+.dsec__head {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 18px;
+	margin: 46px 2px 18px;
+}
+.dsec__eyebrow {
+	display: block;
+	font-size: 12px;
+	font-weight: 800;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--muted-2);
+	margin-bottom: 6px;
+}
+.dsec__head h2 {
+	margin: 0;
+	font-size: 26px;
+	letter-spacing: -0.02em;
+	color: #0F172A;
+}
+.dsec__link {
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--events);
+	white-space: nowrap;
+}
+
+/* Category tiles — desktop twin of the mobile .mcat row. */
+.dcats {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 14px;
+}
+.dcat {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	min-height: 120px;
+	padding: 16px;
+	background: #fff;
+	border: 1px solid var(--border);
+	border-radius: 18px;
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+	transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.dcat:hover {
+	transform: translateY(-3px);
+	border-color: #cdd7e5;
+	box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+}
+.dcat__ico {
+	width: 42px;
+	height: 42px;
+	border-radius: 12px;
+	display: grid;
+	place-items: center;
+	background: rgba(37, 99, 235, 0.10);
+	color: var(--events);
+}
+.dcat__txt {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	margin-top: auto;
+}
+.dcat__txt strong { font-size: 14px; font-weight: 700; color: #0F172A; }
+.dcat__txt small { font-size: 12px; color: var(--muted-2); }
+.dcat--hub .dcat__ico { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
+
+/* The desktop home is phone-hidden; the .mhome feed takes over ≤720px. */
 @media (max-width: 720px) {
-	.hero { grid-template-columns: 1fr; min-height: auto; }
+	.home-desktop-only { display: none; }
+}
+
+/* App-style mobile home is hidden by default; shown only ≤720px. */
+.mhome { display: none; }
+.mhub { display: none; }
+.mven, .mven__modal { display: none; }
+
+/* GameHub live strip is a mobile-only element; shown only ≤1024px (mobile overrides). */
+.gh-live { display: none; }
+
+@media (max-width: 720px) {
+	/* Swap desktop home sections for the app-style mobile home. */
+	.hero, .quick-grid, .section-shell { display: none; }
+	.mhome { display: block; }
 	.event-card__thumb { height: 200px; }
+
+	/* Swap the desktop Events page (banner carousel + category grid + poster
+	   list) for the same app-style mobile home used on "/". */
+	.events-page > .banner-carousel,
+	.events-page > .events-section--filters,
+	.events-page > .events-section:not(.events-section--filters) {
+		display: none;
+	}
+
+	/* Same swap for GameHub: the desktop action cards / hero / sport grid /
+	   venue grid / promo give way to the app-style .mhub feed. .gh-live goes
+	   with them — .mhub's ActionBoard card is the live strip now, and keeping
+	   both would show the same match twice. (gh-live still serves the 721–1024
+	   band, where the desktop layout is what renders.) */
+	.mhub { display: block; }
+	.gamehub-page > .gamehub-actions,
+	.gamehub-page > .gh-live,
+	.gamehub-page > .gamehub-hero,
+	.gamehub-page > .events-section,
+	.gamehub-page > .promo-banner {
+		display: none;
+	}
+
+	/* Venue detail: the app-style page replaces the desktop two-column sheet.
+	   The desktop container is only VISUALLY hidden — the mobile page moves its
+	   booking widget / review form into a sheet on demand, so those nodes must
+	   stay in the DOM (and keep their ids and listeners).
+
+	   Qualified with .page-shell deliberately: `.page-shell { display: grid }`
+	   is defined LATER in this file, and a media query adds no specificity — so a
+	   bare .gamehub-detail-container ties at (0,1,0) and loses on source order. */
+	.mven { display: block; }
+	.page-shell.gamehub-detail-container { display: none; }
 }
 
 .hero__panel-card p {
@@ -589,7 +1128,7 @@ main.container {
 	align-items: end;
 	justify-content: space-between;
 	gap: 18px;
-	margin-bottom: 18px;
+	margin-bottom: 12px;
 }
 
 .text-link {
@@ -639,6 +1178,13 @@ main.container {
 .page-shell {
 	display: grid;
 	gap: 18px;
+}
+
+/* Grid items default to min-width:auto, which lets a wide inner element
+   (e.g. the booking slots grid) force the whole page wider than the
+   viewport on mobile. Force them to shrink to the track instead. */
+.page-shell > * {
+	min-width: 0;
 }
 
 .hero-feature,
@@ -740,6 +1286,7 @@ main.container {
 .filter-button,
 .action-chip,
 .chip,
+.filter-btn,
 .sport-card {
 	border: 1px solid var(--border);
 	border-radius: 999px;
@@ -756,6 +1303,7 @@ main.container {
 }
 
 .chip.is-active,
+.filter-btn.is-active,
 .action-chip,
 .sport-card:hover,
 .filter-button:hover {
@@ -764,21 +1312,103 @@ main.container {
 	border-color: #111827;
 }
 
+/* Flat, un-boxed sections (District/BookMyShow-style): the page is the surface,
+   sections flow on it separated by whitespace, and only the posters/cards inside
+   carry elevation. No per-section card chrome. */
 .events-section {
 	display: grid;
 	gap: 14px;
-	padding: 22px;
-	border-radius: 24px;
-	border: 1px solid var(--border);
-	background: var(--surface);
-	box-shadow: 0 18px 40px rgba(18, 22, 32, 0.06);
+	padding: 4px 2px 6px;
+	border-radius: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
 }
 
 .events-section--filters {
-	padding: 12px;
+	padding: 2px 2px 4px;
 	background: transparent;
 	border: 0;
 	box-shadow: none;
+}
+
+/* Tight, even rhythm between the now-flat sections — enough to separate them
+   without the header floating in a big empty gap above its cards. */
+.page-shell.events-page,
+.page-shell.gamehub-page {
+	gap: 12px;
+}
+
+/* Trending — desktop Top-5 ranked grid (District/BMS-style oversized numerals
+   over posters). Full width, 5 equal columns, so there's no empty gutter. The
+   mobile .mtrends serves ≤720px. */
+.trend-grid {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: 20px;
+}
+.trend-card {
+	display: flex;
+	flex-direction: column;
+	text-decoration: none;
+}
+.trend-card__media {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 3 / 4;
+	border-radius: 18px;
+	background-size: cover;
+	background-position: center;
+	box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+	overflow: hidden;
+	transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.trend-card:hover .trend-card__media {
+	transform: translateY(-4px);
+	box-shadow: 0 24px 48px rgba(15, 23, 42, 0.2);
+}
+.trend-card__grad {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(180deg, transparent 46%, rgba(4, 8, 15, 0.78));
+}
+.trend-card__rank {
+	position: absolute;
+	left: 8px;
+	bottom: -6px;
+	font-size: 92px;
+	font-weight: 800;
+	line-height: 0.8;
+	letter-spacing: -0.04em;
+	color: #fff;
+	-webkit-text-stroke: 3px var(--events);
+	font-variant-numeric: tabular-nums;
+	text-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.trend-card__title {
+	margin: 12px 0 0;
+	font-size: 15px;
+	font-weight: 700;
+	color: #0F172A;
+	line-height: 1.25;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.trend-card__venue {
+	margin: 4px 0 0;
+	font-size: 13px;
+	color: var(--muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.trend-card__price {
+	margin: 6px 0 0;
+	font-size: 13px;
+	font-weight: 700;
+	color: #0F172A;
 }
 
 .event-explore-grid {
@@ -882,31 +1512,61 @@ main.container {
 
 .events-grid-list {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-	gap: 24px;
+	grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+	gap: 28px 22px;
 }
 
+/* Category explore cards, aligned to the mobile .mcat tiles: one clean white
+   surface with an EventsBlue active state, instead of the old per-category
+   warm gradients (yellow/orange/pink) that clashed with the Slate+Blue system.
+   The inline --card-* vars from the blade are simply left unused. */
+.events-page .event-explore-card {
+	background: #fff;
+	border-color: var(--border);
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+.events-page .event-explore-card::after { display: none; }
+.events-page .event-explore-card__title { color: #0F172A; }
+.events-page .event-explore-card:hover {
+	border-color: #cdd7e5;
+	box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+}
+.events-page .event-explore-card.is-active {
+	border-color: var(--events);
+	box-shadow: 0 12px 28px rgba(37, 99, 235, 0.16), inset 0 0 0 1px var(--events);
+}
+.events-page .event-explore-card.is-active .event-explore-card__title { color: var(--events); }
+
+/* BookMyShow-style poster-forward event card.
+   No surrounding white box — the portrait poster IS the card, text sits on the
+   page below it. Hover lifts the whole tile and slow-zooms the artwork. */
 .event-list-card {
 	display: flex;
 	flex-direction: column;
-	background: #ffffff;
-	border-radius: 20px;
-	overflow: hidden;
-	border: 1px solid rgba(18, 22, 32, 0.08);
-	transition: all 0.3s ease;
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+	transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 	height: 100%;
 }
 
 .event-list-card:hover {
-	transform: translateY(-8px);
-	box-shadow: 0 20px 40px rgba(18, 22, 32, 0.1);
+	transform: translateY(-6px);
 }
 
 .event-list-card__media {
 	position: relative;
 	width: 100%;
-	aspect-ratio: 4 / 5;
+	aspect-ratio: 2 / 3; /* BMS portrait poster */
 	overflow: hidden;
+	border-radius: 16px;
+	background: #0f1620;
+	box-shadow: 0 6px 18px rgba(18, 22, 32, 0.14);
+	transition: box-shadow 0.28s ease;
+}
+
+.event-list-card:hover .event-list-card__media {
+	box-shadow: 0 20px 40px rgba(18, 22, 32, 0.26);
 }
 
 .event-list-card__media img {
@@ -914,37 +1574,83 @@ main.container {
 	height: 100%;
 	object-fit: cover;
 	display: block;
+	transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.event-list-card:hover .event-list-card__media img {
+	transform: scale(1.06);
+}
+
+/* Date chip riding the poster, BMS rating-strip position (bottom-left over a
+   soft gradient so it stays legible on any artwork). */
+.event-list-card__media::after {
+	content: "";
+	position: absolute;
+	inset: auto 0 0 0;
+	height: 44%;
+	background: linear-gradient(to top, rgba(8, 11, 18, 0.82) 0%, rgba(8, 11, 18, 0.34) 42%, transparent 100%);
+	pointer-events: none;
+}
+
+.event-list-card__datebadge {
+	position: absolute;
+	left: 12px;
+	bottom: 12px;
+	z-index: 1;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 5px 9px;
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.14);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	border: 1px solid rgba(255, 255, 255, 0.22);
+	color: #fff;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+	line-height: 1;
+	white-space: nowrap;
+	max-width: calc(100% - 24px);
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.event-list-card__datebadge svg {
+	flex: none;
+	opacity: 0.9;
 }
 
 .event-list-card__content {
-	padding: 16px;
+	padding: 12px 2px 0;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-}
-
-.event-list-card__date {
-	font-size: 13px;
-	color: #64748b;
-	font-weight: 500;
-	margin: 0;
+	gap: 4px;
 }
 
 .event-list-card__title {
-	font-size: 17px;
+	font-size: 16px;
 	font-weight: 700;
-	color: #0057B8; /* Mumbai Indians blue */
+	color: #1a1c22; /* BMS dark title */
 	margin: 0;
 	line-height: 1.3;
 	display: -webkit-box;
 	-webkit-line-clamp: 2;
 	-webkit-box-orient: vertical;
 	overflow: hidden;
+	/* Reserve two lines so the venue/price rows align across every card. */
+	min-height: calc(2 * 1.3em);
+	transition: color 0.2s ease;
+}
+
+.event-list-card:hover .event-list-card__title {
+	color: #2563EB;
 }
 
 .event-list-card__venue {
 	font-size: 13px;
-	color: #64748b;
+	color: #6b7280;
 	margin: 0;
 	white-space: nowrap;
 	overflow: hidden;
@@ -953,10 +1659,15 @@ main.container {
 
 .event-list-card__price {
 	font-size: 14px;
-	font-weight: 700;
-	color: #1a1a1a;
-	margin-top: auto;
-	margin-bottom: 0;
+	font-weight: 800;
+	color: #1a1c22;
+	margin: 2px 0 0;
+}
+
+.event-list-card__price span {
+	font-weight: 500;
+	color: #9098a5;
+	font-size: 12px;
 }
 
 .trending-card {
@@ -1139,6 +1850,22 @@ main.container {
 	border-radius: 24px;
 	background: rgba(255, 255, 255, 0.5);
 }
+
+/* Give the desktop GameHub hero the app's signature green band identity
+   (the mobile hub leads with a full green hero). White copy on deep green;
+   the inner search card stays white and reads as a control on the band. */
+.gamehub-page .gamehub-hero {
+	background:
+		radial-gradient(circle at top right, rgba(0, 200, 83, 0.28), transparent 46%),
+		linear-gradient(135deg, #1B5E20 0%, #123f18 100%);
+	border-color: transparent;
+	box-shadow: 0 24px 50px rgba(27, 94, 32, 0.26);
+}
+/* Chain both section classes so this beats the theme-override's own
+   !important green heading rule on specificity, not just source order. */
+.gamehub-page.theme-gamehub .gamehub-hero__copy h1 { color: #ffffff !important; }
+.gamehub-page.theme-gamehub .gamehub-hero__copy p { color: rgba(255, 255, 255, 0.82) !important; }
+.gamehub-page .gamehub-hero__art { background: rgba(255, 255, 255, 0.08); }
 
 .sport-grid {
 	display: grid;
@@ -1786,9 +2513,11 @@ main.container {
     background: rgba(255, 255, 255, 0.3);
 }
 
+/* Brand gradient — EventsBlue → GameHubGreen, the two lanes of the product
+   (same ramp as the mobile footer). Replaces an off-brand indigo→purple. */
 .auth-modal__header {
-    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-    padding: 60px 40px 40px;
+    background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
+    padding: 44px 40px 36px;
     text-align: center;
     color: #fff;
     position: relative;
@@ -1803,23 +2532,22 @@ main.container {
     opacity: 0.1;
 }
 
+/* The wordmark PNG is navy; invert it to white so it reads on the gradient.
+   It carries the brand name, so no separate <h2> heading. */
 .auth-modal__logo img {
-    width: 64px;
-    height: 64px;
-    margin-bottom: 16px;
-    filter: drop-shadow(0 10px 20px rgba(0,0,0,0.2));
-}
-
-.auth-modal__logo h2 {
-    margin: 0 0 8px;
-    font-size: 28px;
-    font-weight: 800;
+    height: 30px;
+    width: auto;
+    margin: 0 auto 14px;
+    display: block;
+    filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
 }
 
 .auth-modal__logo p {
-    margin: 0;
+    margin: 0 auto;
+    max-width: 30ch;
     font-size: 14px;
-    opacity: 0.9;
+    line-height: 1.5;
+    opacity: 0.92;
     font-weight: 500;
 }
 
@@ -1868,6 +2596,9 @@ main.container {
 
 .phone-input-group input {
     flex: 1;
+    /* Without this the input can't shrink below its intrinsic size (flex items
+       default to min-width:auto) and it overflows the card on narrow phones. */
+    min-width: 0;
     padding: 12px 20px;
     background: #fff;
     border: 1px solid #e5e7eb;
@@ -1879,8 +2610,90 @@ main.container {
 
 .phone-input-group input:focus {
     outline: 0;
-    border-color: #6366f1;
-    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+    border-color: #2563EB;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+/* --- Continue with Google -------------------------------------------- */
+/* GIS renders its own iframe button here; we only own the box around it. */
+.auth-google {
+    margin-bottom: 18px;
+}
+
+.auth-google__btn {
+    display: flex;
+    justify-content: center;
+    min-height: 44px;
+}
+
+.auth-google__btn.is-busy {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.auth-google__error {
+    margin: 10px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #DC2626;
+}
+
+/* --- "or" divider ----------------------------------------------------- */
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 18px;
+    color: #9ca3af;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #e5e7eb;
+}
+
+/* --- Inline alerts ---------------------------------------------------- */
+.auth-alert {
+    margin-bottom: 20px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    background: #FEF2F2;
+    color: #B91C1C;
+    border: 1px solid #FECACA;
+}
+
+.auth-alert--ok {
+    background: #ECFDF5;
+    color: #047857;
+    border-color: #A7F3D0;
+}
+
+/* --- OTP field -------------------------------------------------------- */
+.otp-input {
+    width: 100%;
+    padding: 14px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 8px;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.otp-input:focus {
+    outline: 0;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
 
 .btn--large {
@@ -1904,6 +2717,631 @@ main.container {
     text-decoration: underline;
     font-weight: 600;
 }
+
+/* --- Page header (back + title) --------------------------------------
+   The app's PageHeader, for account pages. Hidden by default: on desktop the
+   topbar is the only navigation there is, so the phone-style back header only
+   takes over at the mobile breakpoint (see site-mobile-overrides.css). */
+.pagebar { display: none; }
+
+.pagebar__back {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #EFF2F7;
+    color: #0F172A;
+    cursor: pointer;
+}
+
+.pagebar__back svg { width: 18px; height: 18px; }
+.pagebar__back:hover { background: #E2E8F0; }
+
+.pagebar__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0F172A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* =====================================================================
+   Account screen (/profile) — the web twin of the app's AccountProfileScreen.
+   Tokens are the app's, verbatim: Navy #07111F, NavyMid #102B52, BlueBright
+   #2563EB, Green #00B140, Text1/2/3, Stroke #E5E9F0. The app is a phone, so the
+   column is capped and centred rather than stretched across a desktop.
+   ===================================================================== */
+.aprof {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 16px 16px 40px;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+}
+
+/* --- Identity hero ---------------------------------------------------- */
+/* The screen's ONE saturated moment: navy -> blue -> green, exactly as the brand
+   reads. Nothing else on the page gets a full-bleed gradient; a second one halves
+   the impact of both. The radial glow lifts the avatar off the navy. */
+.aprof-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 24px;
+    padding: 20px;
+    color: #fff;
+    background:
+        radial-gradient(120% 120% at 16% 18%, rgba(37, 99, 235, 0.30) 0%, rgba(37, 99, 235, 0) 60%),
+        linear-gradient(135deg, #07111F 0%, #102B52 55%, #0A3D2A 100%);
+}
+
+/* Guilloché arcs — the concentric line-work of banknotes and passports, struck
+   from a point past the bottom-right so only their shoulders cross the card.
+   Alpha stays under 0.06: the monospaced member ID sits on top of these. */
+.aprof-hero::after {
+    content: '';
+    position: absolute;
+    right: -55%;
+    bottom: -125%;
+    width: 220%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    pointer-events: none;
+    background: repeating-radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.055) 0 1px,
+        rgba(255, 255, 255, 0) 1px 26px
+    );
+}
+
+.aprof-hero__row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.aprof-avatar {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 68px;
+    height: 68px;
+    flex: 0 0 68px;
+    border-radius: 50%;
+    cursor: pointer;
+    background: linear-gradient(135deg, #2563EB, #00B140);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+
+.aprof-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.aprof-avatar__initial {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+}
+
+/* Camera badge signals the avatar is editable. */
+.aprof-avatar__badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #2563EB;
+    border: 2px solid #07111F;
+}
+
+.aprof-avatar__badge svg {
+    width: 12px;
+    height: 12px;
+    color: #fff;
+}
+
+.aprof-hero__id {
+    min-width: 0; /* let the email ellipsis instead of stretching the row */
+    flex: 1;
+}
+
+.aprof-hero__name {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.aprof-hero__email {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 5px 0 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    min-width: 0;
+}
+
+.aprof-hero__email svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.aprof-hero__email span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.aprof-hero__sub {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.aprof-hero__rule {
+    position: relative;
+    height: 1px;
+    margin: 18px 0 14px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* Labelled, monospaced, tap to copy — the way an airline treats a
+   frequent-flyer number. */
+.aprof-memberid {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 2px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: #fff;
+    cursor: pointer;
+    text-align: left;
+}
+
+.aprof-memberid small {
+    display: block;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.aprof-memberid b {
+    display: block;
+    margin-top: 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    white-space: nowrap;
+}
+
+.aprof-memberid svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.aprof-memberid.is-copied svg {
+    color: #00E3A5;
+}
+
+/* --- The two lanes ---------------------------------------------------- */
+.aprof-lanes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.aprof-lane {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    border: 1px solid #E5E9F0;
+    border-radius: 18px;
+    background: #fff;
+    text-decoration: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.aprof-lane:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.aprof-lane__icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+}
+
+.aprof-lane__icon svg {
+    width: 19px;
+    height: 19px;
+}
+
+.aprof-lane__icon--blue { background: #EAF1FE; color: #2563EB; }
+.aprof-lane__icon--green { background: #E7F7EE; color: #00B140; }
+
+.aprof-lane__label {
+    margin-top: 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #5A6473;
+}
+
+/* Push the payload to the bottom so a counting lane and an inviting lane still
+   share a baseline when they sit side by side. */
+.aprof-lane__value {
+    margin-top: auto;
+    padding-top: 6px;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #0F172A;
+}
+
+.aprof-lane__caption {
+    margin-top: 3px;
+    font-size: 11.5px;
+    color: #9AA3B2;
+}
+
+.aprof-lane__invite {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: auto;
+    padding-top: 6px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.aprof-lane__invite svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+}
+
+.aprof-lane__invite--blue { color: #2563EB; }
+.aprof-lane__invite--green { color: #00B140; }
+
+/* --- Standing --------------------------------------------------------- */
+.aprof-standing {
+    display: flex;
+    align-items: center;
+    margin-top: 12px;
+    padding: 14px 0;
+    border: 1px solid #E5E9F0;
+    border-radius: 16px;
+    background: #fff;
+}
+
+.aprof-stat {
+    flex: 1;
+    text-align: center;
+}
+
+.aprof-stat__icon {
+    width: 15px;
+    height: 15px;
+}
+
+.aprof-stat b {
+    display: block;
+    margin-top: 6px;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0F172A;
+    font-variant-numeric: tabular-nums;
+}
+
+.aprof-stat small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #9AA3B2;
+}
+
+.aprof-stat__divider {
+    width: 1px;
+    height: 30px;
+    background: #E5E9F0;
+}
+
+/* --- Groups, rows ----------------------------------------------------- */
+/* One spacing scale instead of ad-hoc values: air between groups (24px), a
+   tighter beat from a heading to the card it labels (12px). */
+.aprof-heading {
+    margin: 24px 0 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0F172A;
+}
+
+.aprof-card {
+    border: 1px solid #E5E9F0;
+    border-radius: 16px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.aprof-card--signout {
+    margin-top: 24px;
+}
+
+.aprof-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 15px 16px;
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    color: #0F172A;
+    text-decoration: none;
+    cursor: pointer;
+    text-align: left;
+}
+
+.aprof-row:hover { background: #F8FAFC; }
+
+.aprof-row > span { flex: 1; }
+
+.aprof-row__icon {
+    width: 19px;
+    height: 19px;
+    flex: 0 0 19px;
+    color: #5A6473;
+}
+
+.aprof-row__chev {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    color: #9AA3B2;
+}
+
+.aprof-row--signout { color: #D23F57; }
+.aprof-row--signout .aprof-row__icon { color: #D23F57; }
+.aprof-row--signout:hover { background: #FDECEF; }
+
+.aprof-hr {
+    display: block;
+    height: 1px;
+    margin-left: 47px; /* start past the icon column, as the app's ThinDivider does */
+    background: #E5E9F0;
+}
+
+.aprof-flash {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    background: #ECFDF5;
+    color: #047857;
+    border: 1px solid #A7F3D0;
+}
+
+.aprof-flash--err {
+    background: #FEF2F2;
+    color: #B91C1C;
+    border-color: #FECACA;
+}
+
+.aprof-version {
+    margin: 20px 0 0;
+    text-align: center;
+    font-size: 11px;
+    color: #9AA3B2;
+}
+
+/* --- Sub-pages: legal, privacy, bookings ------------------------------ */
+.aprof-doc__title {
+    margin: 8px 0 0;
+    font-size: 24px;
+    font-weight: 800;
+    color: #0F172A;
+}
+
+.aprof-doc__meta,
+.aprof-doc__lede {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: #9AA3B2;
+}
+
+.aprof-doc__lede {
+    margin-bottom: 4px;
+    font-size: 14px;
+    color: #5A6473;
+    line-height: 1.5;
+}
+
+.aprof-doc__body {
+    margin-top: 16px;
+    padding: 18px;
+}
+
+.aprof-doc__body p {
+    margin: 0 0 14px;
+    font-size: 14.5px;
+    line-height: 1.65;
+    color: #5A6473;
+}
+
+.aprof-doc__body p:last-child { margin-bottom: 0; }
+.aprof-doc__empty { color: #9AA3B2; font-style: italic; }
+
+.aprof-doc__back {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.aprof-doc__back a {
+    color: #5A6473;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.aprof-doc__back a:hover { color: #2563EB; }
+
+/* Privacy toggles */
+.aprof-toggle {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    cursor: pointer;
+}
+
+.aprof-toggle__text { flex: 1; }
+
+.aprof-toggle__text b {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    color: #0F172A;
+}
+
+.aprof-toggle__text small {
+    display: block;
+    margin-top: 3px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #9AA3B2;
+}
+
+/* The checkbox stays in the DOM (it's what posts), but the track/thumb is the
+   visible switch. Focus is mirrored onto the track for keyboard users. */
+.aprof-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.aprof-toggle__track {
+    position: relative;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: #E5E9F0;
+    transition: background 0.18s;
+}
+
+.aprof-toggle__thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+    transition: transform 0.18s;
+}
+
+.aprof-toggle input:checked ~ .aprof-toggle__track { background: #2563EB; }
+.aprof-toggle input:checked ~ .aprof-toggle__track .aprof-toggle__thumb { transform: translateX(18px); }
+.aprof-toggle input:focus-visible ~ .aprof-toggle__track { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
+
+.aprof-save { margin-top: 24px; }
+
+/* Bookings list */
+.aprof-booking {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    text-decoration: none;
+}
+
+.aprof-booking:hover { background: #F8FAFC; }
+
+.aprof-booking__icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 11px;
+}
+
+.aprof-booking__icon svg { width: 18px; height: 18px; }
+.aprof-booking__icon.is-event { background: #EAF1FE; color: #2563EB; }
+.aprof-booking__icon.is-venue { background: #E7F7EE; color: #00B140; }
+
+.aprof-booking__text { flex: 1; min-width: 0; }
+
+.aprof-booking__text b {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0F172A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.aprof-booking__text small {
+    display: block;
+    margin-top: 2px;
+    font-size: 12.5px;
+    color: #9AA3B2;
+}
+
+.aprof-booking__status {
+    font-size: 11px;
+    font-weight: 700;
+    color: #5A6473;
+    background: #F1F5F9;
+    border-radius: 999px;
+    padding: 4px 9px;
+    white-space: nowrap;
+}
+
+.aprof-empty {
+    margin-top: 16px;
+    padding: 32px 20px;
+    text-align: center;
+}
+
+.aprof-empty p { margin: 0 0 6px; font-size: 14px; color: #9AA3B2; }
+.aprof-empty p b { font-size: 16px; color: #0F172A; }
+.aprof-empty .btn { margin-top: 14px; }
 
 .site-footer {
     background: #1a1a1c;
@@ -1988,22 +3426,22 @@ main.container {
 
 /* Theme footer buttons based on active site mode */
 body.mode-events .footer-hero-btn--primary {
-	background: #0057B8; /* Mumbai Indians blue */
+	background: #2563EB; /* Mumbai Indians blue */
 }
 
 body.mode-events .footer-hero-btn--secondary {
 	background: #ffffff; /* white */
-	color: #0057B8; /* blue text */
-	border: 2px solid #0057B8;
+	color: #2563EB; /* blue text */
+	border: 2px solid #2563EB;
 }
 
 body.mode-gamehub .footer-hero-btn--primary {
-	background: #28a745; /* GameHub green */
+	background: #00C853; /* GameHub green */
 }
 body.mode-gamehub .footer-hero-btn--secondary {
 	background: #ffffff; /* white */
-	color: #28a745; /* green text */
-	border: 2px solid #28a745;
+	color: #00C853; /* green text */
+	border: 2px solid #00C853;
 }
 
 /* Make icon circle match button fill or stroke appropriately */
@@ -2033,27 +3471,22 @@ body.mode-gamehub .footer-hero-btn .icon {
 
 /* Ensure icons in secondary (white) buttons use the mode color */
 body.mode-events .footer-hero-btn--secondary .icon {
-	color: #0057B8;
+	color: #2563EB;
 }
 
 body.mode-gamehub .footer-hero-btn--secondary .icon {
-	color: #28a745;
+	color: #00C853;
 }
 
-/* Theme the location pill (city/country) based on active mode */
-body.mode-events .location-pill__label strong,
-body.mode-events .location-pill__label small {
-	color: #0057B8;
-}
-
-body.mode-gamehub .location-pill__label strong,
-body.mode-gamehub .location-pill__label small {
-	color: #28a745;
-}
+/* Location is a secondary control: keep the label text neutral and let the
+   mode accent live on the pin icon only, so search + the Events/GameHub
+   switch remain the primary focal points. */
+body.mode-events .location-pill__pin { color: #2563EB; }
+body.mode-gamehub .location-pill__pin { color: #00C853; }
 
 /* Events heading color */
 body.mode-events .section-shell__header h2 {
-	color: #0057B8;
+	color: #2563EB;
 }
 
 .footer-hero-btn:hover {
@@ -2548,4 +3981,71 @@ body.mode-events .section-shell__header h2 {
 
 .theme-minimal .legal-pill .copyright {
     color: #999999 !important;
+}
+
+/* Desktop header utility icons — the chat + bell lanes the mobile greeting
+   lockup shows. Hidden on mobile with the rest of .topbar__actions. */
+.topbar__util {
+	position: relative;
+	width: 36px;
+	height: 36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	color: var(--muted);
+	text-decoration: none;
+	transition: background 160ms ease, color 160ms ease;
+}
+.topbar__util:hover {
+	background: #F1F5F9;
+	color: var(--foreground);
+}
+.topbar__util-dot {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #D32F2F;
+	box-shadow: 0 0 0 1.5px var(--surface-strong);
+}
+
+/* Account placeholder (no uploaded photo): a section-tinted user glyph in a
+   soft circle, sized to match the 36px avatar it replaces. */
+.topbar__account--placeholder {
+	display: inline-grid;
+	place-items: center;
+	background: #F1F5F9;
+	color: var(--muted);
+}
+
+/* --- Section-tinted header icons -----------------------------------------
+   The nav + logo are already blue (Events) / green (GameHub); these rules pull
+   the remaining icons into the same lane colour so the bar reads as one colour
+   instead of "blue nav + black icons". Typed search text stays neutral (see
+   .topbar__search-input) for readability — only the glyphs are tinted.
+   .topbar.topbar--* = specificity 0,3,0 so it wins over the base icon rules
+   and the body.mode-* pin tint. */
+.topbar.topbar--events .search-icon,
+.topbar.topbar--events .location-pill__pin,
+.topbar.topbar--events .topbar__util,
+.topbar.topbar--events .topbar__account--placeholder {
+	color: #0d6efd;
+}
+.topbar.topbar--events .topbar__util:hover {
+	background: rgba(13, 110, 253, 0.1);
+	color: #0d6efd;
+}
+
+.topbar.topbar--gamehub .search-icon,
+.topbar.topbar--gamehub .location-pill__pin,
+.topbar.topbar--gamehub .topbar__util,
+.topbar.topbar--gamehub .topbar__account--placeholder {
+	color: #16a34a;
+}
+.topbar.topbar--gamehub .topbar__util:hover {
+	background: rgba(22, 163, 74, 0.1);
+	color: #16a34a;
 }

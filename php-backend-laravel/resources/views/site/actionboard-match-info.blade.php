@@ -193,14 +193,20 @@
     box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03) !important;
 }
 .fact-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 16px !important;
     border-bottom: 1px solid #F1F5F9 !important;
     padding: 10px 0 !important;
 }
 .fact-row span {
     color: #64748B !important;
+    flex-shrink: 0;
 }
 .fact-row strong {
     color: #0F172A !important;
+    text-align: right;
 }
 .fixture-item {
     border: 1px solid #E2E8F0 !important;

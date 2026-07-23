@@ -17,6 +17,36 @@
     transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+/* "Haraan special" lockup — fixed in the banner's top-left corner, above the
+   sliding track. Mirrors the mobile .mbrandmark: black wordmark + blue script. */
+.banner-brand {
+    position: absolute;
+    top: 26px;
+    left: 80px;
+    z-index: 15;
+    display: inline-flex;
+    align-items: flex-end;
+    pointer-events: none;
+}
+.banner-brand img {
+    height: 26px;
+    width: auto;
+    display: block;
+    filter: brightness(0); /* the PNG is navy; force it to black like mobile */
+}
+.banner-brand span {
+    position: relative;
+    top: 7px;
+    margin-left: -4px;
+    font-family: 'Great Vibes', 'Segoe Script', cursive;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    color: #2563EB;
+    transform: rotate(-2deg);
+    white-space: nowrap;
+}
+
 .banner-item {
     flex: 0 0 100%;
     position: relative;
@@ -62,7 +92,7 @@
     margin: 0 0 12px;
     line-height: 1.05;
     letter-spacing: -0.04em;
-    color: #0057B8; /* Mumbai Indians blue */
+    color: #2563EB; /* Mumbai Indians blue */
 }
 
 .banner-item__left .venue {
@@ -81,7 +111,7 @@
 
 .banner-item__left .book-btn {
     display: inline-block;
-    background: #0057B8; /* Mumbai Indians blue */
+    background: #2563EB; /* Mumbai Indians blue */
     color: #fff;
     padding: 15px 36px;
     border-radius: 12px;
@@ -168,13 +198,15 @@
 @media (max-width: 1024px) {
     .banner-item { padding: 0 60px; }
     .banner-dots { left: 60px; }
+    .banner-brand { left: 60px; }
 }
 
 @media (max-width: 850px) {
+    .banner-brand { left: 50%; transform: translateX(-50%); top: 18px; }
     .banner-carousel { height: auto; padding: 60px 20px; }
     .banner-item { flex-direction: column-reverse; text-align: center; padding: 0; }
     .banner-item__left { padding-right: 0; margin-top: 32px; }
-    .banner-item__left h2 { font-size: 32px; color: #0057B8; }
+    .banner-item__left h2 { font-size: 32px; color: #2563EB; }
     .banner-item__right { flex: 0 0 auto; width: 220px; }
     .banner-item__right img { height: 300px; }
     .banner-dots { left: 50%; transform: translateX(-50%); bottom: 20px; }

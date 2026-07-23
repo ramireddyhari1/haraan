@@ -1,0 +1,39 @@
+<resources>
+    <string name="action_score">ஸ்கோர்</string>
+    <string name="live">நேரலை</string>
+    <string name="language">மொழி</string>
+    <string name="choose_language">உங்கள் மொழியைத் தேர்ந்தெடுக்கவும்</string>
+
+    <string name="tab_info">தகவல்</string>
+    <string name="tab_commentary">வர்ணனை</string>
+    <string name="tab_live">நேரலை</string>
+    <string name="tab_scorecard">ஸ்கோர்கார்டு</string>
+
+    <string name="out">அவுட்</string>
+    <string name="start_second_innings">2வது இன்னிங்ஸைத் தொடங்கு</string>
+    <string name="innings_start">இன்னிங்ஸ் தொடக்கம்</string>
+    <string name="over_complete">ஓவர் முடிந்தது</string>
+    <string name="select_opening_bowler">தொடக்க பந்துவீச்சாளரைத் தேர்ந்தெடுக்கவும்</string>
+    <string name="select_next_bowler">அடுத்த பந்துவீச்சாளரைத் தேர்ந்தெடுக்கவும்</string>
+    <string name="wicket">விக்கெட்</string>
+    <string name="select_new_batsman">புதிய பேட்ஸ்மேனைத் தேர்ந்தெடுக்கவும்</string>
+    <string name="innings_complete_fmt">இன்னிங்ஸ் முடிந்தது · %1$d ஓவர்கள்</string>
+
+    <string name="toss_title">டாஸ்</string>
+    <string name="toss_later">பிறகு</string>
+    <string name="toss_tap_coin">நாணயத்தைத் தட்டி டாஸ் போடுங்கள்</string>
+    <string name="toss_tails">டெயில்ஸ்</string>
+    <string name="toss_who_won">டாஸ் யார் வென்றது?</string>
+    <string name="toss_elected_to">டாஸ் வென்ற அணி தேர்ந்தெடுத்தது?</string>
+    <string name="toss_bat">பேட்டிங்</string>
+    <string name="toss_bowl">பௌலிங்</string>
+    <string name="toss_need_help">உதவி வேண்டுமா?</string>
+    <string name="toss_lets_play">விளையாடலாம்</string>
+    <string name="toss_help_hint">நாணயத்தைத் தட்டி டாஸ் போடுங்கள், பிறகு உண்மையில் யார் டாஸ் வென்றது, அவர்கள் எதைத் தேர்ந்தெடுத்தார்கள் என்பதைப் பதிவு செய்யுங்கள்.</string>
+    <string name="toss_striker">ஸ்ட்ரைக்கர்</string>
+    <string name="toss_non_striker">நான்-ஸ்ட்ரைக்கர்</string>
+    <string name="toss_opening_bowler">தொடக்க பந்துவீச்சாளர்</string>
+    <string name="toss_start_match">போட்டியைத் தொடங்கு</string>
+    <string name="toss_no_players">வீரர்கள் சேர்க்கப்படவில்லை — இயல்புநிலை பெயர் பயன்படுத்தப்படும்.</string>
+    <string name="toss_line_fmt">%1$s டாஸ் வென்று %2$s தேர்ந்தெடுத்தது.</string>
+</resources>

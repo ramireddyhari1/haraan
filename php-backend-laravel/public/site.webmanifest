@@ -1,0 +1,13 @@
+{
+    "name": "Haraan",
+    "short_name": "Haraan",
+    "description": "Discover. Book. Play. Events and sports, one app.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
+    "icons": [
+        { "src": "/icons-haraan-192.png", "sizes": "192x192", "type": "image/png" },
+        { "src": "/icons-haraan-512.png", "sizes": "512x512", "type": "image/png" }
+    ]
+}

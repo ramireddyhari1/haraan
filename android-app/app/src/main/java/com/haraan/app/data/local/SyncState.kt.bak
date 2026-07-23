@@ -1,0 +1,13 @@
+package com.example.thanna.data.local
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "sync_states")
+data class SyncState(
+    @PrimaryKey
+    val matchId: String,
+    val localVersion: Long,
+    val serverVersion: Long,
+    val isDirty: Boolean
+)

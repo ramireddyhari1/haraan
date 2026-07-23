@@ -1,0 +1,16 @@
+{
+  "name": "haraan-whatsapp-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted WhatsApp bridge for Haraan OTP delivery (whatsapp-web.js).",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}

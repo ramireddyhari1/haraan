@@ -9,6 +9,7 @@ use App\Support\JwtService;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 
 final class EnsureJwtAuthenticated
@@ -33,8 +34,14 @@ final class EnsureJwtAuthenticated
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        // Bridge JWT auth user with standard Laravel auth guard context
+        Auth::setUser($user);
         $request->attributes->set('auth_user', $user);
+
+        // Activity heartbeat for /control (throttled internally to ~5 min).
+        $user->touchLastSeen();
 
         return $next($request);
     }
 }
+

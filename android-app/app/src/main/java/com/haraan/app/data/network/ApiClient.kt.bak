@@ -1,0 +1,64 @@
+package com.example.thanna.data.network
+
+import com.example.thanna.BuildConfig
+import com.example.thanna.data.ApiConfig
+import com.squareup.moshi.Moshi
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Response
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.converter.moshi.MoshiConverterFactory
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+/**
+ * The single typed network entry point. Replaces the per-repository
+ * HttpURLConnection + org.json plumbing with one shared OkHttp + Retrofit + Moshi
+ * stack. Repositories depend on the service interfaces here; once Hilt lands
+ * these become @Provides bindings with no behavioural change.
+ */
+object ApiClient {
+
+    private val moshi: Moshi = Moshi.Builder().build()
+
+    // Attaches JSON headers + the bearer token (when present) to every request.
+    private val headerInterceptor = Interceptor { chain ->
+        val builder = chain.request().newBuilder()
+            .header("Accept", "application/json")
+        AuthTokenHolder.token?.let { builder.header("Authorization", "Bearer $it") }
+        chain.proceed(builder.build())
+    }
+
+    // One transparent retry on transient IO failures (flaky dev tunnel / mobile network).
+    private val retryInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        try {
+            chain.proceed(request)
+        } catch (e: IOException) {
+            chain.proceed(request)
+        }
+    }
+
+    private val logging = HttpLoggingInterceptor().apply {
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+        else HttpLoggingInterceptor.Level.NONE
+    }
+
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(headerInterceptor)
+        .addInterceptor(retryInterceptor)
+        .addInterceptor(logging)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    private val retrofit: Retrofit = Retrofit.Builder()
+        .baseUrl(ApiConfig.BASE_URL + "/")
+        .client(client)
+        .addConverterFactory(MoshiConverterFactory.create(moshi))
+        .build()
+
+    val venueApi: VenueApi by lazy { retrofit.create(VenueApi::class.java) }
+    val contentApi: ContentApi by lazy { retrofit.create(ContentApi::class.java) }
+}

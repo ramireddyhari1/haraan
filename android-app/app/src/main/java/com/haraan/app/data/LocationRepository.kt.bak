@@ -1,0 +1,203 @@
+package com.example.thanna.data
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.Location
+import android.os.Build
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.util.Locale
+import kotlin.coroutines.resume
+
+/**
+ * The single source of truth the location button renders from.
+ *
+ * [city] is the bold primary line, [area] the muted secondary line. [isManual] tells the UI the
+ * user picked this from the list rather than GPS (so we can show a different hint).
+ */
+sealed interface LocationState {
+  /** Nothing resolved yet and not currently working. */
+  data object Idle : LocationState
+
+  /** A GPS fix / geocode is in flight — drives the pulsing pin + shimmer. */
+  data object Locating : LocationState
+
+  data class Resolved(
+    val city: String,
+    val area: String,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    val isManual: Boolean = false
+  ) : LocationState
+
+  /** Permission was refused — UI shows the "Enable location" CTA. */
+  data object Denied : LocationState
+
+  data class Error(val message: String) : LocationState
+}
+
+/** A pickable city for the manual search list. */
+data class CityOption(val city: String, val area: String)
+
+/**
+ * Wraps the fused location provider + reverse geocoding and persists the last resolved place so the
+ * button shows a real value instantly on the next launch instead of a hardcoded placeholder.
+ */
+class LocationRepository(private val context: Context) {
+
+  private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+  private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+
+  fun hasPermission(): Boolean {
+    val fine = ContextCompat.checkSelfPermission(
+      context, Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+    val coarse = ContextCompat.checkSelfPermission(
+      context, Manifest.permission.ACCESS_COARSE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+    return fine || coarse
+  }
+
+  /** Last place we resolved, restored from disk — used to seed the button before any GPS call. */
+  fun cached(): LocationState.Resolved? {
+    val city = prefs.getString(KEY_CITY, null) ?: return null
+    val area = prefs.getString(KEY_AREA, "") ?: ""
+    val lat = if (prefs.contains(KEY_LAT)) prefs.getFloat(KEY_LAT, 0f).toDouble() else null
+    val lng = if (prefs.contains(KEY_LNG)) prefs.getFloat(KEY_LNG, 0f).toDouble() else null
+    return LocationState.Resolved(city, area, lat, lng, prefs.getBoolean(KEY_MANUAL, false))
+  }
+
+  /**
+   * Reads the current GPS fix and reverse-geocodes it. Caller is responsible for having the
+   * permission granted; if it isn't we short-circuit to [LocationState.Denied].
+   */
+  suspend fun detectCurrent(): LocationState {
+    if (!hasPermission()) return LocationState.Denied
+    return try {
+      val location = currentLocation() ?: return LocationState.Error("Couldn't get a GPS fix")
+      val resolved = reverseGeocode(location)
+      persist(resolved)
+      resolved
+    } catch (se: SecurityException) {
+      LocationState.Denied
+    } catch (e: Exception) {
+      LocationState.Error(e.message ?: "Location unavailable")
+    }
+  }
+
+  /** Persist a manual pick from the city list. */
+  fun selectCity(option: CityOption): LocationState.Resolved {
+    val resolved = LocationState.Resolved(option.city, option.area, isManual = true)
+    persist(resolved)
+    addRecent(option)
+    return resolved
+  }
+
+  fun recents(): List<CityOption> {
+    val raw = prefs.getString(KEY_RECENTS, "") ?: ""
+    if (raw.isBlank()) return emptyList()
+    return raw.split(RECENT_SEP).mapNotNull { entry ->
+      val parts = entry.split(FIELD_SEP)
+      if (parts.size == 2) CityOption(parts[0], parts[1]) else null
+    }
+  }
+
+  private suspend fun currentLocation(): Location? {
+    val cts = CancellationTokenSource()
+    return try {
+      @Suppress("MissingPermission")
+      suspendCancellableCoroutine { cont ->
+        fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
+          .addOnSuccessListener { cont.resume(it) }
+          .addOnFailureListener { cont.resume(null) }
+        cont.invokeOnCancellation { cts.cancel() }
+      }
+    } catch (se: SecurityException) {
+      throw se
+    }
+  }
+
+  private suspend fun reverseGeocode(location: Location): LocationState.Resolved =
+    withContext(Dispatchers.IO) {
+      val fallback = LocationState.Resolved(
+        city = "Lat ${"%.3f".format(location.latitude)}",
+        area = "Lng ${"%.3f".format(location.longitude)}",
+        lat = location.latitude,
+        lng = location.longitude
+      )
+      if (!Geocoder.isPresent()) return@withContext fallback
+      try {
+        val geocoder = Geocoder(context, Locale.getDefault())
+        @Suppress("DEPRECATION")
+        val results = geocoder.getFromLocation(location.latitude, location.longitude, 1)
+        val address = results?.firstOrNull() ?: return@withContext fallback
+        val city = address.locality
+          ?: address.subAdminArea
+          ?: address.adminArea
+          ?: fallback.city
+        val area = address.subLocality
+          ?: address.adminArea
+          ?: address.countryName
+          ?: ""
+        LocationState.Resolved(city, area, location.latitude, location.longitude)
+      } catch (e: Exception) {
+        fallback
+      }
+    }
+
+  private fun persist(resolved: LocationState.Resolved) {
+    prefs.edit().apply {
+      putString(KEY_CITY, resolved.city)
+      putString(KEY_AREA, resolved.area)
+      resolved.lat?.let { putFloat(KEY_LAT, it.toFloat()) } ?: remove(KEY_LAT)
+      resolved.lng?.let { putFloat(KEY_LNG, it.toFloat()) } ?: remove(KEY_LNG)
+      putBoolean(KEY_MANUAL, resolved.isManual)
+      apply()
+    }
+  }
+
+  private fun addRecent(option: CityOption) {
+    val current = recents().toMutableList()
+    current.removeAll { it.city == option.city }
+    current.add(0, option)
+    val trimmed = current.take(MAX_RECENTS)
+    val raw = trimmed.joinToString(RECENT_SEP) { "${it.city}$FIELD_SEP${it.area}" }
+    prefs.edit().putString(KEY_RECENTS, raw).apply()
+  }
+
+  companion object {
+    private const val PREFS = "haraan_location_prefs"
+    private const val KEY_CITY = "loc_city"
+    private const val KEY_AREA = "loc_area"
+    private const val KEY_LAT = "loc_lat"
+    private const val KEY_LNG = "loc_lng"
+    private const val KEY_MANUAL = "loc_manual"
+    private const val KEY_RECENTS = "loc_recents"
+    private const val RECENT_SEP = "||"
+    private const val FIELD_SEP = "::"
+    private const val MAX_RECENTS = 4
+
+    /** Curated list backing the searchable picker. */
+    val POPULAR_CITIES: List<CityOption> = listOf(
+      CityOption("Vaddeswaram", "Andhra Pradesh"),
+      CityOption("Vijayawada", "Andhra Pradesh"),
+      CityOption("Guntur", "Andhra Pradesh"),
+      CityOption("Hyderabad", "Telangana"),
+      CityOption("Bengaluru", "Karnataka"),
+      CityOption("Chennai", "Tamil Nadu"),
+      CityOption("Mumbai", "Maharashtra"),
+      CityOption("Pune", "Maharashtra"),
+      CityOption("Delhi", "Delhi NCR"),
+      CityOption("Kolkata", "West Bengal"),
+      CityOption("Visakhapatnam", "Andhra Pradesh"),
+      CityOption("Kochi", "Kerala")
+    )
+  }
+}

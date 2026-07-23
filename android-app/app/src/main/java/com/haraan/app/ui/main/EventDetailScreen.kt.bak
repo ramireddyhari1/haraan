@@ -1,0 +1,420 @@
+package com.example.thanna.ui.main
+
+import android.widget.Toast
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.delay
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.thanna.EventDetail
+import com.example.thanna.ui.components.HaraanButton
+import com.example.thanna.ui.components.HaraanImage
+import com.example.thanna.ui.theme.HaraanColors
+import com.example.thanna.ui.theme.HaraanRadius
+import com.example.thanna.ui.theme.HaraanSpacing
+import com.example.thanna.ui.theme.HaraanTypography
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventDetailScreen(
+    event: EventDetail,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val scrollState = rememberScrollState()
+    var isSaved by remember { mutableStateOf(false) }
+
+    val configuration = LocalConfiguration.current
+    val screenHeight = configuration.screenHeightDp.dp
+    val posterHeight = screenHeight * 0.55f
+
+    var quantity by remember { mutableStateOf(1) }
+    val basePrice = remember(event.price) {
+        val digits = event.price.filter { it.isDigit() }
+        digits.toDoubleOrNull() ?: 2999.0
+    }
+    val totalPrice = basePrice * quantity
+
+    // B1 — total price counts up smoothly and pops on change.
+    val animatedTotal by animateIntAsState(totalPrice.toInt(), tween(320), label = "total")
+    val priceScale = remember { Animatable(1f) }
+    LaunchedEffect(totalPrice) {
+        priceScale.snapTo(1.12f)
+        priceScale.animateTo(1f, tween(220))
+    }
+
+    // B1 — save bookmark scale-pop on toggle.
+    val saveScale = remember { Animatable(1f) }
+    LaunchedEffect(isSaved) {
+        if (isSaved) {
+            saveScale.snapTo(0.7f)
+            saveScale.animateTo(1f, tween(260))
+        }
+    }
+
+    // B2 — sticky booking bar slides up on entry.
+    var barIn by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { barIn = true }
+    val barRise by animateFloatAsState(if (barIn) 0f else 1f, tween(420), label = "barRise")
+
+    // B2 — content sheet fades + rises in just after the poster settles.
+    var contentIn by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(90); contentIn = true }
+    val contentAlpha by animateFloatAsState(if (contentIn) 1f else 0f, tween(460), label = "contentAlpha")
+    val contentRise by animateFloatAsState(if (contentIn) 0f else 1f, tween(460), label = "contentRise")
+
+    Box(modifier = Modifier.fillMaxSize().background(HaraanColors.Background)) {
+        
+        // 1. Parallax Poster Background
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(posterHeight + 40.dp)
+                .graphicsLayer {
+                    translationY = -scrollState.value * 0.4f
+                    alpha = (1f - (scrollState.value / (posterHeight.toPx())).coerceIn(0f, 1f))
+                }
+        ) {
+            HaraanImage(
+                model = event.imageUrl,
+                contentDescription = event.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            
+            // Poster Bottom Gradient Mask
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.4f),
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.7f)
+                            )
+                        )
+                    )
+            )
+        }
+
+        // 2. Scrollable Details Sheet
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
+            Spacer(modifier = Modifier.height(posterHeight))
+
+            // Rounded Bottom Content Card overlapping the poster
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { alpha = contentAlpha; translationY = contentRise * 40.dp.toPx() }
+                    .clip(RoundedCornerShape(topStart = HaraanRadius.Hero, topEnd = HaraanRadius.Hero))
+                    .background(HaraanColors.Surface)
+                    .padding(top = HaraanSpacing.Medium, bottom = 120.dp)
+            ) {
+                // Top Category Strip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = HaraanSpacing.Medium),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = HaraanColors.EventsBlue.copy(alpha = 0.08f),
+                        shape = CircleShape
+                    ) {
+                        Text(
+                            text = event.category,
+                            color = HaraanColors.EventsBlue,
+                            style = HaraanTypography.LabelSmall,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+
+                    // Social proof — only shown when there's real popularity to report.
+                    if (event.bookedThisWeek > 0) {
+                        Surface(
+                            color = HaraanColors.GameHubGreen.copy(alpha = 0.08f),
+                            shape = CircleShape
+                        ) {
+                            Text(
+                                text = "🔥 ${event.bookedThisWeek} booked this week",
+                                color = HaraanColors.GameHubGreen,
+                                style = HaraanTypography.LabelSmall.copy(fontSize = 10.sp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(HaraanSpacing.Medium))
+
+                Column(modifier = Modifier.padding(horizontal = HaraanSpacing.Medium)) {
+                    // Event Title
+                    Text(
+                        text = event.title,
+                        style = HaraanTypography.TitleLarge.copy(fontSize = 24.sp, color = HaraanColors.TextPrimary)
+                    )
+
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Small))
+
+                    // Date & Location Info Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = event.date,
+                            style = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextSecondary, fontWeight = FontWeight.SemiBold)
+                        )
+                        Spacer(modifier = Modifier.width(HaraanSpacing.Small))
+                        Text(
+                            text = "•",
+                            color = HaraanColors.TextMuted
+                        )
+                        Spacer(modifier = Modifier.width(HaraanSpacing.Small))
+                        Text(
+                            text = event.venue,
+                            style = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextSecondary)
+                        )
+                    }
+
+                    HorizontalDivider(
+                        color = HaraanColors.BorderLight,
+                        modifier = Modifier.padding(vertical = HaraanSpacing.Medium)
+                    )
+
+                    // Description text
+                    Text(
+                        text = "About the Event",
+                        style = HaraanTypography.TitleMedium.copy(color = HaraanColors.TextPrimary)
+                    )
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Small))
+                    Text(
+                        text = event.description.ifBlank {
+                            "Join ${event.title} at ${event.venue} for a memorable live experience. Reserve your spot now — popular dates fill up fast."
+                        },
+                        style = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextSecondary, lineHeight = 22.sp)
+                    )
+
+                    // Booking Terms / Info Card — shown only when there are notes.
+                    if (event.infoNotes.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                        Surface(
+                            color = HaraanColors.Background,
+                            shape = RoundedCornerShape(HaraanRadius.Medium),
+                            border = BorderStroke(1.dp, HaraanColors.BorderLight),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(HaraanSpacing.Medium)) {
+                                Text(
+                                    text = "Important Information",
+                                    style = HaraanTypography.TitleMedium.copy(fontSize = 14.sp, color = HaraanColors.TextPrimary)
+                                )
+                                Spacer(modifier = Modifier.height(HaraanSpacing.Micro))
+                                Text(
+                                    text = event.infoNotes.joinToString("\n") { "• $it" },
+                                    style = HaraanTypography.BodyMedium.copy(color = HaraanColors.TextSecondary, lineHeight = 18.sp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Floating Custom Top Nav Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = HaraanSpacing.Medium, vertical = HaraanSpacing.Small),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Back button
+            val backInteraction = remember { MutableInteractionSource() }
+            val backPressed by backInteraction.collectIsPressedAsState()
+            val backScale by animateFloatAsState(if (backPressed) 0.86f else 1f, label = "backScale")
+            Surface(
+                onClick = onBack,
+                interactionSource = backInteraction,
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.5f),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .size(40.dp)
+                    .graphicsLayer { scaleX = backScale; scaleY = backScale }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(20.dp))
+                }
+            }
+
+            // Share & Save Actions
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val shareInteraction = remember { MutableInteractionSource() }
+                val sharePressed by shareInteraction.collectIsPressedAsState()
+                val shareScale by animateFloatAsState(if (sharePressed) 0.86f else 1f, label = "shareScale")
+                Surface(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        Toast.makeText(context, "Link copied to share!", Toast.LENGTH_SHORT).show()
+                    },
+                    interactionSource = shareInteraction,
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.5f),
+                    contentColor = Color.White,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .graphicsLayer { scaleX = shareScale; scaleY = shareScale }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(20.dp))
+                    }
+                }
+                Surface(
+                    onClick = {
+                        isSaved = !isSaved
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    },
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.5f),
+                    contentColor = Color.White,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .graphicsLayer { scaleX = saveScale.value; scaleY = saveScale.value }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = "Save",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4. Sticky Bottom Booking Panel
+        Surface(
+            color = HaraanColors.Surface,
+            border = BorderStroke(1.dp, HaraanColors.BorderLight),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .graphicsLayer { translationY = barRise * 140.dp.toPx() }
+                .navigationBarsPadding()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(HaraanSpacing.Medium),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "Total Price",
+                        style = HaraanTypography.BodyMedium.copy(color = HaraanColors.TextSecondary)
+                    )
+                    Text(
+                        text = "₹$animatedTotal",
+                        style = HaraanTypography.TitleLarge.copy(color = HaraanColors.TextPrimary, fontSize = 20.sp),
+                        modifier = Modifier.graphicsLayer { scaleX = priceScale.value; scaleY = priceScale.value }
+                    )
+                }
+
+                // Quantity counter + booking CTA
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Quantity control
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(HaraanColors.Background, RoundedCornerShape(HaraanRadius.Small))
+                            .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(HaraanRadius.Small))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "-",
+                            style = HaraanTypography.TitleMedium.copy(fontSize = 18.sp, color = HaraanColors.TextPrimary),
+                            modifier = Modifier
+                                .clickable {
+                                    if (quantity > 1) {
+                                        quantity--
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                }
+                                .padding(horizontal = 8.dp)
+                        )
+                        Text(
+                            text = quantity.toString(),
+                            style = HaraanTypography.TitleMedium.copy(color = HaraanColors.TextPrimary),
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                        Text(
+                            text = "+",
+                            style = HaraanTypography.TitleMedium.copy(fontSize = 18.sp, color = HaraanColors.TextPrimary),
+                            modifier = Modifier
+                                .clickable {
+                                    quantity++
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                .padding(horizontal = 8.dp)
+                        )
+                    }
+
+                    // Dynamic Book Now CTA using Haraan Colors
+                    HaraanButton(
+                        text = "Book Now",
+                        containerColor = HaraanColors.GameHubGreen,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            Toast.makeText(context, "Booking ₹${totalPrice.toInt()} successful!", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                }
+            }
+        }
+    }
+}

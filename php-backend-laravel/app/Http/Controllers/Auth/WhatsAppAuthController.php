@@ -106,12 +106,18 @@ class WhatsAppAuthController extends Controller
         if ($user) {
             Auth::login($user, true); // login and remember
             session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone']);
-            
-            if (empty($user->district) || empty($user->state)) {
-                return redirect()->route('site.profile.setup')->with('info', 'Please complete your cricket identity registration.');
+
+            // Partners (event hosts / venue owners) go straight to their /partner console.
+            if ($user->hasRoleEither(['PARTNER'])) {
+                return redirect('/partner');
             }
 
-            return redirect('/')->with('success', 'Logged in successfully via WhatsApp!');
+            // Straight to where they were headed — never via cricket onboarding, and for
+            // the same reason as the Google flow (see GoogleWebAuthController): most web
+            // sign-ins are Events traffic, and a "Permanent Cricket Identity" wall right
+            // after login is wrong-lane friction. District/state are an ActionBoard
+            // concern; EnsureActionboardProfile collects them at the point of use.
+            return redirect()->intended('/')->with('success', 'Logged in successfully via WhatsApp!');
         }
 
         return redirect()->route('login')->with('error', 'User not found.');

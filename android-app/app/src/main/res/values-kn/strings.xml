@@ -1,0 +1,39 @@
+<resources>
+    <string name="action_score">ಸ್ಕೋರ್</string>
+    <string name="live">ಲೈವ್</string>
+    <string name="language">ಭಾಷೆ</string>
+    <string name="choose_language">ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ</string>
+
+    <string name="tab_info">ಮಾಹಿತಿ</string>
+    <string name="tab_commentary">ವೀಕ್ಷಕ ವಿವರಣೆ</string>
+    <string name="tab_live">ಲೈವ್</string>
+    <string name="tab_scorecard">ಸ್ಕೋರ್‌ಕಾರ್ಡ್</string>
+
+    <string name="out">ಔಟ್</string>
+    <string name="start_second_innings">2ನೇ ಇನ್ನಿಂಗ್ಸ್ ಆರಂಭಿಸಿ</string>
+    <string name="innings_start">ಇನ್ನಿಂಗ್ಸ್ ಆರಂಭ</string>
+    <string name="over_complete">ಓವರ್ ಮುಗಿದಿದೆ</string>
+    <string name="select_opening_bowler">ಆರಂಭಿಕ ಬೌಲರ್ ಆಯ್ಕೆಮಾಡಿ</string>
+    <string name="select_next_bowler">ಮುಂದಿನ ಬೌಲರ್ ಆಯ್ಕೆಮಾಡಿ</string>
+    <string name="wicket">ವಿಕೆಟ್</string>
+    <string name="select_new_batsman">ಹೊಸ ಬ್ಯಾಟ್ಸ್‌ಮನ್ ಆಯ್ಕೆಮಾಡಿ</string>
+    <string name="innings_complete_fmt">ಇನ್ನಿಂಗ್ಸ್ ಮುಗಿದಿದೆ · %1$d ಓವರ್‌ಗಳು</string>
+
+    <string name="toss_title">ಟಾಸ್</string>
+    <string name="toss_later">ನಂತರ</string>
+    <string name="toss_tap_coin">ನಾಣ್ಯವನ್ನು ಟ್ಯಾಪ್ ಮಾಡಿ ಟಾಸ್ ಮಾಡಿ</string>
+    <string name="toss_tails">ಟೈಲ್ಸ್</string>
+    <string name="toss_who_won">ಟಾಸ್ ಯಾರು ಗೆದ್ದರು?</string>
+    <string name="toss_elected_to">ಟಾಸ್ ಗೆದ್ದ ತಂಡ ಆಯ್ಕೆ ಮಾಡಿದ್ದು?</string>
+    <string name="toss_bat">ಬ್ಯಾಟಿಂಗ್</string>
+    <string name="toss_bowl">ಬೌಲಿಂಗ್</string>
+    <string name="toss_need_help">ಸಹಾಯ ಬೇಕೇ?</string>
+    <string name="toss_lets_play">ಆಡೋಣ</string>
+    <string name="toss_help_hint">ನಾಣ್ಯವನ್ನು ಟ್ಯಾಪ್ ಮಾಡಿ ಟಾಸ್ ಮಾಡಿ, ನಂತರ ನಿಜವಾಗಿ ಯಾರು ಟಾಸ್ ಗೆದ್ದರು ಮತ್ತು ಅವರು ಏನನ್ನು ಆಯ್ಕೆ ಮಾಡಿದರು ಎಂಬುದನ್ನು ದಾಖಲಿಸಿ.</string>
+    <string name="toss_striker">ಸ್ಟ್ರೈಕರ್</string>
+    <string name="toss_non_striker">ನಾನ್-ಸ್ಟ್ರೈಕರ್</string>
+    <string name="toss_opening_bowler">ಆರಂಭಿಕ ಬೌಲರ್</string>
+    <string name="toss_start_match">ಪಂದ್ಯ ಆರಂಭಿಸಿ</string>
+    <string name="toss_no_players">ಆಟಗಾರರನ್ನು ಸೇರಿಸಿಲ್ಲ — ಡೀಫಾಲ್ಟ್ ಹೆಸರು ಬಳಸಲಾಗುತ್ತದೆ.</string>
+    <string name="toss_line_fmt">%1$s ಟಾಸ್ ಗೆದ್ದು %2$s ಆಯ್ಕೆ ಮಾಡಿದೆ.</string>
+</resources>

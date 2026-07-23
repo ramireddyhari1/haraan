@@ -1,0 +1,26 @@
+package com.example.thanna.data.local
+
+import androidx.room.*
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface SyncStateDao {
+    @Query("SELECT * FROM sync_states WHERE matchId = :matchId")
+    fun getSyncStateFlow(matchId: String): Flow<SyncState?>
+
+    @Query("SELECT * FROM sync_states WHERE matchId = :matchId")
+    suspend fun getSyncState(matchId: String): SyncState?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSyncState(syncState: SyncState): Long
+
+    @Update
+    suspend fun updateSyncState(syncState: SyncState): Int
+
+    @Delete
+    suspend fun deleteSyncState(syncState: SyncState): Int
+
+    @Query("DELETE FROM sync_states WHERE matchId = :matchId")
+    suspend fun deleteSyncStateByMatchId(matchId: String): Int
+}
+

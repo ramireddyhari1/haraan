@@ -8,6 +8,65 @@
  *   3. Phone-login form submission
  */
 
+/* -------------------------------------------------------------------------- */
+/*  0. Overlay history — makes Back and Escape close overlays                   */
+/* -------------------------------------------------------------------------- */
+/**
+ * Every modal/sheet on this site is opened by toggling classes, which puts
+ * nothing in the browser history. On mobile that means the hardware/gesture Back
+ * button LEAVES THE PAGE instead of closing the overlay — the user loses their
+ * place (worst on the event ticket sheet, mid-booking). On desktop, Escape did
+ * nothing either.
+ *
+ * This gives each overlay a history entry so Back unwinds it, and closes the
+ * topmost one on Escape. Overlays opt in by calling push() when they open and
+ * pop() when they close — see openLoginModal/closeLoginModal for the pattern:
+ *
+ *   function openThing() { ...show DOM...; HaraanOverlay.push('thing', closeThing); }
+ *   function closeThing() { ...hide DOM...; HaraanOverlay.pop('thing'); }
+ *
+ * Both directions route through here, so the ✕ button, the backdrop, Escape and
+ * Back all end in the same place and the history stack cannot drift.
+ *
+ * Exposed on `window` so page-level inline scripts (event detail's sheets) can
+ * use it without duplicating the logic.
+ */
+window.HaraanOverlay = (function () {
+    const stack = [];      // names of open overlays, innermost last
+    const closers = {};    // name -> the function that hides it
+    // True only while we're reacting to a real Back press, so pop() knows not to
+    // call history.back() again (which would eat a second, unrelated entry).
+    let handlingPop = false;
+
+    function push(name, closeFn) {
+        if (stack.indexOf(name) !== -1) return;
+        closers[name] = closeFn;
+        stack.push(name);
+        history.pushState({ haraanOverlay: name }, '');
+    }
+
+    function pop(name) {
+        const i = stack.lastIndexOf(name);
+        if (i === -1) return;           // already closed — keeps close() idempotent
+        stack.splice(i, 1);
+        if (!handlingPop) history.back();
+    }
+
+    window.addEventListener('popstate', function () {
+        const name = stack[stack.length - 1];
+        if (!name) return;              // not our entry; let the browser navigate
+        handlingPop = true;
+        try { (closers[name] || function () {})(); } finally { handlingPop = false; }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || stack.length === 0) return;
+        (closers[stack[stack.length - 1]] || function () {})();
+    });
+
+    return { push: push, pop: pop, isOpen: function (n) { return stack.indexOf(n) !== -1; } };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     /* ------------------------------------------------------------------ */
     /*  1. Location Modal                                                  */
@@ -15,7 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const locationModal    = document.getElementById('locationModal');
     const locationCard     = locationModal?.querySelector('.location-modal__card');
-    const locationToggle   = document.getElementById('locationToggle');
+    // Two triggers open the picker: the desktop pill and the mobile greeting's
+    // location line. Bind by attribute so either can open it.
+    const locationToggles  = document.querySelectorAll('[data-location-toggle]');
     const locationBackdrop = document.getElementById('locationBackdrop');
     const closeLocationBtn = document.getElementById('closeLocation');
     const locationSearch   = document.getElementById('locationSearch');
@@ -33,7 +94,11 @@ document.addEventListener('DOMContentLoaded', () => {
         locationModal.setAttribute('aria-hidden', 'false');
         locationModal.style.display = 'block';
         locationCard?.classList.add('show');
+        window.HaraanOverlay.push('location', closeLocationModal);
         locationSearch?.focus();
+        // Now that the list has layout, reset to the top and light up the
+        // matching A-Z letter (syncing before this point sees zero offsets).
+        if (allList) { allList.scrollTop = 0; syncActiveLetter(); }
     }
 
     /** Hide the location-selector modal. */
@@ -42,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
         locationModal.setAttribute('aria-hidden', 'true');
         locationModal.style.display = 'none';
         locationCard?.classList.remove('show');
+        window.HaraanOverlay.pop('location');
     }
 
     /**
@@ -112,10 +178,23 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.className   = letters[letter] ? '' : 'disabled';
 
             if (letters[letter]) {
-                btn.addEventListener('click', () => filterByLetter(letter));
+                btn.addEventListener('click', () => scrollToLetter(letter));
             }
             alphaIndex.appendChild(btn);
         });
+
+        // Keep the active letter in sync as the list scrolls.
+        allList.onscroll = syncActiveLetter;
+        syncActiveLetter();
+
+        // Current-city context line under the title.
+        const currentLine = document.getElementById('locationCurrent');
+        if (currentLine) {
+            const sel = selectedCityName();
+            currentLine.textContent = sel
+                ? 'Currently showing: ' + sel
+                : 'Set where you want to play & attend';
+        }
 
         // --- Wire up the search input ---
         if (locationSearch) {
@@ -130,17 +209,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** Name of the currently-selected city, for highlighting in the list. */
+    function selectedCityName() {
+        try { return (JSON.parse(localStorage.getItem('bv_selected_city') || '{}').name) || ''; }
+        catch (_) { return ''; }
+    }
+
+    /**
+     * A colored monogram chip for a city — deterministic hue from the name, so
+     * each city reads as a distinct branded tile instead of a gray placeholder.
+     */
+    function cityMonogram(city, cls) {
+        let h = 0;
+        for (const ch of (city.name || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+        // Constrain to the brand blue/indigo family (198–238°) so the modal reads
+        // as one product with the now-blue header, not a bag of random pastels.
+        const hue = 198 + (h % 40);
+        const letter = (city.name || '?').charAt(0).toUpperCase();
+        return `<span class="${cls}" style="background:hsl(${hue} 70% 94%);color:hsl(${hue} 62% 42%)">${letter}</span>`;
+    }
+
     /** Build a card element for the "Popular Cities" grid. */
     function buildCityCard(city) {
         const btn = document.createElement('button');
-        btn.className = 'city-card';
+        btn.className = 'city-card' + (city.name === selectedCityName() ? ' is-selected' : '');
         btn.setAttribute('role', 'listitem');
         btn.innerHTML = `
-            <div class="icon"><img src="${city.icon}" alt="${city.name}"/></div>
-            <div>
-                <strong>${city.name}</strong>
-                <small style="color:#6b7280">${city.country}</small>
-            </div>`;
+            <div class="icon">${cityMonogram(city, 'city-mono')}</div>
+            <div><strong>${city.name}</strong></div>`;
         btn.addEventListener('click', () => selectCity(city));
         return btn;
     }
@@ -148,14 +244,13 @@ document.addEventListener('DOMContentLoaded', () => {
     /** Build a row element for the "All Cities" list. */
     function buildCityRow(city) {
         const div = document.createElement('div');
-        div.className = 'city-row';
+        div.className = 'city-row' + (city.name === selectedCityName() ? ' is-selected' : '');
         div.setAttribute('role', 'listitem');
+        div.dataset.letter = (city.name || '?').charAt(0).toUpperCase();
         div.innerHTML = `
-            <div class="thumb"><img src="${city.icon}" alt="${city.name}"/></div>
-            <div>
-                <strong>${city.name}</strong>
-                <small style="color:#6b7280">${city.country}</small>
-            </div>`;
+            <div class="thumb">${cityMonogram(city, 'city-mono city-mono--sm')}</div>
+            <div><strong>${city.name}</strong></div>
+            ${city.name === selectedCityName() ? '<span class="city-row__check" aria-label="Selected">✓</span>' : ''}`;
         div.addEventListener('click', () => selectCity(city));
         return div;
     }
@@ -165,25 +260,50 @@ document.addEventListener('DOMContentLoaded', () => {
      * the modal.
      */
     function selectCity(city) {
-        const label = document.querySelector('.location-pill__label');
-        if (label) {
-            label.querySelector('strong').textContent = city.name;
-            label.querySelector('small').textContent  = city.country;
-        }
-        try { localStorage.setItem('bv_selected_city', JSON.stringify(city)); } catch (_) {}
+        // Persist the choice in a cookie so the server can scope content
+        // (events/venues) to this city and render the pill on every page.
+        try {
+            const maxAge = 60 * 60 * 24 * 365; // 1 year
+            document.cookie = 'haraan_city=' + encodeURIComponent(city.name) +
+                '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+            localStorage.setItem('bv_selected_city', JSON.stringify(city));
+        } catch (_) {}
         closeLocationModal();
+        // Reload so the server re-filters listings and updates the header pill.
+        window.location.reload();
     }
 
-    /** Filter the "All Cities" list to show only a given starting letter. */
-    function filterByLetter(letter) {
-        Array.from(allList.children).forEach(row => {
-            const name = row.querySelector('strong').textContent;
-            row.style.display = name.charAt(0).toUpperCase() === letter ? '' : 'none';
+    /** Scroll the "All Cities" list to the first city under a given letter. */
+    function scrollToLetter(letter) {
+        const target = Array.from(allList.children)
+            .find(row => row.dataset.letter === letter);
+        if (target) {
+            allList.scrollTop = target.offsetTop - allList.offsetTop;
+            // Programmatic scrollTop doesn't reliably fire 'scroll', so refresh
+            // the active-letter highlight directly.
+            syncActiveLetter();
+        }
+    }
+
+    /** Highlight the A-Z button matching the topmost visible row as you scroll. */
+    function syncActiveLetter() {
+        if (!allList || !alphaIndex) return;
+        // No layout yet (modal still hidden) → skip; every offset is 0 and the
+        // loop would otherwise fall through to the last letter.
+        if (!allList.offsetParent && allList.offsetHeight === 0) return;
+        const top = allList.scrollTop;
+        let current = null;
+        for (const row of allList.children) {
+            if (row.offsetTop - allList.offsetTop <= top + 4) current = row.dataset.letter;
+            else break;
+        }
+        Array.from(alphaIndex.children).forEach(btn => {
+            btn.classList.toggle('active', btn.textContent === current);
         });
     }
 
     // --- Location modal event wiring ---
-    locationToggle?.addEventListener('click', (e) => {
+    locationToggles.forEach((toggle) => toggle.addEventListener('click', (e) => {
         e.preventDefault();
         if (cachedCities.length) {
             renderCities(cachedCities);
@@ -191,22 +311,133 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             fetchCities().then(() => openLocationModal());
         }
-    });
+    }));
 
     locationBackdrop?.addEventListener('click', closeLocationModal);
     closeLocationBtn?.addEventListener('click', closeLocationModal);
 
+    /**
+     * Map free-text place names from a reverse geocoder onto one of the served
+     * cities (public/data/cities.json). Returns the matching city object, or
+     * null when the viewer is outside every city Haraan serves.
+     */
+    function matchServedCity(candidates) {
+        const names = (candidates || [])
+            .filter(Boolean)
+            .map((s) => String(s).toLowerCase().trim());
+        if (!names.length || !cachedCities.length) return null;
+
+        // Known localities / administrative names → served city label.
+        const aliases = {
+            'mumbai': 'Mumbai', 'bombay': 'Mumbai', 'navi mumbai': 'Mumbai', 'thane': 'Mumbai',
+            'delhi': 'Delhi NCR', 'new delhi': 'Delhi NCR', 'gurgaon': 'Delhi NCR',
+            'gurugram': 'Delhi NCR', 'noida': 'Delhi NCR', 'ghaziabad': 'Delhi NCR', 'faridabad': 'Delhi NCR',
+            'bengaluru': 'Bengaluru', 'bangalore': 'Bengaluru',
+            'pune': 'Pune', 'pimpri': 'Pune', 'chinchwad': 'Pune',
+            'goa': 'Goa', 'panaji': 'Goa', 'panjim': 'Goa', 'mapusa': 'Goa', 'margao': 'Goa', 'vasco': 'Goa',
+        };
+        const findCity = (label) =>
+            cachedCities.find((c) => c.name.toLowerCase() === label.toLowerCase()) || null;
+
+        // 1) Alias hit (longest alias first so "navi mumbai" wins over "mumbai").
+        const needles = Object.keys(aliases).sort((a, b) => b.length - a.length);
+        for (const name of names) {
+            for (const needle of needles) {
+                if (name.includes(needle)) {
+                    const city = findCity(aliases[needle]);
+                    if (city) return city;
+                }
+            }
+        }
+        // 2) Direct match against a served city's own name.
+        for (const name of names) {
+            for (const c of cachedCities) {
+                if (name.includes(c.name.toLowerCase())) return c;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Apply a set of geocoder place-name candidates: prefer a curated served
+     * city, otherwise fall back to the raw detected name so the pill still
+     * reflects the viewer's actual city. Returns true when a city was applied
+     * (which triggers a reload), false when nothing usable was found.
+     */
+    function applyDetectedCity(candidates, detectedName, countryName) {
+        const matched = matchServedCity(candidates);
+        if (matched) {
+            selectCity(matched); // persists cookie + reloads (updates the pill)
+            return true;
+        }
+        const name = (detectedName || '').trim();
+        if (name) {
+            selectCity({ name: name, country: countryName || 'India' });
+            return true;
+        }
+        return false;
+    }
+
+    /** Resolve a city from precise GPS coordinates (browser geolocation). */
+    async function resolveCityByCoords(latitude, longitude) {
+        if (!cachedCities.length) await fetchCities();
+        const resp = await fetch(
+            'https://api.bigdatacloud.net/data/reverse-geocode-client' +
+            `?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+        );
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        const admin = (data.localityInfo && data.localityInfo.administrative) || [];
+        const candidates = [data.city, data.locality, data.principalSubdivision, ...admin.map((a) => a && a.name)];
+        return applyDetectedCity(candidates, data.city || data.locality, data.countryName);
+    }
+
+    /**
+     * Resolve a city from the viewer's IP address — the fallback when browser
+     * geolocation is denied, blocked (e.g. inside an embedded frame), or times
+     * out. Less precise than GPS but works without any permission prompt.
+     */
+    async function resolveCityByIp() {
+        if (!cachedCities.length) await fetchCities();
+        const resp = await fetch('https://ipwho.is/');
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        if (data && data.success === false) return false;
+        const candidates = [data.city, data.region, data.country];
+        return applyDetectedCity(candidates, data.city, data.country);
+    }
+
     useCurrentBtn?.addEventListener('click', () => {
-        if (!navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition((pos) => {
-            alert(
-                'Using current location — lat:' +
-                pos.coords.latitude.toFixed(3) +
-                ', lon:' +
-                pos.coords.longitude.toFixed(3)
-            );
-            closeLocationModal();
-        });
+        const originalLabel = useCurrentBtn.textContent;
+        const resetBtn = () => {
+            useCurrentBtn.textContent = originalLabel;
+            useCurrentBtn.disabled = false;
+        };
+        const fail = () => {
+            resetBtn();
+            alert('Could not detect your location. Please pick a city from the list.');
+        };
+        useCurrentBtn.textContent = 'Locating…';
+        useCurrentBtn.disabled = true;
+
+        // IP fallback — used when precise geolocation is unavailable/denied.
+        const tryIp = () => resolveCityByIp().then((ok) => { if (!ok) fail(); }).catch(fail);
+
+        if (!navigator.geolocation) {
+            tryIp();
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                resolveCityByCoords(pos.coords.latitude, pos.coords.longitude)
+                    .then((ok) => { if (!ok) return tryIp(); })
+                    .catch(tryIp);
+            },
+            // Denied / unavailable / timeout → fall back to IP-based lookup.
+            () => tryIp(),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
     });
 
     // Close location modal on Escape key
@@ -214,8 +445,117 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') closeLocationModal();
     });
 
-    // Restore previously selected city on load
-    loadSelectedCity();
+    // The header pill is rendered server-side from the city cookie, so we no
+    // longer override it from localStorage on load (that would fight the server
+    // value). loadSelectedCity() is kept for reference but intentionally unused.
+    void loadSelectedCity;
+
+    /* ------------------------------------------------------------------ */
+    /*  Topbar elevation on scroll (flat at top, subtle shadow once moved) */
+    /* ------------------------------------------------------------------ */
+    const topbarEl = document.querySelector('.topbar');
+    if (topbarEl) {
+        let ticking = false;
+        const syncTopbar = () => {
+            topbarEl.classList.toggle('is-scrolled', window.scrollY > 4);
+            ticking = false;
+        };
+        window.addEventListener('scroll', () => {
+            if (!ticking) { ticking = true; requestAnimationFrame(syncTopbar); }
+        }, { passive: true });
+        syncTopbar(); // reflect state on load (e.g. restored scroll position)
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Header search autocomplete (live suggestions)                      */
+    /* ------------------------------------------------------------------ */
+    const searchForm  = document.querySelector('.topbar__search');
+    const searchInput = searchForm ? searchForm.querySelector('.topbar__search-input') : null;
+    const suggestBox  = document.getElementById('searchSuggest');
+    if (searchForm && searchInput && suggestBox) {
+        let items = [];        // flat list of {title, meta, url} in render order
+        let activeIdx = -1;    // keyboard-highlighted item
+        let debounceId = null;
+        let lastQuery = '';
+        let reqToken = 0;      // guards against out-of-order responses
+
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+
+        const closeSuggest = () => {
+            suggestBox.hidden = true;
+            suggestBox.innerHTML = '';
+            items = []; activeIdx = -1;
+            searchInput.setAttribute('aria-expanded', 'false');
+        };
+
+        const render = (data) => {
+            const ev = data.events || [];
+            const vn = data.venues || [];
+            items = [...ev, ...vn];
+            if (!items.length) {
+                suggestBox.innerHTML = '<div class="search-suggest__empty">No matches — press Enter to search everything</div>';
+                suggestBox.hidden = false;
+                searchInput.setAttribute('aria-expanded', 'true');
+                activeIdx = -1;
+                return;
+            }
+            const group = (label, rows) => rows.length
+                ? '<div class="search-suggest__group-label">' + label + '</div>' + rows.map(r =>
+                    '<a class="search-suggest__item" role="option" href="' + esc(r.url) + '">' +
+                        '<span class="search-suggest__title">' + esc(r.title) + '</span>' +
+                        '<span class="search-suggest__meta">' + esc(r.meta) + '</span>' +
+                    '</a>').join('')
+                : '';
+            suggestBox.innerHTML = group('Events', ev) + group('Venues', vn);
+            suggestBox.hidden = false;
+            searchInput.setAttribute('aria-expanded', 'true');
+            activeIdx = -1;
+        };
+
+        const highlight = () => {
+            const nodes = suggestBox.querySelectorAll('.search-suggest__item');
+            nodes.forEach((n, i) => n.classList.toggle('is-active', i === activeIdx));
+            if (activeIdx >= 0 && nodes[activeIdx]) nodes[activeIdx].scrollIntoView({ block: 'nearest' });
+        };
+
+        const fetchSuggest = (q) => {
+            const token = ++reqToken;
+            fetch('/api/search/suggest?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
+                .then(r => r.ok ? r.json() : { events: [], venues: [] })
+                // Only render if this is still the newest request AND the box's
+                // query is still what the user has in the field (guards against
+                // stale results after the input was cleared or changed).
+                .then(data => { if (token === reqToken && searchInput.value.trim() === q) render(data); })
+                .catch(() => { if (token === reqToken) closeSuggest(); });
+        };
+
+        searchInput.addEventListener('input', () => {
+            const q = searchInput.value.trim();
+            lastQuery = q;
+            clearTimeout(debounceId);
+            if (q.length < 2) { closeSuggest(); return; }
+            debounceId = setTimeout(() => fetchSuggest(q), 180);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+            const nodes = suggestBox.querySelectorAll('.search-suggest__item');
+            if (suggestBox.hidden || !nodes.length) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = (activeIdx + 1) % nodes.length; highlight(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = (activeIdx - 1 + nodes.length) % nodes.length; highlight(); }
+            else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); window.location.href = nodes[activeIdx].getAttribute('href'); }
+            else if (e.key === 'Escape') { closeSuggest(); }
+        });
+
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.value.trim().length >= 2 && items.length) suggestBox.hidden = false;
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!searchForm.contains(e.target)) closeSuggest();
+        });
+    }
 
     /* ------------------------------------------------------------------ */
     /*  5. Mobile action buttons (switch behavior)                         */
@@ -223,31 +563,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobileActionWrap = document.querySelector('.mobile-action-buttons');
     const mobileActionBtns = mobileActionWrap ? Array.from(mobileActionWrap.querySelectorAll('.mobile-action-btn')) : [];
     if (mobileActionBtns.length) {
-        // default: make the first button active if none
-        if (!mobileActionBtns.some(b => b.classList.contains('is-active'))) {
-            mobileActionBtns[0].classList.add('is-active');
-        }
+        // Determine active tab from the current URL, not just click state,
+        // so a direct visit/refresh on /gamehub highlights GameHub (not Events).
+        mobileActionBtns.forEach(b => b.classList.remove('is-active'));
+        const isGamehubPath = /^\/gamehub(\/|$)/.test(window.location.pathname);
+        const initialBtn = mobileActionBtns.find(b => isGamehubPath
+            ? b.classList.contains('mobile-action-btn--gamehub')
+            : b.classList.contains('mobile-action-btn--events'));
+        (initialBtn || mobileActionBtns[0]).classList.add('is-active');
+        // These are real anchor links — let the browser navigate natively.
+        // We only nudge the active thumb on tap for instant feedback while the
+        // next page loads (no preventDefault, so no slide-then-flash double action).
         mobileActionBtns.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
+            btn.addEventListener('click', () => {
                 mobileActionBtns.forEach(b => b.classList.remove('is-active'));
                 btn.classList.add('is-active');
-                // Mirror active section to body class so other UI (footer) can theme accordingly
-                if (document && document.body) {
-                    if (btn.classList.contains('mobile-action-btn--events')) {
-                        document.body.classList.add('mode-events');
-                        document.body.classList.remove('mode-gamehub');
-                        updateFooterLordIcon('events');
-                    } else if (btn.classList.contains('mobile-action-btn--gamehub')) {
-                        document.body.classList.add('mode-gamehub');
-                        document.body.classList.remove('mode-events');
-                        updateFooterLordIcon('gamehub');
-                    }
-                }
-                const href = btn.getAttribute('href');
-                if (href && href !== '#') {
-                    window.location.href = href;
-                }
             });
         });
         // Ensure initial body mode reflects the active button on load
@@ -269,41 +599,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const icon = document.querySelector('.footer-star-icon lord-icon');
             if (!icon) return;
             if (mode === 'events') {
-                icon.setAttribute('colors', 'primary:#ffffff,secondary:#0057B8');
+                icon.setAttribute('colors', 'primary:#ffffff,secondary:#2563EB');
             } else if (mode === 'gamehub') {
-                icon.setAttribute('colors', 'primary:#ffffff,secondary:#28a745');
+                icon.setAttribute('colors', 'primary:#ffffff,secondary:#00C853');
             }
         } catch (e) { /* ignore */ }
     }
-
-    /* ------------------------------------------------------------------ */
-    /*  4. Mobile off-canvas menu                                           */
-    /* ------------------------------------------------------------------ */
-    const mobileToggle = document.getElementById('mobileMenuToggle');
-    const mobileNav    = document.getElementById('mobileNav');
-    const mobileClose  = document.getElementById('mobileNavClose');
-    const mobileBackdrop = document.getElementById('mobileNavBackdrop');
-
-    function openMobileNav() {
-        if (!mobileNav) return;
-        mobileNav.classList.add('show');
-        mobileBackdrop.classList.add('show');
-        mobileNav.setAttribute('aria-hidden', 'false');
-        mobileToggle?.setAttribute('aria-expanded', 'true');
-    }
-
-    function closeMobileNav() {
-        if (!mobileNav) return;
-        mobileNav.classList.remove('show');
-        mobileBackdrop.classList.remove('show');
-        mobileNav.setAttribute('aria-hidden', 'true');
-        mobileToggle?.setAttribute('aria-expanded', 'false');
-    }
-
-    mobileToggle?.addEventListener('click', (e) => { e.preventDefault(); openMobileNav(); });
-    mobileClose?.addEventListener('click', (e) => { e.preventDefault(); closeMobileNav(); });
-    mobileBackdrop?.addEventListener('click', closeMobileNav);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMobileNav(); });
 
     /* ------------------------------------------------------------------ */
     /*  2. Login (Auth) Modal                                              */
@@ -320,6 +621,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!loginModal) return;
         loginModal.setAttribute('aria-hidden', 'false');
         loginModal.style.display = 'grid';
+        // Now that the slot has a measurable width, GIS can size its button to fit.
+        renderGoogleButtonIfNeeded();
+        window.HaraanOverlay.push('login', closeLoginModal);
         setTimeout(() => loginCard?.classList.add('show'), 20);
     }
 
@@ -327,6 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeLoginModal() {
         if (!loginModal) return;
         loginCard?.classList.remove('show');
+        window.HaraanOverlay.pop('login');
         setTimeout(() => {
             loginModal.setAttribute('aria-hidden', 'true');
             loginModal.style.display = 'none';
@@ -337,8 +642,149 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         openLoginModal();
     });
+    // Guest taps on the mobile greeting's avatar / icons route into the same modal.
+    document.querySelectorAll('[data-login-open]').forEach((el) => el.addEventListener('click', (e) => {
+        e.preventDefault();
+        openLoginModal();
+    }));
     loginBackdrop?.addEventListener('click', closeLoginModal);
     closeLoginBtn?.addEventListener('click', closeLoginModal);
+    // Re-open the modal after a failed email/password sign-in so the error shows
+    // (the POST redirects back to whatever page the modal lives on).
+    if (loginModal?.dataset.openOnError) { openLoginModal(); }
+
+    /* ------------------------------------------------------------------ */
+    /*  2a0. Page header back button                                       */
+    /* ------------------------------------------------------------------ */
+
+    /** Pops the history stack, but a page opened directly (shared link, new tab)
+     *  has nothing to pop — fall back to the account screen rather than dead-end. */
+    document.querySelector('[data-back]')?.addEventListener('click', () => {
+        if (window.history.length > 1) window.history.back();
+        else window.location.assign('/profile');
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  2a. Member ID — tap to copy                                        */
+    /* ------------------------------------------------------------------ */
+
+    /** Mirrors the app's MemberIdBand: tapping the ID copies it. */
+    document.querySelector('.aprof-memberid')?.addEventListener('click', async function () {
+        const id = this.dataset.copy;
+        if (!id) return;
+        try {
+            await navigator.clipboard.writeText(id);
+        } catch {
+            return; // clipboard blocked (insecure context / denied) — say nothing rather than lie
+        }
+        this.classList.add('is-copied');
+        const label = this.querySelector('small');
+        if (!label) return;
+        const original = label.textContent;
+        label.textContent = 'COPIED';
+        setTimeout(() => {
+            label.textContent = original;
+            this.classList.remove('is-copied');
+        }, 1400);
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  2b. Continue with Google                                           */
+    /* ------------------------------------------------------------------ */
+
+    let googleRendered = false;
+
+    /**
+     * Draws the Google button, sized to the slot's real width.
+     *
+     * Must run while the modal is visible: GIS needs a pixel width, and a hidden
+     * modal measures 0 — which silently falls back to a 320px button that overflows
+     * the card. Hence the call from openLoginModal() rather than on page load.
+     * Safe to call repeatedly; only the first visible call draws.
+     */
+    function renderGoogleButtonIfNeeded() {
+        const cfg  = window.HaraanGoogleAuth;
+        const slot = document.getElementById('googleSignInBtn');
+        if (googleRendered || !cfg || !slot || !window.google?.accounts?.id) return;
+
+        const width = slot.clientWidth;
+        if (!width) return; // still hidden — we'll be called again on open
+
+        googleRendered = true;
+        window.google.accounts.id.renderButton(slot, {
+            theme: 'outline',
+            size: 'large',
+            shape: 'pill',
+            text: 'continue_with',
+            logo_alignment: 'center',
+            width: Math.min(width, 400),
+        });
+    }
+
+    /**
+     * Initialises Google Identity Services and trades the ID token it returns for a
+     * Laravel session. GIS loads async, so we poll briefly rather than racing it.
+     * The slot only exists when GOOGLE_CLIENT_ID is configured (see layout.blade.php).
+     */
+    (function initGoogleSignIn() {
+        const cfg  = window.HaraanGoogleAuth;
+        const slot = document.getElementById('googleSignInBtn');
+        if (!cfg || !slot) return;
+
+        const errorEl = document.getElementById('googleSignInError');
+        const showError = (msg) => {
+            if (!errorEl) return;
+            errorEl.textContent = msg;
+            errorEl.hidden = false;
+        };
+
+        /** Exchange the Google ID token for a session, then go where the user was headed. */
+        async function onCredential(response) {
+            errorEl && (errorEl.hidden = true);
+            slot.classList.add('is-busy');
+            try {
+                const res = await fetch(cfg.postUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ credential: response.credential }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    showError(data.error || 'That sign-in did not work. Please try again.');
+                    return;
+                }
+                window.location.assign(data.redirect || '/');
+            } catch {
+                showError('Network error. Please check your connection and try again.');
+            } finally {
+                slot.classList.remove('is-busy');
+            }
+        }
+
+        let waited = 0;
+        const timer = setInterval(() => {
+            if (window.google?.accounts?.id) {
+                clearInterval(timer);
+                window.google.accounts.id.initialize({
+                    client_id: cfg.clientId,
+                    callback: onCredential,
+                });
+                // Covers the case where the modal is already open when GIS lands.
+                renderGoogleButtonIfNeeded();
+            } else if ((waited += 100) > 6000) {
+                // GIS blocked (offline, blocker, or an unauthorised origin) — leave the
+                // phone form as the working path instead of showing a dead button.
+                clearInterval(timer);
+                slot.closest('.auth-google')?.remove();
+                document.querySelector('.auth-divider')?.remove();
+            }
+        }, 100);
+    })();
 
     /* ------------------------------------------------------------------ */
     /*  3. Phone Login Form                                                */

@@ -26,6 +26,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Claude Code local settings (machine-specific, do not publish)
+.claude/
+
 # Expo
 .expo/
 *.jks
@@ -37,3 +40,10 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# WhatsApp Web.js runtime session/cache — huge Chromium cache, never commit.
+# (The deployed bridge keeps its own session on the server.)
+whatsapp-api/.wwebjs_auth/
+whatsapp-api/.wwebjs_cache/
+**/.wwebjs_auth/
+**/.wwebjs_cache/

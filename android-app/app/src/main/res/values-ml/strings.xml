@@ -1,0 +1,39 @@
+<resources>
+    <string name="action_score">സ്കോർ</string>
+    <string name="live">ലൈവ്</string>
+    <string name="language">ഭാഷ</string>
+    <string name="choose_language">നിങ്ങളുടെ ഭാഷ തിരഞ്ഞെടുക്കുക</string>
+
+    <string name="tab_info">വിവരം</string>
+    <string name="tab_commentary">കമന്ററി</string>
+    <string name="tab_live">ലൈവ്</string>
+    <string name="tab_scorecard">സ്കോർകാർഡ്</string>
+
+    <string name="out">ഔട്ട്</string>
+    <string name="start_second_innings">2-ാം ഇന്നിംഗ്സ് തുടങ്ങുക</string>
+    <string name="innings_start">ഇന്നിംഗ്സ് ആരംഭം</string>
+    <string name="over_complete">ഓവർ പൂർത്തിയായി</string>
+    <string name="select_opening_bowler">ഓപ്പണിംഗ് ബൗളറെ തിരഞ്ഞെടുക്കുക</string>
+    <string name="select_next_bowler">അടുത്ത ബൗളറെ തിരഞ്ഞെടുക്കുക</string>
+    <string name="wicket">വിക്കറ്റ്</string>
+    <string name="select_new_batsman">പുതിയ ബാറ്റ്സ്മാനെ തിരഞ്ഞെടുക്കുക</string>
+    <string name="innings_complete_fmt">ഇന്നിംഗ്സ് പൂർത്തിയായി · %1$d ഓവറുകൾ</string>
+
+    <string name="toss_title">ടോസ്</string>
+    <string name="toss_later">പിന്നീട്</string>
+    <string name="toss_tap_coin">നാണയത്തിൽ ടാപ്പ് ചെയ്ത് ടോസ് ചെയ്യുക</string>
+    <string name="toss_tails">ടെയിൽസ്</string>
+    <string name="toss_who_won">ടോസ് ആരു ജയിച്ചു?</string>
+    <string name="toss_elected_to">ടോസ് ജയിച്ച ടീം തിരഞ്ഞെടുത്തത്?</string>
+    <string name="toss_bat">ബാറ്റിംഗ്</string>
+    <string name="toss_bowl">ബൗളിംഗ്</string>
+    <string name="toss_need_help">സഹായം വേണോ?</string>
+    <string name="toss_lets_play">കളിക്കാം</string>
+    <string name="toss_help_hint">നാണയത്തിൽ ടാപ്പ് ചെയ്ത് ടോസ് ചെയ്യുക, തുടർന്ന് യഥാർത്ഥത്തിൽ ആരു ടോസ് ജയിച്ചു, അവർ എന്താണ് തിരഞ്ഞെടുത്തത് എന്ന് രേഖപ്പെടുത്തുക.</string>
+    <string name="toss_striker">സ്ട്രൈക്കർ</string>
+    <string name="toss_non_striker">നോൺ-സ്ട്രൈക്കർ</string>
+    <string name="toss_opening_bowler">ഓപ്പണിംഗ് ബൗളർ</string>
+    <string name="toss_start_match">മത്സരം ആരംഭിക്കുക</string>
+    <string name="toss_no_players">കളിക്കാരെ ചേർത്തിട്ടില്ല — ഡിഫോൾട്ട് പേര് ഉപയോഗിക്കും.</string>
+    <string name="toss_line_fmt">%1$s ടോസ് ജയിച്ച് %2$s തിരഞ്ഞെടുത്തു.</string>
+</resources>

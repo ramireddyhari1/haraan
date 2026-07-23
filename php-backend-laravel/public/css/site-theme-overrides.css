@@ -1,22 +1,32 @@
 /* Lightweight theme overrides for Events (orange) and GameHub (green) */
 
 .theme-events {
-    --accent-local: #ff9f1a; /* bright orange */
-    --accent-lite: #fff6ed;  /* very light orange background */
-    --accent-ink: #7a3910;   /* dark orange text */
+    --accent-local: #2563EB; /* Haraan Events blue (app EventsBlue) */
+    --accent-lite: #EFF6FF;  /* very light blue background */
+    --accent-ink: #1E3A8A;   /* dark blue text */
 }
 
 .theme-gamehub {
-    --accent-local: #1e7f4f; /* green */
+    --accent-local: #1B5E20; /* Haraan GameHub deep green (headings/hero, app GameHubDeep) */
+    --accent-cta: #00C853;   /* Haraan GameHub bright green (buttons/active states, app GameHubGreen) */
     --accent-lite: #f0fbf6;  /* very light green */
-    --accent-ink: #0b4f2f;   /* dark green text */
+    --accent-ink: #14532D;   /* dark green text */
 }
 
 /* Apply to key components */
-.theme-events .hero-feature,
+.theme-events .hero-feature {
+    background: linear-gradient(180deg, var(--surface), var(--surface));
+}
+
+/* Events content stays FLAT on the aurora page — no white section/page boxes.
+   (This rule used to paint .events-section and .page-shell white, which is what
+   made the page read as stacked white cards; keep them transparent to match the
+   flattened .events-section in site.css.) */
 .theme-events .events-section,
 .theme-events .page-shell {
-    background: linear-gradient(180deg, var(--surface), var(--surface));
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
 }
 
 .theme-events .hero-feature__content {
@@ -56,7 +66,7 @@
 .theme-gamehub .events-section .section-shell__header .eyebrow,
 .theme-gamehub .gamehub-hero__copy h1,
 .theme-gamehub .promo-banner__content h2 {
-    color: #16a34a !important;
+    color: #1B5E20 !important;
 }
 
 .theme-gamehub .events-section .section-shell__header h2 {
@@ -66,9 +76,9 @@
 .theme-gamehub .chip.is-active,
 .theme-gamehub .filter-button:hover,
 .theme-gamehub .chip.is-active:hover {
-    background: var(--accent-local);
+    background: var(--accent-cta);
     color: #fff;
-    border-color: var(--accent-local);
+    border-color: var(--accent-cta);
 }
 
 .theme-gamehub .sport-card {
@@ -90,30 +100,66 @@
 .theme-gamehub .action-card__title,
 .theme-gamehub .gamehub-hero__copy h1,
 .theme-gamehub .promo-banner__content h2 {
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 /* Location selector modal */
 .location-modal{display:none;position:fixed;inset:0;z-index:1200}
-.location-modal{display:none;position:fixed;inset:0;z-index:1200}
 .location-modal__backdrop{position:fixed;inset:0;background:rgba(8,12,20,0.55);backdrop-filter:blur(4px)}
-.location-modal__card{position:relative;max-width:980px;margin:5vh auto;padding:18px;border-radius:14px;background:#fff;box-shadow:0 18px 60px rgba(3,12,30,0.25);z-index:1201;display:grid;grid-template-columns:1fr 120px;gap:18px}
-.location-modal__header{display:flex;gap:12px;align-items:center}
-.location-search input{width:100%;padding:12px 14px;border:1px solid #eef3f7;border-radius:10px;font-size:15px}
-.use-current{display:inline-block;margin:12px 0;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e9eef2}
-.popular-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin:12px 0}
-.city-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px;border-radius:12px;background:#fbfcff;border:1px solid #f1f6fb;width:100%;height:120px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease}
-.city-card:hover{transform:translateY(-4px);box-shadow:0 8px 30px rgba(12,30,60,0.08)}
-.city-card .icon{width:56px;height:56px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid #eef4fb}
-.city-card img{width:44px;height:44px}
-.city-card strong{display:block;font-size:14px}
-.all-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:340px;overflow:auto;padding-right:6px}
-.city-row{display:flex;gap:12px;align-items:center;padding:10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
-.city-row:hover{background:#fbfcff}
-.city-row .thumb{width:44px;height:44px;border-radius:8px;background:#fff;border:1px solid #eef4fb;display:flex;align-items:center;justify-content:center}
-.alpha-index{display:flex;flex-direction:column;gap:6px;align-items:center;padding:6px;border-left:1px solid #f1f5f9}
-.alpha-index button{background:transparent;border:0;padding:6px 8px;border-radius:8px;color:#0d1720;cursor:pointer}
-.alpha-index button.active{background:#eef6ff}
+.location-modal__card{position:relative;max-width:860px;margin:6vh auto;padding:24px 26px;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(3,12,30,0.28);z-index:1201}
+
+/* Title + corner close */
+.location-modal__titles{margin-bottom:16px;padding-right:40px}
+.location-modal__title{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em;color:#0f172a}
+.location-modal__sub{margin:3px 0 0;font-size:13px;color:#64748b}
+.location-modal__close{position:absolute;top:16px;right:16px;width:36px;height:36px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:#f1f5f9;color:#475569;cursor:pointer;transition:background .15s ease,color .15s ease}
+.location-modal__close:hover{background:#e2e8f0;color:#0f172a}
+
+/* Header: search + primary "use current location" */
+.location-modal__header{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+.location-search{position:relative;flex:1;display:flex;align-items:center}
+.location-search__icon{position:absolute;left:14px;color:#2563EB;pointer-events:none}
+.location-search input{width:100%;padding:12px 14px 12px 42px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;background:#fff;transition:border-color .15s ease,box-shadow .15s ease}
+.location-search input:focus{outline:0;border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+.btn--use-location{flex-shrink:0;display:inline-flex;align-items:center;gap:7px;padding:11px 16px;border-radius:12px;background:#2563EB;color:#fff;font-weight:700;font-size:14px;border:0;box-shadow:0 8px 18px rgba(37,99,235,.22);cursor:pointer;transition:background .15s ease,transform .15s ease}
+.btn--use-location:hover{background:#1d4ed8;transform:translateY(-1px)}
+.btn--use-location:disabled{opacity:.7;cursor:default;transform:none}
+
+/* Section headings */
+.loc-section{margin-top:6px}
+.loc-section+.loc-section{margin-top:18px}
+.loc-section__title{margin:0 0 12px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8}
+
+/* Popular cities — shorter cards so the list below gets real room */
+.popular-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.city-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 8px;border-radius:14px;background:#fbfcff;border:1px solid #eef2f7;width:100%;height:92px;justify-content:center;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
+.city-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(12,30,60,0.1);border-color:#dbe6ff}
+.city-card .icon{display:flex;align-items:center;justify-content:center}
+.city-card strong{display:block;font-size:13px;text-align:center;line-height:1.2}
+
+/* All cities list + attached A-Z rail */
+.all-cities-wrap{display:flex;gap:6px;align-items:stretch}
+.all-list{flex:1;display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto;padding-right:6px}
+.city-row{display:flex;gap:12px;align-items:center;padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.city-row:hover{background:#f6f9ff}
+.city-row .thumb{display:flex;align-items:center;justify-content:center}
+.city-row>div:nth-child(2){flex:1;min-width:0}
+
+/* Colored monogram chips — brand-blue family, cohesive with the header */
+.city-mono{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;line-height:1;letter-spacing:-.01em}
+.city-mono--sm{width:38px;height:38px;border-radius:10px;font-size:17px}
+/* Selected-city affordance */
+.city-card.is-selected{border-color:#2563EB;box-shadow:0 0 0 1px #2563EB inset}
+.city-row.is-selected{background:#eff4ff;border-color:#dbe6ff}
+.city-row__check{margin-left:auto;color:#2563EB;font-weight:800;font-size:15px}
+
+/* A-Z quick-jump rail — narrow, attached to the list, blue active state */
+.alpha-index{flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:2px;width:26px;border-left:1px solid #f1f5f9}
+.alpha-index button{background:transparent;border:0;padding:0;height:15px;width:22px;border-radius:5px;color:#94a3b8;font-size:10px;font-weight:700;cursor:pointer;transition:background .12s ease,color .12s ease}
+.alpha-index button:hover{color:#2563EB}
+.alpha-index button.active{background:#2563EB;color:#fff}
+.alpha-index button.disabled{color:#cbd5e1;pointer-events:none}
+
 .location-modal__card.show{animation:modalIn .18s ease}
 @keyframes modalIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
@@ -122,8 +168,8 @@
    ========================================== */
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-    background: radial-gradient(circle at top left, rgba(30, 127, 79, 0.03), transparent 40%),
-                linear-gradient(180deg, #fafbfc 0%, #f3f5f7 100%) !important;
+    background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.05), transparent 40%),
+                linear-gradient(180deg, #fafbfc 0%, #F4F7FB 100%) !important;
 }
 
 h1, h2, h3, h4, h5, h6, 
@@ -203,7 +249,7 @@ h2, h3 {
 }
 
 .gamehub-venue-card__star {
-    color: #16a34a;
+    color: #1B5E20;
     font-weight: 700;
 }
 
@@ -215,6 +261,17 @@ h2, h3 {
 .gamehub-venue-card__reviews-count {
     color: #888888;
     font-size: 12px;
+}
+
+/* Unrated venue: a neutral "New" chip instead of a misleading 0.0 rating */
+.gamehub-venue-card__rating--new {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(22, 94, 32, 0.10);
+    color: #1B5E20;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 
 .gamehub-venue-card__actions {
@@ -235,7 +292,7 @@ h2, h3 {
     padding: 8px 18px;
     font-size: 12.5px;
     font-weight: 700;
-    background: #16a34a;
+    background: #1B5E20;
     color: #ffffff;
     border-radius: 999px;
     transition: transform 0.2s, background-color 0.2s;
@@ -298,7 +355,7 @@ h2, h3 {
 }
 
 .detail-badge {
-    background: #16a34a;
+    background: #1B5E20;
     color: #fff;
     font-size: 12px;
     font-weight: 800;
@@ -402,6 +459,10 @@ h2, h3 {
     align-items: start;
 }
 
+.detail-two-column > * {
+    min-width: 0;
+}
+
 @media (max-width: 991px) {
     .detail-two-column {
         grid-template-columns: 1fr;
@@ -469,7 +530,7 @@ h2, h3 {
 }
 
 .date-pill:hover {
-    border-color: #16a34a;
+    border-color: #1B5E20;
     background: #f0fdf4;
 }
 
@@ -517,14 +578,14 @@ h2, h3 {
 }
 
 .sport-tab:hover {
-    border-color: #16a34a;
-    color: #16a34a;
+    border-color: #1B5E20;
+    color: #1B5E20;
 }
 
 .sport-tab.is-active {
-    background: #16a34a;
+    background: #1B5E20;
     color: #fff;
-    border-color: #16a34a;
+    border-color: #1B5E20;
     box-shadow: 0 4px 14px rgba(22,163,74,0.25);
 }
 
@@ -624,18 +685,18 @@ h2, h3 {
 }
 
 .slot-item.is-selected {
-    border-color: #16a34a !important;
+    border-color: #1B5E20 !important;
     background: #f0fdf4 !important;
     box-shadow: 0 4px 14px rgba(22,163,74,0.18) !important;
     transform: translateY(-2px);
 }
 
 .slot-item.is-selected .slot-item__time {
-    color: #16a34a !important;
+    color: #1B5E20 !important;
 }
 
 .slot-item.is-selected .slot-item__price {
-    color: #16a34a !important;
+    color: #1B5E20 !important;
 }
 
 /* Amenities Grid */
@@ -689,7 +750,7 @@ h2, h3 {
     transition: transform 0.2s ease;
     font-size: 18px;
     font-weight: bold;
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 .accordion-body {
@@ -725,7 +786,7 @@ h2, h3 {
 
 .reviews-count-badge {
     background: #f0fdf4;
-    color: #16a34a;
+    color: #1B5E20;
     font-size: 14px;
     font-weight: 700;
     padding: 4px 14px;
@@ -756,7 +817,7 @@ h2, h3 {
     height: 40px;
     border-radius: 50%;
     background: #f0fdf4;
-    color: #16a34a;
+    color: #1B5E20;
     font-weight: 800;
     display: flex;
     align-items: center;
@@ -833,7 +894,7 @@ h2, h3 {
 
 .star-btn:hover,
 .star-btn.is-active {
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 .review-input-field {
@@ -849,12 +910,12 @@ h2, h3 {
 }
 
 .review-input-field:focus {
-    border-color: #16a34a;
+    border-color: #1B5E20;
     box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.1);
 }
 
 .review-submit-btn {
-    background: #16a34a;
+    background: #1B5E20;
     color: #fff;
     border: none;
     border-radius: 10px;
@@ -951,7 +1012,7 @@ h2, h3 {
 .selected-slot-item-pill__header {
     font-size: 11px;
     font-weight: 700;
-    color: #16a34a;
+    color: #1B5E20;
     text-transform: uppercase;
     margin-bottom: 2px;
 }
@@ -969,7 +1030,7 @@ h2, h3 {
 }
 
 .selected-slot-item-pill__price {
-    color: #16a34a;
+    color: #1B5E20;
     font-weight: 800;
 }
 
@@ -1018,7 +1079,7 @@ h2, h3 {
 }
 
 .calc-row--bold .total-green {
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 /* Submit and Lock Button */
@@ -1037,7 +1098,7 @@ h2, h3 {
 }
 
 .book-now-button-widget.is-ready {
-    background: #16a34a;
+    background: #1B5E20;
     color: #fff;
     cursor: pointer;
     box-shadow: 0 8px 24px rgba(22, 163, 74, 0.25);
@@ -1127,7 +1188,7 @@ h2, h3 {
 .receipt-ref-id {
     font-family: monospace;
     font-weight: 700;
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 .receipt-highlight {
@@ -1137,7 +1198,7 @@ h2, h3 {
 
 .receipt-total {
     font-weight: 900;
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 .success-done-btn {
@@ -1167,7 +1228,7 @@ h2, h3 {
 .mb-32 { margin-bottom: 32px !important; }
 
 .detail-meta-star {
-    color: #16a34a;
+    color: #1B5E20;
     font-weight: 700;
     font-size: 18px;
 }
@@ -1188,7 +1249,7 @@ h2, h3 {
 }
 
 .review-star.is-active {
-    color: #16a34a;
+    color: #1B5E20;
 }
 
 .review-comment-textarea {
@@ -1269,14 +1330,14 @@ html {
 .gamehub-action-card:hover {
     transform: translateY(-3px);
     background: #ffffff;
-    border-color: rgba(30, 127, 79, 0.3);
-    box-shadow: 0 12px 28px rgba(30, 127, 79, 0.06), 0 4px 10px rgba(30, 127, 79, 0.02);
+    border-color: rgba(27, 94, 32, 0.3);
+    box-shadow: 0 12px 28px rgba(27, 94, 32, 0.06), 0 4px 10px rgba(27, 94, 32, 0.02);
 }
 
 .gamehub-action-card.active {
     background: #ffffff;
     border-color: var(--accent-local);
-    box-shadow: 0 14px 32px rgba(30, 127, 79, 0.08), 0 4px 12px rgba(30, 127, 79, 0.03);
+    box-shadow: 0 14px 32px rgba(27, 94, 32, 0.08), 0 4px 12px rgba(27, 94, 32, 0.03);
 }
 
 /* Light indicator line on the left side of active card */
@@ -1298,7 +1359,7 @@ html {
     width: 46px;
     height: 46px;
     border-radius: 12px;
-    background: rgba(30, 127, 79, 0.06);
+    background: rgba(27, 94, 32, 0.06);
     color: var(--accent-local);
     transition: all 0.3s ease;
     flex-shrink: 0;
@@ -1371,4 +1432,282 @@ html {
         opacity: 0.85;
         transform: scale(0.97);
     }
+}
+
+/* ==========================================
+   SEARCH RESULTS PAGE
+   ========================================== */
+.search-results-page {
+    padding: 24px 0 48px;
+}
+
+.search-header h1 {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--foreground);
+    margin: 0 0 8px;
+}
+
+.search-query,
+.search-empty {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0;
+}
+
+.search-filters {
+    margin: 20px 0 28px;
+}
+
+.filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.filter-btn {
+    padding: 10px 18px;
+    font-size: 14px;
+}
+
+.no-results {
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 24px;
+    text-align: center;
+    color: var(--muted);
+}
+
+.no-results p:first-child {
+    color: var(--foreground);
+    font-weight: 700;
+    margin: 0 0 6px;
+}
+
+/* ---------------------------------------------------------------------------
+   Support chat + notifications inbox — the web twins of the app's chat and
+   bell screens, reached from the header's utility icons.
+   --------------------------------------------------------------------------- */
+
+.support-page,
+.notif-page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 0 40px;
+}
+
+.support-page__title,
+.notif-page__title {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--foreground);
+    margin: 0 0 4px;
+}
+
+.support-page__sub,
+.notif-page__sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 20px;
+}
+
+.support-topic-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+/* --- Thread --- */
+.support-thread {
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 18px;
+    min-height: 320px;
+    max-height: 58vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.support-msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 78%;
+}
+.support-msg--user  { align-self: flex-end; align-items: flex-end; }
+.support-msg--admin { align-self: flex-start; align-items: flex-start; }
+
+.support-msg__bubble {
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 14.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+/* Blue = the user's own voice, matching the Events lane accent. */
+.support-msg--user .support-msg__bubble {
+    background: #2563EB;
+    color: #fff;
+    border-bottom-right-radius: 6px;
+}
+.support-msg--admin .support-msg__bubble {
+    background: #F1F5F9;
+    color: var(--foreground);
+    border-bottom-left-radius: 6px;
+}
+.support-msg__time {
+    font-size: 11px;
+    color: var(--muted-2);
+    margin-top: 4px;
+}
+
+.support-empty {
+    margin: auto;
+    text-align: center;
+    color: var(--muted);
+}
+.support-empty h2 {
+    font-size: 18px;
+    color: var(--foreground);
+    margin: 0 0 6px;
+}
+.support-empty p { font-size: 14px; margin: 0; max-width: 340px; }
+
+/* --- Composer --- */
+.support-compose { margin-top: 14px; }
+.support-compose__topic {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+}
+.support-compose__topic select {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface-strong);
+    color: var(--foreground);
+    font-size: 14px;
+}
+.support-compose__error {
+    color: #D32F2F;
+    font-size: 13px;
+    margin: 0 0 8px;
+}
+.support-compose__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.support-compose__input {
+    flex: 1;
+    min-height: 48px;
+    padding: 0 16px;
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    background: var(--surface-strong);
+    font-size: 15px;
+    color: var(--foreground);
+    outline: none;
+}
+.support-compose__input:focus { border-color: #CBD5E1; }
+.support-compose__send {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 50%;
+    background: #2563EB;
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+.support-compose__send:hover { background: #1D4ED8; }
+
+/* --- Notifications inbox --- */
+.notif-card {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    margin-bottom: 10px;
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    text-decoration: none;
+    color: inherit;
+}
+a.notif-card:hover { border-color: #CBD5E1; }
+/* Unread on arrival — a left rule rather than a tinted card, so a long inbox
+   doesn't turn into stripes. */
+.notif-card--new { border-left: 3px solid #2563EB; }
+
+.notif-card__img {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: 12px;
+    object-fit: cover;
+}
+.notif-card__body { min-width: 0; flex: 1; }
+.notif-card__top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.notif-card__title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--foreground);
+    margin: 0;
+}
+.notif-card__new {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: #EFF6FF;
+    color: #2563EB;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.notif-card__text {
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--muted);
+    margin: 4px 0 6px;
+    overflow-wrap: anywhere;
+}
+.notif-card__time { font-size: 12px; color: var(--muted-2); }
+
+.notif-empty {
+    text-align: center;
+    padding: 56px 24px;
+    color: var(--muted);
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+}
+.notif-empty svg { color: var(--muted-2); margin-bottom: 10px; }
+.notif-empty h2 { font-size: 18px; color: var(--foreground); margin: 0 0 6px; }
+.notif-empty p { font-size: 14px; margin: 0; }
+
+@media (max-width: 640px) {
+    .support-thread { max-height: 52vh; padding: 14px; }
+    .support-msg { max-width: 86%; }
+    .support-page__title, .notif-page__title { font-size: 22px; }
 }

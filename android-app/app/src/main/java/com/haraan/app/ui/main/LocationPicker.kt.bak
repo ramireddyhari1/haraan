@@ -1,0 +1,414 @@
+package com.example.thanna.ui.main
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.thanna.data.CityOption
+import com.example.thanna.data.LocationRepository
+import com.example.thanna.data.LocationState
+
+/** Visual styling so one pill can serve the Events, Home and (green) GameHub headers. */
+enum class LocationPillStyle { Events, Home, GameHub }
+
+private val AccentBlue = Color(0xFF2563EB)
+private val AccentOrange = Color(0xFFE86830)
+private val Ink = Color(0xFF0F172A)
+private val Muted = Color(0xFF64748B)
+
+/**
+ * The tappable location label. Drives a pulsing pin while a fix is in flight, a chevron that
+ * rotates when the picker is open, and a crossfade when the resolved city changes.
+ */
+@Composable
+fun LocationPill(
+  state: LocationState,
+  expanded: Boolean,
+  style: LocationPillStyle,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val isLocating = state is LocationState.Locating
+  val onGreen = style == LocationPillStyle.GameHub
+  val pinTint = when (style) {
+    LocationPillStyle.Home -> AccentOrange
+    LocationPillStyle.GameHub -> Color.White
+    LocationPillStyle.Events -> Ink
+  }
+  val cityColor = if (onGreen) Color.White else Ink
+  val areaColor = if (onGreen) Color.White.copy(alpha = 0.65f) else Muted
+
+  // Pin breathes while we're locating.
+  val pulse = rememberInfiniteTransition(label = "pin-pulse")
+  val pinScale by pulse.animateFloat(
+    initialValue = 1f,
+    targetValue = if (isLocating) 1.18f else 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(650, easing = FastOutSlowInEasing),
+      repeatMode = RepeatMode.Reverse
+    ),
+    label = "pin-scale"
+  )
+  val chevronRotation by animateFloatAsState(
+    targetValue = if (expanded) 180f else 0f,
+    animationSpec = tween(250),
+    label = "chevron"
+  )
+
+  val pinSize = if (style == LocationPillStyle.Home) 16.dp else 24.dp
+  val cityFont = if (style == LocationPillStyle.Home) 14.sp else 16.sp
+  val areaFont = if (style == LocationPillStyle.Home) 11.sp else 12.sp
+
+  val primary = state.primaryLabel()
+  val secondary = state.secondaryLabel()
+
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = modifier.clickable(onClick = onClick)
+  ) {
+    Icon(
+      imageVector = Icons.Default.LocationOn,
+      contentDescription = "Location",
+      tint = pinTint,
+      modifier = Modifier
+        .size(pinSize)
+        .scale(pinScale)
+    )
+    Spacer(modifier = Modifier.width(if (style == LocationPillStyle.Home) 4.dp else if (onGreen) 10.dp else 8.dp))
+
+    when (style) {
+      LocationPillStyle.Home -> Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          AnimatedCity(primary, cityFont, cityColor)
+          Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = "Change location",
+            tint = cityColor,
+            modifier = Modifier
+              .size(14.dp)
+              .rotate(chevronRotation)
+          )
+        }
+        Text(
+          text = secondary,
+          color = areaColor,
+          fontSize = areaFont,
+          modifier = Modifier
+            .padding(start = 20.dp)
+            .offset(y = (-4).dp)
+        )
+      }
+
+      LocationPillStyle.GameHub -> Column {
+        // "Your Location" eyebrow above the city, matching the original GameHub header.
+        Text(text = "Your Location", color = areaColor, fontSize = 11.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          AnimatedCity(primary, 14.sp, cityColor)
+          Spacer(modifier = Modifier.width(4.dp))
+          Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = "Change location",
+            tint = cityColor,
+            modifier = Modifier
+              .size(16.dp)
+              .rotate(chevronRotation)
+          )
+        }
+      }
+
+      LocationPillStyle.Events -> Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          AnimatedCity(primary, cityFont, cityColor)
+          Spacer(modifier = Modifier.width(4.dp))
+          Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = "Change location",
+            tint = cityColor,
+            modifier = Modifier
+              .size(16.dp)
+              .rotate(chevronRotation)
+          )
+        }
+        Text(text = secondary, color = areaColor, fontSize = areaFont)
+      }
+    }
+  }
+}
+
+@Composable
+private fun AnimatedCity(text: String, fontSize: androidx.compose.ui.unit.TextUnit, color: Color) {
+  AnimatedContent(
+    targetState = text,
+    transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+    label = "city"
+  ) { value ->
+    Text(value, color = color, fontWeight = FontWeight.Bold, fontSize = fontSize)
+  }
+}
+
+private fun LocationState.primaryLabel(): String = when (this) {
+  is LocationState.Resolved -> city
+  LocationState.Locating -> "Locating…"
+  LocationState.Denied -> "Set location"
+  is LocationState.Error -> "Set location"
+  LocationState.Idle -> "Set location"
+}
+
+private fun LocationState.secondaryLabel(): String = when (this) {
+  is LocationState.Resolved -> area.ifBlank { if (isManual) "Tap to change" else "Current location" }
+  LocationState.Locating -> "Finding you…"
+  LocationState.Denied -> "Tap to enable"
+  is LocationState.Error -> message
+  LocationState.Idle -> "Tap to choose"
+}
+
+/**
+ * The picker bottom sheet: a big "use my current location" action (blue CTA, per the app's
+ * blue/green rule), a live search field, recent picks and the curated city list.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LocationPickerSheet(
+  state: LocationState,
+  recents: List<CityOption>,
+  onUseCurrentLocation: () -> Unit,
+  onSelectCity: (CityOption) -> Unit,
+  onDismiss: () -> Unit
+) {
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  var query by remember { mutableStateOf("") }
+
+  val filtered = remember(query) {
+    if (query.isBlank()) LocationRepository.POPULAR_CITIES
+    else LocationRepository.POPULAR_CITIES.filter {
+      it.city.contains(query, ignoreCase = true) || it.area.contains(query, ignoreCase = true)
+    }
+  }
+  val selectedCity = (state as? LocationState.Resolved)?.city
+
+  ModalBottomSheet(
+    onDismissRequest = onDismiss,
+    sheetState = sheetState,
+    containerColor = Color.White,
+    dragHandle = {
+      Box(
+        modifier = Modifier
+          .padding(top = 12.dp)
+          .size(width = 40.dp, height = 4.dp)
+          .background(Color(0xFFCBD5E1), CircleShape)
+      )
+    }
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .navigationBarsPadding()
+        .padding(horizontal = 20.dp)
+        .padding(bottom = 12.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "Choose location",
+          color = Ink,
+          fontWeight = FontWeight.Bold,
+          fontSize = 20.sp,
+          modifier = Modifier.weight(1f)
+        )
+        Box(
+          modifier = Modifier
+            .size(32.dp)
+            .background(Color(0xFFF1F5F9), CircleShape)
+            .clickable(onClick = onDismiss),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(Icons.Default.Close, "Close", tint = Muted, modifier = Modifier.size(18.dp))
+        }
+      }
+
+      Spacer(Modifier.height(16.dp))
+
+      // Primary CTA — detect current location.
+      val locating = state is LocationState.Locating
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .background(AccentBlue.copy(alpha = if (locating) 0.85f else 1f))
+          .clickable(enabled = !locating, onClick = onUseCurrentLocation)
+          .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        if (locating) {
+          CircularProgressIndicator(
+            color = Color.White,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(20.dp)
+          )
+        } else {
+          Icon(Icons.Default.MyLocation, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = if (locating) "Finding your location…" else "Use my current location",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp
+          )
+          if (state is LocationState.Denied) {
+            Text("Location permission needed", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
+          }
+        }
+      }
+
+      Spacer(Modifier.height(16.dp))
+
+      // Search field.
+      TextField(
+        value = query,
+        onValueChange = { query = it },
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text("Search city or area", color = Muted) },
+        leadingIcon = { Icon(Icons.Default.Search, null, tint = Muted) },
+        singleLine = true,
+        shape = RoundedCornerShape(14.dp),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = {
+          filtered.firstOrNull()?.let(onSelectCity)
+        }),
+        colors = TextFieldDefaults.colors(
+          focusedContainerColor = Color(0xFFF1F5F9),
+          unfocusedContainerColor = Color(0xFFF1F5F9),
+          focusedIndicatorColor = Color.Transparent,
+          unfocusedIndicatorColor = Color.Transparent,
+          focusedTextColor = Ink,
+          unfocusedTextColor = Ink
+        )
+      )
+
+      Spacer(Modifier.height(8.dp))
+
+      LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+        if (query.isBlank() && recents.isNotEmpty()) {
+          item { SectionLabel("Recent") }
+          items(recents) { option ->
+            CityRow(option, selected = option.city == selectedCity, onClick = { onSelectCity(option) })
+          }
+          item { SectionLabel("Popular cities") }
+        }
+        items(filtered) { option ->
+          CityRow(option, selected = option.city == selectedCity, onClick = { onSelectCity(option) })
+        }
+        if (filtered.isEmpty()) {
+          item {
+            Text(
+              "No matches for \"$query\"",
+              color = Muted,
+              fontSize = 14.sp,
+              modifier = Modifier.padding(vertical = 24.dp)
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+  Text(
+    text = text.uppercase(),
+    color = Muted,
+    fontWeight = FontWeight.Bold,
+    fontSize = 11.sp,
+    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+  )
+}
+
+@Composable
+private fun CityRow(option: CityOption, selected: Boolean, onClick: () -> Unit) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .clickable(onClick = onClick)
+      .padding(vertical = 12.dp, horizontal = 4.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Icon(
+      Icons.Default.LocationOn,
+      null,
+      tint = if (selected) AccentBlue else Muted,
+      modifier = Modifier.size(20.dp)
+    )
+    Spacer(Modifier.width(12.dp))
+    Column(modifier = Modifier.weight(1f)) {
+      Text(option.city, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+      Text(option.area, color = Muted, fontSize = 12.sp)
+    }
+    if (selected) {
+      Icon(Icons.Default.Check, "Selected", tint = AccentBlue, modifier = Modifier.size(20.dp))
+    }
+  }
+}

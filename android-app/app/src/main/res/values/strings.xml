@@ -1,3 +1,61 @@
 <resources>
     <string name="app_name">Haraan</string>
+
+    <!-- Common -->
+    <string name="action_score">Score</string>
+    <string name="live">LIVE</string>
+    <string name="language">Language</string>
+    <string name="choose_language">Choose your language</string>
+
+    <!-- Match detail tabs -->
+    <string name="tab_info">Info</string>
+    <string name="tab_commentary">Commentary</string>
+    <string name="tab_live">Live</string>
+    <string name="tab_scorecard">Scorecard</string>
+
+    <!-- Scorer -->
+    <string name="out">OUT</string>
+    <string name="start_second_innings">Start 2nd Innings</string>
+    <string name="innings_start">INNINGS START</string>
+    <string name="over_complete">OVER COMPLETE</string>
+    <string name="select_opening_bowler">Select the opening bowler</string>
+    <string name="select_next_bowler">Select the next bowler</string>
+    <string name="wicket">WICKET</string>
+    <string name="select_new_batsman">Select the new batsman</string>
+    <string name="innings_complete_fmt">Innings complete · %1$d overs</string>
+
+    <!-- Toss -->
+    <string name="toss_title">Toss</string>
+    <string name="toss_later">Later</string>
+    <string name="toss_tap_coin">Tap the coin to flip</string>
+    <string name="toss_tails">TAILS</string>
+    <string name="toss_who_won">Who won the toss?</string>
+    <string name="toss_elected_to">Winner of the toss elected to?</string>
+    <string name="toss_bat">Bat</string>
+    <string name="toss_bowl">Bowl</string>
+    <string name="toss_need_help">Need help?</string>
+    <string name="toss_lets_play">Let\'s Play</string>
+    <string name="toss_help_hint">Tap the coin for a flip, then record who actually won the toss and what they chose.</string>
+    <string name="toss_striker">Striker</string>
+    <string name="toss_non_striker">Non-striker</string>
+    <string name="toss_opening_bowler">Opening bowler</string>
+    <string name="toss_start_match">Start Match</string>
+    <string name="toss_no_players">No players added — a default name will be used.</string>
+    <string name="toss_line_fmt">%1$s won the toss &amp; chose to %2$s.</string>
+    <string name="toss_tap_hint">Tap to flip — the coin picks who won</string>
+    <string name="toss_won_fmt">%1$s won the toss 🪙</string>
+    <string name="toss_coin_editable">Set by the coin — tap a team to change</string>
+    <string name="toss_pick_hint">Flip the coin, then pick a choice to continue</string>
+    <string name="toss_opening_lineup">Opening lineup</string>
+    <string name="toss_opening_lineup_hint">Pick who takes the crease and who bowls the first over.</string>
+    <string name="toss_batting_label">Batting first</string>
+    <string name="toss_bowling_label">Bowling first</string>
+    <string name="toss_pick">Tap to pick</string>
+    <string name="toss_get_ready">Get ready…</string>
+    <string name="toss_go">GO!</string>
+    <string name="toss_starting_fmt">%1$s to open the innings</string>
+    <string name="toss_status_striker">On strike · faces the first ball</string>
+    <string name="toss_status_non_striker">At the other end</string>
+    <string name="toss_status_bowler">New ball · opens the attack</string>
+    <string name="toss_tap_to_choose">Tap a player to choose</string>
 </resources>

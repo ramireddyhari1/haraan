@@ -20,10 +20,12 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::controller(PublicWebController::class)->group(function (): void {
-    Route::get('/', 'home');
+    Route::get('/', 'events');
     Route::get('/home', 'home');
     Route::get('/events', 'events');
     Route::get('/events/{id}', 'eventDetail');
+    Route::get('/host/{slug}', 'hostProfile')->name('site.host');
+    Route::middleware('auth')->post('/host/{slug}/follow', 'followHost')->name('site.host.follow');
     Route::get('/gamehub', 'gamehub')->name('site.gamehub');
     Route::get('/gamehub/{id}', 'gamehubDetail')->whereNumber('id');
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
@@ -34,10 +36,18 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/gamehub/actionboard/matches/json', 'actionBoardMatchesJson')->name('site.gamehub.actionboard.matches.json');
     Route::get('/gamehub/leaderboard', 'leaderboard')->name('site.gamehub.leaderboard');
     Route::get('/search', 'search')->name('site.search');
+    Route::get('/api/search/suggest', 'searchSuggest')->name('api.search.suggest');
     Route::get('/login', 'login')->name('site.login');
     Route::get('/register', 'register')->name('site.register');
-    Route::get('/profile', 'profile')->name('site.profile');
-    Route::put('/profile', 'updateProfile')->name('site.profile.update');
+    // Razorpay Standard Checkout demo page — LOCAL ONLY. It's an unauthenticated page
+    // that opens a real charge, so it must never be reachable on the live server. The
+    // public key is delivered by the /api/create-order response (never templated in).
+    if (app()->environment('local')) {
+        Route::view('/pay', 'site.pay')->name('site.pay');
+    }
+    // NB: /profile lives in Web\AccountController (auth-gated) — the account screen is
+    // the app's twin now. The old PUT /profile name/email/phone editor went with the
+    // page that posted to it; nothing referenced it afterwards.
 });
 
 // New Live Match Routes
@@ -58,13 +68,93 @@ Route::middleware('auth')->group(function() {
     Route::post('/profile/setup', [\App\Http\Controllers\Web\PublicWebController::class, 'saveProfileSetup'])->name('site.profile.setup.save');
 });
 
-// WhatsApp Auth Routes
+// Public ticket-QR image (used by the confirmation email's <img>, the Twilio WhatsApp media,
+// and anywhere a hosted QR is needed). The QR encodes the scanner contract `haraan:ticket:<code>`
+// — the code itself is the only secret. Generated server-side via a public QR image service
+// (no self-hosted bridge, no QR PHP extension needed); the response is cached hard so it's
+// fetched once. Configurable via services.qr.endpoint.
+Route::get('/t/{code}/qr.png', function (string $code) {
+    $payload = 'haraan:ticket:' . $code;
+    $endpoint = (string) config('services.qr.endpoint', 'https://api.qrserver.com/v1/create-qr-code/');
+    try {
+        $res = \Illuminate\Support\Facades\Http::connectTimeout(4)->timeout(15)->get($endpoint, [
+            'size' => '360x360',
+            'margin' => '1',
+            'data' => $payload,
+        ]);
+        if ($res->successful()) {
+            return response($res->body(), 200)
+                ->header('Content-Type', 'image/png')
+                ->header('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+    } catch (\Throwable $e) {
+        // fall through to 404
+    }
+    abort(404);
+})->where('code', '[A-Za-z0-9]+')->name('ticket.qr');
+
+// Event ticket booking — the web twin of the app's checkout (same BookingService).
+Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingController::class)->group(function (): void {
+    Route::get('/events/{id}/book', 'checkout')->whereNumber('id')->name('site.booking.checkout');
+    Route::post('/events/{id}/book', 'store')->whereNumber('id')->name('site.booking.store');
+    // Razorpay payment on the reserved order (AJAX from the payment page).
+    Route::post('/events/{id}/book/confirm', 'confirmWeb')->whereNumber('id')->name('site.booking.confirm');
+    Route::post('/events/{id}/book/release', 'releaseWeb')->whereNumber('id')->name('site.booking.release');
+    Route::get('/bookings/{id}/pass', 'pass')->whereNumber('id')->name('site.booking.pass');
+});
+
+// Header inbox lanes — the web twins of the app's chat + bell icons. Both read the
+// same tables the JWT API serves the app, so a conversation or a notification looks
+// the same wherever the user opens it.
+Route::middleware('auth')->group(function (): void {
+    Route::get('/support', [\App\Http\Controllers\Web\SupportChatController::class, 'show'])->name('site.support');
+    Route::post('/support/messages', [\App\Http\Controllers\Web\SupportChatController::class, 'send'])->name('site.support.send');
+    Route::get('/support/poll', [\App\Http\Controllers\Web\SupportChatController::class, 'poll'])->name('site.support.poll');
+    Route::get('/notifications', [\App\Http\Controllers\Web\NotificationsController::class, 'index'])->name('site.notifications');
+});
+
+// Email + password sign-in for the public website login modal (see WebPasswordAuthController).
+Route::post('/auth/password', [\App\Http\Controllers\Auth\WebPasswordAuthController::class, 'login'])
+    ->middleware('throttle:auth')
+    ->name('site.password.login');
+
+// Forgot / set password for site users (companion to the email+password login).
+Route::controller(\App\Http\Controllers\Auth\WebPasswordResetController::class)->group(function (): void {
+    Route::get('/forgot-password', 'showRequestForm')->name('site.password.request');
+    Route::post('/forgot-password', 'sendResetLink')->middleware('throttle:auth')->name('site.password.email');
+    Route::get('/reset-password/{token}', 'showResetForm')->name('site.password.reset');
+    Route::post('/reset-password', 'reset')->middleware('throttle:auth')->name('site.password.update');
+});
+
+// WhatsApp Auth Routes (legacy phone-OTP; the login form no longer surfaces this,
+// but the routes stay so any in-flight/bookmarked flow doesn't 404).
 Route::controller(\App\Http\Controllers\Auth\WhatsAppAuthController::class)->group(function (): void {
     Route::post('/auth/whatsapp/request', 'requestOtp')->name('whatsapp.request');
     Route::get('/auth/whatsapp/verify', 'showVerifyForm')->name('whatsapp.verify.show');
     Route::post('/auth/whatsapp/verify', 'verifyOtp')->name('whatsapp.verify.submit');
     Route::get('/auth/whatsapp/cancel', 'cancel')->name('whatsapp.cancel');
 });
+
+// Account — the web twin of the app's AccountProfileScreen (hero, lanes, settings).
+// /profile itself is declared with the public site routes above; these are the rows
+// and lanes it opens, plus the sign-out it always needed.
+Route::middleware('auth')->controller(\App\Http\Controllers\Web\AccountController::class)->group(function (): void {
+    Route::get('/profile', 'profile')->name('site.profile');
+    Route::get('/bookings', 'bookings')->name('site.bookings');
+    Route::get('/account/privacy', 'privacy')->name('site.account.privacy');
+    Route::post('/account/privacy', 'updatePrivacy')->name('site.account.privacy.save');
+    Route::post('/account/demographics', 'saveDemographics')->name('site.account.demographics');
+    Route::post('/profile/avatar', 'uploadAvatar')->name('site.profile.avatar');
+    Route::post('/logout', 'logout')->name('site.logout');
+});
+
+// Terms & Conditions / Privacy Policy — public documents, readable signed out.
+Route::get('/legal/{slug}', [\App\Http\Controllers\Web\AccountController::class, 'legal'])
+    ->name('site.legal');
+
+// "Continue with Google" on the website — the login modal posts the GIS ID token here.
+Route::post('/auth/google', [\App\Http\Controllers\Auth\GoogleWebAuthController::class, 'login'])
+    ->name('google.web.login');
 
 /*
 |--------------------------------------------------------------------------
@@ -80,8 +170,9 @@ Route::middleware('erp.key')->group(function (): void {
     Route::get('/erp', fn () => view('portal.index'))->name('portal.index');
         Route::get('/erp/setup-admin', [\App\Http\Controllers\Web\AdminAuthController::class, 'setupAdmin'])->name('portal.setup_admin');
 
-    // Admin auth routes (public within ERP portal)
-    Route::get('admin/login', [\App\Http\Controllers\Web\AdminAuthController::class, 'showLogin'])->name('admin.login');
+    // Admin auth — consolidated onto the single Filament "Control" panel (/control).
+    // The legacy Blade login now redirects there so there is ONE admin front door.
+    Route::get('admin/login', fn () => redirect('/control'))->name('admin.login');
     Route::post('admin/login', [\App\Http\Controllers\Web\AdminAuthController::class, 'login'])->name('admin.login.submit');
     Route::post('admin/logout', [\App\Http\Controllers\Web\AdminAuthController::class, 'logout'])->name('admin.logout');
     // Password reset for admin
@@ -131,6 +222,13 @@ Route::middleware('erp.key')->group(function (): void {
         Route::get('/withdraw', 'withdraw')->name('withdraw');
         Route::get('/cities', [AdminCitiesController::class, 'edit'])->name('cities.edit');
         Route::post('/cities', [AdminCitiesController::class, 'update'])->name('cities.update');
+
+        // Login Posters
+        Route::get('/login-posters', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'index'])->name('login-posters');
+        Route::post('/login-posters', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'store'])->name('login-posters.store');
+        Route::post('/login-posters/{id}', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'update'])->name('login-posters.update');
+        Route::delete('/login-posters/{id}', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'destroy'])->name('login-posters.delete');
+        Route::post('/login-posters/{id}/toggle', [\App\Http\Controllers\Web\AdminLoginPostersController::class, 'toggleActive'])->name('login-posters.toggle');
         // Admin JSON endpoints for bookings, payments, coupons, users
         Route::get('/bookings/json', [\App\Http\Controllers\Web\AdminBookingsController::class, 'indexJson'])->name('bookings.json');
         Route::post('/bookings/{id}/status', [\App\Http\Controllers\Web\AdminBookingsController::class, 'updateStatus'])->name('bookings.update_status');
@@ -176,20 +274,9 @@ Route::middleware('erp.key')->group(function (): void {
         });
     });
 
-    // Partner auth and protected routes
-    Route::get('partner/login', [\App\Http\Controllers\Web\PartnerAuthController::class, 'showLogin'])->name('partner.login');
-    Route::post('partner/login', [\App\Http\Controllers\Web\PartnerAuthController::class, 'login'])->name('partner.login.submit');
-    Route::post('partner/logout', [\App\Http\Controllers\Web\PartnerAuthController::class, 'logout'])->name('partner.logout');
-    // Password reset for partner (shares same controller)
-    Route::get('partner/password/reset', [\App\Http\Controllers\Web\PasswordResetController::class, 'showLinkRequestForm'])->name('partner.password.request');
-    Route::post('partner/password/email', [\App\Http\Controllers\Web\PasswordResetController::class, 'sendResetLinkEmail'])->name('partner.password.email');
-    Route::get('partner/password/reset/{token}', [\App\Http\Controllers\Web\PasswordResetController::class, 'showResetForm'])->name('partner.password.reset');
-    Route::post('partner/password/reset', [\App\Http\Controllers\Web\PasswordResetController::class, 'reset'])->name('partner.password.update');
-
-    Route::prefix('partner')->name('partner.')->middleware(['auth', \App\Http\Middleware\EnsureRole::class . ':PARTNER'])->controller(PartnerDashboardController::class)->group(function (): void {
-        Route::get('/', 'home')->name('dashboard');
-        Route::get('/events', 'events')->name('events');
-        Route::get('/gamehub', 'gamehub')->name('gamehub');
-        Route::get('/workers', 'workers')->name('workers');
-    });
+    // NOTE: the legacy Blade partner stub (partner/login, partner dashboard,
+    // password reset) has been retired — the /partner console is now the
+    // Filament PartnerPanelProvider, which owns /partner/login, password-reset
+    // and profile. Keeping the old Blade routes here shadowed the Filament
+    // panel's own login and 404'd it, so they are intentionally removed.
 });
