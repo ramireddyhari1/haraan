@@ -109,7 +109,7 @@ class PartnerPanelProvider extends PanelProvider
                        dark theme is untouched. */
                     .fi-sidebar-header{flex-wrap:wrap;
                         justify-content:center;text-align:center;padding:14px 12px 12px;
-                        margin:10px;border-radius:16px;border:1px solid #e3e9f5;
+                        margin:10px 10px 6px;border-radius:16px;border:1px solid #e3e9f5;
                         background:linear-gradient(180deg,#eaf1ff 0%,#f4f8ff 55%,#ffffff 100%);
                         box-shadow:0 1px 2px rgba(11,18,32,.05);}
                     .fi-sidebar-header .fi-sidebar-header-logo-ctn{margin-inline:auto;}
@@ -255,7 +255,7 @@ class PartnerPanelProvider extends PanelProvider
                     </a>
                     <style>
                         .hrn-create-cta{display:flex;align-items:center;justify-content:center;gap:8px;
-                            margin:2px 8px 12px;padding:10px 14px;border-radius:12px;text-decoration:none;
+                            margin:0 8px 6px;padding:10px 14px;border-radius:12px;text-decoration:none;
                             background:linear-gradient(180deg,#2f6bff,#1e50e6);color:#fff;
                             font-size:13.5px;font-weight:600;letter-spacing:.01em;
                             box-shadow:0 8px 18px -8px rgba(37,99,235,.6);transition:filter .15s,transform .05s;}
