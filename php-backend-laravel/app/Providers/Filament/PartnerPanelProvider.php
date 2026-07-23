@@ -101,6 +101,7 @@ class PartnerPanelProvider extends PanelProvider
             PanelsRenderHook::SIDEBAR_LOGO_AFTER,
             fn (): string => Blade::render(<<<'BLADE'
                 <span class="hrn-sidebar-tag">partner</span>
+                <span class="hrn-sidebar-tag hrn-sidebar-brand">Haraan</span>
                 <style>
                     .fi-sidebar-header{flex-wrap:wrap;}
                     .fi-sidebar-header-logo-ctn{flex:0 0 auto;}
@@ -109,6 +110,8 @@ class PartnerPanelProvider extends PanelProvider
                         font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
                         "Brush Script MT","Comic Sans MS",cursive;
                         transform:rotate(-3deg);transform-origin:left center;}
+                    /* Handwritten "Haraan" tucked under "partner", black. */
+                    .hrn-sidebar-brand{font-size:15px;margin-top:4px;}
                     .dark .hrn-sidebar-tag{color:#e6e9ef;}
                 </style>
             BLADE),
@@ -377,6 +380,9 @@ class PartnerPanelProvider extends PanelProvider
             ->colors([
                 'primary' => Color::Blue,
             ])
+            // Day theme only — no dark mode, so the profile menu's light/dark/system
+            // switch disappears and the console always renders on the light palette.
+            ->darkMode(false)
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
             ->pages([

@@ -8,6 +8,7 @@ use Database\Factories\UserFactory;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasAvatar;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -35,7 +36,7 @@ use Spatie\Permission\Traits\HasRoles;
  * @property-read \Illuminate\Database\Eloquent\Collection<Event>   $events
  * @property-read \Illuminate\Database\Eloquent\Collection<Booking> $bookings
  */
-class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery
+class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, HasAvatar
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory;
@@ -124,6 +125,17 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
         // /control — internal staff only, never partners.
         return $this->hasRoleEither(['FINANCE', 'MARKETING', 'OPS']);
+    }
+
+    /**
+     * The uploaded profile photo for Filament's topbar/user menu avatar. Without
+     * this, Filament falls back to a generated initials chip ("BP"). Resolved
+     * through MediaUrl so a stored relative path becomes an absolute URL; null
+     * (no photo) lets Filament use its initials fallback.
+     */
+    public function getFilamentAvatarUrl(): ?string
+    {
+        return \App\Support\MediaUrl::resolve($this->avatar);
     }
 
     /**
