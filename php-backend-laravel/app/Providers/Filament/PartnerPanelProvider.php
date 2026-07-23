@@ -71,7 +71,6 @@ class PartnerPanelProvider extends PanelProvider
                 <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
                     <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan Partner">
                     <span class="hrn-topbar-tag">partner</span>
-                    <span class="hrn-topbar-tag hrn-topbar-brand">Haraan</span>
                 </a>
                 <style>
                     .hrn-topbar-logo{display:none;flex-direction:column;align-items:center;
@@ -82,8 +81,6 @@ class PartnerPanelProvider extends PanelProvider
                         "Brush Script MT","Comic Sans MS",cursive;
                         font-size:12px;line-height:1;color:#0b1220;margin-top:2px;
                         letter-spacing:.02em;transform:rotate(-3deg);}
-                    /* Handwritten "Haraan" tucked under "partner", black — mirrors the sidebar. */
-                    .hrn-topbar-brand{font-size:13px;margin-top:1px;}
                     .dark .hrn-topbar-tag{color:#e6e9ef;}
                     @media (max-width:1023px){
                         .fi-topbar{position:relative;}
@@ -121,7 +118,7 @@ class PartnerPanelProvider extends PanelProvider
                            logo + two handwritten lines, so it clipped the wordmark's top.
                            Drop the 2nd "Haraan" line here and let the header grow with a
                            little breathing room up top so the logo sits clean. */
-                        .hrn-sidebar-brand{display:none;}
+                        .hrn-sidebar-brand{display:none!important;}
                         .fi-sidebar-header{height:auto;min-height:0;
                             padding-top:1rem;padding-bottom:.6rem;align-content:flex-start;}
                     }
