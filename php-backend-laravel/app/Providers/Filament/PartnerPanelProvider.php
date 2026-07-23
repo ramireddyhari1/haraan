@@ -308,6 +308,14 @@ class PartnerPanelProvider extends PanelProvider
                             [wire\:partial="table-filters-form"]{justify-content:stretch;}
                             [wire\:partial="table-filters-form"] > *{width:100%;max-width:none;}
                         }
+                        /* Desktop: float the period control up to the top-right, level
+                           with the page title (above the hero card). Mobile keeps it
+                           in flow beneath the hero. */
+                        @media (min-width:1024px){
+                            .fi-page{position:relative;}
+                            [wire\:partial="table-filters-form"]{position:absolute;top:.15rem;right:0;
+                                margin:0;width:15rem;z-index:20;}
+                        }
                     </style>
                 BLADE);
             },
