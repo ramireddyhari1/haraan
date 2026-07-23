@@ -69,9 +69,17 @@ final class PublicWebController extends Controller
         ]);
     }
 
-    public function eventDetail(string $id): View
+    public function eventDetail(Request $request, string $id): View
     {
         $event = Event::query()->with('partner.hostProfile')->findOrFail($id);
+
+        // Record the web page view for the organiser's analytics funnel (the app
+        // already records API opens via EventsController). Best-effort + swallowed
+        // inside the recorder. Skip the organiser's own previews so their funnel
+        // reflects real visitors, not their own edits.
+        if ($request->user()?->id !== $event->partner_id) {
+            \App\Support\EventViewRecorder::record($event, $request);
+        }
 
         // Link "Hosted by" to the organiser's public page, but only if it's live.
         $hostProfile = $event->partner?->hostProfile;

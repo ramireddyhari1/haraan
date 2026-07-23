@@ -10,7 +10,9 @@ use App\Filament\Widgets\Partner\PartnerOrganizerScoreWidget;
 use App\Filament\Widgets\Partner\PartnerPeakHoursWidget;
 use App\Filament\Widgets\Partner\PartnerQuickActionsWidget;
 use App\Filament\Widgets\Partner\PartnerRecentBookingsWidget;
+use App\Filament\Widgets\Partner\PartnerFunnelWidget;
 use App\Filament\Widgets\Partner\PartnerRevenueTrendWidget;
+use App\Filament\Widgets\Partner\PartnerTrafficSourcesWidget;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
@@ -123,11 +125,17 @@ class Dashboard extends BaseDashboard
             // internally — supersedes the generic Events/GameHub stats strip here.
             // Its revenue + sparkline follow the global period control.
             PartnerKpiHeroWidget::class,
+            // Conversion funnel — Page Views → Sales → Conversion %. Event lane only
+            // (self-gates via canView); follows the global period control.
+            PartnerFunnelWidget::class,
             // The one dominant money chart — follows the global period control too.
             // (The old "Money by day" bar strip was retired here: three separate
             //  daily-money visuals stacked read busy; PartnerDailyEarningsWidget
             //  stays in the codebase if it's ever wanted back.)
             PartnerRevenueTrendWidget::class,
+            // Where those views come from (Instagram / WhatsApp / Search / …).
+            // Event lane only; follows the global period control.
+            PartnerTrafficSourcesWidget::class,
             // "Needs you" — sellout risk · pending settlement · refund watch.
             PartnerNeedsAttentionWidget::class,
             // Insight analytics — standing trust score and when the audience buys
