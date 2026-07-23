@@ -17,6 +17,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Schema;
 
 /**
@@ -90,21 +91,28 @@ class Dashboard extends BaseDashboard
     }
 
     /**
-     * Show the period control above the widgets on the partner console only.
-     * The /control dashboard (limited staff who don't get the Command Center)
-     * keeps its plain widget grid — its widgets don't read pageFilters.
+     * On the partner console: the blue launchpad card first, then the period
+     * control directly beneath it, then the rest of the widgets — so "Showing …"
+     * sits under the hero, not above it. /control (limited staff without the
+     * Command Center) keeps its plain widget grid; its widgets ignore pageFilters.
      */
     public function content(Schema $schema): Schema
     {
-        $components = [];
-
-        if (self::isPartnerPanel()) {
-            $components[] = $this->getFiltersFormContentComponent();
+        if (! self::isPartnerPanel()) {
+            return $schema->components([$this->getWidgetsContentComponent()]);
         }
 
-        $components[] = $this->getWidgetsContentComponent();
+        $widgets = $this->getWidgets();
+        $hero = array_slice($widgets, 0, 1);   // PartnerQuickActionsWidget (the blue card)
+        $rest = array_slice($widgets, 1);
 
-        return $schema->components($components);
+        return $schema->components([
+            Grid::make($this->getColumns())
+                ->schema(fn (): array => $this->getWidgetsSchemaComponents($hero)),
+            $this->getFiltersFormContentComponent(),
+            Grid::make($this->getColumns())
+                ->schema(fn (): array => $this->getWidgetsSchemaComponents($rest)),
+        ]);
     }
 
     /**

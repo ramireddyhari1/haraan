@@ -291,12 +291,21 @@ class PartnerPanelProvider extends PanelProvider
                         /* Shrink the page filters form into a compact, right-aligned
                            period pill under the page title. */
                         [wire\:partial="table-filters-form"]{display:flex;justify-content:flex-end;
-                            margin-top:0;margin-bottom:1rem;position:relative;z-index:1;}
-                        [wire\:partial="table-filters-form"] > *{width:auto;min-width:11rem;max-width:15rem;}
+                            margin:.25rem 0 1.1rem;position:relative;z-index:1;}
+                        [wire\:partial="table-filters-form"] > *{width:auto;min-width:12rem;max-width:16rem;}
                         [wire\:partial="table-filters-form"] .fi-fo-field-wrp-label{font-size:.7rem;
-                            text-transform:uppercase;letter-spacing:.07em;font-weight:700;opacity:.7;}
+                            text-transform:uppercase;letter-spacing:.08em;font-weight:800;
+                            color:#2f6bff;margin-bottom:5px;}
+                        /* Premium pill for the period selector: soft gradient, rounded,
+                           inset hairline that lifts to a brand-blue glow on hover. */
+                        [wire\:partial="table-filters-form"] .fi-input-wrp{border-radius:11px;
+                            background:linear-gradient(180deg,#ffffff,#f3f7ff);
+                            box-shadow:0 1px 2px rgba(11,18,32,.06),0 0 0 1px #dbe4f6 inset;
+                            transition:box-shadow .15s;}
+                        [wire\:partial="table-filters-form"] .fi-input-wrp:hover{
+                            box-shadow:0 3px 8px -2px rgba(47,107,255,.18),0 0 0 1px #b8ccf3 inset;}
                         @media (max-width:640px){
-                            [wire\:partial="table-filters-form"]{margin-top:.25rem;justify-content:stretch;}
+                            [wire\:partial="table-filters-form"]{justify-content:stretch;}
                             [wire\:partial="table-filters-form"] > *{width:100%;max-width:none;}
                         }
                     </style>
