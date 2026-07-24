@@ -122,6 +122,72 @@
                 and we'll sort it out — self-serve upgrades are coming.
             </p>
         </section>
+
+        {{-- ---------- Top-up packs ---------- --}}
+        @php $packs = $this->packs(); @endphp
+        @if ($packs->isNotEmpty())
+            <section class="ppl-card">
+                <div class="ppl-card-head">
+                    <div>
+                        <h2 class="ppl-card-title">Need more conversations?</h2>
+                        <p class="ppl-card-sub">
+                            One-off top-ups. They never expire, and they're used only after
+                            your monthly allowance runs out.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="ppl-packs">
+                    @foreach ($packs as $pack)
+                        <div class="ppl-pack">
+                            <span class="ppl-pack-n">{{ number_format($pack->conversations) }}</span>
+                            <span class="ppl-pack-l">conversations</span>
+                            <span class="ppl-pack-p">₹{{ number_format($pack->price_inr) }}</span>
+                            <button type="button" class="ppl-buy" wire:click="buyPack({{ $pack->id }})"
+                                    wire:loading.attr="disabled" wire:target="buyPack({{ $pack->id }})">
+                                <span wire:loading.remove wire:target="buyPack({{ $pack->id }})">Buy</span>
+                                <span wire:loading wire:target="buyPack({{ $pack->id }})">Opening…</span>
+                            </button>
+                        </div>
+                    @endforeach
+                </div>
+            </section>
+
+            {{-- Razorpay Standard Checkout. The key and order id come from the
+                 server on demand; nothing sensitive is templated into the page. --}}
+            <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+            <script>
+                document.addEventListener('open-razorpay', (event) => {
+                    const detail = event.detail ?? {};
+                    const order = detail.order ?? {};
+
+                    if (!order.order_id || !order.key) {
+                        return;
+                    }
+
+                    new Razorpay({
+                        key: order.key,
+                        order_id: order.order_id,
+                        amount: order.amount,
+                        currency: order.currency,
+                        name: 'Haraan',
+                        description: detail.name ?? 'Conversation top-up',
+                        handler: (response) => {
+                            // Server re-verifies the signature; this call is a claim,
+                            // not proof.
+                            window.Livewire.find(
+                                document.querySelector('[wire\\:id]').getAttribute('wire:id')
+                            ).call(
+                                'confirmPack',
+                                response.razorpay_order_id,
+                                response.razorpay_payment_id,
+                                response.razorpay_signature,
+                            );
+                        },
+                    }).open();
+                });
+            </script>
+        @endif
     </div>
 
     <style>
@@ -176,6 +242,21 @@
         .ppl-tick.is-on{color:#0a7d4e;background:#e7f7ef;}
         .ppl-feature-label{font-size:13.5px;color:#0b1220;}
         .ppl-feature-label.is-off{color:#98a2b3;}
+
+        /* ---- top-up packs ---- */
+        .ppl-packs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+        .ppl-pack{display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+            padding:14px;border-radius:14px;background:#f6f8fc;box-shadow:inset 0 0 0 1px #e9edf4;}
+        .ppl-pack-n{font-size:22px;font-weight:800;color:#0b1220;letter-spacing:-.02em;
+            font-variant-numeric:tabular-nums;}
+        .ppl-pack-l{font-size:11.5px;color:#98a2b3;}
+        .ppl-pack-p{font-size:14px;font-weight:700;color:#0b1220;margin-top:8px;}
+        .ppl-buy{margin-top:10px;width:100%;border:0;cursor:pointer;font-size:13px;font-weight:700;
+            padding:9px 14px;border-radius:10px;color:#fff;
+            background:linear-gradient(180deg,#2f6bff,#1e50e6);
+            box-shadow:0 8px 18px -10px rgba(37,99,235,.6);}
+        .ppl-buy:hover{filter:brightness(1.06);}
+        .ppl-buy:disabled{opacity:.6;cursor:default;}
 
         .ppl-note{font-size:11.5px;color:#98a2b3;margin:10px 0 0;line-height:1.5;}
         .ppl-note-cta{margin-top:14px;}

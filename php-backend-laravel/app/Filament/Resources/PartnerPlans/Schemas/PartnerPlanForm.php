@@ -55,6 +55,12 @@ class PartnerPlanForm
                     ->helperText('Ticket delivery and OTPs are deliberately absent: they are never '
                         . 'gated by a plan, on any tier.'),
 
+                TextInput::make('razorpay_plan_id')
+                    ->label('Razorpay plan id')
+                    ->placeholder('plan_XXXXXXXXXXXX')
+                    ->helperText('Create the matching recurring plan in the Razorpay dashboard and paste '
+                        . 'its id here. Without it this tier can only be assigned by an admin, not bought.'),
+
                 Toggle::make('is_default')
                     ->label('Default plan')
                     ->helperText('What a partner falls back to with no subscription, or when payment fails. '

@@ -24,7 +24,7 @@ final class PartnerPlan extends Model
 
     protected $fillable = [
         'code', 'name', 'description', 'price_inr', 'included_conversations',
-        'features', 'is_default', 'is_active', 'sort',
+        'features', 'razorpay_plan_id', 'is_default', 'is_active', 'sort',
     ];
 
     protected $casts = [

@@ -316,3 +316,10 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 Route::post('/webhooks/twilio/whatsapp', [\App\Http\Controllers\Api\TwilioWebhookController::class, 'whatsapp'])
     ->middleware('throttle:60,1')
     ->name('webhooks.twilio.whatsapp');
+
+// Razorpay billing webhook — subscription lifecycle and prepaid credit grants.
+// Unauthenticated by necessity; the HMAC signature check in the controller is
+// the authentication, and it fails closed.
+Route::post('/webhooks/razorpay', [\App\Http\Controllers\Api\RazorpayWebhookController::class, 'handle'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.razorpay');

@@ -81,6 +81,11 @@ return [
     'razorpay' => [
         'key'    => env('RAZORPAY_KEY_ID'),
         'secret' => env('RAZORPAY_KEY_SECRET'),
+
+        // Set in the Razorpay dashboard when creating the webhook. Separate from
+        // the API secret, and without it the webhook rejects everything — which
+        // is the right failure, since it grants paid features.
+        'webhook_secret' => env('RAZORPAY_WEBHOOK_SECRET'),
     ],
 
     // Anthropic Claude — powers the /partner support AI assistant (PartnerSupportAI).
