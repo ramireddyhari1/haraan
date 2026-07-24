@@ -40,6 +40,21 @@ class MessageJourneyTest extends TestCase
             'partner_type' => 'event',
         ]);
 
+        // Journeys are a paid feature since phase 2a, so the partner needs a plan
+        // that includes them before any of this can send.
+        $plan = \App\Models\PartnerPlan::create([
+            'code' => 'pro', 'name' => 'Pro', 'price_inr' => 999,
+            'included_conversations' => 500,
+            'features' => [\App\Models\PartnerPlan::FEATURE_JOURNEYS],
+        ]);
+
+        \App\Models\PartnerSubscription::create([
+            'partner_id' => $this->partner->id,
+            'plan_id' => $plan->id,
+            'status' => \App\Models\PartnerSubscription::STATUS_ACTIVE,
+            'current_period_end' => Carbon::now()->addMonth(),
+        ]);
+
         config([
             'messaging.local_timezone' => 'Asia/Kolkata',
             'messaging.journeys.enabled' => true,

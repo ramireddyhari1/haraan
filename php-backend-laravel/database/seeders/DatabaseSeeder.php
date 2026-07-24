@@ -28,5 +28,8 @@ class DatabaseSeeder extends Seeder
         // Enterprise access bootstrap
         $this->call(PermissionSetupSeeder::class);
         $this->call(OrganizationSeeder::class);
+
+        // Plan catalogue — every partner needs a default plan to fall back to.
+        $this->call(PartnerPlanSeeder::class);
     }
 }

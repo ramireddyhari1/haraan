@@ -44,6 +44,21 @@ class InboundMessageTest extends TestCase
             'partner_type' => 'event',
         ]);
 
+        // Auto-replies are a paid feature since phase 2a. Compliance replies
+        // (STOP/START/HELP) are not, which several tests below rely on.
+        $plan = \App\Models\PartnerPlan::create([
+            'code' => 'growth', 'name' => 'Growth', 'price_inr' => 499,
+            'included_conversations' => 500,
+            'features' => [\App\Models\PartnerPlan::FEATURE_INBOUND],
+        ]);
+
+        \App\Models\PartnerSubscription::create([
+            'partner_id' => $this->partner->id,
+            'plan_id' => $plan->id,
+            'status' => \App\Models\PartnerSubscription::STATUS_ACTIVE,
+            'current_period_end' => Carbon::now()->addMonth(),
+        ]);
+
         config([
             'app.url' => 'https://haraan.test',
             'messaging.webhook.validate_signature' => true,

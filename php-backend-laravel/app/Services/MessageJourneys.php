@@ -42,6 +42,7 @@ final class MessageJourneys
     public function __construct(
         private readonly WhatsAppService $whatsapp,
         private readonly JourneyTemplates $templates,
+        private readonly PlanEntitlements $entitlements,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -224,6 +225,20 @@ final class MessageJourneys
         if ($start !== null && str_starts_with($message->template_key, 'event.reminder')
             && $start->lessThan(Carbon::now())) {
             $this->skip($message, 'too_late');
+
+            return 'skipped';
+        }
+
+        // Plan gate. Journeys are a paid feature; ticket delivery is not, and
+        // BookingNotifier deliberately never comes through here.
+        $entitlement = $this->entitlements->canAutomate(
+            $message->partner_id,
+            \App\Models\PartnerPlan::FEATURE_JOURNEYS,
+            $message->channel,
+        );
+
+        if (! $entitlement['allowed']) {
+            $this->skip($message, (string) $entitlement['reason']);
 
             return 'skipped';
         }

@@ -37,7 +37,7 @@ class PartnerReviews extends Page
 
     protected static ?string $navigationLabel = 'Reviews';
 
-    protected static ?int $navigationSort = 7;
+    protected static ?int $navigationSort = 8;
 
     protected string $view = 'filament.pages.partner.reviews';
 

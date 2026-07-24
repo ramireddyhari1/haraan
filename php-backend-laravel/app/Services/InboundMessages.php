@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\AutomationRule;
 use App\Models\MessageConversation;
 use App\Models\MessagingOptOut;
+use App\Models\PartnerPlan;
 use App\Support\MessageContext;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -40,6 +41,7 @@ final class InboundMessages
     public function __construct(
         private readonly MessageMeter $meter,
         private readonly WhatsAppService $whatsapp,
+        private readonly PlanEntitlements $entitlements,
     ) {}
 
     /**
@@ -95,7 +97,13 @@ final class InboundMessages
             return ['action' => 'ignored_opted_out', 'partner_id' => $partnerId, 'reply' => null];
         }
 
-        // --- 3. Auto-reply rules ---------------------------------------------
+        // --- 3. Auto-reply rules (a paid feature; compliance replies above are not)
+        $entitlement = $this->entitlements->canAutomate($partnerId, PartnerPlan::FEATURE_INBOUND, $channel);
+
+        if (! $entitlement['allowed']) {
+            return ['action' => 'not_entitled:' . $entitlement['reason'], 'partner_id' => $partnerId, 'reply' => null];
+        }
+
         foreach (AutomationRule::forPartner($partnerId, $channel) as $rule) {
             if ($rule->matches($text)) {
                 return $this->finish($channel, $from, $partnerId, 'rule:' . $rule->id, $rule->reply_body);
