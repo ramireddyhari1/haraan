@@ -44,6 +44,29 @@ final class JourneyTemplates
     }
 
     /**
+     * The positional variables for the approved WhatsApp template behind a key.
+     *
+     * These must line up with the {{1}}, {{2}} placeholders submitted to Meta —
+     * the registry row (message_templates.variables) documents the order, and
+     * this is what fills it. Kept beside render() on purpose: when the wording
+     * of one changes, the other is right there.
+     *
+     * @return array<int, string>
+     */
+    public function variables(string $key, Booking $booking): array
+    {
+        $title = $this->title($booking);
+        $when = $this->when($booking);
+        $passUrl = url('/bookings/' . $booking->id . '/pass');
+
+        return match ($key) {
+            'event.reminder_24h', 'event.reminder_2h' => [$title, $when, $passUrl],
+            'review.request' => [$title],
+            default => [],
+        };
+    }
+
+    /**
      * Messages go out from Haraan's shared number, not the partner's, so the
      * organiser is named in the body — otherwise the recipient has no idea who
      * is texting them about their Saturday.

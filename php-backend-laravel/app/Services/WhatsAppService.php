@@ -43,6 +43,32 @@ class WhatsAppService
         return $this->dispatch($phone, $caption, $mediaUrl !== '' ? $mediaUrl : null, $context);
     }
 
+    /**
+     * Send a pre-approved template by its Twilio Content SID.
+     *
+     * This is the only legal way to reach someone outside the 24-hour service
+     * window. Variables are positional, matching the {{1}}, {{2}} placeholders
+     * in the approved template — a mismatch is rejected by Twilio, so the
+     * registry (message_templates.variables) is what keeps the two in step.
+     *
+     * @param  array<int|string, string>  $variables
+     */
+    public function sendTemplate(string $phone, string $contentSid, array $variables = [], ?MessageContext $context = null): bool
+    {
+        // Twilio wants a JSON object keyed by position: {"1":"…","2":"…"}.
+        $indexed = [];
+        $position = 1;
+
+        foreach ($variables as $key => $value) {
+            $indexed[is_int($key) ? (string) $position++ : (string) $key] = (string) $value;
+        }
+
+        return $this->dispatch($phone, '', null, $context, [
+            'ContentSid' => $contentSid,
+            'ContentVariables' => $indexed === [] ? null : json_encode($indexed),
+        ]);
+    }
+
     /** Whether Twilio WhatsApp is configured well enough to attempt a send. */
     public function isConfigured(): bool
     {
@@ -54,7 +80,10 @@ class WhatsAppService
                 || (bool) ($c['auth_token'] ?? null));
     }
 
-    private function dispatch(string $phone, string $body, ?string $mediaUrl, ?MessageContext $context = null): bool
+    /**
+     * @param  array<string, string|null>  $extra  content-template params, when templated
+     */
+    private function dispatch(string $phone, string $body, ?string $mediaUrl, ?MessageContext $context = null, array $extra = []): bool
     {
         $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
 
@@ -83,7 +112,20 @@ class WhatsAppService
         $accountSid = (string) config('services.whatsapp.account_sid');
         $from = 'whatsapp:' . $this->e164((string) config('services.whatsapp.from'));
 
-        $payload = ['From' => $from, 'To' => $to, 'Body' => $body];
+        $payload = ['From' => $from, 'To' => $to];
+
+        // A templated send carries ContentSid instead of Body; sending both is
+        // rejected, so Body is only added when there's no template.
+        foreach ($extra as $key => $value) {
+            if ($value !== null) {
+                $payload[$key] = $value;
+            }
+        }
+
+        if (! isset($payload['ContentSid'])) {
+            $payload['Body'] = $body;
+        }
+
         if ($mediaUrl !== null) {
             $payload['MediaUrl'] = $mediaUrl;
         }

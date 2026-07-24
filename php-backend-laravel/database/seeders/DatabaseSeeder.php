@@ -31,5 +31,8 @@ class DatabaseSeeder extends Seeder
 
         // Plan catalogue — every partner needs a default plan to fall back to.
         $this->call(PartnerPlanSeeder::class);
+
+        // Register the WhatsApp templates the code sends (drafts until Meta approves).
+        $this->call(MessageTemplateSeeder::class);
     }
 }

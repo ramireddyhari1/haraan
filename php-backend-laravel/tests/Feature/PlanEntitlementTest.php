@@ -66,6 +66,10 @@ class PlanEntitlementTest extends TestCase
             'services.whatsapp.auth_token' => 'token',
             'services.whatsapp.from' => '+14155238886',
         ]);
+
+        // Business-initiated sends need an approved template unless the customer
+        // has an open window (phase 2b routing).
+        $this->approveJourneyTemplates();
     }
 
     private function subscribe(string $status = PartnerSubscription::STATUS_ACTIVE): PartnerSubscription
@@ -77,6 +81,18 @@ class PlanEntitlementTest extends TestCase
             'current_period_start' => Carbon::now()->subDays(3),
             'current_period_end' => Carbon::now()->addDays(27),
         ]);
+    }
+
+    /** Approve the journey templates so sends take the real production path. */
+    private function approveJourneyTemplates(): void
+    {
+        foreach (['event.reminder_24h', 'event.reminder_2h', 'review.request'] as $key) {
+            \App\Models\MessageTemplate::create([
+                'key' => $key, 'name' => $key, 'channel' => 'whatsapp',
+                'category' => 'utility', 'body' => '{{1}}', 'variables' => ['1' => 'title'],
+                'provider_template_id' => 'HX' . md5($key), 'status' => 'approved', 'is_active' => true,
+            ]);
+        }
     }
 
     private function entitlements(): PlanEntitlements

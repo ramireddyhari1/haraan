@@ -43,6 +43,7 @@ final class MessageJourneys
         private readonly WhatsAppService $whatsapp,
         private readonly JourneyTemplates $templates,
         private readonly PlanEntitlements $entitlements,
+        private readonly TemplateResolver $resolver,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -265,8 +266,26 @@ final class MessageJourneys
             (int) $booking->id,
         );
 
+        // A journey is business-initiated, so free text only works inside a window
+        // the customer opened. Outside one, an approved template is the only legal
+        // send — and if there isn't one, say so rather than letting Twilio reject it.
+        $route = $this->resolver->resolve($message->template_key, $message->channel, $message->recipient);
+
+        if ($route['mode'] === TemplateResolver::MODE_BLOCKED) {
+            $this->skip($message, (string) $route['reason']);
+
+            return 'skipped';
+        }
+
         try {
-            $ok = $this->whatsapp->sendMessage($message->recipient, $body, $context);
+            $ok = $route['mode'] === TemplateResolver::MODE_TEMPLATE
+                ? $this->whatsapp->sendTemplate(
+                    $message->recipient,
+                    (string) $route['sid'],
+                    $this->templates->variables($message->template_key, $booking),
+                    $context,
+                )
+                : $this->whatsapp->sendMessage($message->recipient, $body, $context);
         } catch (Throwable $e) {
             $ok = false;
             $message->error = mb_substr($e->getMessage(), 0, 2000);
