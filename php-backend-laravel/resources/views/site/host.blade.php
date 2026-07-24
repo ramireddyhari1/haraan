@@ -17,13 +17,26 @@
     ])->filter(fn ($s) => filled($s['url']));
 @endphp
 
-@push('head')
-    <meta property="og:type" content="profile">
-    <meta property="og:title" content="{{ $profile->display_name }}">
-    <meta property="og:description" content="{{ $desc }}">
-    @if ($ogImg)<meta property="og:image" content="{{ $ogImg }}">@endif
-    <meta name="description" content="{{ $desc }}">
-@endpush
+@php
+    // Search + social metadata for this organiser/venue page (rendered by
+    // site/partials/seo.blade.php via the layout).
+    $seo = [
+        'type' => 'profile',
+        'description' => $desc ?: ($profile->display_name . ' on Haraan — upcoming events, venues and tickets.'),
+        'image' => $ogImg ?: null,
+        'canonical' => url('/host/' . $profile->slug),
+        'jsonld' => array_filter([
+            '@context' => 'https://schema.org',
+            '@type' => $isVenue ? 'LocalBusiness' : 'Organization',
+            'name' => $profile->display_name,
+            'url' => url('/host/' . $profile->slug),
+            'description' => $desc ?: null,
+            'logo' => $logo ?: null,
+            'image' => $ogImg ?: null,
+            'sameAs' => array_values(array_filter($socials->pluck('url')->all())) ?: null,
+        ]),
+    ];
+@endphp
 
 @section('content')
 <div class="host-page">

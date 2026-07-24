@@ -4,8 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ $title ?? 'Haraan' }}</title>
+    @php
+        // "Page name | Haraan", but never "Haraan | Haraan" — several pages already
+        // carry the brand in the title they pass (e.g. host profiles).
+        $pageTitle = trim((string) ($title ?? 'Haraan'));
+        $fullTitle = ($pageTitle === '' || str_contains($pageTitle, 'Haraan'))
+            ? ($pageTitle ?: 'Haraan')
+            : $pageTitle . ' | Haraan';
+    @endphp
+    <title>{{ $fullTitle }}</title>
     <meta name="theme-color" content="#ffffff">
+    @include('site.partials.seo', ['title' => $fullTitle])
     @stack('head')
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     <link rel="manifest" href="{{ asset('site.webmanifest') }}">

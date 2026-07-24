@@ -19,6 +19,10 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Search-engine discovery. robots.txt is the static file in public/ (nginx serves
+// it before PHP); the sitemap is generated + cached hourly so new events show up.
+Route::get('/sitemap.xml', [\App\Http\Controllers\Web\SitemapController::class, 'index'])->name('sitemap');
+
 Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/', 'events');
     Route::get('/home', 'home');

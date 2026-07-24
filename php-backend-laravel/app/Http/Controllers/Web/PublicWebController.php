@@ -57,8 +57,29 @@ final class PublicWebController extends Controller
         $trending = $this->trendingFeed(8, $category);
         $bannerEvents = app(EventService::class)->getBannerEvents();
 
+        // The listing is one page with an optional ?category= / ?city= filter, so
+        // every variant canonicalises to /events and only the unfiltered page is
+        // indexed — thin near-duplicates dilute the listing's ranking.
+        $seoCity = CityResolver::selected();
+
         return view('site.events', [
-            'title' => 'Events',
+            'title' => $seoCity ? 'Events in ' . $seoCity : 'Events near you',
+            'seo' => [
+                'title' => $seoCity
+                    ? 'Events in ' . $seoCity . ' — book tickets'
+                    : 'Events near you — book tickets',
+                'description' => 'Concerts, comedy nights, workshops, sports and festivals'
+                    . ($seoCity ? ' in ' . $seoCity : '')
+                    . '. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
+                // `/` and `/events` render the same listing — each keeps its own
+                // canonical so the homepage stays the homepage.
+                'canonical' => request()->path() === '/' ? url('/') : url('/events'),
+                // City comes from a cookie (crawlers never send one), so only the
+                // ?category= filter can produce a near-duplicate worth suppressing.
+                'robots' => $category !== null
+                    ? 'noindex,follow'
+                    : 'index,follow,max-image-preview:large',
+            ],
             'events' => $events,
             'forYou' => $this->railFeed('for_you', 20, $category),
             'eventsAd' => $this->usableAd('events'),
@@ -90,7 +111,104 @@ final class PublicWebController extends Controller
             'event' => $event,
             'id'    => $id,
             'hostProfile' => $hostProfile,
+            'seo'   => $this->eventSeo($event),
         ]);
+    }
+
+    /**
+     * Search metadata for an event page: a rich description plus schema.org
+     * `Event` markup, which is what earns the date/venue/price rich result on
+     * Google (and the "Events" carousel). Offers use the cheapest live tier —
+     * Google reads `lowPrice`-style single offers fine and it matches the "from
+     * ₹x" the page shows.
+     *
+     * @return array<string, mixed>
+     */
+    private function eventSeo(Event $event): array
+    {
+        $where = trim(implode(', ', array_filter([$event->venue, $event->city])));
+        $when = $event->date?->format('D, j M Y');
+
+        $desc = trim(strip_tags((string) $event->description));
+        if ($desc === '') {
+            $desc = trim(implode(' · ', array_filter([
+                $event->title,
+                $when,
+                $where,
+            ]))) . '. Book tickets on Haraan.';
+        }
+
+        // Start time: the date column is a datetime, the clock is a separate
+        // free-text column ("07:30 PM"). Fold them together when it parses.
+        $start = $event->date?->copy();
+        if ($start && filled($event->time)) {
+            try {
+                $t = \Illuminate\Support\Carbon::parse((string) $event->time);
+                $start->setTime((int) $t->format('H'), (int) $t->format('i'));
+            } catch (\Throwable) {
+                // Unparseable clock text — the date alone is still valid markup.
+            }
+        }
+
+        $tiers = $event->ticketTypes()->get(['price']);
+        $price = $tiers->isNotEmpty() ? (float) $tiers->min('price') : (float) $event->price;
+
+        $schema = array_filter([
+            '@context' => 'https://schema.org',
+            '@type' => 'Event',
+            'name' => $event->title,
+            'url' => url('/events/' . $event->id),
+            'description' => \Illuminate\Support\Str::limit($desc, 300),
+            'image' => array_values(array_filter($event->imageUrls())) ?: null,
+            // The stored date/time is IST wall-clock (the app runs on UTC), so
+            // stamp the offset without shifting the hands — otherwise Google shows
+            // an event that starts 5½ hours early.
+            'startDate' => $start
+                ? \Illuminate\Support\Carbon::parse($start->format('Y-m-d H:i:s'), 'Asia/Kolkata')->toIso8601String()
+                : null,
+            'eventStatus' => 'https://schema.org/EventScheduled',
+            'eventAttendanceMode' => 'https://schema.org/OfflineEventAttendanceMode',
+            'location' => $where === '' ? null : array_filter([
+                '@type' => 'Place',
+                'name' => $event->venue ?: $event->city,
+                'address' => array_filter([
+                    '@type' => 'PostalAddress',
+                    'streetAddress' => $event->location ?: null,
+                    'addressLocality' => $event->city ?: null,
+                    'addressCountry' => 'IN',
+                ]),
+            ]),
+            'organizer' => $event->partner?->hostProfile?->isLive()
+                ? [
+                    '@type' => 'Organization',
+                    'name' => $event->partner->hostProfile->display_name,
+                    'url' => url('/host/' . $event->partner->hostProfile->slug),
+                ]
+                : null,
+            'offers' => array_filter([
+                '@type' => 'Offer',
+                'url' => url('/events/' . $event->id),
+                'price' => number_format($price, 2, '.', ''),
+                'priceCurrency' => 'INR',
+                'availability' => ($event->available_slots ?? 1) > 0
+                    ? 'https://schema.org/InStock'
+                    : 'https://schema.org/SoldOut',
+            ]),
+            'aggregateRating' => ($event->ratings_count ?? 0) > 0 ? [
+                '@type' => 'AggregateRating',
+                'ratingValue' => (string) round((float) $event->rating, 1),
+                'reviewCount' => (int) $event->ratings_count,
+            ] : null,
+        ], static fn ($v) => $v !== null && $v !== []);
+
+        return [
+            'title' => trim($event->title . ($where !== '' ? ' — ' . $where : '')),
+            'description' => $desc,
+            'image' => $event->heroImageUrl(),
+            'type' => 'event',
+            'canonical' => url('/events/' . $event->id),
+            'jsonld' => $schema,
+        ];
     }
 
     /**
@@ -188,7 +306,16 @@ final class PublicWebController extends Controller
         $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
 
         return view('site.gamehub', [
-            'title'         => 'GameHub',
+            'title'         => 'GameHub — book turfs, courts & play',
+            'seo'           => [
+                'title' => 'Book turfs, courts and sports venues'
+                    . ($city ? ' in ' . $city : ' near you'),
+                'description' => 'Book cricket turfs, football grounds and badminton courts'
+                    . ($city ? ' in ' . $city : ' near you')
+                    . ' by the hour on Haraan — plus live gully-cricket scores and player rankings.',
+                'canonical' => url('/gamehub'),
+                'robots' => request()->query('sport') ? 'noindex,follow' : 'index,follow,max-image-preview:large',
+            ],
             'venues'        => $venues,
             'sportCounts'   => $sportCounts,
             'liveMatches'   => $liveMatches,
@@ -290,10 +417,64 @@ final class PublicWebController extends Controller
 
         return view('site.gamehub-detail', [
             'hostProfile' => $hostProfile,
-            'title' => $venue->name,
+            'title' => $venue->name . ($venue->city ? ' — ' . $venue->city : ''),
             'id'    => $id,
             'venue' => $this->decorateVenueDetail($venue),
+            'seo'   => $this->venueSeo($venue),
         ]);
+    }
+
+    /**
+     * Search metadata for a venue page. `SportsActivityLocation` is the schema.org
+     * type Google understands for turfs/courts — it carries the address, price
+     * range and rating into the local result.
+     *
+     * @return array<string, mixed>
+     */
+    private function venueSeo(Venue $venue): array
+    {
+        $sports = implode(', ', array_slice($venue->sportsList(), 0, 3));
+        $image = \App\Support\MediaUrl::resolveMany(is_array($venue->images) ? $venue->images : [])[0] ?? null;
+
+        $desc = trim(strip_tags((string) ($venue->tagline ?: $venue->about))) ?: trim(
+            'Book ' . ($sports ?: 'a slot') . ' at ' . $venue->name
+            . ($venue->city ? ' in ' . $venue->city : '')
+            . ($venue->price ? ' from ₹' . $venue->price . '/hr' : '') . ' on Haraan.'
+        );
+
+        $schema = array_filter([
+            '@context' => 'https://schema.org',
+            '@type' => 'SportsActivityLocation',
+            'name' => $venue->name,
+            'url' => url('/gamehub/' . $venue->id),
+            'description' => \Illuminate\Support\Str::limit($desc, 300),
+            'image' => $image,
+            'address' => array_filter([
+                '@type' => 'PostalAddress',
+                'streetAddress' => $venue->address ?: $venue->location ?: null,
+                'addressLocality' => $venue->city ?: null,
+                'addressCountry' => 'IN',
+            ]),
+            'geo' => ($venue->latitude && $venue->longitude) ? [
+                '@type' => 'GeoCoordinates',
+                'latitude' => $venue->latitude,
+                'longitude' => $venue->longitude,
+            ] : null,
+            'priceRange' => $venue->price ? '₹' . $venue->price : null,
+            'aggregateRating' => ($venue->ratings_count ?? 0) > 0 ? [
+                '@type' => 'AggregateRating',
+                'ratingValue' => (string) round((float) $venue->rating, 1),
+                'reviewCount' => (int) $venue->ratings_count,
+            ] : null,
+        ], static fn ($v) => $v !== null && $v !== []);
+
+        return [
+            'title' => $venue->name . ($venue->city ? ' — ' . $venue->city : ''),
+            'description' => $desc,
+            'image' => $image,
+            'canonical' => url('/gamehub/' . $venue->id),
+            'jsonld' => $schema,
+        ];
     }
 
     public function actionBoard(): View

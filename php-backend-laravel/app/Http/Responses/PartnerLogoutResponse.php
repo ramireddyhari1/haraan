@@ -12,9 +12,8 @@ use Livewire\Features\SupportRedirects\Redirector;
 /**
  * Logout redirect for the Filament panels.
  *
- * Partners reach the /partner console through the public website login modal, so
- * on logout they should land back on that same website login area (/login) — not
- * the bare Filament "Sign in" page for the panel. Every other panel keeps
+ * Partners sign out of the /partner console back onto the panel's own branded
+ * sign-in page (/partner/login), not the public website login. Every panel keeps
  * Filament's default behaviour (its own login page).
  */
 class PartnerLogoutResponse implements Responsable
@@ -22,7 +21,7 @@ class PartnerLogoutResponse implements Responsable
     public function toResponse($request): RedirectResponse | Redirector
     {
         if (Filament::getCurrentPanel()?->getId() === 'partner') {
-            return redirect()->to(route('site.login'));
+            return redirect()->to(route('filament.partner.auth.login'));
         }
 
         // Default Filament behaviour for the other panels.

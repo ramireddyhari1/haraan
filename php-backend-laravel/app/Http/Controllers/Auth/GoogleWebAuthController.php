@@ -73,16 +73,22 @@ final class GoogleWebAuthController extends Controller
             $user->fill($fill)->save();
         }
 
+        // Partners sign in on the console's own page (/partner/login), not the
+        // public site — don't open a website session for them here.
+        if ($user->hasRoleEither(['PARTNER'])) {
+            return response()->json([
+                'redirect' => route('filament.partner.auth.login'),
+                'message' => 'Partner accounts sign in at /partner/login.',
+            ]);
+        }
+
         Auth::login($user, true);
         $request->session()->regenerate();
 
-        // Partners (event hosts / venue owners) go straight to their /partner console.
-        // Otherwise: straight to where they were headed — never via cricket onboarding.
+        // Straight to where they were headed — never via cricket onboarding.
         // Most people signing in here came for Events, and district/state are an
         // ActionBoard concern: EnsureActionboardProfile collects them at the point of use.
-        $redirect = $user->hasRoleEither(['PARTNER'])
-            ? '/partner'
-            : $request->session()->pull('url.intended', '/');
+        $redirect = $request->session()->pull('url.intended', '/');
 
         return response()->json(['redirect' => $redirect]);
     }

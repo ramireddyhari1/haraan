@@ -1,2 +1,19 @@
 User-agent: *
-Disallow:
+Allow: /
+
+# Private lanes: behind auth, personalised, or thin duplicates. These also carry
+# a noindex meta tag — the Disallow here just saves crawl budget.
+Disallow: /partner
+Disallow: /control
+Disallow: /admin
+Disallow: /login
+Disallow: /register
+Disallow: /profile
+Disallow: /bookings
+Disallow: /support
+Disallow: /notifications
+Disallow: /search
+Disallow: /t/
+Disallow: /api/
+
+Sitemap: https://haraan.app/sitemap.xml
