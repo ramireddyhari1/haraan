@@ -17,8 +17,11 @@
     @include('site.partials.seo', ['title' => $fullTitle])
     @stack('head')
     {{-- Favicon: blue Haraan "H" mark on a white rounded tile. The ?v= busts the
-         old empty favicon.ico browsers may have cached. --}}
+         old empty favicon.ico browsers may have cached.
+         The 192px PNG is for Google's search-result favicon, which prefers a
+         square that's a multiple of 48px. --}}
     <link rel="icon" href="{{ asset('favicon.ico') }}?v=2" sizes="any">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('favicon-192.png') }}?v=2">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32.png') }}?v=2">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16.png') }}?v=2">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}?v=2">
