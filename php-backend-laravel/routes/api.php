@@ -323,3 +323,11 @@ Route::post('/webhooks/twilio/whatsapp', [\App\Http\Controllers\Api\TwilioWebhoo
 Route::post('/webhooks/razorpay', [\App\Http\Controllers\Api\RazorpayWebhookController::class, 'handle'])
     ->middleware('throttle:60,1')
     ->name('webhooks.razorpay');
+
+// Meta / Instagram webhook. GET is the one-time subscription handshake; POST
+// carries message events, signed with the app secret. Both fail closed.
+Route::get('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify'])
+    ->name('webhooks.meta.verify');
+Route::post('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
+    ->middleware('throttle:120,1')
+    ->name('webhooks.meta.instagram');

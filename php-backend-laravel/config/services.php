@@ -69,6 +69,22 @@ return [
         'sms_from' => env('TWILIO_SMS_FROM'),
     ],
 
+    // Instagram DMs via the Meta Graph API (automation phase 3). Reactive only:
+    // Instagram permits a reply within 24h of the user's message and has no
+    // template escape hatch, so there is no such thing as a cold Instagram DM.
+    'instagram' => [
+        // App secret from the Meta app dashboard — signs every inbound webhook.
+        'app_secret' => env('META_APP_SECRET'),
+
+        // A string we choose; Meta echoes it back during the subscription handshake.
+        'verify_token' => env('META_VERIFY_TOKEN'),
+
+        'graph_version' => env('META_GRAPH_VERSION', 'v21.0'),
+
+        // Local testing only — never false in production.
+        'validate_signature' => env('META_VERIFY_WEBHOOK', true),
+    ],
+
     // Public QR image generator for ticket QRs (/t/{code}/qr.png). Swappable if the default
     // service is ever unavailable; must accept ?data=&size=WxH and return a PNG.
     'qr' => [

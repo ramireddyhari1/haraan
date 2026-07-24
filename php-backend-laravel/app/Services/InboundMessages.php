@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\AutomationRule;
+use App\Models\ChannelConnection;
 use App\Models\MessageConversation;
 use App\Models\MessagingOptOut;
 use App\Models\PartnerPlan;
@@ -42,16 +43,42 @@ final class InboundMessages
         private readonly MessageMeter $meter,
         private readonly WhatsAppService $whatsapp,
         private readonly PlanEntitlements $entitlements,
+        private readonly InstagramMessenger $instagram,
     ) {}
+
+    /**
+     * The Instagram connection this conversation belongs to, set before handle()
+     * so the reply goes back out of the account the DM arrived on.
+     */
+    private ?ChannelConnection $connection = null;
+
+    /**
+     * Handle a DM on a linked Instagram account.
+     *
+     * Attribution is exact here — the account maps to one partner — so unlike
+     * WhatsApp there's no guessing whose customer this is.
+     */
+    public function handleInstagram(ChannelConnection $connection, string $senderId, string $body, ?string $messageId = null): array
+    {
+        $this->connection = $connection;
+
+        try {
+            return $this->handle('instagram', $senderId, $body, $messageId, $connection->partner_id);
+        } finally {
+            $this->connection = null;
+        }
+    }
 
     /**
      * Handle one inbound message.
      *
      * @return array{action: string, partner_id: int|null, reply: string|null}
      */
-    public function handle(string $channel, string $from, string $body, ?string $providerMessageId = null): array
+    public function handle(string $channel, string $from, string $body, ?string $providerMessageId = null, ?int $knownPartnerId = null): array
     {
-        $partnerId = $this->attribute($channel, $from);
+        // Instagram knows exactly whose account was messaged; WhatsApp's shared
+        // sender has to infer it.
+        $partnerId = $knownPartnerId ?? $this->attribute($channel, $from);
 
         $this->meter->recordInbound($channel, $from, $partnerId, $providerMessageId, $body);
 
@@ -131,11 +158,14 @@ final class InboundMessages
         // Replies ride inside the service window the customer just opened, so no
         // approved template is needed — this is the one place free text is allowed.
         if ($force || ! MessagingOptOut::blocks($channel, $to, $partnerId)) {
-            if ($channel === 'whatsapp') {
-                $this->whatsapp->sendMessage($to, $reply, $context);
-            } else {
-                Log::info("Inbound reply skipped: unsupported channel {$channel}");
-            }
+            match (true) {
+                $channel === 'whatsapp' => $this->whatsapp->sendMessage($to, $reply, $context),
+                // Instagram replies go back out of the account that was messaged,
+                // and only ever inside the window the user just opened.
+                $channel === 'instagram' && $this->connection !== null
+                    => $this->instagram->reply($this->connection, $to, $reply, $context),
+                default => Log::info("Inbound reply skipped: unsupported channel {$channel}"),
+            };
         }
 
         return ['action' => $action, 'partner_id' => $partnerId, 'reply' => $reply];
