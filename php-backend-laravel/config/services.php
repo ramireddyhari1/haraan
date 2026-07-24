@@ -83,4 +83,13 @@ return [
         'secret' => env('RAZORPAY_KEY_SECRET'),
     ],
 
+    // Anthropic Claude — powers the /partner support AI assistant (PartnerSupportAI).
+    // Key NEVER reaches the frontend; the model answers server-side only. Read via
+    // config() so it survives config:cache. Leave the key unset to disable the AI
+    // panel gracefully (it falls back to "talk to the team").
+    'anthropic' => [
+        'key'   => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_MODEL', 'claude-opus-4-8'),
+    ],
+
 ];
