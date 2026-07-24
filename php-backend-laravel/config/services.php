@@ -42,36 +42,37 @@ return [
         ],
     ],
 
-    // WhatsApp delivery via Twilio (replaces the old self-hosted whatsapp-web.js bridge).
-    // All values read through config() so they survive `config:cache`.
+    // WhatsApp via Meta's WhatsApp Cloud API (Graph). Twilio is gone: going direct
+    // means ONE business verification, one app secret, one webhook signature scheme
+    // and one template registry shared with Instagram — rather than Meta's approval
+    // process plus a reseller's on top.
+    //
+    // NB there is no SMS here. Meta does WhatsApp, not SMS, so phone delivery is
+    // WhatsApp or nothing and email is the parallel path (see BookingNotifier).
     'whatsapp' => [
-        // Toggle: when false, WhatsAppService is a no-op (logs only) — e.g. local dev.
-        'enabled' => env('TWILIO_WHATSAPP_ENABLED', false),
+        // Toggle: when false, WhatsAppService is a no-op (logs + ledger only).
+        'enabled' => env('META_WHATSAPP_ENABLED', false),
 
-        // Twilio auth: prefer an API key (SID + secret) over the account Auth Token.
-        // The account SID is always required (it's in the REST resource path).
-        'account_sid' => env('TWILIO_ACCOUNT_SID'),
-        'auth_token' => env('TWILIO_AUTH_TOKEN'),
-        'api_key_sid' => env('TWILIO_API_KEY_SID'),
-        'api_key_secret' => env('TWILIO_API_KEY_SECRET'),
+        // From the Meta app dashboard → WhatsApp → API setup.
+        'phone_number_id' => env('META_WHATSAPP_PHONE_NUMBER_ID'),
+        'waba_id' => env('META_WHATSAPP_WABA_ID'),
 
-        // The WhatsApp-enabled sender, E.164 without the "whatsapp:" prefix (we add it).
-        // e.g. +16293174010, or the Twilio sandbox +14155238886 while testing.
-        'from' => env('TWILIO_WHATSAPP_FROM'),
+        // A permanent system-user token. Sends messages as the business, so treat
+        // it like a password.
+        'access_token' => env('META_WHATSAPP_TOKEN'),
+
+        'graph_version' => env('META_GRAPH_VERSION', 'v21.0'),
 
         // Country code prepended to bare 10-digit local numbers (India = 91).
-        'default_country' => env('TWILIO_DEFAULT_COUNTRY', '91'),
-
-        // SMS fallback: when a WhatsApp send fails (e.g. sender not yet approved), the ticket
-        // is delivered as a plain SMS instead. Uses the same Twilio account; 'sms_from' must be
-        // an SMS-capable Twilio number (the purchased +1 number works).
-        'sms_enabled' => env('TWILIO_SMS_ENABLED', false),
-        'sms_from' => env('TWILIO_SMS_FROM'),
+        'default_country' => env('WHATSAPP_DEFAULT_COUNTRY', '91'),
     ],
 
-    // Instagram DMs via the Meta Graph API (automation phase 3). Reactive only:
-    // Instagram permits a reply within 24h of the user's message and has no
-    // template escape hatch, so there is no such thing as a cold Instagram DM.
+    // Instagram DMs via the Meta Graph API. Reactive only: Instagram permits a
+    // reply within 24h of the user's message and has no template escape hatch, so
+    // there is no such thing as a cold Instagram DM.
+    //
+    // `app_secret` and `verify_token` cover BOTH Meta webhooks (Instagram and
+    // WhatsApp Cloud) — one app, one signing secret, one handshake.
     'instagram' => [
         // App secret from the Meta app dashboard — signs every inbound webhook.
         'app_secret' => env('META_APP_SECRET'),

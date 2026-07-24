@@ -31,7 +31,7 @@ class MessageTemplatesTable
 
                 // The whole point of the screen: approved without a SID still can't send.
                 TextColumn::make('provider_template_id')
-                    ->label('Content SID')
+                    ->label('Meta template name')
                     ->placeholder('not set')
                     ->color(fn ($record): string => filled($record->provider_template_id) ? 'gray' : 'danger')
                     ->limit(20),

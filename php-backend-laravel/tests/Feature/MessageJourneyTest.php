@@ -62,9 +62,8 @@ class MessageJourneyTest extends TestCase
             'messaging.journeys.quiet_hours.start' => 23,
             'messaging.journeys.quiet_hours.end' => 23,
             'services.whatsapp.enabled' => true,
-            'services.whatsapp.account_sid' => 'ACtest',
-            'services.whatsapp.auth_token' => 'token',
-            'services.whatsapp.from' => '+14155238886',
+            'services.whatsapp.phone_number_id' => '123456789',
+            'services.whatsapp.access_token' => 'meta-token',
         ]);
 
         // Business-initiated sends need an approved template unless the customer
@@ -191,7 +190,7 @@ class MessageJourneyTest extends TestCase
 
     public function test_due_messages_are_sent_and_recorded(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM123'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $this->booking();
         $this->journeys()->enqueue();
         ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
@@ -206,7 +205,7 @@ class MessageJourneyTest extends TestCase
 
     public function test_nothing_is_delivered_while_the_master_switch_is_off(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM123'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         config(['messaging.journeys.enabled' => false]);
         $this->booking();
         $this->journeys()->enqueue();
@@ -223,7 +222,7 @@ class MessageJourneyTest extends TestCase
 
     public function test_an_opted_out_recipient_is_skipped(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM123'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $this->booking();
         $this->journeys()->enqueue();
         ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
@@ -240,7 +239,7 @@ class MessageJourneyTest extends TestCase
 
     public function test_a_cancelled_booking_is_skipped_at_send_time(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM123'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $booking = $this->booking();
         $this->journeys()->enqueue();
         ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
@@ -257,7 +256,7 @@ class MessageJourneyTest extends TestCase
 
     public function test_quiet_hours_hold_a_message_rather_than_dropping_it(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM123'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $this->booking();
         $this->journeys()->enqueue();
         ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
@@ -276,7 +275,7 @@ class MessageJourneyTest extends TestCase
 
     public function test_a_failed_send_retries_before_giving_up(): void
     {
-        Http::fake(fn () => Http::response(['message' => 'nope'], 400));
+        Http::fake(fn () => Http::response(['error' => ['message' => 'nope']], 400));
         $this->booking(['time' => '']);   // one reminder + one review request
         $this->journeys()->enqueue();
         ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
@@ -285,7 +284,7 @@ class MessageJourneyTest extends TestCase
 
         $message = ScheduledMessage::first();
         $this->assertSame(1, $message->attempts);
-        $this->assertSame(ScheduledMessage::STATUS_PENDING, $message->status, 'a Twilio blip should not cost the reminder');
+        $this->assertSame(ScheduledMessage::STATUS_PENDING, $message->status, 'a Graph API blip should not cost the reminder');
         $this->assertTrue($message->send_after->isFuture());
     }
 

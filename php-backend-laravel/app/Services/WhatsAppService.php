@@ -10,198 +10,182 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * WhatsApp delivery via Twilio's REST API. Replaces the old self-hosted whatsapp-web.js bridge
- * (no QR to scan, no session to keep alive). Keeps the original interface — sendMessage() and
- * sendMedia() — so callers (BookingNotifier, auth controllers) are unchanged.
+ * WhatsApp delivery via Meta's WhatsApp Cloud API (Graph). Replaces Twilio, which
+ * replaced a self-hosted whatsapp-web.js bridge.
  *
- * Every send is best-effort and returns bool; a failure is logged, never thrown, so it can't
- * break a booking or an OTP flow. Requires a WhatsApp-enabled Twilio sender ('from') and, for
- * business-initiated messages outside a 24h session, an approved template on the Twilio side.
+ * Going direct to Meta means one business verification, one app secret, one
+ * webhook signature scheme and one template registry shared with Instagram —
+ * instead of Meta's approval process plus a reseller's on top of it.
  *
- * Every attempt — including the ones that never reach Twilio — is written to the messaging
- * ledger via {@see MessageMeter}. Pass a {@see MessageContext} to attribute the send to a
- * partner; without one it's recorded as platform traffic and bills nobody.
+ * The public interface is unchanged from the Twilio implementation on purpose:
+ * sendMessage() / sendMedia() / sendTemplate() / isConfigured(), all best-effort
+ * returning bool, never throwing into a booking or an OTP flow. Every attempt —
+ * including the ones that never leave the building — lands in the messaging
+ * ledger via {@see MessageMeter}.
+ *
+ * Note there is no SMS sibling any more: Meta does WhatsApp, not SMS. Phone
+ * delivery is WhatsApp or nothing, with email as the parallel path.
  */
 class WhatsAppService
 {
-    private const API = 'https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json';
-
     public function __construct(private readonly MessageMeter $meter) {}
 
     public function sendMessage(string $phone, string $message, ?MessageContext $context = null): bool
     {
-        return $this->dispatch($phone, $message, null, $context);
-    }
-
-    /**
-     * Send an image (the ticket QR) with a caption. $mediaUrl must be a publicly reachable URL
-     * that Twilio can fetch (e.g. the /t/{code}/qr.png route). Falls back to a text-only send if
-     * no media URL is given.
-     */
-    public function sendMedia(string $phone, string $caption, string $mediaUrl, ?MessageContext $context = null): bool
-    {
-        return $this->dispatch($phone, $caption, $mediaUrl !== '' ? $mediaUrl : null, $context);
-    }
-
-    /**
-     * Send a pre-approved template by its Twilio Content SID.
-     *
-     * This is the only legal way to reach someone outside the 24-hour service
-     * window. Variables are positional, matching the {{1}}, {{2}} placeholders
-     * in the approved template — a mismatch is rejected by Twilio, so the
-     * registry (message_templates.variables) is what keeps the two in step.
-     *
-     * @param  array<int|string, string>  $variables
-     */
-    public function sendTemplate(string $phone, string $contentSid, array $variables = [], ?MessageContext $context = null): bool
-    {
-        // Twilio wants a JSON object keyed by position: {"1":"…","2":"…"}.
-        $indexed = [];
-        $position = 1;
-
-        foreach ($variables as $key => $value) {
-            $indexed[is_int($key) ? (string) $position++ : (string) $key] = (string) $value;
-        }
-
-        return $this->dispatch($phone, '', null, $context, [
-            'ContentSid' => $contentSid,
-            'ContentVariables' => $indexed === [] ? null : json_encode($indexed),
+        return $this->dispatch($phone, $context, [
+            'type' => 'text',
+            // preview_url off: link previews on a ticket URL look like spam and
+            // Meta fetches the page to build them.
+            'text' => ['body' => $message, 'preview_url' => false],
         ]);
     }
 
-    /** Whether Twilio WhatsApp is configured well enough to attempt a send. */
+    /**
+     * Send an image (the ticket QR) with a caption. $mediaUrl must be publicly
+     * reachable — Meta fetches it server-side. Falls back to text if empty.
+     */
+    public function sendMedia(string $phone, string $caption, string $mediaUrl, ?MessageContext $context = null): bool
+    {
+        if ($mediaUrl === '') {
+            return $this->sendMessage($phone, $caption, $context);
+        }
+
+        return $this->dispatch($phone, $context, [
+            'type' => 'image',
+            'image' => ['link' => $mediaUrl, 'caption' => $caption],
+        ]);
+    }
+
+    /**
+     * Send a pre-approved template — the only legal way to reach someone outside
+     * the 24-hour service window.
+     *
+     * Meta identifies a template by NAME + language, not by an opaque id, and
+     * body variables are positional {{1}}, {{2}}… in order.
+     *
+     * @param  array<int|string, string>  $variables
+     */
+    public function sendTemplate(
+        string $phone,
+        string $templateName,
+        array $variables = [],
+        ?MessageContext $context = null,
+        string $language = 'en',
+    ): bool {
+        $template = [
+            'name' => $templateName,
+            'language' => ['code' => $language],
+        ];
+
+        if ($variables !== []) {
+            $template['components'] = [[
+                'type' => 'body',
+                'parameters' => array_values(array_map(
+                    fn ($value): array => ['type' => 'text', 'text' => (string) $value],
+                    $variables,
+                )),
+            ]];
+        }
+
+        return $this->dispatch($phone, $context, [
+            'type' => 'template',
+            'template' => $template,
+        ]);
+    }
+
+    /** Whether the Cloud API is configured well enough to attempt a send. */
     public function isConfigured(): bool
     {
         $c = config('services.whatsapp');
 
-        return (bool) ($c['account_sid'] ?? null)
-            && (bool) ($c['from'] ?? null)
-            && (((bool) ($c['api_key_sid'] ?? null) && (bool) ($c['api_key_secret'] ?? null))
-                || (bool) ($c['auth_token'] ?? null));
+        return filled($c['phone_number_id'] ?? null) && filled($c['access_token'] ?? null);
     }
 
     /**
-     * @param  array<string, string|null>  $extra  content-template params, when templated
+     * @param  array<string, mixed>  $message  the type-specific part of the payload
      */
-    private function dispatch(string $phone, string $body, ?string $mediaUrl, ?MessageContext $context = null, array $extra = []): bool
+    private function dispatch(string $phone, ?MessageContext $context, array $message): bool
     {
         $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
 
         if (! $enabled) {
-            Log::info("WhatsApp (disabled — not sent) to {$phone}: {$body}");
+            Log::info("WhatsApp (disabled — not sent) to {$phone}");
             $this->meter->record('whatsapp', $phone, MessageLog::STATUS_DISABLED, $context);
 
             return false;
         }
 
         if (! $this->isConfigured()) {
-            Log::warning('WhatsApp not sent: Twilio credentials / sender not configured.');
+            Log::warning('WhatsApp not sent: Meta phone number id / access token not configured.');
             $this->meter->record('whatsapp', $phone, MessageLog::STATUS_UNCONFIGURED, $context);
 
             return false;
         }
 
-        $to = $this->toWhatsApp($phone);
-        if ($to === null) {
+        $to = $this->e164($phone);
+
+        if (! preg_match('/^\+\d{8,15}$/', $to)) {
             Log::warning("WhatsApp not sent: unroutable number {$phone}");
             $this->meter->record('whatsapp', $phone, MessageLog::STATUS_UNROUTABLE, $context);
 
             return false;
         }
 
-        $accountSid = (string) config('services.whatsapp.account_sid');
-        $from = 'whatsapp:' . $this->e164((string) config('services.whatsapp.from'));
+        // Meter against the normalised address: "9876543210" and "+919876543210"
+        // are one recipient, and keying on the raw input would open (and charge
+        // for) two conversations with the same person.
+        $recipient = $to;
 
-        $payload = ['From' => $from, 'To' => $to];
+        $version = (string) config('services.whatsapp.graph_version', 'v21.0');
+        $phoneNumberId = (string) config('services.whatsapp.phone_number_id');
+        $url = "https://graph.facebook.com/{$version}/{$phoneNumberId}/messages";
 
-        // A templated send carries ContentSid instead of Body; sending both is
-        // rejected, so Body is only added when there's no template.
-        foreach ($extra as $key => $value) {
-            if ($value !== null) {
-                $payload[$key] = $value;
-            }
-        }
-
-        if (! isset($payload['ContentSid'])) {
-            $payload['Body'] = $body;
-        }
-
-        if ($mediaUrl !== null) {
-            $payload['MediaUrl'] = $mediaUrl;
-        }
-
-        // Meter against the normalised address, not the raw input: "9876543210" and
-        // "+919876543210" are one recipient, and keying on the raw string would open
-        // (and charge for) two conversations with the same person.
-        $recipient = substr($to, strlen('whatsapp:'));
+        // Meta wants the number without the leading plus.
+        $payload = array_merge([
+            'messaging_product' => 'whatsapp',
+            'recipient_type' => 'individual',
+            'to' => ltrim($to, '+'),
+        ], $message);
 
         try {
-            $response = Http::withBasicAuth(...$this->authPair($accountSid))
-                ->asForm()
+            $response = Http::withToken((string) config('services.whatsapp.access_token'))
+                ->acceptJson()
                 ->connectTimeout(5)->timeout(20)
-                ->post(sprintf(self::API, $accountSid), $payload);
+                ->post($url, $payload);
 
             if ($response->successful()) {
-                // The Twilio SID is what a later cost backfill joins the ledger on.
                 $this->meter->record(
                     'whatsapp',
                     $recipient,
                     MessageLog::STATUS_SENT,
                     $context,
-                    providerMessageId: $response->json('sid'),
+                    // wamid — what a later cost/status backfill joins on.
+                    providerMessageId: $response->json('messages.0.id'),
                 );
 
                 return true;
             }
 
-            // Twilio returns a helpful {code,message} — surface it so sender/template issues are clear.
-            Log::warning('Twilio WhatsApp send failed (' . $response->status() . '): ' . $response->body());
-            $this->meter->record(
-                'whatsapp',
-                $recipient,
-                MessageLog::STATUS_FAILED,
-                $context,
-                error: 'HTTP ' . $response->status() . ': ' . $response->body(),
-            );
+            // Meta returns a structured {error:{message,code,error_data}} — surface
+            // it, since template and window rejections are the common failures.
+            $error = $response->json('error.message') ?? $response->body();
+            Log::warning('WhatsApp Cloud send failed (' . $response->status() . '): ' . $error);
+            $this->meter->record('whatsapp', $recipient, MessageLog::STATUS_FAILED, $context, error: (string) $error);
 
             return false;
         } catch (\Throwable $e) {
-            Log::warning('Twilio WhatsApp exception: ' . $e->getMessage());
+            Log::warning('WhatsApp Cloud exception: ' . $e->getMessage());
             $this->meter->record('whatsapp', $recipient, MessageLog::STATUS_FAILED, $context, error: $e->getMessage());
 
             return false;
         }
     }
 
-    /**
-     * Basic-auth pair: prefer the API key (sid+secret); fall back to account SID + auth token.
-     *
-     * @return array{0:string,1:string}
-     */
-    private function authPair(string $accountSid): array
-    {
-        $keySid = (string) config('services.whatsapp.api_key_sid');
-        $keySecret = (string) config('services.whatsapp.api_key_secret');
-
-        if ($keySid !== '' && $keySecret !== '') {
-            return [$keySid, $keySecret];
-        }
-
-        return [$accountSid, (string) config('services.whatsapp.auth_token')];
-    }
-
-    /** Build the `whatsapp:+E164` recipient, or null if the number can't be normalised. */
-    private function toWhatsApp(string $phone): ?string
-    {
-        $e164 = $this->e164($phone);
-
-        return preg_match('/^\+\d{8,15}$/', $e164) ? 'whatsapp:' . $e164 : null;
-    }
-
-    /** Normalise a phone to E.164 (+<country><number>), defaulting bare 10-digit numbers to +91. */
+    /** Normalise a phone to E.164, defaulting bare 10-digit numbers to +91. */
     private function e164(string $phone): string
     {
         $phone = trim($phone);
+
         if (str_starts_with($phone, '+')) {
             return '+' . preg_replace('/\D/', '', $phone);
         }
@@ -209,14 +193,9 @@ class WhatsAppService
         $digits = preg_replace('/\D/', '', $phone);
         $cc = preg_replace('/\D/', '', (string) config('services.whatsapp.default_country', '91'));
 
-        // Trunk-prefixed local numbers (e.g. 0XXXXXXXXXX) — drop the leading zero(s).
-        $digits = ltrim($digits, '0');
+        // Trunk-prefixed local numbers (0XXXXXXXXXX) — drop the leading zero(s).
+        $digits = ltrim((string) $digits, '0');
 
-        // 10-digit local → prepend country code; already carries a country code → use as-is.
-        if (strlen($digits) === 10) {
-            return '+' . $cc . $digits;
-        }
-
-        return '+' . $digits;
+        return strlen($digits) === 10 ? '+' . $cc . $digits : '+' . $digits;
     }
 }

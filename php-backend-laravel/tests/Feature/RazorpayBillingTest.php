@@ -158,10 +158,11 @@ class RazorpayBillingTest extends TestCase
         $this->webhook($this->subscriptionEvent('subscription.halted'))->assertStatus(200);
 
         config([
-            'services.whatsapp.enabled' => true, 'services.whatsapp.account_sid' => 'ACtest',
-            'services.whatsapp.auth_token' => 'token', 'services.whatsapp.from' => '+14155238886',
+            'services.whatsapp.enabled' => true,
+            'services.whatsapp.phone_number_id' => '123456789',
+            'services.whatsapp.access_token' => 'meta-token',
         ]);
-        Http::fake(fn () => Http::response(['sid' => 'SM1'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
 
         app(\App\Services\WhatsAppService::class)->sendMessage(
             '9876543210', 'your ticket',

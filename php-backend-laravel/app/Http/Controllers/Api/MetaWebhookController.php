@@ -58,6 +58,7 @@ class MetaWebhookController extends Controller
         }
 
         foreach ($payload['entry'] ?? [] as $entry) {
+            // Instagram delivers DMs under entry[].messaging[].
             foreach ($entry['messaging'] ?? [] as $event) {
                 try {
                     $this->handleEvent($event, $inbound);
@@ -66,9 +67,51 @@ class MetaWebhookController extends Controller
                     Log::error('Instagram event handling failed: ' . $e->getMessage());
                 }
             }
+
+            // WhatsApp Cloud uses a different shape on the same endpoint:
+            // entry[].changes[] with field=messages. One app, one signature, two
+            // payload formats — worth keeping side by side so that's obvious.
+            foreach ($entry['changes'] ?? [] as $change) {
+                if (($change['field'] ?? null) !== 'messages') {
+                    continue;
+                }
+
+                try {
+                    $this->handleWhatsApp($change['value'] ?? [], $inbound);
+                } catch (\Throwable $e) {
+                    Log::error('WhatsApp event handling failed: ' . $e->getMessage());
+                }
+            }
         }
 
         return response('', 200);
+    }
+
+    /**
+     * Inbound WhatsApp from the Cloud API.
+     *
+     * Attribution stays a heuristic here, unlike Instagram: the number is shared
+     * across partners, so InboundMessages infers the owner from the most recent
+     * conversation. Statuses (sent/delivered/read) arrive on this same field and
+     * are ignored — there's nothing to reply to.
+     *
+     * @param  array<string, mixed>  $value
+     */
+    private function handleWhatsApp(array $value, InboundMessages $inbound): void
+    {
+        foreach ($value['messages'] ?? [] as $message) {
+            $text = trim((string) ($message['text']['body'] ?? ''));
+            $from = (string) ($message['from'] ?? '');
+
+            if ($from === '' || $text === '') {
+                // A sticker, image, reaction or location — no keyword to match.
+                continue;
+            }
+
+            // Meta reports `from` without a plus; the ledger keys on E.164, and
+            // WhatsAppService normalises the same way, so they must agree.
+            $inbound->handle('whatsapp', '+' . ltrim($from, '+'), $text, $message['id'] ?? null);
+        }
     }
 
     /** @param array<string, mixed> $event */

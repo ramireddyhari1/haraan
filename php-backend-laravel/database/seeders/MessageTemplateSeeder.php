@@ -10,10 +10,9 @@ use Illuminate\Database\Seeder;
 /**
  * Registers the templates Haraan actually sends, as DRAFTS.
  *
- * Nothing here is approved and nothing carries a Content SID, because both come
- * from Meta, not from us: submit the copy for approval on the Twilio side, then
- * paste the returned SID into /control → Platform → Templates and mark it
- * approved. Until then TemplateResolver routes these as "blocked — template not
+ * Nothing here is approved and nothing carries a Meta template name, because both
+ * come from Meta: create the template in WhatsApp Manager, and once it's approved
+ * put its NAME into /control → Platform → Templates and mark it approved. Until then TemplateResolver routes these as "blocked — template not
  * approved", which is the honest state.
  *
  * `body` is the submitted copy with {{n}} placeholders; `variables` documents

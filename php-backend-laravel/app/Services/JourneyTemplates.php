@@ -12,9 +12,8 @@ use Illuminate\Support\Carbon;
  * time so a rescheduled event quotes the new time.
  *
  * Free-text for now, which only works inside an open 24h window. Before these go
- * out to a cold recipient each needs an approved WhatsApp template on the Twilio
- * side, and this class becomes the place that maps a key to its Content SID and
- * variables (see the message_templates table).
+ * out to a cold recipient each needs a template approved in WhatsApp Manager;
+ * message_templates maps a key to that template's name and variables.
  *
  * Every journey message carries the STOP line: it's how someone leaves, and the
  * inbound handler that honours it is the next slice of work.

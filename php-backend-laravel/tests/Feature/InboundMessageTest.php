@@ -8,26 +8,30 @@ use App\Models\AutomationRule;
 use App\Models\MessageConversation;
 use App\Models\MessageLog;
 use App\Models\MessagingOptOut;
+use App\Models\PartnerPlan;
+use App\Models\PartnerSubscription;
 use App\Models\User;
-use App\Support\TwilioSignature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
- * The inbound webhook is public and can create opt-outs and send replies, so the
- * signature check is the security boundary and gets tested as one. The rest
- * covers the rules that protect a customer: STOP always wins, an opted-out
- * person gets silence, and the reply goes to the right partner's account.
+ * Inbound WhatsApp through Meta's Cloud API. The endpoint is public and can create
+ * opt-outs and send replies, so the signature is the security boundary. The rest
+ * covers what protects a customer: STOP always wins, an opted-out person gets
+ * silence, and the reply is billed to the right partner.
+ *
+ * Note the shape difference from Instagram on the same URL: WhatsApp arrives as
+ * entry[].changes[] with field=messages, Instagram as entry[].messaging[].
  */
 class InboundMessageTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const TOKEN = 'test-auth-token';
+    private const SECRET = 'meta-app-secret';
 
-    private const URL = 'https://haraan.test/api/webhooks/twilio/whatsapp';
+    private const FROM = '919876543210';
 
     private User $partner;
 
@@ -46,66 +50,66 @@ class InboundMessageTest extends TestCase
 
         // Auto-replies are a paid feature since phase 2a. Compliance replies
         // (STOP/START/HELP) are not, which several tests below rely on.
-        $plan = \App\Models\PartnerPlan::create([
+        $plan = PartnerPlan::create([
             'code' => 'growth', 'name' => 'Growth', 'price_inr' => 499,
             'included_conversations' => 500,
-            'features' => [\App\Models\PartnerPlan::FEATURE_INBOUND],
+            'features' => [PartnerPlan::FEATURE_INBOUND],
         ]);
 
-        \App\Models\PartnerSubscription::create([
+        PartnerSubscription::create([
             'partner_id' => $this->partner->id,
             'plan_id' => $plan->id,
-            'status' => \App\Models\PartnerSubscription::STATUS_ACTIVE,
+            'status' => PartnerSubscription::STATUS_ACTIVE,
             'current_period_end' => Carbon::now()->addMonth(),
         ]);
 
         config([
-            'app.url' => 'https://haraan.test',
-            'messaging.webhook.validate_signature' => true,
-            'messaging.webhook.url' => '',
+            'services.instagram.app_secret' => self::SECRET,
+            'services.instagram.validate_signature' => true,
             'services.whatsapp.enabled' => true,
-            'services.whatsapp.account_sid' => 'ACtest',
-            'services.whatsapp.auth_token' => self::TOKEN,
-            'services.whatsapp.from' => '+14155238886',
+            'services.whatsapp.phone_number_id' => '123456789',
+            'services.whatsapp.access_token' => 'meta-token',
         ]);
 
-        Http::fake(fn () => Http::response(['sid' => 'SM' . uniqid()], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.' . uniqid()]]], 200));
     }
 
-    /** @param array<string, string> $params */
-    private function hook(array $params, ?string $signature = null)
+    /** @param array<string, mixed> $payload */
+    private function hook(array $payload, ?string $signature = null)
     {
-        $signature ??= base64_encode(hash_hmac('sha1', $this->payload($params), self::TOKEN, true));
+        $raw = json_encode($payload);
+        $signature ??= 'sha256=' . hash_hmac('sha256', $raw, self::SECRET);
 
-        return $this->withHeaders(['X-Twilio-Signature' => $signature])
-            ->post('/api/webhooks/twilio/whatsapp', $params);
+        return $this->call(
+            'POST', '/api/webhooks/meta', [], [], [],
+            ['HTTP_X-Hub-Signature-256' => $signature, 'CONTENT_TYPE' => 'application/json'],
+            $raw,
+        );
     }
 
-    /** @param array<string, string> $params */
-    private function payload(array $params): string
+    /** A WhatsApp Cloud inbound-message payload. */
+    private function inbound(string $body, string $from = self::FROM): array
     {
-        ksort($params);
-        $payload = self::URL;
-
-        foreach ($params as $k => $v) {
-            $payload .= $k . $v;
-        }
-
-        return $payload;
-    }
-
-    private function inbound(string $body, string $from = '+919876543210'): array
-    {
-        return ['From' => 'whatsapp:' . $from, 'Body' => $body, 'MessageSid' => 'SM' . uniqid()];
+        return ['entry' => [['changes' => [[
+            'field' => 'messages',
+            'value' => [
+                'messaging_product' => 'whatsapp',
+                'messages' => [[
+                    'from' => $from,
+                    'id' => 'wamid.' . uniqid(),
+                    'type' => 'text',
+                    'text' => ['body' => $body],
+                ]],
+            ],
+        ]]]]];
     }
 
     // --- security -----------------------------------------------------------
 
     public function test_a_forged_signature_is_rejected(): void
     {
-        $this->hook($this->inbound('stop'), signature: 'obviously-wrong')->assertStatus(403);
+        $this->hook($this->inbound('stop'), 'sha256=deadbeef')->assertStatus(403);
 
-        // Nothing happened: no opt-out, nothing recorded, no reply.
         $this->assertSame(0, MessagingOptOut::count());
         $this->assertSame(0, MessageLog::count());
         Http::assertNothingSent();
@@ -113,14 +117,13 @@ class InboundMessageTest extends TestCase
 
     public function test_a_missing_signature_is_rejected(): void
     {
-        $this->hook($this->inbound('hello'), signature: '')->assertStatus(403);
+        $this->hook($this->inbound('hello'), '')->assertStatus(403);
         $this->assertSame(0, MessageLog::count());
     }
 
-    public function test_it_fails_closed_when_no_auth_token_is_configured(): void
+    public function test_it_fails_closed_when_no_app_secret_is_configured(): void
     {
-        // Better to reject real traffic than to accept forged traffic.
-        config(['services.whatsapp.auth_token' => '']);
+        config(['services.instagram.app_secret' => '']);
 
         $this->hook($this->inbound('hello'))->assertStatus(403);
         $this->assertSame(0, MessageLog::count());
@@ -128,37 +131,25 @@ class InboundMessageTest extends TestCase
 
     public function test_a_tampered_body_invalidates_the_signature(): void
     {
-        $params = $this->inbound('hello');
-        $signature = base64_encode(hash_hmac('sha1', $this->payload($params), self::TOKEN, true));
+        $payload = $this->inbound('hello');
+        $signature = 'sha256=' . hash_hmac('sha256', json_encode($payload), self::SECRET);
 
-        $params['Body'] = 'stop';   // swapped after signing
-
-        $this->hook($params, signature: $signature)->assertStatus(403);
+        $this->hook($this->inbound('stop'), $signature)->assertStatus(403);
         $this->assertSame(0, MessagingOptOut::count());
     }
 
     public function test_a_valid_signature_is_accepted(): void
     {
-        $this->hook($this->inbound('hello there'))->assertStatus(204);
+        $this->hook($this->inbound('hello there'))->assertStatus(200);
 
         $this->assertSame(1, MessageLog::where('direction', 'in')->count());
-    }
-
-    public function test_the_validator_matches_twilios_documented_algorithm(): void
-    {
-        // Params are sorted by name and concatenated key+value onto the URL.
-        $params = ['B' => 'two', 'A' => 'one'];
-        $expected = base64_encode(hash_hmac('sha1', 'https://x.test/hookAoneBtwo', 'tok', true));
-
-        $this->assertTrue(TwilioSignature::isValid($expected, 'https://x.test/hook', $params, 'tok'));
-        $this->assertFalse(TwilioSignature::isValid($expected, 'https://x.test/other', $params, 'tok'));
     }
 
     // --- compliance ---------------------------------------------------------
 
     public function test_stop_opts_the_sender_out_globally_and_confirms(): void
     {
-        $this->hook($this->inbound('STOP'))->assertStatus(204);
+        $this->hook($this->inbound('STOP'))->assertStatus(200);
 
         $optOut = MessagingOptOut::first();
         $this->assertNotNull($optOut);
@@ -174,29 +165,29 @@ class InboundMessageTest extends TestCase
 
     public function test_stop_is_matched_exactly_not_loosely(): void
     {
-        $this->hook($this->inbound('please stop by the venue at 6'))->assertStatus(204);
+        $this->hook($this->inbound('please stop by the venue at 6'))->assertStatus(200);
 
         $this->assertSame(0, MessagingOptOut::count(), 'a sentence containing "stop" is not an opt-out');
     }
 
     public function test_start_resubscribes(): void
     {
-        MessagingOptOut::record('whatsapp', '+919876543210');
+        MessagingOptOut::record('whatsapp', '+' . self::FROM);
 
-        $this->hook($this->inbound('START'))->assertStatus(204);
+        $this->hook($this->inbound('START'))->assertStatus(200);
 
         $this->assertSame(0, MessagingOptOut::count());
     }
 
     public function test_an_opted_out_sender_gets_no_rule_reply(): void
     {
-        MessagingOptOut::record('whatsapp', '+919876543210');
+        MessagingOptOut::record('whatsapp', '+' . self::FROM);
         AutomationRule::create([
             'name' => 'Tickets', 'trigger_type' => 'keyword', 'keywords' => ['ticket'],
             'reply_body' => 'Here are your tickets.',
         ]);
 
-        $this->hook($this->inbound('where is my ticket'))->assertStatus(204);
+        $this->hook($this->inbound('where is my ticket'))->assertStatus(200);
 
         Http::assertNothingSent();
         // Still recorded, though — we heard them, we just didn't reply.
@@ -212,9 +203,10 @@ class InboundMessageTest extends TestCase
             'reply_body' => 'Parking is free at the north gate.',
         ]);
 
-        $this->hook($this->inbound('is there parking?'))->assertStatus(204);
+        $this->hook($this->inbound('is there parking?'))->assertStatus(200);
 
-        Http::assertSent(fn ($request) => str_contains((string) ($request['Body'] ?? ''), 'north gate'));
+        Http::assertSent(fn ($request): bool
+            => str_contains((string) ($request->data()['text']['body'] ?? ''), 'north gate'));
     }
 
     public function test_a_partner_rule_beats_the_platform_default(): void
@@ -228,21 +220,22 @@ class InboundMessageTest extends TestCase
             'reply_body' => 'The venue will call you back.', 'priority' => 99,
         ]);
 
-        // Attribution comes from the last conversation with this number.
+        // Attribution on the shared number comes from the last conversation with it.
         MessageConversation::create([
             'partner_id' => $this->partner->id, 'channel' => 'whatsapp',
-            'recipient' => '+919876543210', 'category' => 'utility',
+            'recipient' => '+' . self::FROM, 'category' => 'utility',
             'opened_at' => Carbon::now()->subHour(), 'expires_at' => Carbon::now()->addHours(23),
         ]);
 
-        $this->hook($this->inbound('anything at all'))->assertStatus(204);
+        $this->hook($this->inbound('anything at all'))->assertStatus(200);
 
-        Http::assertSent(fn ($request) => str_contains((string) ($request['Body'] ?? ''), 'call you back'));
+        Http::assertSent(fn ($request): bool
+            => str_contains((string) ($request->data()['text']['body'] ?? ''), 'call you back'));
     }
 
     public function test_an_unmatched_message_gets_no_reply(): void
     {
-        $this->hook($this->inbound('mumble mumble'))->assertStatus(204);
+        $this->hook($this->inbound('mumble mumble'))->assertStatus(200);
 
         Http::assertNothingSent();
         $this->assertSame(1, MessageLog::where('direction', 'in')->count());
@@ -254,11 +247,11 @@ class InboundMessageTest extends TestCase
     {
         MessageConversation::create([
             'partner_id' => $this->partner->id, 'channel' => 'whatsapp',
-            'recipient' => '+919876543210', 'category' => 'utility',
+            'recipient' => '+' . self::FROM, 'category' => 'utility',
             'opened_at' => Carbon::now()->subHour(), 'expires_at' => Carbon::now()->addHours(23),
         ]);
 
-        $this->hook($this->inbound('hello'))->assertStatus(204);
+        $this->hook($this->inbound('hello'))->assertStatus(200);
 
         $log = MessageLog::where('direction', 'in')->first();
         $this->assertSame($this->partner->id, $log->partner_id);
@@ -267,7 +260,29 @@ class InboundMessageTest extends TestCase
 
         // A service window is opened for the reply to ride inside.
         $this->assertTrue(
-            MessageConversation::where('category', 'service')->where('recipient', '+919876543210')->exists()
+            MessageConversation::where('category', 'service')->where('recipient', '+' . self::FROM)->exists()
         );
+    }
+
+    public function test_the_recipient_is_normalised_to_e164(): void
+    {
+        // Meta reports `from` without a plus; the ledger and WhatsAppService both
+        // key on E.164, so they have to agree or every reply opens a new window.
+        $this->hook($this->inbound('hello'))->assertStatus(200);
+
+        $this->assertSame('+' . self::FROM, MessageLog::where('direction', 'in')->first()->recipient);
+    }
+
+    public function test_status_callbacks_are_ignored(): void
+    {
+        // Delivery/read receipts arrive on the same field with no `messages` key.
+        $payload = ['entry' => [['changes' => [[
+            'field' => 'messages',
+            'value' => ['statuses' => [['id' => 'wamid.x', 'status' => 'delivered']]],
+        ]]]]];
+
+        $this->hook($payload)->assertStatus(200);
+
+        $this->assertSame(0, MessageLog::count());
     }
 }

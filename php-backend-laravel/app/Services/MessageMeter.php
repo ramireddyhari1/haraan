@@ -66,7 +66,7 @@ final class MessageMeter
                 'template_key' => $context->templateKey,
                 'context_type' => $context->contextType,
                 'context_id' => $context->contextId,
-                'provider' => 'twilio',
+                'provider' => 'meta',
                 'provider_message_id' => $providerMessageId,
                 'status' => $status,
                 // Truncated: provider errors can be long, and the useful part is the head.
@@ -112,7 +112,7 @@ final class MessageMeter
                 'direction' => 'in',
                 'recipient' => $from,
                 'category' => MessageContext::SERVICE,
-                'provider' => 'twilio',
+                'provider' => 'meta',
                 'provider_message_id' => $providerMessageId,
                 'status' => MessageLog::STATUS_RECEIVED,
                 // The customer's own words, trimmed — enough to see what they asked

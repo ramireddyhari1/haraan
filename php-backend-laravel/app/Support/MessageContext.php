@@ -8,7 +8,7 @@ use App\Models\Booking;
 
 /**
  * Who a message belongs to and why it was sent — the attribution the transport
- * services (WhatsAppService, SmsService) have no way to work out for themselves.
+ * services (WhatsAppService, InstagramMessenger) have no way to work out for themselves.
  *
  * Passing one is optional so existing callers keep working untouched; a send with
  * no context is recorded as platform-owned, which is exactly right for login OTPs

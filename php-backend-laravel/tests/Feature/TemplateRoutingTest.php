@@ -58,12 +58,11 @@ class TemplateRoutingTest extends TestCase
             'messaging.journeys.quiet_hours.start' => 23,
             'messaging.journeys.quiet_hours.end' => 23,
             'services.whatsapp.enabled' => true,
-            'services.whatsapp.account_sid' => 'ACtest',
-            'services.whatsapp.auth_token' => 'token',
-            'services.whatsapp.from' => '+14155238886',
+            'services.whatsapp.phone_number_id' => '123456789',
+            'services.whatsapp.access_token' => 'meta-token',
         ]);
 
-        Http::fake(fn () => Http::response(['sid' => 'SM' . uniqid()], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.' . uniqid()]]], 200));
     }
 
     private function resolver(): TemplateResolver
@@ -76,7 +75,7 @@ class TemplateRoutingTest extends TestCase
         return MessageTemplate::create([
             'key' => $key, 'name' => 'Reminder', 'channel' => 'whatsapp',
             'category' => 'utility', 'body' => 'Tomorrow: {{1}}',
-            'variables' => ['1' => 'title'], 'provider_template_id' => 'HX123',
+            'variables' => ['1' => 'title'], 'provider_template_id' => 'event_reminder_24h', 'locale' => 'en',
             'status' => 'approved', 'is_active' => true,
         ]);
     }
@@ -122,7 +121,9 @@ class TemplateRoutingTest extends TestCase
         $route = $this->resolver()->resolve('event.reminder_24h', 'whatsapp', '9876543210');
 
         $this->assertSame(TemplateResolver::MODE_TEMPLATE, $route['mode']);
-        $this->assertSame('HX123', $route['sid']);
+        // Meta identifies a template by name + language, not an opaque id.
+        $this->assertSame('event_reminder_24h', $route['name']);
+        $this->assertSame('en', $route['language']);
     }
 
     public function test_free_text_is_allowed_inside_a_customer_opened_window(): void
@@ -200,7 +201,7 @@ class TemplateRoutingTest extends TestCase
 
         $result = app(MessageJourneys::class)->dispatch();
 
-        // Nothing is thrown at Twilio to be rejected — the reason is recorded instead.
+        // Nothing is thrown at Meta to be rejected — the reason is recorded instead.
         Http::assertNothingSent();
         $this->assertSame(3, $result['skipped']);
         $this->assertSame('no_template_registered', ScheduledMessage::first()->skip_reason);
@@ -218,12 +219,14 @@ class TemplateRoutingTest extends TestCase
 
         $this->assertSame(1, $result['sent']);
         Http::assertSent(function ($request): bool {
-            $variables = json_decode((string) ($request['ContentVariables'] ?? '{}'), true);
+            $body = $request->data();
+            $parameters = $body['template']['components'][0]['parameters'] ?? [];
 
-            return ($request['ContentSid'] ?? null) === 'HX123'
-                // Body and ContentSid together are rejected by Twilio.
-                && ! isset($request['Body'])
-                && ($variables['1'] ?? null) === 'Routed Show';
+            return ($body['type'] ?? null) === 'template'
+                && ($body['template']['name'] ?? null) === 'event_reminder_24h'
+                && ($body['template']['language']['code'] ?? null) === 'en'
+                // Positional {{1}}, in the order JourneyTemplates::variables() returns.
+                && ($parameters[0]['text'] ?? null) === 'Routed Show';
         });
     }
 
@@ -237,6 +240,6 @@ class TemplateRoutingTest extends TestCase
         $result = app(MessageJourneys::class)->dispatch();
 
         $this->assertSame(3, $result['sent']);
-        Http::assertSent(fn ($request): bool => isset($request['Body']) && ! isset($request['ContentSid']));
+        Http::assertSent(fn ($request): bool => ($request->data()['type'] ?? null) === 'text');
     }
 }

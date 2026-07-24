@@ -22,7 +22,6 @@ final class BookingNotifier
     public function __construct(
         private readonly WhatsAppService $whatsapp,
         private readonly EmailOtpService $mailer,
-        private readonly SmsService $sms,
     ) {}
 
     /**
@@ -84,28 +83,18 @@ final class BookingNotifier
             // Utility category: it's a transaction the customer asked for, not marketing.
             $ctx = MessageContext::forBooking($booking, MessageContext::UTILITY, 'booking.ticket');
 
-            // Delivery ladder: WhatsApp image (scannable QR) → WhatsApp text → SMS. The SMS
-            // fallback ensures the ticket still reaches the customer while the WhatsApp sender
-            // is pending approval (or if a WhatsApp send fails for any reason).
+            // Delivery ladder: WhatsApp image (scannable QR) → WhatsApp text.
+            // There is no SMS rung any more — Meta does WhatsApp, not SMS. So if
+            // both fail, the customer's copy is the email sent above, which is
+            // exactly why that send is never conditional on this one.
             $whatsappOk = $this->whatsapp->sendMedia($phone, $caption, $qrUrl, $ctx)
                 || $this->whatsapp->sendMessage($phone, $caption . "\n\nYour ticket & QR: " . $passUrl, $ctx);
 
             if (! $whatsappOk) {
-                $this->sms->sendSms($phone, $this->smsText($title, $when, $tier, $qty, $code, $passUrl), $ctx);
+                Log::warning("Booking {$booking->id}: WhatsApp ticket delivery failed"
+                    . ($email !== null ? '; the emailed ticket is the customer\'s copy.' : ' AND there is no email on file.'));
             }
         }
-    }
-
-    /**
-     * Compact ticket text for SMS — no emoji/markdown (plain GSM-7 keeps it to fewer segments),
-     * with the code and the hosted pass link so the recipient can open the full QR ticket.
-     */
-    private function smsText(string $title, string $when, ?string $tier, int $qty, string $code, string $passUrl): string
-    {
-        $tickets = ($tier !== null ? $tier . ' x' : '') . $qty;
-
-        return "Haraan: You're confirmed for {$title} ({$when}). Tickets: {$tickets}. Code: {$code}. "
-            . "View your ticket & QR: {$passUrl}";
     }
 
     private function recipientEmail(Booking $booking): ?string

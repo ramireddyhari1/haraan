@@ -45,17 +45,16 @@ class MessageMeterTest extends TestCase
 
         config([
             'services.whatsapp.enabled' => true,
-            'services.whatsapp.account_sid' => 'ACtest',
-            'services.whatsapp.auth_token' => 'token',
-            'services.whatsapp.from' => '+14155238886',
+            'services.whatsapp.phone_number_id' => '123456789',
+            'services.whatsapp.access_token' => 'meta-token',
         ]);
     }
 
-    private function fakeTwilio(bool $fails = false): void
+    private function fakeGraph(bool $fails = false): void
     {
         Http::fake(fn () => $fails
-            ? Http::response(['message' => 'sender not approved'], 400)
-            : Http::response(['sid' => 'SM' . uniqid()], 201));
+            ? Http::response(['error' => ['message' => 'template not approved', 'code' => 132001]], 400)
+            : Http::response(['messages' => [['id' => 'wamid.' . uniqid()]]], 200));
     }
 
     private function partnerContext(string $category = MessageContext::UTILITY): MessageContext
@@ -65,7 +64,7 @@ class MessageMeterTest extends TestCase
 
     public function test_messages_to_one_recipient_inside_the_window_share_a_conversation(): void
     {
-        $this->fakeTwilio();
+        $this->fakeGraph();
         $wa = app(WhatsAppService::class);
 
         $wa->sendMessage('9876543210', 'first', $this->partnerContext());
@@ -79,7 +78,7 @@ class MessageMeterTest extends TestCase
 
     public function test_a_different_category_opens_its_own_conversation(): void
     {
-        $this->fakeTwilio();
+        $this->fakeGraph();
         $wa = app(WhatsAppService::class);
 
         $wa->sendMessage('9876543210', 'your ticket', $this->partnerContext());
@@ -91,7 +90,7 @@ class MessageMeterTest extends TestCase
 
     public function test_an_expired_window_opens_a_new_conversation(): void
     {
-        $this->fakeTwilio();
+        $this->fakeGraph();
         $wa = app(WhatsAppService::class);
 
         $wa->sendMessage('9876543210', 'day one', $this->partnerContext());
@@ -106,13 +105,13 @@ class MessageMeterTest extends TestCase
 
     public function test_a_failed_send_is_logged_but_never_billed(): void
     {
-        $this->fakeTwilio(fails: true);
+        $this->fakeGraph(fails: true);
 
         $this->assertFalse(app(WhatsAppService::class)->sendMessage('9876543210', 'nope', $this->partnerContext()));
 
         $this->assertSame(0, MessageConversation::count(), 'a rejected message costs nothing');
         $this->assertSame(MessageLog::STATUS_FAILED, MessageLog::first()->status);
-        $this->assertStringContainsString('sender not approved', (string) MessageLog::first()->error);
+        $this->assertStringContainsString('template not approved', (string) MessageLog::first()->error);
 
         $usage = MessagingUsage::first();
         $this->assertSame(0, (int) $usage->conversations_opened);
@@ -134,7 +133,7 @@ class MessageMeterTest extends TestCase
 
     public function test_a_send_without_context_belongs_to_no_partner(): void
     {
-        $this->fakeTwilio();
+        $this->fakeGraph();
 
         // Login OTPs are Haraan's own traffic and must never land on a partner's bill.
         app(WhatsAppService::class)->sendMessage('9000000001', 'your OTP is 123456');
@@ -146,7 +145,7 @@ class MessageMeterTest extends TestCase
 
     public function test_usage_is_reported_per_partner(): void
     {
-        $this->fakeTwilio();
+        $this->fakeGraph();
         $wa = app(WhatsAppService::class);
 
         $wa->sendMessage('9876543210', 'one', $this->partnerContext());
@@ -161,13 +160,13 @@ class MessageMeterTest extends TestCase
 
     public function test_the_provider_id_is_captured_for_cost_backfill(): void
     {
-        $this->fakeTwilio();
+        $this->fakeGraph();
 
         app(WhatsAppService::class)->sendMessage('9876543210', 'ticket', $this->partnerContext());
 
-        // Cost isn't known at send time; the SID is what a later backfill joins on.
+        // Cost isn't known at send time; the wamid is what a later backfill joins on.
         $log = MessageLog::first();
-        $this->assertStringStartsWith('SM', (string) $log->provider_message_id);
+        $this->assertStringStartsWith('wamid.', (string) $log->provider_message_id);
         $this->assertNull($log->cost_micros);
     }
 }

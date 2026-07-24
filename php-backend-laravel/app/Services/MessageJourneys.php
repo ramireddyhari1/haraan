@@ -268,7 +268,7 @@ final class MessageJourneys
 
         // A journey is business-initiated, so free text only works inside a window
         // the customer opened. Outside one, an approved template is the only legal
-        // send — and if there isn't one, say so rather than letting Twilio reject it.
+        // send — and if there isn't one, say so rather than letting Meta reject it.
         $route = $this->resolver->resolve($message->template_key, $message->channel, $message->recipient);
 
         if ($route['mode'] === TemplateResolver::MODE_BLOCKED) {
@@ -281,9 +281,10 @@ final class MessageJourneys
             $ok = $route['mode'] === TemplateResolver::MODE_TEMPLATE
                 ? $this->whatsapp->sendTemplate(
                     $message->recipient,
-                    (string) $route['sid'],
+                    (string) $route['name'],
                     $this->templates->variables($message->template_key, $booking),
                     $context,
+                    (string) $route['language'],
                 )
                 : $this->whatsapp->sendMessage($message->recipient, $body, $context);
         } catch (Throwable $e) {
@@ -302,7 +303,7 @@ final class MessageJourneys
             return 'sent';
         }
 
-        // Retry a couple of times before giving up — a Twilio blip shouldn't cost
+        // Retry a couple of times before giving up — a Graph API blip shouldn't cost
         // the customer their reminder, but a rejected template will never work.
         if ($message->attempts >= (int) config('messaging.journeys.max_attempts', 3)) {
             $message->status = ScheduledMessage::STATUS_FAILED;

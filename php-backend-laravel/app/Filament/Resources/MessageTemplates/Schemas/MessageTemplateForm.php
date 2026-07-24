@@ -37,9 +37,11 @@ class MessageTemplateForm
                         . 'and the ORDER must match.'),
 
                 TextInput::make('provider_template_id')
-                    ->label('Twilio Content SID')
-                    ->placeholder('HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-                    ->helperText('From Twilio once Meta approves. Without it this template can never send.'),
+                    ->label('Meta template name')
+                    ->placeholder('event_reminder_24h')
+                    ->helperText('The exact name registered in WhatsApp Manager. Meta identifies a '
+                        . 'template by name + language, so this and the locale below must both match. '
+                        . 'Without it this template can never send.'),
 
                 Select::make('status')
                     ->options([

@@ -68,7 +68,7 @@ Route::middleware('auth')->group(function() {
     Route::post('/profile/setup', [\App\Http\Controllers\Web\PublicWebController::class, 'saveProfileSetup'])->name('site.profile.setup.save');
 });
 
-// Public ticket-QR image (used by the confirmation email's <img>, the Twilio WhatsApp media,
+// Public ticket-QR image (used by the confirmation email's <img>, the WhatsApp media message,
 // and anywhere a hosted QR is needed). The QR encodes the scanner contract `haraan:ticket:<code>`
 // — the code itself is the only secret. Generated server-side via a public QR image service
 // (no self-hosted bridge, no QR PHP extension needed); the response is cached hard so it's

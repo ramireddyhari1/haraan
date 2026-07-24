@@ -13,9 +13,9 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 
 /**
- * The approved-template registry. This is where a Twilio Content SID gets pasted
- * once Meta approves the copy — until then TemplateResolver treats the template
- * as unusable and journeys are held rather than rejected by Twilio.
+ * The approved-template registry. This is where a Meta template NAME gets recorded
+ * once WhatsApp Manager approves the copy — until then TemplateResolver treats
+ * the template as unusable and journeys are held rather than rejected by Meta.
  *
  * No create action: rows are seeded from the templates the code actually sends,
  * and inventing one here would register a key nothing ever uses.

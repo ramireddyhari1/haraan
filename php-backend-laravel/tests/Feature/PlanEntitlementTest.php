@@ -62,9 +62,8 @@ class PlanEntitlementTest extends TestCase
             'messaging.journeys.quiet_hours.start' => 23,
             'messaging.journeys.quiet_hours.end' => 23,
             'services.whatsapp.enabled' => true,
-            'services.whatsapp.account_sid' => 'ACtest',
-            'services.whatsapp.auth_token' => 'token',
-            'services.whatsapp.from' => '+14155238886',
+            'services.whatsapp.phone_number_id' => '123456789',
+            'services.whatsapp.access_token' => 'meta-token',
         ]);
 
         // Business-initiated sends need an approved template unless the customer
@@ -175,7 +174,7 @@ class PlanEntitlementTest extends TestCase
         $this->paid->update(['included_conversations' => 1]);
 
         // Burn the single included conversation.
-        Http::fake(fn () => Http::response(['sid' => 'SM1'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         app(\App\Services\WhatsAppService::class)->sendMessage(
             '9000000001', 'hi',
             new \App\Support\MessageContext($this->partner->id, 'utility'),
@@ -197,7 +196,7 @@ class PlanEntitlementTest extends TestCase
 
     public function test_journeys_are_skipped_when_the_plan_excludes_them(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM1'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $this->booking();
         app(MessageJourneys::class)->enqueue();
         ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
@@ -211,7 +210,7 @@ class PlanEntitlementTest extends TestCase
 
     public function test_journeys_send_once_the_partner_is_on_a_plan_that_includes_them(): void
     {
-        Http::fake(fn () => Http::response(['sid' => 'SM1'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $this->subscribe();
         $this->booking();
         app(MessageJourneys::class)->enqueue();
@@ -226,7 +225,7 @@ class PlanEntitlementTest extends TestCase
     {
         // The rule this whole class exists to protect: the partner has no plan at
         // all, and the customer still gets the ticket they paid for.
-        Http::fake(fn () => Http::response(['sid' => 'SM1'], 201));
+        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
 
         app(\App\Services\BookingNotifier::class)->notify($this->booking());
 

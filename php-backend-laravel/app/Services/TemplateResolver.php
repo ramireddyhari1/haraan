@@ -17,14 +17,14 @@ use Illuminate\Support\Carbon;
  * messaging us. Our own outbound messages don't open it. Outside it, the only
  * legal send is a pre-approved template.
  *
- * The important consequence is the third outcome. Today a journey with no
- * approved template just gets rejected by Twilio (error 63016) and shows up as
- * a delivery failure, which reads like an outage. Naming it "blocked — no
+ * The important consequence is the third outcome. A journey with no approved
+ * template would otherwise be rejected by Meta (error 131047 / 132001) and show
+ * up as a delivery failure, which reads like an outage. Naming it "blocked — no
  * approved template" turns a mystery into a to-do item.
  */
 final class TemplateResolver
 {
-    /** Send using an approved template + variables. */
+    /** Send using an approved template (Meta template name + language) + variables. */
     public const MODE_TEMPLATE = 'template';
 
     /** A live customer-service window is open; free text is allowed. */
@@ -34,7 +34,7 @@ final class TemplateResolver
     public const MODE_BLOCKED = 'blocked';
 
     /**
-     * @return array{mode: string, sid: string|null, reason: string|null}
+     * @return array{mode: string, name: string|null, language: string, reason: string|null}
      */
     public function resolve(string $key, string $channel, string $recipient): array
     {
@@ -47,16 +47,24 @@ final class TemplateResolver
         // An approved template is always the safest route, in or out of a window:
         // it can't be rejected for being business-initiated.
         if ($template !== null && $template->isApproved() && filled($template->provider_template_id)) {
-            return ['mode' => self::MODE_TEMPLATE, 'sid' => (string) $template->provider_template_id, 'reason' => null];
+            // Meta identifies a template by NAME + language, not by an opaque id —
+            // provider_template_id holds the registered name.
+            return [
+                'mode' => self::MODE_TEMPLATE,
+                'name' => (string) $template->provider_template_id,
+                'language' => (string) ($template->locale ?: 'en'),
+                'reason' => null,
+            ];
         }
 
         if ($this->hasOpenServiceWindow($channel, $recipient)) {
-            return ['mode' => self::MODE_FREE_TEXT, 'sid' => null, 'reason' => null];
+            return ['mode' => self::MODE_FREE_TEXT, 'name' => null, 'language' => 'en', 'reason' => null];
         }
 
         return [
             'mode' => self::MODE_BLOCKED,
-            'sid' => null,
+            'name' => null,
+            'language' => 'en',
             // Distinguish "nobody has registered this template" from "it's
             // registered but Meta hasn't approved it yet" — different next steps.
             'reason' => $template === null ? 'no_template_registered' : 'template_not_approved',

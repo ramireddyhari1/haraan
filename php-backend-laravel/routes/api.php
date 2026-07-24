@@ -302,21 +302,6 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         });
     });
 
-/*
-|--------------------------------------------------------------------------
-| Provider webhooks
-|--------------------------------------------------------------------------
-|
-| Public and unauthenticated — Twilio can't carry a session — so the
-| X-Twilio-Signature check inside the controller is the authentication.
-| Throttled anyway: the endpoint is world-reachable, and a flood of forged
-| requests shouldn't be able to spin the ledger even while failing validation.
-|
-*/
-Route::post('/webhooks/twilio/whatsapp', [\App\Http\Controllers\Api\TwilioWebhookController::class, 'whatsapp'])
-    ->middleware('throttle:60,1')
-    ->name('webhooks.twilio.whatsapp');
-
 // Razorpay billing webhook — subscription lifecycle and prepaid credit grants.
 // Unauthenticated by necessity; the HMAC signature check in the controller is
 // the authentication, and it fails closed.
@@ -326,8 +311,15 @@ Route::post('/webhooks/razorpay', [\App\Http\Controllers\Api\RazorpayWebhookCont
 
 // Meta / Instagram webhook. GET is the one-time subscription handshake; POST
 // carries message events, signed with the app secret. Both fail closed.
-Route::get('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify'])
+// One callback URL for the whole Meta app: Instagram DMs arrive as
+// entry[].messaging[], WhatsApp Cloud as entry[].changes[] — same signature.
+Route::get('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify'])
     ->name('webhooks.meta.verify');
+Route::post('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
+    ->middleware('throttle:240,1')
+    ->name('webhooks.meta');
+
+// Alias kept so a callback already pointed here doesn't break.
+Route::get('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify']);
 Route::post('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
-    ->middleware('throttle:120,1')
-    ->name('webhooks.meta.instagram');
+    ->middleware('throttle:240,1');
