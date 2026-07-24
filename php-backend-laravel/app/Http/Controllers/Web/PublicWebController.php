@@ -62,18 +62,31 @@ final class PublicWebController extends Controller
         // indexed — thin near-duplicates dilute the listing's ranking.
         $seoCity = CityResolver::selected();
 
+        // `/` and `/events` render the same listing, but the root is the brand's
+        // front door: its title/description must LEAD with "Haraan" so a search for
+        // the brand name resolves to it (Google otherwise reads "haraan" as the
+        // singer Hariharan). /events stays keyword-forward for "events near you".
+        $isHome = request()->path() === '/';
+
         return view('site.events', [
-            'title' => $seoCity ? 'Events in ' . $seoCity : 'Events near you',
+            'title' => $isHome
+                ? 'Haraan — Events, Turf Booking & Live Sports'
+                : ($seoCity ? 'Events in ' . $seoCity : 'Events near you'),
             'seo' => [
-                'title' => $seoCity
-                    ? 'Events in ' . $seoCity . ' — book tickets'
-                    : 'Events near you — book tickets',
-                'description' => 'Concerts, comedy nights, workshops, sports and festivals'
-                    . ($seoCity ? ' in ' . $seoCity : '')
-                    . '. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
-                // `/` and `/events` render the same listing — each keeps its own
-                // canonical so the homepage stays the homepage.
-                'canonical' => request()->path() === '/' ? url('/') : url('/events'),
+                'title' => $isHome
+                    ? 'Haraan — Book Events, Sports Turfs & Live Scores'
+                    : ($seoCity
+                        ? 'Events in ' . $seoCity . ' — book tickets'
+                        : 'Events near you — book tickets'),
+                'description' => $isHome
+                    ? 'Haraan is your app for booking concerts, comedy, workshops and sports '
+                        . 'events, reserving cricket turfs and badminton courts, and following '
+                        . 'live gully-cricket scores — all in one place.'
+                    : 'Concerts, comedy nights, workshops, sports and festivals'
+                        . ($seoCity ? ' in ' . $seoCity : '')
+                        . '. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
+                // Each keeps its own canonical so the homepage stays the homepage.
+                'canonical' => $isHome ? url('/') : url('/events'),
                 // City comes from a cookie (crawlers never send one), so only the
                 // ?category= filter can produce a near-duplicate worth suppressing.
                 'robots' => $category !== null

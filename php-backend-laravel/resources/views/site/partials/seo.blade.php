@@ -60,8 +60,16 @@
                 '@type' => 'Organization',
                 '@id' => url('/') . '#org',
                 'name' => 'Haraan',
+                'alternateName' => 'Haraan App',
                 'url' => url('/'),
                 'logo' => asset('images/haraan-logo-blue.png'),
+                'description' => 'Haraan — book concerts, comedy, workshops and sports events, '
+                    . 'reserve cricket turfs and courts, and follow live gully-cricket scores.',
+                // sameAs is the brand-verification signal: it links this entity to
+                // its known profiles so Google resolves "haraan" to this brand.
+                'sameAs' => [
+                    'https://www.instagram.com/haraan_official/',
+                ],
             ],
             [
                 '@type' => 'WebSite',
