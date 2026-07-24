@@ -6,6 +6,7 @@ namespace App\Filament\Pages;
 
 use App\Models\MessageLog;
 use App\Models\MessagingUsage;
+use App\Models\ScheduledMessage;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
@@ -169,6 +170,54 @@ class MessagingUsagePage extends Page
             ->pluck('total', 'status')
             ->map(fn ($n): int => (int) $n)
             ->all();
+    }
+
+    /**
+     * State of the outbound journey queue (reminders + review requests).
+     *
+     * `enabled` is surfaced first on purpose: with the master switch off the queue
+     * fills and holds, which looks identical to "broken" unless you're told.
+     *
+     * @return array{enabled: bool, counts: array<string, int>, upcoming: array<int, array<string, mixed>>, skips: array<string, int>}
+     */
+    public function getJourneys(): array
+    {
+        $counts = ScheduledMessage::query()
+            ->select('status', DB::raw('count(*) as total'))
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->map(fn ($n): int => (int) $n)
+            ->all();
+
+        $upcoming = ScheduledMessage::query()
+            ->with('partner:id,name')
+            ->where('status', ScheduledMessage::STATUS_PENDING)
+            ->orderBy('send_after')
+            ->limit(10)
+            ->get()
+            ->map(fn (ScheduledMessage $m): array => [
+                'template' => $m->template_key,
+                'partner' => $m->partner?->name ?? 'Haraan',
+                'recipient' => $this->maskRecipient($m->recipient),
+                'when' => $m->send_after?->diffForHumans(),
+                'due' => $m->send_after?->isPast() ?? false,
+            ])
+            ->all();
+
+        $skips = ScheduledMessage::query()
+            ->whereNotNull('skip_reason')
+            ->select('skip_reason', DB::raw('count(*) as total'))
+            ->groupBy('skip_reason')
+            ->pluck('total', 'skip_reason')
+            ->map(fn ($n): int => (int) $n)
+            ->all();
+
+        return [
+            'enabled' => (bool) config('messaging.journeys.enabled', false),
+            'counts' => $counts,
+            'upcoming' => $upcoming,
+            'skips' => $skips,
+        ];
     }
 
     /** Keep the last few digits only — enough to identify a number, not to reuse it. */

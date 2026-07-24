@@ -150,6 +150,51 @@
             @endif
         </section>
 
+        {{-- ---------- Journey queue ---------- --}}
+        @php $j = $this->getJourneys(); @endphp
+        <section class="hmu-card">
+            <h3 class="hmu-card-title">Journey queue</h3>
+            <p class="hmu-card-sub">Event reminders and post-event review requests, queued ahead of time.</p>
+
+            @unless ($j['enabled'])
+                {{-- Without this the queue looks broken rather than deliberately paused. --}}
+                <div class="hmu-note">
+                    <strong>Journeys are switched off.</strong>
+                    Messages are still being queued and held, but nothing is delivered.
+                    Set <code>MESSAGING_JOURNEYS_ENABLED=true</code> to start sending.
+                </div>
+            @endunless
+
+            <div class="hmu-chips">
+                @foreach (['pending' => 'Queued', 'sent' => 'Sent', 'skipped' => 'Skipped', 'failed' => 'Failed'] as $k => $label)
+                    <span class="hmu-chip">
+                        <span class="hmu-chip-n">{{ number_format($j['counts'][$k] ?? 0) }}</span> {{ $label }}
+                    </span>
+                @endforeach
+            </div>
+
+            @if ($j['skips'] !== [])
+                <p class="hmu-skips">
+                    Skipped because:
+                    @foreach ($j['skips'] as $reason => $n)
+                        {{ str_replace('_', ' ', $reason) }} ({{ $n }}){{ ! $loop->last ? ' · ' : '' }}
+                    @endforeach
+                </p>
+            @endif
+
+            @forelse ($j['upcoming'] as $u)
+                <div class="hmu-row">
+                    <span class="hmu-row-name">{{ $u['template'] }}</span>
+                    <span class="hmu-row-meta">
+                        {{ $u['partner'] }} · {{ $u['recipient'] }} ·
+                        <span class="{{ $u['due'] ? 'hmu-bad' : '' }}">{{ $u['when'] }}</span>
+                    </span>
+                </div>
+            @empty
+                <p class="hmu-empty-line">Nothing queued — no confirmed bookings inside the scheduling horizon.</p>
+            @endforelse
+        </section>
+
         {{-- ---------- Recent non-deliveries ---------- --}}
         <section class="hmu-card">
             <h3 class="hmu-card-title">Recent non-deliveries</h3>
@@ -221,6 +266,20 @@
         .hmu-row-meta{font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums;}
         .hmu-bad{color:var(--bad);font-weight:700;}
         .hmu-empty-line{font-size:12.5px;color:var(--ink3);margin:8px 0 0;}
+
+        /* ---- journey queue ---- */
+        .hmu-note{font-size:12.5px;line-height:1.5;color:#92400e;background:#fffbeb;
+            border-radius:11px;padding:10px 12px;margin-bottom:12px;
+            box-shadow:inset 0 0 0 1px rgba(217,119,6,.22);}
+        .dark .hmu-note{color:#fcd34d;background:rgba(245,158,11,.12);}
+        .hmu-note code{font-size:11.5px;padding:1px 5px;border-radius:5px;
+            background:rgba(0,0,0,.06);}
+        .dark .hmu-note code{background:rgba(255,255,255,.1);}
+        .hmu-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;}
+        .hmu-chip{font-size:12px;font-weight:600;color:var(--ink2);padding:5px 11px;
+            border-radius:999px;box-shadow:inset 0 0 0 1px var(--border);}
+        .hmu-chip-n{font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;}
+        .hmu-skips{font-size:11.5px;color:var(--ink3);margin:0 0 8px;}
 
         /* ---- table ---- */
         .hmu-table-wrap{overflow-x:auto;}

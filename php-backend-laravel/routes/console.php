@@ -2,6 +2,7 @@
 
 use App\Services\BookingService;
 use App\Services\MatchVerificationService;
+use App\Services\MessageJourneys;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -26,3 +27,21 @@ Artisan::command('bookings:release-expired', function (BookingService $bookings)
 })->purpose('Release expired ticket reservation holds');
 
 Schedule::command('bookings:release-expired')->everyMinute();
+
+// Outbound message journeys (event reminders + the post-event review request).
+// Two steps on purpose: enqueueing is idempotent bookkeeping that can run often
+// and cheaply, while dispatch is the only thing that talks to a customer.
+Artisan::command('messaging:enqueue-journeys', function (MessageJourneys $journeys) {
+    $result = $journeys->enqueue();
+    $this->info("Scanned {$result['scanned']} booking(s), queued {$result['queued']} new message(s).");
+})->purpose('Queue reminders and review requests for upcoming bookings');
+
+Artisan::command('messaging:dispatch-journeys', function (MessageJourneys $journeys) {
+    $r = $journeys->dispatch();
+    $this->info("Sent {$r['sent']}, skipped {$r['skipped']}, failed {$r['failed']}, held {$r['held']}.");
+})->purpose('Deliver journey messages that are due');
+
+Schedule::command('messaging:enqueue-journeys')->hourly()->withoutOverlapping();
+// Every five minutes: fine-grained enough that a "2 hours before" reminder is
+// actually about two hours before, without hammering the box.
+Schedule::command('messaging:dispatch-journeys')->everyFiveMinutes()->withoutOverlapping();
