@@ -21,7 +21,17 @@ use Illuminate\Support\Facades\Route;
 
 // Search-engine discovery. robots.txt is the static file in public/ (nginx serves
 // it before PHP); the sitemap is generated + cached hourly so new events show up.
-Route::get('/sitemap.xml', [\App\Http\Controllers\Web\SitemapController::class, 'index'])->name('sitemap');
+// Sessions/CSRF are stripped so the response carries no Set-Cookie and can be
+// cached — a sitemap is anonymous, identical for every caller.
+Route::get('/sitemap.xml', [\App\Http\Controllers\Web\SitemapController::class, 'index'])
+    ->name('sitemap')
+    ->withoutMiddleware([
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
+    ]);
 
 Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/', 'events');

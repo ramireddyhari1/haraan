@@ -27,7 +27,11 @@ class SitemapController extends Controller
     {
         $xml = Cache::remember('sitemap.xml', now()->addHour(), fn (): string => $this->build());
 
-        return response($xml, 200)->header('Content-Type', 'application/xml; charset=UTF-8');
+        // Anonymous, identical for everyone — let crawlers and any CDN cache it for
+        // an hour (matches the app-cache TTL above).
+        return response($xml, 200)
+            ->header('Content-Type', 'application/xml; charset=UTF-8')
+            ->header('Cache-Control', 'public, max-age=3600');
     }
 
     private function build(): string
