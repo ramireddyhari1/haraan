@@ -32,6 +32,9 @@ final class MessageLog extends Model
     /** Recipient couldn't be normalised to a routable address. */
     public const STATUS_UNROUTABLE = 'unroutable';
 
+    /** An inbound message from a customer (direction 'in'). */
+    public const STATUS_RECEIVED = 'received';
+
     protected $fillable = [
         'partner_id', 'conversation_id', 'channel', 'direction', 'recipient',
         'category', 'template_key', 'context_type', 'context_id',

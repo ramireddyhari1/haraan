@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Models\MessageLog;
+use App\Models\MessagingOptOut;
 use App\Models\MessagingUsage;
 use App\Models\ScheduledMessage;
 use BackedEnum;
@@ -170,6 +171,28 @@ class MessagingUsagePage extends Page
             ->pluck('total', 'status')
             ->map(fn ($n): int => (int) $n)
             ->all();
+    }
+
+    /**
+     * Inbound activity — what customers sent us, and who has opted out.
+     *
+     * Message bodies are deliberately not stored, so this is counts only: the
+     * ledger is a billing and delivery record, not a chat archive.
+     *
+     * @return array{messages: int, senders: int, optOuts: int}
+     */
+    public function getInboundSummary(): array
+    {
+        $inbound = MessageLog::query()
+            ->where('direction', 'in')
+            ->where('created_at', '>=', $this->periodStart())
+            ->where('created_at', '<', $this->periodStart()->copy()->addMonth());
+
+        return [
+            'messages' => (clone $inbound)->count(),
+            'senders' => (clone $inbound)->distinct()->count('recipient'),
+            'optOuts' => MessagingOptOut::count(),
+        ];
     }
 
     /**

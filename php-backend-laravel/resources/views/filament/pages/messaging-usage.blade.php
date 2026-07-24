@@ -95,6 +95,15 @@
                 @empty
                     <p class="hmu-empty-line">No sends recorded this period.</p>
                 @endforelse
+
+                @php $in = $this->getInboundSummary(); @endphp
+                <p class="hmu-skips" style="margin-top:10px;">
+                    Inbound: {{ number_format($in['messages']) }}
+                    {{ \Illuminate\Support\Str::plural('message', $in['messages']) }}
+                    from {{ number_format($in['senders']) }}
+                    {{ \Illuminate\Support\Str::plural('number', $in['senders']) }}
+                    · {{ number_format($in['optOuts']) }} opted out
+                </p>
             </section>
 
             <section class="hmu-card">

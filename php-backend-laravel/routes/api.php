@@ -301,3 +301,18 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::delete('/staff/{id}', 'deleteStaff')->whereNumber('id');
         });
     });
+
+/*
+|--------------------------------------------------------------------------
+| Provider webhooks
+|--------------------------------------------------------------------------
+|
+| Public and unauthenticated — Twilio can't carry a session — so the
+| X-Twilio-Signature check inside the controller is the authentication.
+| Throttled anyway: the endpoint is world-reachable, and a flood of forged
+| requests shouldn't be able to spin the ledger even while failing validation.
+|
+*/
+Route::post('/webhooks/twilio/whatsapp', [\App\Http\Controllers\Api\TwilioWebhookController::class, 'whatsapp'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.twilio.whatsapp');

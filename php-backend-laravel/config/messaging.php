@@ -19,6 +19,25 @@ return [
     */
     'local_timezone' => env('MESSAGING_LOCAL_TZ', 'Asia/Kolkata'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Inbound webhook
+    |--------------------------------------------------------------------------
+    |
+    | Twilio POSTs inbound WhatsApp messages to /api/webhooks/twilio/whatsapp.
+    | The endpoint is public, so the X-Twilio-Signature check is its only
+    | authentication — leave validation on everywhere except local testing.
+    |
+    | 'url' overrides the URL used to recompute the signature. It must match what
+    | Twilio called byte for byte; normally APP_URL + path is right, and this is
+    | only needed if the public URL and APP_URL ever diverge.
+    |
+    */
+    'webhook' => [
+        'validate_signature' => env('MESSAGING_VERIFY_WEBHOOK', true),
+        'url' => env('MESSAGING_WEBHOOK_URL', ''),
+    ],
+
     'journeys' => [
 
         /*

@@ -84,6 +84,53 @@ final class MessageMeter
     }
 
     /**
+     * Record a message FROM a customer.
+     *
+     * Inbound costs nothing to receive, but it opens (or extends) the 24-hour
+     * service window — the period in which we're allowed to reply freely, without
+     * a pre-approved template. So it's metered as a conversation, not as a
+     * message: it's a billable window, just not a billable send.
+     *
+     * @return MessageConversation|null the live service window, if one could be opened
+     */
+    public function recordInbound(
+        string $channel,
+        string $from,
+        ?int $partnerId = null,
+        ?string $providerMessageId = null,
+        ?string $body = null,
+    ): ?MessageConversation {
+        $context = new MessageContext($partnerId, MessageContext::SERVICE);
+
+        try {
+            $conversation = $this->touchConversation($channel, $from, $context);
+
+            MessageLog::create([
+                'partner_id' => $partnerId,
+                'conversation_id' => $conversation?->id,
+                'channel' => $channel,
+                'direction' => 'in',
+                'recipient' => $from,
+                'category' => MessageContext::SERVICE,
+                'provider' => 'twilio',
+                'provider_message_id' => $providerMessageId,
+                'status' => MessageLog::STATUS_RECEIVED,
+                // The customer's own words, trimmed — enough to see what they asked
+                // without turning the ledger into a message archive.
+                'error' => null,
+                'template_key' => null,
+                'context_type' => $body !== null ? 'inbound_text' : null,
+            ]);
+
+            return $conversation;
+        } catch (Throwable $e) {
+            Log::warning('MessageMeter could not record an inbound message: ' . $e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
      * Find the live window for this recipient/category, or open a new one. A new
      * window is what a "conversation" costs, so it's also what the quota counts.
      */
