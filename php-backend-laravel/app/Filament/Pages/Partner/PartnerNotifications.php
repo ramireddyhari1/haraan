@@ -25,7 +25,7 @@ class PartnerNotifications extends Page
 
     protected static ?string $navigationLabel = 'Notifications';
 
-    protected static ?int $navigationSort = 9;
+    protected static ?int $navigationSort = 10;
 
     protected string $view = 'filament.pages.partner.notifications';
 

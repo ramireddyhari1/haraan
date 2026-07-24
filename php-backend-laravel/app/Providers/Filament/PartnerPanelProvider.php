@@ -402,7 +402,9 @@ class PartnerPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/control/theme.css')
             ->login(PartnerLogin::class)
             ->passwordReset()
-            ->profile()
+            // Own account page, rendered inside the console shell (not Filament's
+            // bare "simple" layout, which read like the panel had dropped away).
+            ->profile(\App\Filament\Pages\Partner\PartnerProfile::class, isSimple: false)
             ->colors([
                 'primary' => Color::Blue,
             ])
@@ -414,6 +416,8 @@ class PartnerPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
+                \App\Filament\Pages\Partner\PartnerPayouts::class,
+                \App\Filament\Pages\Partner\PartnerReviews::class,
                 \App\Filament\Pages\Partner\PartnerPublicProfile::class,
                 \App\Filament\Pages\Partner\PartnerSupport::class,
                 \App\Filament\Pages\Partner\PartnerNotifications::class,
