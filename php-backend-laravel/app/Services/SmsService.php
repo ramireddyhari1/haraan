@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\MessageLog;
+use App\Support\MessageContext;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -19,6 +21,8 @@ class SmsService
 {
     private const API = 'https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json';
 
+    public function __construct(private readonly MessageMeter $meter) {}
+
     public function isConfigured(): bool
     {
         $c = config('services.whatsapp');
@@ -29,17 +33,19 @@ class SmsService
                 || (bool) ($c['auth_token'] ?? null));
     }
 
-    public function sendSms(string $phone, string $message): bool
+    public function sendSms(string $phone, string $message, ?MessageContext $context = null): bool
     {
         $enabled = filter_var(config('services.whatsapp.sms_enabled', false), FILTER_VALIDATE_BOOLEAN);
         if (! $enabled) {
             Log::info("SMS (disabled — not sent) to {$phone}: {$message}");
+            $this->meter->record('sms', $phone, MessageLog::STATUS_DISABLED, $context);
 
             return false;
         }
 
         if (! $this->isConfigured()) {
             Log::warning('SMS not sent: Twilio SMS sender / credentials not configured.');
+            $this->meter->record('sms', $phone, MessageLog::STATUS_UNCONFIGURED, $context);
 
             return false;
         }
@@ -47,6 +53,7 @@ class SmsService
         $to = $this->e164($phone);
         if (! preg_match('/^\+\d{8,15}$/', $to)) {
             Log::warning("SMS not sent: unroutable number {$phone}");
+            $this->meter->record('sms', $phone, MessageLog::STATUS_UNROUTABLE, $context);
 
             return false;
         }
@@ -64,14 +71,26 @@ class SmsService
                 ]);
 
             if ($response->successful()) {
+                // SMS bills per message, not per 24h window, so the meter records it
+                // without opening a conversation (see MessageMeter).
+                $this->meter->record('sms', $to, MessageLog::STATUS_SENT, $context, providerMessageId: $response->json('sid'));
+
                 return true;
             }
 
             Log::warning('Twilio SMS send failed (' . $response->status() . '): ' . $response->body());
+            $this->meter->record(
+                'sms',
+                $to,
+                MessageLog::STATUS_FAILED,
+                $context,
+                error: 'HTTP ' . $response->status() . ': ' . $response->body(),
+            );
 
             return false;
         } catch (\Throwable $e) {
             Log::warning('Twilio SMS exception: ' . $e->getMessage());
+            $this->meter->record('sms', $to, MessageLog::STATUS_FAILED, $context, error: $e->getMessage());
 
             return false;
         }

@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Support\ContactPrefill;
+use App\Support\MessageContext;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -77,14 +78,20 @@ final class BookingNotifier
 
         if ($phone !== null) {
             $caption = $this->caption($title, $when, $where, $tier, $qty, $code, $passUrl, $note);
+
+            // Attribute the ticket to whoever owns the event/venue, so the messaging
+            // ledger can answer "what did this partner send, and what did it cost?".
+            // Utility category: it's a transaction the customer asked for, not marketing.
+            $ctx = MessageContext::forBooking($booking, MessageContext::UTILITY, 'booking.ticket');
+
             // Delivery ladder: WhatsApp image (scannable QR) → WhatsApp text → SMS. The SMS
             // fallback ensures the ticket still reaches the customer while the WhatsApp sender
             // is pending approval (or if a WhatsApp send fails for any reason).
-            $whatsappOk = $this->whatsapp->sendMedia($phone, $caption, $qrUrl)
-                || $this->whatsapp->sendMessage($phone, $caption . "\n\nYour ticket & QR: " . $passUrl);
+            $whatsappOk = $this->whatsapp->sendMedia($phone, $caption, $qrUrl, $ctx)
+                || $this->whatsapp->sendMessage($phone, $caption . "\n\nYour ticket & QR: " . $passUrl, $ctx);
 
             if (! $whatsappOk) {
-                $this->sms->sendSms($phone, $this->smsText($title, $when, $tier, $qty, $code, $passUrl));
+                $this->sms->sendSms($phone, $this->smsText($title, $when, $tier, $qty, $code, $passUrl), $ctx);
             }
         }
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\MessageLog;
+use App\Support\MessageContext;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -15,14 +17,20 @@ use Illuminate\Support\Facades\Log;
  * Every send is best-effort and returns bool; a failure is logged, never thrown, so it can't
  * break a booking or an OTP flow. Requires a WhatsApp-enabled Twilio sender ('from') and, for
  * business-initiated messages outside a 24h session, an approved template on the Twilio side.
+ *
+ * Every attempt — including the ones that never reach Twilio — is written to the messaging
+ * ledger via {@see MessageMeter}. Pass a {@see MessageContext} to attribute the send to a
+ * partner; without one it's recorded as platform traffic and bills nobody.
  */
 class WhatsAppService
 {
     private const API = 'https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json';
 
-    public function sendMessage(string $phone, string $message): bool
+    public function __construct(private readonly MessageMeter $meter) {}
+
+    public function sendMessage(string $phone, string $message, ?MessageContext $context = null): bool
     {
-        return $this->dispatch($phone, $message, null);
+        return $this->dispatch($phone, $message, null, $context);
     }
 
     /**
@@ -30,9 +38,9 @@ class WhatsAppService
      * that Twilio can fetch (e.g. the /t/{code}/qr.png route). Falls back to a text-only send if
      * no media URL is given.
      */
-    public function sendMedia(string $phone, string $caption, string $mediaUrl): bool
+    public function sendMedia(string $phone, string $caption, string $mediaUrl, ?MessageContext $context = null): bool
     {
-        return $this->dispatch($phone, $caption, $mediaUrl !== '' ? $mediaUrl : null);
+        return $this->dispatch($phone, $caption, $mediaUrl !== '' ? $mediaUrl : null, $context);
     }
 
     /** Whether Twilio WhatsApp is configured well enough to attempt a send. */
@@ -46,18 +54,20 @@ class WhatsAppService
                 || (bool) ($c['auth_token'] ?? null));
     }
 
-    private function dispatch(string $phone, string $body, ?string $mediaUrl): bool
+    private function dispatch(string $phone, string $body, ?string $mediaUrl, ?MessageContext $context = null): bool
     {
         $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
 
         if (! $enabled) {
             Log::info("WhatsApp (disabled — not sent) to {$phone}: {$body}");
+            $this->meter->record('whatsapp', $phone, MessageLog::STATUS_DISABLED, $context);
 
             return false;
         }
 
         if (! $this->isConfigured()) {
             Log::warning('WhatsApp not sent: Twilio credentials / sender not configured.');
+            $this->meter->record('whatsapp', $phone, MessageLog::STATUS_UNCONFIGURED, $context);
 
             return false;
         }
@@ -65,6 +75,7 @@ class WhatsAppService
         $to = $this->toWhatsApp($phone);
         if ($to === null) {
             Log::warning("WhatsApp not sent: unroutable number {$phone}");
+            $this->meter->record('whatsapp', $phone, MessageLog::STATUS_UNROUTABLE, $context);
 
             return false;
         }
@@ -77,6 +88,11 @@ class WhatsAppService
             $payload['MediaUrl'] = $mediaUrl;
         }
 
+        // Meter against the normalised address, not the raw input: "9876543210" and
+        // "+919876543210" are one recipient, and keying on the raw string would open
+        // (and charge for) two conversations with the same person.
+        $recipient = substr($to, strlen('whatsapp:'));
+
         try {
             $response = Http::withBasicAuth(...$this->authPair($accountSid))
                 ->asForm()
@@ -84,15 +100,32 @@ class WhatsAppService
                 ->post(sprintf(self::API, $accountSid), $payload);
 
             if ($response->successful()) {
+                // The Twilio SID is what a later cost backfill joins the ledger on.
+                $this->meter->record(
+                    'whatsapp',
+                    $recipient,
+                    MessageLog::STATUS_SENT,
+                    $context,
+                    providerMessageId: $response->json('sid'),
+                );
+
                 return true;
             }
 
             // Twilio returns a helpful {code,message} — surface it so sender/template issues are clear.
             Log::warning('Twilio WhatsApp send failed (' . $response->status() . '): ' . $response->body());
+            $this->meter->record(
+                'whatsapp',
+                $recipient,
+                MessageLog::STATUS_FAILED,
+                $context,
+                error: 'HTTP ' . $response->status() . ': ' . $response->body(),
+            );
 
             return false;
         } catch (\Throwable $e) {
             Log::warning('Twilio WhatsApp exception: ' . $e->getMessage());
+            $this->meter->record('whatsapp', $recipient, MessageLog::STATUS_FAILED, $context, error: $e->getMessage());
 
             return false;
         }
