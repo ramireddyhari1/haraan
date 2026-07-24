@@ -26,8 +26,9 @@ class AutomationRuleForm
                 Select::make('trigger_type')
                     ->label('Trigger')
                     ->options([
-                        'keyword' => 'Keyword — fires when the message contains one of these words',
-                        'fallback' => 'Fallback — fires when nothing else matched (the away message)',
+                        'keyword' => 'Keyword — fires when a DM contains one of these words',
+                        'fallback' => 'Fallback — fires when no other DM rule matched (the away message)',
+                        'comment' => 'Instagram comment → DM — fires when someone COMMENTS on a post',
                     ])
                     ->default('keyword')
                     ->live()
@@ -35,9 +36,11 @@ class AutomationRuleForm
 
                 TagsInput::make('keywords')
                     ->label('Keywords')
-                    ->placeholder('parking')
-                    ->helperText('Case-insensitive. Add each word or phrase separately.')
-                    ->visible(fn ($get): bool => $get('trigger_type') === 'keyword')
+                    ->placeholder('price')
+                    ->helperText(fn ($get): string => $get('trigger_type') === 'comment'
+                        ? 'Case-insensitive. LEAVE EMPTY to DM everyone who comments.'
+                        : 'Case-insensitive. Add each word or phrase separately.')
+                    ->visible(fn ($get): bool => in_array($get('trigger_type'), ['keyword', 'comment'], true))
                     ->required(fn ($get): bool => $get('trigger_type') === 'keyword'),
 
                 Select::make('match_type')
@@ -47,16 +50,28 @@ class AutomationRuleForm
                         'exact' => 'The whole message is exactly the keyword',
                     ])
                     ->default('contains')
-                    ->visible(fn ($get): bool => $get('trigger_type') === 'keyword')
+                    ->visible(fn ($get): bool => in_array($get('trigger_type'), ['keyword', 'comment'], true))
                     ->required(),
 
                 Textarea::make('reply_body')
-                    ->label('Reply')
+                    ->label(fn ($get): string => $get('trigger_type') === 'comment' ? 'Private reply (the DM)' : 'Reply')
                     ->rows(4)
                     ->maxLength(1000)
-                    ->helperText('Sent from the shared Haraan number, so say who you are. '
-                        . 'Only works inside the 24h window opened by their message.')
+                    ->helperText(fn ($get): string => $get('trigger_type') === 'comment'
+                        ? 'DMed to whoever commented. Meta allows exactly ONE per comment, so put the '
+                            . 'booking link in it.'
+                        : 'Sent from the shared Haraan number, so say who you are. '
+                            . 'Only works inside the 24h window opened by their message.')
                     ->required(),
+
+                Textarea::make('public_reply_body')
+                    ->label('Public reply under the comment')
+                    ->rows(2)
+                    ->maxLength(300)
+                    ->placeholder('Just sent you a DM! 💬')
+                    ->visible(fn ($get): bool => $get('trigger_type') === 'comment')
+                    ->helperText('Optional, and visible to everyone reading the thread — which is what '
+                        . 'makes the automation look deliberate rather than silent. Leave empty to skip it.'),
 
                 Select::make('partner_id')
                     ->label('Applies to')

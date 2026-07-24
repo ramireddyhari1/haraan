@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ChannelConnection;
 use App\Services\InboundMessages;
+use App\Services\InstagramComments;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
@@ -72,14 +73,16 @@ class MetaWebhookController extends Controller
             // entry[].changes[] with field=messages. One app, one signature, two
             // payload formats — worth keeping side by side so that's obvious.
             foreach ($entry['changes'] ?? [] as $change) {
-                if (($change['field'] ?? null) !== 'messages') {
-                    continue;
-                }
-
                 try {
-                    $this->handleWhatsApp($change['value'] ?? [], $inbound);
+                    match ($change['field'] ?? null) {
+                        'messages' => $this->handleWhatsApp($change['value'] ?? [], $inbound),
+                        // Instagram comments — the comment-to-DM trigger. `entry.id`
+                        // is the IG account the comment was left on.
+                        'comments' => $this->handleComment((string) ($entry['id'] ?? ''), $change['value'] ?? []),
+                        default => null,
+                    };
                 } catch (\Throwable $e) {
-                    Log::error('WhatsApp event handling failed: ' . $e->getMessage());
+                    Log::error('Meta change handling failed: ' . $e->getMessage());
                 }
             }
         }
@@ -152,6 +155,26 @@ class MetaWebhookController extends Controller
         }
 
         $inbound->handleInstagram($connection, $senderId, $text, $message['mid'] ?? null);
+    }
+
+    /**
+     * An Instagram comment. Routed by the account it was left on, so attribution
+     * is exact — the same advantage DMs have over the shared WhatsApp number.
+     *
+     * @param  array<string, mixed>  $value
+     */
+    private function handleComment(string $accountId, array $value): void
+    {
+        $connection = ChannelConnection::forAccount('instagram', $accountId);
+
+        if ($connection === null) {
+            Log::info("Instagram comment on unlinked account {$accountId} ignored.");
+
+            return;
+        }
+
+        $outcome = app(InstagramComments::class)->handle($connection, $value);
+        Log::info('Instagram comment → ' . $outcome);
     }
 
     private function verifySignature(Request $request): bool

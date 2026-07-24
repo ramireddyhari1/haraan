@@ -26,7 +26,16 @@ class AutomationRulesTable
                 TextColumn::make('trigger_type')
                     ->label('Trigger')
                     ->badge()
-                    ->color(fn (string $state): string => $state === 'fallback' ? 'warning' : 'info'),
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'comment' => 'Comment → DM',
+                        'fallback' => 'Fallback',
+                        default => 'Keyword',
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'comment' => 'success',
+                        'fallback' => 'warning',
+                        default => 'info',
+                    }),
 
                 TextColumn::make('keywords')
                     ->label('Keywords')
@@ -58,7 +67,7 @@ class AutomationRulesTable
             ->filters([
                 SelectFilter::make('trigger_type')
                     ->label('Trigger')
-                    ->options(['keyword' => 'Keyword', 'fallback' => 'Fallback']),
+                    ->options(['keyword' => 'Keyword', 'fallback' => 'Fallback', 'comment' => 'Comment → DM']),
 
                 TernaryFilter::make('is_active')->label('Active'),
             ])

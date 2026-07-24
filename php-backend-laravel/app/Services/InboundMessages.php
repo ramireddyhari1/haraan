@@ -132,6 +132,13 @@ final class InboundMessages
         }
 
         foreach (AutomationRule::forPartner($partnerId, $channel) as $rule) {
+            // Comment rules belong to the comment-to-DM flow, not to DMs. A
+            // keyword-less comment rule matches everything, so leaking one in
+            // here would answer every DM with it.
+            if ($rule->trigger_type === AutomationRule::TRIGGER_COMMENT) {
+                continue;
+            }
+
             if ($rule->matches($text)) {
                 return $this->finish($channel, $from, $partnerId, 'rule:' . $rule->id, $rule->reply_body);
             }

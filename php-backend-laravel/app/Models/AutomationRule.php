@@ -18,9 +18,12 @@ final class AutomationRule extends Model
 
     public const TRIGGER_FALLBACK = 'fallback';
 
+    /** Fires on an Instagram COMMENT rather than a DM — the comment-to-DM flow. */
+    public const TRIGGER_COMMENT = 'comment';
+
     protected $fillable = [
         'partner_id', 'channel', 'name', 'trigger_type', 'keywords',
-        'match_type', 'reply_body', 'priority', 'is_active',
+        'match_type', 'reply_body', 'public_reply_body', 'priority', 'is_active',
     ];
 
     protected $casts = [
@@ -58,10 +61,27 @@ final class AutomationRule extends Model
             ->get();
     }
 
+    /**
+     * Active COMMENT rules for a partner, most specific first.
+     *
+     * @return Collection<int, self>
+     */
+    public static function commentRulesFor(?int $partnerId): Collection
+    {
+        return static::forPartner($partnerId, 'instagram')
+            ->where(fn (self $rule): bool => $rule->trigger_type === self::TRIGGER_COMMENT);
+    }
+
     /** Whether this rule fires for the given (already lowercased) message. */
     public function matches(string $text): bool
     {
         if ($this->trigger_type === self::TRIGGER_FALLBACK) {
+            return true;
+        }
+
+        // A comment rule with no keywords answers every comment — that's a
+        // deliberate "reply to everyone" setting, not a misconfiguration.
+        if ($this->trigger_type === self::TRIGGER_COMMENT && ($this->keywords ?? []) === []) {
             return true;
         }
 
