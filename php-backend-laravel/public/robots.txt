@@ -3,6 +3,9 @@ Allow: /
 
 # Private lanes: behind auth, personalised, or thin duplicates. These also carry
 # a noindex meta tag — the Disallow here just saves crawl budget.
+# The partner LOGIN page is public and indexable (more specific Allow wins); only
+# the authenticated console behind it is blocked.
+Allow: /partner/login
 Disallow: /partner
 Disallow: /control
 Disallow: /admin

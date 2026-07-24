@@ -20,6 +20,15 @@ use Illuminate\Support\HtmlString;
  */
 class PartnerLogin extends BaseLogin
 {
+    // Browser <title>. Leads with the brand so a search for "haraan partner"
+    // resolves here; this page is intentionally indexable (unlike the console
+    // behind it) — see the HEAD_END render hook + robots.txt in
+    // PartnerPanelProvider.
+    public function getTitle(): string | Htmlable
+    {
+        return 'Haraan Partner Login — Hosts & Venue Owners';
+    }
+
     public function getHeading(): string | Htmlable
     {
         return 'Partner sign in';

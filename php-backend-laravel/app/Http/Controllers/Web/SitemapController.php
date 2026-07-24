@@ -53,6 +53,8 @@ class SitemapController extends Controller
         $add('/events', null, '0.9', 'daily');
         $add('/gamehub', null, '0.9', 'daily');
         $add('/gamehub/leaderboard', null, '0.5', 'daily');
+        // The partner console door — public + indexable (the console itself is not).
+        $add('/partner/login', null, '0.4', 'monthly');
 
         // Published, not-yet-finished events (a past event page is a dead end for
         // searchers — it stays reachable, it just isn't worth re-crawling).

@@ -59,6 +59,18 @@ class PartnerPanelProvider extends PanelProvider
             scopes: PartnerLogin::class,
         );
 
+        // Make the partner LOGIN page discoverable in Google (only this page — the
+        // console behind it stays out of the index via robots.txt + auth). The
+        // panel emits no description/canonical of its own, so add search metadata
+        // here; scoped to PartnerLogin so no other panel page is affected.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => '<meta name="description" content="Log in to the Haraan Partner dashboard — for event hosts and venue owners to manage events, bookings, earnings and payouts.">'
+                . '<meta name="robots" content="index,follow,max-image-preview:large">'
+                . '<link rel="canonical" href="' . e(url('/partner/login')) . '">',
+            scopes: PartnerLogin::class,
+        );
+
         // The brand logo lives in the sidebar header, which is collapsed behind the
         // hamburger on mobile — so on a phone the console opened with no Haraan mark
         // at all. Paint it into the top bar too, but only below the desktop breakpoint
