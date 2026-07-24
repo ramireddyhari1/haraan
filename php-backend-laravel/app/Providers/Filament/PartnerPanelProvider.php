@@ -406,7 +406,9 @@ class PartnerPanelProvider extends PanelProvider
             // CTA); /control keeps the navy mark via its own provider.
             ->brandLogo(asset('images/haraan-logo-blue.png'))
             ->brandLogoHeight('2.2rem')
-            ->favicon(asset('images/haraan-logo.png'))
+            // Square blue-H-on-white tile — the wide wordmark was illegible as a
+            // 16px browser-tab icon.
+            ->favicon(asset('favicon-192.png'))
             // Same design system as /control — Inter + the compiled theme. The
             // theme styles panel-agnostic fi-* hooks and follows each panel's own
             // primary colour, so the blue lane stays blue.
