@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "618469027917",
+    "project_id": "haraan-1a84a",
+    "storage_bucket": "haraan-1a84a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:618469027917:android:c56ca0d4680cbceefd6c04",
+        "android_client_info": {
+          "package_name": "com.haraan.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCLpAMrwjqnCU20QjcvCUF4Beng61OBL20"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -142,6 +142,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -342,6 +343,8 @@ fun MainScreen(
       onLoginSuccess = { token ->
         com.haraan.app.data.TokenStore.saveToken(context, token)
         cachedToken = token
+        // Register this device for push now that there's a real session.
+        com.haraan.app.push.PushRegistrar.syncToken(context)
       },
       modifier = Modifier.fillMaxSize()
     )
@@ -457,6 +460,21 @@ internal fun MainAppContainer(
   var showNotifications by remember { mutableStateOf(false) }
   // The booking whose entry-pass QR is currently open (null = none). Set from booking taps.
   var ticketPass by remember { mutableStateOf<com.haraan.app.data.BookingLite?>(null) }
+
+  // Route a deep link from a tapped push into the right place. Held in DeepLinkState
+  // by MainActivity; applied here since this composable owns the tab + inbox state.
+  // A link tapped while signed out lands here once the user reaches this screen.
+  val pendingDeepLink by com.haraan.app.push.DeepLinkState.pending.collectAsState()
+  LaunchedEffect(pendingDeepLink) {
+    val link = pendingDeepLink ?: return@LaunchedEffect
+    when (com.haraan.app.push.DeepLinks.parse(link)) {
+      com.haraan.app.push.DeepLinkTarget.Inbox -> { selectedTab = 0; showNotifications = true }
+      com.haraan.app.push.DeepLinkTarget.Events -> { selectedTab = 0; activeSubTab = "Events" }
+      com.haraan.app.push.DeepLinkTarget.GameHub -> { selectedTab = 0; activeSubTab = "GameHub" }
+      null -> {} // unknown link: just bring the app to the foreground
+    }
+    com.haraan.app.push.DeepLinkState.consume()
+  }
   val accountRepository = remember { com.haraan.app.data.AccountRepository() }
   val playerProfileRepository = remember { com.haraan.app.data.ProfileRepository() }
 
@@ -3836,6 +3854,7 @@ private fun CrexMatchesScreen(
         onSkipClick = { gateStep = 0; pendingRankedAction = null },
         onLoginSuccess = { token ->
           com.haraan.app.data.TokenStore.saveToken(context, token)
+          com.haraan.app.push.PushRegistrar.syncToken(context)
           scope.launch {
             if (profileRepository.isProfileComplete(token)) {
               gateStep = 0

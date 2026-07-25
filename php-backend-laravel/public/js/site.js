@@ -622,7 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loginModal.setAttribute('aria-hidden', 'false');
         loginModal.style.display = 'grid';
         // Now that the slot has a measurable width, GIS can size its button to fit.
-        renderGoogleButtonIfNeeded();
+        renderGoogleButtons();
         window.HaraanOverlay.push('login', closeLoginModal);
         setTimeout(() => loginCard?.classList.add('show'), 20);
     }
@@ -692,56 +692,56 @@ document.addEventListener('DOMContentLoaded', () => {
     /*  2b. Continue with Google                                           */
     /* ------------------------------------------------------------------ */
 
-    let googleRendered = false;
-
     /**
-     * Draws the Google button, sized to the slot's real width.
+     * Draws the Google button into EVERY slot that's visible and not yet drawn.
      *
-     * Must run while the modal is visible: GIS needs a pixel width, and a hidden
-     * modal measures 0 — which silently falls back to a 320px button that overflows
-     * the card. Hence the call from openLoginModal() rather than on page load.
-     * Safe to call repeatedly; only the first visible call draws.
+     * There are two slots on a page — the site-wide login drawer and the standalone
+     * /login card — so this iterates `.auth-google__btn` rather than a single id
+     * (ids can't be unique across both). GIS needs a real pixel width, and a hidden
+     * drawer measures 0, so each slot is drawn only once it has width; safe to call
+     * repeatedly (e.g. on modal open and once GIS lands).
      */
-    function renderGoogleButtonIfNeeded() {
-        const cfg  = window.HaraanGoogleAuth;
-        const slot = document.getElementById('googleSignInBtn');
-        if (googleRendered || !cfg || !slot || !window.google?.accounts?.id) return;
+    function renderGoogleButtons() {
+        const cfg = window.HaraanGoogleAuth;
+        if (!cfg || !window.google?.accounts?.id) return;
 
-        const width = slot.clientWidth;
-        if (!width) return; // still hidden — we'll be called again on open
-
-        googleRendered = true;
-        window.google.accounts.id.renderButton(slot, {
-            theme: 'outline',
-            size: 'large',
-            shape: 'pill',
-            text: 'continue_with',
-            logo_alignment: 'center',
-            width: Math.min(width, 400),
+        document.querySelectorAll('.auth-google__btn').forEach((slot) => {
+            if (slot.dataset.gRendered) return;
+            const width = slot.clientWidth;
+            if (!width) return; // still hidden — we'll be called again on open
+            slot.dataset.gRendered = '1';
+            window.google.accounts.id.renderButton(slot, {
+                theme: 'outline',
+                size: 'large',
+                shape: 'pill',
+                text: 'continue_with',
+                logo_alignment: 'center',
+                width: Math.min(width, 400),
+            });
         });
     }
 
     /**
      * Initialises Google Identity Services and trades the ID token it returns for a
      * Laravel session. GIS loads async, so we poll briefly rather than racing it.
-     * The slot only exists when GOOGLE_CLIENT_ID is configured (see layout.blade.php).
+     * A slot only exists when GOOGLE_CLIENT_ID is configured (see layout.blade.php).
      */
     (function initGoogleSignIn() {
         const cfg  = window.HaraanGoogleAuth;
-        const slot = document.getElementById('googleSignInBtn');
-        if (!cfg || !slot) return;
+        const slots = document.querySelectorAll('.auth-google__btn');
+        if (!cfg || !slots.length) return;
 
-        const errorEl = document.getElementById('googleSignInError');
         const showError = (msg) => {
-            if (!errorEl) return;
-            errorEl.textContent = msg;
-            errorEl.hidden = false;
+            document.querySelectorAll('.auth-google__error').forEach((el) => {
+                el.textContent = msg;
+                el.hidden = false;
+            });
         };
 
         /** Exchange the Google ID token for a session, then go where the user was headed. */
         async function onCredential(response) {
-            errorEl && (errorEl.hidden = true);
-            slot.classList.add('is-busy');
+            document.querySelectorAll('.auth-google__error').forEach((el) => { el.hidden = true; });
+            slots.forEach((s) => s.classList.add('is-busy'));
             try {
                 const res = await fetch(cfg.postUrl, {
                     method: 'POST',
@@ -762,7 +762,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch {
                 showError('Network error. Please check your connection and try again.');
             } finally {
-                slot.classList.remove('is-busy');
+                slots.forEach((s) => s.classList.remove('is-busy'));
             }
         }
 
@@ -774,14 +774,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     client_id: cfg.clientId,
                     callback: onCredential,
                 });
-                // Covers the case where the modal is already open when GIS lands.
-                renderGoogleButtonIfNeeded();
+                // Draw now (standalone /login is already visible) and shortly after, to
+                // catch a slot that gains width when the drawer opens.
+                renderGoogleButtons();
+                let tries = 0;
+                const draw = setInterval(() => {
+                    renderGoogleButtons();
+                    if (++tries > 30) clearInterval(draw);
+                }, 200);
             } else if ((waited += 100) > 6000) {
                 // GIS blocked (offline, blocker, or an unauthorised origin) — leave the
-                // phone form as the working path instead of showing a dead button.
+                // other sign-in paths working instead of showing a dead button.
                 clearInterval(timer);
-                slot.closest('.auth-google')?.remove();
-                document.querySelector('.auth-divider')?.remove();
+                document.querySelectorAll('.auth-google').forEach((el) => el.remove());
             }
         }, 100);
     })();

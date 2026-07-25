@@ -170,6 +170,12 @@ Route::get('/legal/{slug}', [\App\Http\Controllers\Web\AccountController::class,
 Route::post('/auth/google', [\App\Http\Controllers\Auth\GoogleWebAuthController::class, 'login'])
     ->name('google.web.login');
 
+// Phone-number sign-in (Firebase SMS OTP) — the browser completes the OTP and posts
+// the resulting Firebase ID token here for verification + session login.
+Route::post('/auth/firebase-phone', [\App\Http\Controllers\Auth\FirebasePhoneAuthController::class, 'login'])
+    ->middleware('throttle:auth')
+    ->name('firebase.phone.login');
+
 /*
 |--------------------------------------------------------------------------
 | ERP Portal Routes (Admin & Partner)

@@ -1,16 +1,27 @@
 package com.haraan.app
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.haraan.app.data.LanguageManager
 import com.haraan.app.data.PaymentBridge
 import com.haraan.app.data.RealtimeClient
 import com.haraan.app.data.RemoteBootstrap
 import com.haraan.app.data.RemoteConfigStore
+import com.haraan.app.push.DeepLinkState
+import com.haraan.app.push.DeepLinks
+import com.haraan.app.push.PushNotifications
+import com.haraan.app.push.PushRegistrar
 import com.haraan.app.theme.ThannaTheme
 import com.razorpay.Checkout
 import com.razorpay.PaymentData
@@ -23,6 +34,12 @@ import kotlinx.coroutines.launch
  * that opened the sheet can confirm (or release) the reservation.
  */
 class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
+  // POST_NOTIFICATIONS runtime prompt (Android 13+). The result doesn't gate anything —
+  // a denied prompt just means the OS drops shade notifications; the FCM token is still
+  // registered so the in-app bell inbox keeps working either way.
+  private val requestNotificationPermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
+
   // Apply the user's chosen language to every resource lookup in this Activity.
   override fun attachBaseContext(newBase: Context) {
     super.attachBaseContext(LanguageManager.wrap(newBase))
@@ -34,6 +51,12 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
     // Warm up the checkout SDK so the first payment sheet opens without a cold-start lag.
     Checkout.preload(applicationContext)
 
+    // Push: ensure the channel exists, ask for the 13+ notification permission, and
+    // register this device's FCM token with the backend (no-op unless signed in).
+    PushNotifications.ensureChannel(applicationContext)
+    maybeRequestNotificationPermission()
+    PushRegistrar.syncToken(applicationContext)
+
     // Load remote config (feature flags + theme) and the translation overlay at
     // launch, then open the realtime socket so later admin changes arrive live.
     // Best-effort: the in-memory stores keep their defaults if it fails.
@@ -42,11 +65,47 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
       RealtimeClient.start(applicationContext, RemoteConfigStore.config.realtime)
     }
 
+    // A deep link carried on the launch intent (cold start from a tapped push).
+    handleDeepLinkIntent(intent)
+
     enableEdgeToEdge()
     setContent {
       ThannaTheme {
         MainNavigation()
       }
+    }
+  }
+
+  // A push tapped while the app is already running (singleTop) arrives here.
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    handleDeepLinkIntent(intent)
+  }
+
+  /**
+   * Pull a deep link off a launch/tap intent. Web URLs open in the browser; app
+   * links are handed to [DeepLinkState] for MainAppContainer to route.
+   */
+  private fun handleDeepLinkIntent(intent: Intent?) {
+    val link = intent?.getStringExtra(PushNotifications.EXTRA_DEEP_LINK)?.takeIf { it.isNotBlank() }
+      ?: return
+    if (DeepLinks.isWebUrl(link)) {
+      runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) }
+    } else {
+      DeepLinkState.set(link)
+    }
+  }
+
+  /** Prompt for POST_NOTIFICATIONS once on 13+ if it hasn't already been granted. */
+  private fun maybeRequestNotificationPermission() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val granted = ContextCompat.checkSelfPermission(
+      this,
+      Manifest.permission.POST_NOTIFICATIONS,
+    ) == PackageManager.PERMISSION_GRANTED
+    if (!granted) {
+      requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
   }
 

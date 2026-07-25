@@ -114,4 +114,31 @@ return [
         'model' => env('ANTHROPIC_MODEL', 'claude-opus-4-8'),
     ],
 
+    // Firebase phone-number sign-in for the public website login (SMS OTP).
+    // These three values are the WEB app config from Firebase (Project settings →
+    // General → your Web app). The api_key + auth_domain + project_id are all public
+    // (they ship to the browser), so defaulting them to the known project is safe;
+    // override via env if the web app is reconfigured. Leave api_key unset to hide
+    // the phone option entirely (the login falls back to Google + email/password).
+    'firebase' => [
+        // Web app config from Firebase (Project settings → your Web app "haraan.app").
+        // These are the WEB values — distinct from the Android key in google-services.json.
+        'api_key'     => env('FIREBASE_WEB_API_KEY', 'AIzaSyDnXtdoL3Z7aIvC5sjhg-Jolq_xLnmLS-g'),
+        'auth_domain' => env('FIREBASE_AUTH_DOMAIN', 'haraan-1a84a.firebaseapp.com'),
+        'project_id'  => env('FIREBASE_PROJECT_ID', 'haraan-1a84a'),
+        // appId identifies the web app to Firebase; the phone-auth reCAPTCHA/app-credential
+        // check needs it (without it: auth/invalid-app-credential).
+        'app_id'      => env('FIREBASE_APP_ID', '1:618469027917:web:0050ee1392e5e0f3fd6c04'),
+    ],
+
+    // Firebase Cloud Messaging — background push to the app's registered devices
+    // (device_tokens). `credentials` is an absolute path to the service-account JSON
+    // downloaded from Firebase (Project settings → Service accounts → Generate key);
+    // the project id + private key are read from it. Leave the path unset (or the file
+    // absent) and FcmClient reports not-configured — sending becomes a logged no-op,
+    // so the in-app bell inbox and Reverb delivery keep working regardless.
+    'fcm' => [
+        'credentials' => env('FCM_CREDENTIALS_PATH'),
+    ],
+
 ];

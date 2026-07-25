@@ -4,6 +4,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.google.services)
 }
 
 // Release signing config, loaded from the git-ignored keystore.properties (see that
@@ -137,4 +138,9 @@ dependencies {
   implementation("androidx.security:security-crypto:1.1.0")
   // WebSocket client for realtime content updates (Reverb / Pusher protocol)
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+  // Firebase — BoM keeps product versions aligned; add products without pinning versions.
+  // Cloud Messaging (FCM) powers push notifications (see the notifications inbox work).
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.messaging)
 }
