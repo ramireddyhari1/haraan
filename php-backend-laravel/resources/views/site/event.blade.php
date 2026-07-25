@@ -726,6 +726,281 @@
         .dr-reveal, .dr-reveal.is-in { opacity: 1 !important; transform: none !important; transition: none !important; }
         .dr-book-bar { transform: none !important; transition: none !important; }
     }
+
+    /* =====================================================================
+       DESKTOP REDESIGN (≥1025px) — an immersive, editorial event page
+       rendered from the `.dr-desk` block. The mobile `.dr-sheet` above is
+       left completely untouched; on desktop we simply hide it (and its
+       poster hero) and show this handcrafted layout instead. All rules are
+       scoped to ≥1025px, so nothing here can reach the phone experience.
+       ===================================================================== */
+    .dr-desk { display: none; }
+
+    @media (min-width: 1025px) {
+        .district-event-page .dr-hero-banner,
+        .district-event-page .dr-sheet { display: none !important; }
+        .district-event-page .dr-card-body { background: #ffffff !important; padding: 0 !important; }
+
+        .dr-desk {
+            display: block;
+            --dk-accent: #2563eb; --dk-ink: #0f1626; --dk-mut: #5b6472;
+            --dk-line: #edf0f6; --dk-soft: #f6f8fc;
+        }
+
+        /* ---------- Cinematic hero (full-bleed via 100vw; html/body clip) ---------- */
+        .dk-hero {
+            position: relative; width: 100vw; margin-left: calc(-50vw + 50%);
+            display: flex; align-items: flex-end; overflow: hidden; isolation: isolate;
+        }
+        .dk-hero__bg {
+            position: absolute; inset: -50px; z-index: -2; background-size: cover;
+            background-position: center; filter: blur(34px) saturate(1.25) brightness(0.58);
+        }
+        .dk-hero::after {
+            content: ''; position: absolute; inset: 0; z-index: -1;
+            background:
+                linear-gradient(105deg, rgba(9,12,22,0.9) 0%, rgba(9,12,22,0.5) 44%, rgba(9,12,22,0.74) 100%),
+                linear-gradient(180deg, rgba(9,12,22,0) 42%, rgba(9,12,22,0.6) 100%);
+        }
+        .dk-hero__inner {
+            max-width: 1200px; margin: 0 auto; width: 100%;
+            padding: 48px 40px 52px; display: grid; grid-template-columns: 296px 1fr;
+            gap: 48px; align-items: end;
+        }
+        .dk-poster {
+            aspect-ratio: 3 / 4; border-radius: 18px; overflow: hidden; background: #10141d;
+            box-shadow: 0 34px 70px -24px rgba(0,0,0,0.72), 0 0 0 1px rgba(255,255,255,0.09);
+        }
+        .dk-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .dk-info { color: #fff; min-width: 0; padding-bottom: 4px; }
+        .dk-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 20px; }
+        .dk-chip {
+            display: inline-flex; align-items: center; gap: 6px; height: 29px; padding: 0 13px;
+            border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff;
+            background: rgba(255,255,255,0.13); border: 1px solid rgba(255,255,255,0.18);
+            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+        }
+        .dk-chip--cat { background: var(--dk-accent); border-color: transparent; text-transform: uppercase; letter-spacing: 0.06em; }
+        .dk-chip--rate i { color: #ffca3a; font-style: normal; }
+        .dk-title {
+            margin: 0 0 22px; font-size: 46px; line-height: 1.05; font-weight: 800;
+            letter-spacing: -0.028em; color: #fff; text-shadow: 0 2px 40px rgba(0,0,0,0.35);
+        }
+        .dk-facts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-bottom: 30px; }
+        .dk-fact { display: inline-flex; align-items: center; gap: 9px; font-size: 14.5px; font-weight: 500; color: rgba(255,255,255,0.92); }
+        .dk-fact svg { width: 17px; height: 17px; flex: none; opacity: 0.82; }
+        .dk-hero__actions { display: flex; align-items: center; gap: 14px; }
+        .dk-price { display: flex; flex-direction: column; line-height: 1.12; margin-right: 6px; }
+        .dk-price small { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(255,255,255,0.6); }
+        .dk-price strong { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+
+        .dk-btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+            height: 52px; padding: 0 34px; border: none; cursor: pointer; border-radius: 14px;
+            font: inherit; font-size: 15.5px; font-weight: 750; letter-spacing: -0.01em; color: #fff;
+            background: linear-gradient(135deg, #2f6bff, #1e40af);
+            box-shadow: 0 14px 30px -10px rgba(37,99,235,0.7);
+            transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+        }
+        .dk-btn:hover { transform: translateY(-2px); box-shadow: 0 20px 42px -12px rgba(37,99,235,0.8); filter: brightness(1.05); }
+        .dk-btn:active { transform: translateY(0); }
+        .dk-btn:disabled { background: #94a3b8; box-shadow: none; cursor: default; transform: none; filter: none; }
+        .dk-iconbtn {
+            width: 52px; height: 52px; border-radius: 14px; cursor: pointer;
+            background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff;
+            display: inline-flex; align-items: center; justify-content: center; transition: background 0.18s ease;
+        }
+        .dk-iconbtn:hover { background: rgba(255,255,255,0.22); }
+        .dk-iconbtn svg { width: 20px; height: 20px; }
+        .dk-trust { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 24px; }
+        .dk-trust span { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.72); }
+        .dk-trust svg { width: 15px; height: 15px; color: #5ee0a0; flex: none; }
+
+        /* ---------- Breadcrumb ---------- */
+        .dk-crumbs { max-width: 1200px; margin: 0 auto; padding: 18px 40px 0; }
+        .dk-crumbs a { display: inline-flex; align-items: center; gap: 7px; color: var(--dk-mut); font-size: 13px; font-weight: 600; text-decoration: none; transition: color 0.15s ease; }
+        .dk-crumbs a:hover { color: var(--dk-ink); }
+        .dk-crumbs svg { width: 15px; height: 15px; }
+
+        /* ---------- Two-column body ---------- */
+        .dk-body {
+            max-width: 1200px; margin: 0 auto; padding: 36px 40px 96px;
+            display: grid; grid-template-columns: minmax(0, 1fr) 358px; gap: 60px; align-items: start;
+        }
+        .dk-main { min-width: 0; }
+        .dk-sec { padding-bottom: 40px; margin-bottom: 40px; border-bottom: 1px solid var(--dk-line); }
+        .dk-sec:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .dk-h { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 0 0 22px; }
+        .dk-h h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--dk-ink); }
+        .dk-h span { font-size: 13px; font-weight: 600; color: var(--dk-mut); }
+
+        .dk-about { font-size: 16.5px; line-height: 1.8; color: #3b4453; }
+        .dk-about p { margin: 0 0 16px; } .dk-about p:last-child { margin-bottom: 0; }
+        /* Collapsed to ~6 lines with a soft fade until "Read more" is clicked (JS sets max-height). */
+        .dk-about-wrap.is-clamped .dk-about { position: relative; overflow: hidden; }
+        .dk-about-wrap.is-clamped .dk-about::after {
+            content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 74px;
+            background: linear-gradient(rgba(255,255,255,0), #fff 92%); pointer-events: none;
+        }
+        .dk-readmore {
+            display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; padding: 0;
+            background: none; border: none; cursor: pointer; color: var(--dk-accent);
+            font: inherit; font-size: 14px; font-weight: 750;
+        }
+        .dk-readmore:hover { text-decoration: underline; text-underline-offset: 3px; }
+        .dk-readmore svg { width: 16px; height: 16px; transition: transform 0.2s ease; }
+        .dk-readmore.is-open svg { transform: rotate(180deg); }
+        .dk-about ul, .dk-about ol { margin: 0 0 16px; padding-left: 22px; }
+        .dk-about li { margin-bottom: 6px; }
+        .dk-about a { color: var(--dk-accent); }
+        .dk-about h1, .dk-about h2, .dk-about h3, .dk-about h4 { color: var(--dk-ink) !important; margin: 22px 0 10px; font-weight: 750; }
+
+        /* Lineup */
+        .dk-artists { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 22px; }
+        .dk-artist { text-align: center; }
+        .dk-artist__ph {
+            aspect-ratio: 1 / 1; border-radius: 16px; overflow: hidden; background: #10141d;
+            box-shadow: 0 12px 28px -16px rgba(15,22,38,0.45); margin-bottom: 12px;
+        }
+        .dk-artist__ph img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.45s cubic-bezier(0.2,0.7,0.3,1); }
+        .dk-artist:hover .dk-artist__ph img { transform: scale(1.06); }
+        .dk-artist strong { display: block; font-size: 14.5px; font-weight: 700; color: var(--dk-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dk-artist span { display: block; font-size: 12.5px; color: var(--dk-mut); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Gallery mosaic — first photo anchors a 2×2 tile */
+        .dk-gallery { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 152px; gap: 12px; }
+        .dk-gallery button { border: none; padding: 0; cursor: pointer; overflow: hidden; border-radius: 16px; background: #10141d; }
+        .dk-gallery img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.5s cubic-bezier(0.2,0.7,0.3,1); }
+        .dk-gallery button:hover img { transform: scale(1.07); }
+        .dk-gallery button:first-child { grid-column: span 2; grid-row: span 2; }
+
+        /* Venue / location */
+        .dk-venue { border: 1px solid var(--dk-line); border-radius: 20px; overflow: hidden; box-shadow: 0 20px 46px -30px rgba(15,22,38,0.3); }
+        .dk-venue iframe { display: block; width: 100%; height: 264px; border: 0; }
+        .dk-venue__ft { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px; }
+        .dk-venue__ft h4 { margin: 0 0 3px; font-size: 16px; font-weight: 750; color: var(--dk-ink); }
+        .dk-venue__ft p { margin: 0; font-size: 13.5px; color: var(--dk-mut); }
+        .dk-venue__map { height: 152px; position: relative; background: linear-gradient(135deg, #e6f0ff, #eef5ff); }
+        .dk-venue__map::before { content: ''; position: absolute; inset: 0; background-image: linear-gradient(rgba(37,99,235,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(37,99,235,0.08) 1px, transparent 1px); background-size: 24px 24px; }
+        .dk-venue__pin { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--dk-accent); border: 4px solid #fff; box-shadow: 0 4px 14px rgba(37,99,235,0.5); }
+        .dk-dir { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 13px; background: var(--dk-ink); color: #fff; font-size: 13.5px; font-weight: 700; text-decoration: none; transition: transform 0.18s ease, box-shadow 0.18s ease; }
+        .dk-dir:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -12px rgba(15,22,38,0.5); }
+        .dk-dir svg { width: 15px; height: 15px; }
+
+        /* Good to know — reuse the shared card, softened for the editorial column */
+        .dk-gtk .dr-gtk__card { background: var(--dk-soft); border-color: var(--dk-line); border-radius: 18px; }
+
+        /* Important information */
+        .dk-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+        .dk-notes li { display: flex; gap: 12px; font-size: 14.5px; line-height: 1.6; color: #3b4453; }
+        .dk-notes li::before { content: ''; flex: none; width: 7px; height: 7px; margin-top: 8px; border-radius: 50%; background: var(--dk-accent); }
+
+        /* ---------- Sticky booking rail ---------- */
+        .dk-rail { align-self: start; position: sticky; top: 92px; display: flex; flex-direction: column; gap: 18px; }
+        .dk-book { background: #fff; border: 1px solid var(--dk-line); border-radius: 22px; padding: 24px; box-shadow: 0 28px 64px -34px rgba(15,22,38,0.42); }
+        .dk-book__price { display: flex; align-items: baseline; gap: 8px; margin-bottom: 18px; }
+        .dk-book__price b { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--dk-ink); }
+        .dk-book__price small { font-size: 13px; color: var(--dk-mut); font-weight: 600; }
+        .dk-book__rows { display: flex; flex-direction: column; margin-bottom: 20px; }
+        .dk-brow { display: flex; align-items: center; gap: 13px; padding: 12px 0; border-bottom: 1px solid var(--dk-line); }
+        .dk-brow:last-child { border-bottom: none; }
+        .dk-brow__ic { flex: none; width: 38px; height: 38px; border-radius: 11px; background: var(--dk-soft); display: grid; place-items: center; color: var(--dk-accent); }
+        .dk-brow__ic svg { width: 18px; height: 18px; }
+        .dk-brow__tx { min-width: 0; }
+        .dk-brow__tx small { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #98a1b0; }
+        .dk-brow__tx strong { font-size: 14px; font-weight: 650; color: var(--dk-ink); }
+        .dk-book .dk-btn { width: 100%; }
+        .dk-book__sec { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; font-size: 12px; font-weight: 600; color: var(--dk-mut); }
+        .dk-book__sec svg { width: 14px; height: 14px; color: #22a565; }
+        .dk-book__closed { text-align: center; font-size: 14px; font-weight: 650; color: var(--dk-mut); padding: 8px 0 2px; }
+
+        .dk-org { background: #fff; border: 1px solid var(--dk-line); border-radius: 20px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 20px 48px -34px rgba(15,22,38,0.32); }
+        .dk-org__ava { flex: none; width: 54px; height: 54px; border-radius: 50%; overflow: hidden; background: #10141d; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 19px; }
+        .dk-org__ava img { width: 100%; height: 100%; object-fit: cover; }
+        .dk-org__tx { min-width: 0; flex: 1; }
+        .dk-org__tx small { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #98a1b0; }
+        .dk-org__tx strong { display: block; font-size: 15.5px; font-weight: 750; color: var(--dk-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dk-org__tx a { font-size: 12.5px; font-weight: 700; color: var(--dk-accent); text-decoration: none; }
+        .dk-org__tx a:hover { text-decoration: underline; }
+
+        /* Hero depth: ambient blue glow around the floating poster */
+        .dk-poster { box-shadow: 0 34px 70px -24px rgba(0,0,0,0.72), 0 0 70px -12px rgba(47,107,255,0.4), 0 0 0 1px rgba(255,255,255,0.09); }
+
+        /* ---------- Inline luxury ticket panel (sticky rail) ---------- */
+        .dk-tix { background: #fff; border: 1px solid var(--dk-line); border-radius: 22px; padding: 22px 22px 24px; box-shadow: 0 28px 64px -34px rgba(15,22,38,0.42); transition: box-shadow 0.3s ease; }
+        .dk-tix.dk-pulse { box-shadow: 0 0 0 4px rgba(47,107,255,0.25), 0 28px 64px -30px rgba(15,22,38,0.5); }
+        .dk-tix__top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
+        .dk-tix__top h3 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.01em; color: var(--dk-ink); }
+        .dk-tix__top span { font-size: 12px; font-weight: 700; color: #c9720a; white-space: nowrap; }
+        .dk-tix__sub { margin: 0 0 14px; font-size: 12.5px; color: var(--dk-mut); }
+        .dk-trow { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--dk-line); }
+        .dk-trow:last-of-type { border-bottom: none; }
+        .dk-trow__i { min-width: 0; flex: 1; }
+        .dk-trow__i strong { display: block; font-size: 14.5px; font-weight: 700; color: var(--dk-ink); }
+        .dk-trow__i > small { font-size: 13.5px; font-weight: 800; color: var(--dk-ink); letter-spacing: -0.01em; }
+        .dk-av { display: inline-block; margin-top: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px; }
+        .dk-av--ok  { background: #eafaf0; color: #1f9d57; }
+        .dk-av--low { background: #fff4e6; color: #c9720a; }
+        .dk-av--out { background: #f3f4f6; color: #9aa1ac; }
+        .dk-step { display: flex; align-items: center; gap: 5px; flex: none; }
+        .dk-step button { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--dk-line); background: var(--dk-soft); color: var(--dk-ink); font-size: 18px; font-weight: 700; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease; }
+        .dk-step button:hover:not(:disabled) { border-color: var(--dk-accent); color: var(--dk-accent); background: #fff; }
+        .dk-step button:disabled { opacity: 0.38; cursor: default; }
+        .dk-step input { width: 28px; text-align: center; border: none; background: none; font: inherit; font-size: 15px; font-weight: 800; color: var(--dk-ink); pointer-events: none; -moz-appearance: textfield; padding: 0; }
+        .dk-step input::-webkit-outer-spin-button, .dk-step input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .dk-tix__total { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 0 16px; padding-top: 16px; border-top: 1px dashed var(--dk-line); }
+        .dk-tix__total small { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #98a1b0; }
+        .dk-tix__total b { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--dk-ink); font-variant-numeric: tabular-nums; }
+        .dk-tix .dk-btn { width: 100%; }
+        .dk-tix__sec { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 13px; font-size: 12px; font-weight: 600; color: var(--dk-mut); }
+        .dk-tix__sec svg { width: 14px; height: 14px; color: #22a565; }
+        .dk-tix__closed { text-align: center; font-size: 14px; font-weight: 650; color: var(--dk-mut); padding: 14px 0 4px; }
+
+        /* ---------- Reviews summary (honest aggregate — no fabricated text) ---------- */
+        .dk-rev { display: flex; align-items: center; gap: 30px; padding: 24px 26px; border: 1px solid var(--dk-line); border-radius: 20px; background: linear-gradient(135deg, #fbfcff, #f4f7fc); }
+        .dk-rev__score { flex: none; text-align: center; }
+        .dk-rev__score b { display: block; font-size: 46px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--dk-ink); }
+        .dk-rev__stars { margin-top: 7px; color: #f5a623; font-size: 15px; letter-spacing: 3px; }
+        .dk-rev__score small { display: block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--dk-mut); }
+        .dk-rev__txt strong { font-size: 17px; font-weight: 750; color: var(--dk-ink); letter-spacing: -0.01em; }
+        .dk-rev__txt p { margin: 7px 0 0; font-size: 14px; line-height: 1.65; color: var(--dk-mut); }
+
+        /* ---------- Similar events (full-width discovery rail) ---------- */
+        .dk-more { max-width: 1200px; margin: 0 auto; padding: 4px 40px 100px; }
+        .dk-more__h { margin: 0 0 24px; font-size: 24px; font-weight: 800; letter-spacing: -0.025em; color: var(--dk-ink); }
+        .dk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(206px, 1fr)); gap: 22px; }
+        .dk-card { display: block; text-decoration: none; color: inherit; border-radius: 18px; overflow: hidden; background: #fff; border: 1px solid var(--dk-line); box-shadow: 0 14px 32px -22px rgba(15,22,38,0.32); transition: transform 0.22s ease, box-shadow 0.22s ease; }
+        .dk-card:hover { transform: translateY(-4px); box-shadow: 0 26px 48px -22px rgba(15,22,38,0.4); }
+        .dk-card__img { aspect-ratio: 3 / 4; background: #10141d; overflow: hidden; }
+        .dk-card__img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.5s cubic-bezier(0.2,0.7,0.3,1); }
+        .dk-card:hover .dk-card__img img { transform: scale(1.05); }
+        .dk-card__b { padding: 14px 15px 16px; }
+        .dk-card__cat { font-size: 10.5px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dk-accent); }
+        .dk-card__t { margin: 5px 0 7px; font-size: 15px; font-weight: 750; line-height: 1.3; color: var(--dk-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .dk-card__m { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dk-mut); }
+        .dk-card__m svg { width: 13px; height: 13px; flex: none; opacity: 0.7; }
+        .dk-card__p { margin-top: 11px; font-size: 14px; font-weight: 800; color: var(--dk-ink); }
+
+        /* Scroll-reveal — sections rise gently into view (never the sticky rail) */
+        .dr-desk .dk-reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.65s cubic-bezier(0.2,0.7,0.3,1); }
+        .dr-desk .dk-reveal.is-in { opacity: 1; transform: none; }
+
+        /* Let the shared photo lightbox open on desktop too (it's mobile-only above) */
+        .district-event-page .dr-lbx { display: flex !important; }
+
+        @media (prefers-reduced-motion: reduce) {
+            .dk-btn, .dk-dir, .dk-artist__ph img, .dk-gallery img, .dk-card, .dk-card__img img { transition: none !important; }
+            .dr-desk .dk-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+        }
+    }
+
+    /* Narrower desktops: let the rail drop under the content instead of cramping. */
+    @media (min-width: 1025px) and (max-width: 1180px) {
+        .dr-desk .dk-body { grid-template-columns: 1fr; gap: 8px; }
+        .dr-desk .dk-rail { position: static; top: auto; flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
+        .dr-desk .dk-tix { flex: 2 1 340px; }
+        .dr-desk .dk-org { flex: 1 1 260px; }
+    }
 </style>
 
 <div class="district-event-page" style="position: relative;">
@@ -1230,6 +1505,424 @@
             @endif
 
             </div>{{-- /.dr-sheet --}}
+
+            {{-- =====================================================================
+                 DESKTOP BUILD (≥1025px only; hidden on phones via CSS). A fully
+                 separate, handcrafted layout so the app-parity mobile sheet above
+                 is never touched. Re-renders the same $event data — the Book CTAs
+                 open the shared .dr-tix ticket modal (drTixToggle).
+                 ===================================================================== --}}
+            @php
+                $dkTiers        = $event->ticketTypes->filter->isOnSale()->values();
+                $dkFrom         = $dkTiers->count() ? (float) $dkTiers->min(fn ($t) => $t->effectivePrice()) : (float) $event->price;
+                $dkSoldOut      = (int) $event->available_slots <= 0;
+                $dkSalesClosed  = $event->ticketTypes->isNotEmpty() && $dkTiers->isEmpty();
+                $dkPriceLabel   = $dkFrom > 0 ? '₹' . number_format($dkFrom) : 'Free';
+                $dkPriceSuffix  = $dkTiers->count() > 1 ? 'onwards' : ($dkFrom > 0 ? 'per ticket' : 'entry');
+                $dkLineup       = $event->lineupRows();
+                $dkGallery      = $event->galleryUrls();
+                $dkGtk          = $event->goodToKnowRows();
+                $dkNotes        = array_values(array_filter((array) ($event->info_notes ?? []), fn ($n) => is_string($n) && trim($n) !== ''));
+                $dkMapEmbed     = $event->mapEmbedUrl();
+                $dkDirections   = $event->directionsUrl();
+                $dkVenueName    = $event->venue ?: ($event->city ?: 'Venue');
+                $dkVenueAddr    = $event->location ?: ($event->city ? $event->city . ', India' : 'India');
+                $dkOrg          = $event->artist->name ?? 'Event Host';
+                $dkHeroImg      = $event->heroImageUrl() ?? asset('events.png');
+                $dkDateLong     = optional($event->date)->format('l, d M Y');
+                $dkDateShort    = optional($event->date)->format('D, d M');
+                $dkTime         = optional($event->date)->format('g:i A');
+                $dkDesc         = trim(strip_tags((string) $event->description));
+                $dkBookDisabled = $dkSoldOut || $dkSalesClosed;
+                $dkBookLabel    = $dkSoldOut ? 'Sold out' : ($dkSalesClosed ? 'Sales closed' : 'Book tickets');
+                // Honest urgency: only when the real remaining slot count is genuinely low.
+                $dkUrgent       = ! $dkBookDisabled && (int) $event->available_slots > 0 && (int) $event->available_slots <= 20;
+            @endphp
+            <div class="dr-desk">
+                {{-- Cinematic hero --}}
+                <header class="dk-hero">
+                    <div class="dk-hero__bg" style="background-image:url('{{ $dkHeroImg }}')"></div>
+                    <div class="dk-hero__inner">
+                        <div class="dk-poster">
+                            <img src="{{ $dkHeroImg }}" alt="{{ $event->title }}" fetchpriority="high" decoding="async">
+                        </div>
+                        <div class="dk-info">
+                            <div class="dk-chips">
+                                <span class="dk-chip dk-chip--cat">{{ $event->category ?: 'Event' }}</span>
+                                @if(!empty($event->rating) && $event->rating > 0)
+                                    <span class="dk-chip dk-chip--rate"><i>★</i>{{ number_format($event->rating, 1) }}@if($event->ratings_count) · {{ $event->ratings_count }} rating{{ $event->ratings_count == 1 ? '' : 's' }}@endif</span>
+                                @endif
+                                @if($countdown)<span class="dk-chip">{{ $countdown }}</span>@endif
+                            </div>
+                            <h1 class="dk-title">{{ $event->title }}</h1>
+                            <div class="dk-facts">
+                                @if($dkDateLong)
+                                <span class="dk-fact">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                    {{ $dkDateLong }}
+                                </span>
+                                @endif
+                                @if($dkTime)
+                                <span class="dk-fact">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+                                    {{ $dkTime }}
+                                </span>
+                                @endif
+                                @if($event->venue || $event->city)
+                                <span class="dk-fact">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                    {{ trim(($event->venue ?: '') . ($event->venue && $event->city ? ', ' : '') . ($event->city ?: ''), ', ') }}
+                                </span>
+                                @endif
+                            </div>
+                            <div class="dk-hero__actions">
+                                <div class="dk-price">
+                                    <small>{{ $dkFrom > 0 ? 'Tickets from' : 'Entry' }}</small>
+                                    <strong>{{ $dkPriceLabel }}</strong>
+                                </div>
+                                <button type="button" class="dk-btn" onclick="dkScrollToTix()" @if($dkBookDisabled) disabled @endif>
+                                    @unless($dkBookDisabled)
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><line x1="13" y1="5" x2="13" y2="19" stroke-dasharray="2 3"/></svg>
+                                    @endunless
+                                    {{ $dkBookLabel }}
+                                </button>
+                                <button type="button" class="dk-iconbtn" aria-label="Share" onclick="drShare()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
+                                </button>
+                            </div>
+                            <div class="dk-trust">
+                                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verified event</span>
+                                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secure checkout</span>
+                                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Instant e-tickets</span>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <nav class="dk-crumbs">
+                    <a href="/events" onclick="if(window.history.length>1){event.preventDefault();history.back();}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                        All events
+                    </a>
+                </nav>
+
+                <div class="dk-body">
+                    {{-- Left: editorial content column --}}
+                    <div class="dk-main">
+                        @if($dkDesc !== '')
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>About the event</h2></div>
+                            <div class="dk-about-wrap" id="dkAboutWrap">
+                                <div class="dk-about">{!! $event->description !!}</div>
+                                <button type="button" class="dk-readmore" id="dkAboutToggle" onclick="dkToggleAbout()" hidden>
+                                    <span class="lbl">Read more</span>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </button>
+                            </div>
+                        </section>
+                        @endif
+
+                        @if(count($dkLineup))
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>Who takes the stage</h2><span>{{ count($dkLineup) }} {{ \Illuminate\Support\Str::plural('artist', count($dkLineup)) }}</span></div>
+                            <div class="dk-artists">
+                                @foreach($dkLineup as $artist)
+                                    <div class="dk-artist">
+                                        <div class="dk-artist__ph">
+                                            @if($artist['image'])
+                                                <img src="{{ $artist['image'] }}" alt="{{ $artist['name'] }}" loading="lazy" decoding="async">
+                                            @endif
+                                        </div>
+                                        <strong>{{ $artist['name'] }}</strong>
+                                        @if($artist['subtitle'])<span>{{ $artist['subtitle'] }}</span>@endif
+                                    </div>
+                                @endforeach
+                            </div>
+                        </section>
+                        @endif
+
+                        @if(count($dkGallery) >= 1)
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>Gallery</h2><span>{{ count($dkGallery) }} {{ \Illuminate\Support\Str::plural('photo', count($dkGallery)) }}</span></div>
+                            <div class="dk-gallery">
+                                @foreach(array_slice($dkGallery, 0, 5) as $img)
+                                    <button type="button" onclick="drLbx(this)" aria-label="View photo full screen">
+                                        <img src="{{ $img }}" alt="{{ $event->title }}" loading="lazy" decoding="async">
+                                    </button>
+                                @endforeach
+                            </div>
+                        </section>
+                        @endif
+
+                        @if($event->venue || $event->city)
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>Location</h2></div>
+                            <div class="dk-venue">
+                                @if($dkMapEmbed && $event->hasCoordinates())
+                                    <iframe src="{{ $dkMapEmbed }}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="Venue location map"></iframe>
+                                @else
+                                    <div class="dk-venue__map"><span class="dk-venue__pin"></span></div>
+                                @endif
+                                <div class="dk-venue__ft">
+                                    <div style="min-width:0;">
+                                        <h4>{{ $dkVenueName }}</h4>
+                                        <p>{{ $dkVenueAddr }}</p>
+                                    </div>
+                                    <a class="dk-dir" href="{{ $dkDirections }}" target="_blank" rel="noopener">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+                                        Directions
+                                    </a>
+                                </div>
+                            </div>
+                        </section>
+                        @endif
+
+                        @if(count($dkGtk))
+                        <section class="dk-sec dk-gtk">
+                            <div class="dk-h"><h2>Good to know</h2></div>
+                            <div class="dr-gtk__card">
+                                <div class="dr-gtk__grid">
+                                    @foreach($dkGtk as $row)
+                                        <div class="dr-gtk__cell">
+                                            <span class="dr-gtk__ico">{!! $gtkIcon($row['icon']) !!}</span>
+                                            <span class="dr-gtk__txt">
+                                                <small>{{ $row['label'] }}</small>
+                                                <strong>{{ $row['value'] }}</strong>
+                                            </span>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
+                        </section>
+                        @endif
+
+                        @if(count($dkNotes))
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>Important information</h2></div>
+                            <ul class="dk-notes">
+                                @foreach($dkNotes as $note)<li>{{ $note }}</li>@endforeach
+                            </ul>
+                        </section>
+                        @endif
+
+                        @if(($event->ratings_count ?? 0) > 0)
+                        @php $dkStars = (int) round((float) $event->rating); @endphp
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>Ratings</h2></div>
+                            <div class="dk-rev">
+                                <div class="dk-rev__score">
+                                    <b>{{ number_format((float) $event->rating, 1) }}</b>
+                                    <div class="dk-rev__stars">{{ str_repeat('★', max(0, min(5, $dkStars))) }}{{ str_repeat('☆', max(0, 5 - $dkStars)) }}</div>
+                                    <small>{{ number_format($event->ratings_count) }} {{ \Illuminate\Support\Str::plural('rating', $event->ratings_count) }}</small>
+                                </div>
+                                <div class="dk-rev__txt">
+                                    <strong>Loved by attendees</strong>
+                                    <p>Rated {{ number_format((float) $event->rating, 1) }} out of 5 by {{ number_format($event->ratings_count) }} verified {{ \Illuminate\Support\Str::plural('attendee', $event->ratings_count) }} who booked this experience on Haraan.</p>
+                                </div>
+                            </div>
+                        </section>
+                        @endif
+                    </div>
+
+                    {{-- Right: sticky booking rail — an inline ticket selector that
+                         posts to the same auth-gated checkout the mobile modal uses. --}}
+                    <aside class="dk-rail">
+                        <form class="dk-tix" method="GET" action="/events/{{ $event->id }}/book">
+                            <div class="dk-tix__top">
+                                <h3>Select tickets</h3>
+                                @if($dkUrgent)<span>● Selling fast</span>@endif
+                            </div>
+                            <p class="dk-tix__sub">Pick your tickets — secure payment on the next step.</p>
+
+                            @if($dkSoldOut)
+                                <p class="dk-tix__closed">This event is sold out.</p>
+                            @elseif($dkSalesClosed)
+                                <p class="dk-tix__closed">Ticket sales are closed right now.</p>
+                            @elseif($dkTiers->count())
+                                @foreach($dkTiers as $tier)
+                                    @php
+                                        $rem = $tier->remaining();
+                                        $out = $rem !== null && $rem <= 0;
+                                        $max = $out ? 0 : min(10, $rem ?? 10);
+                                    @endphp
+                                    <div class="dk-trow" data-price="{{ $out ? 0 : $tier->effectivePrice() }}">
+                                        <div class="dk-trow__i">
+                                            <strong>{{ $tier->name }}</strong>
+                                            <small>{{ $tier->effectivePrice() > 0 ? '₹'.number_format($tier->effectivePrice()) : 'Free' }}</small>
+                                            @if($out)
+                                                <span class="dk-av dk-av--out">Sold out</span>
+                                            @elseif($rem !== null && $rem <= 10)
+                                                <span class="dk-av dk-av--low">Only {{ $rem }} left</span>
+                                            @endif
+                                        </div>
+                                        <div class="dk-step">
+                                            <button type="button" onclick="dkStep(this,-1)" aria-label="Fewer" @if($out) disabled @endif>−</button>
+                                            <input type="number" name="qty[{{ $tier->id }}]" value="0" min="0" max="{{ $max }}" readonly>
+                                            <button type="button" onclick="dkStep(this,1)" aria-label="More" @if($out) disabled @endif>+</button>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            @else
+                                <div class="dk-trow" data-price="{{ (float) $event->price }}">
+                                    <div class="dk-trow__i">
+                                        <strong>Standard entry</strong>
+                                        <small>{{ $event->price ? '₹'.number_format($event->price) : 'Free' }}</small>
+                                    </div>
+                                    <div class="dk-step">
+                                        <button type="button" onclick="dkStep(this,-1)" aria-label="Fewer">−</button>
+                                        <input type="number" name="qty[0]" value="0" min="0" max="10" readonly>
+                                        <button type="button" onclick="dkStep(this,1)" aria-label="More">+</button>
+                                    </div>
+                                </div>
+                            @endif
+
+                            @unless($dkSoldOut || $dkSalesClosed)
+                                <div class="dk-tix__total"><small>Total</small><b id="dkTotal">—</b></div>
+                                <button type="submit" class="dk-btn" id="dkCta" disabled><span class="lbl">Select tickets</span></button>
+                                <div class="dk-tix__sec">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    Secure checkout · Instant confirmation
+                                </div>
+                            @endunless
+                        </form>
+
+                        <div class="dk-org">
+                            <span class="dk-org__ava">
+                                @if($event->artist && $event->artist->image)
+                                    <img src="{{ $event->artist->image }}" alt="{{ $dkOrg }}">
+                                @else
+                                    {{ strtoupper(mb_substr(trim($dkOrg), 0, 1)) }}
+                                @endif
+                            </span>
+                            <span class="dk-org__tx">
+                                <small>Organised by</small>
+                                <strong>{{ $dkOrg }}</strong>
+                                @if($hostProfile ?? null)<a href="{{ route('site.host', ['slug' => $hostProfile->slug]) }}">View organiser page →</a>@endif
+                            </span>
+                        </div>
+                    </aside>
+                </div>
+
+                {{-- Similar events — real published events from the controller ($similar). --}}
+                @if(($similar ?? null) && count($similar))
+                <section class="dk-more">
+                    <h2 class="dk-more__h">More events you may like</h2>
+                    <div class="dk-cards">
+                        @foreach($similar as $s)
+                            @php
+                                $sTiers = $s->relationLoaded('ticketTypes') ? $s->ticketTypes->filter->isOnSale() : collect();
+                                $sFrom  = $sTiers->count() ? (float) $sTiers->min(fn ($t) => $t->effectivePrice()) : (float) $s->price;
+                            @endphp
+                            <a class="dk-card" href="/events/{{ $s->id }}">
+                                <div class="dk-card__img">
+                                    <img src="{{ $s->heroImageUrl() ?? asset('events.png') }}" alt="{{ $s->title }}" loading="lazy" decoding="async">
+                                </div>
+                                <div class="dk-card__b">
+                                    <div class="dk-card__cat">{{ $s->category ?: 'Event' }}</div>
+                                    <div class="dk-card__t">{{ $s->title }}</div>
+                                    <div class="dk-card__m">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                        {{ optional($s->date)->format('D, d M') ?: 'TBA' }}@if($s->city) · {{ $s->city }}@endif
+                                    </div>
+                                    <div class="dk-card__p">{{ $sFrom > 0 ? 'From ₹'.number_format($sFrom) : 'Free' }}</div>
+                                </div>
+                            </a>
+                        @endforeach
+                    </div>
+                </section>
+                @endif
+            </div>{{-- /.dr-desk --}}
+
+            {{-- Desktop-only behaviour: inline ticket total/steppers, hero→panel
+                 scroll, and gentle scroll-reveals. No effect on the mobile sheet. --}}
+            <script>
+                function dkStep(btn, delta) {
+                    var row = btn.closest('.dk-trow');
+                    var input = row.querySelector('input');
+                    var max = parseInt(input.getAttribute('max') || '10', 10);
+                    input.value = Math.min(max, Math.max(0, parseInt(input.value || '0', 10) + delta));
+                    // Reflect min/max on the stepper buttons.
+                    var v = parseInt(input.value, 10);
+                    var btns = row.querySelectorAll('.dk-step button');
+                    if (btns[0]) btns[0].disabled = v <= 0;
+                    if (btns[1]) btns[1].disabled = v >= max;
+                    dkTotal();
+                }
+                function dkTotal() {
+                    var total = 0, count = 0;
+                    document.querySelectorAll('.dk-tix .dk-trow[data-price]').forEach(function (r) {
+                        var q = parseInt(r.querySelector('input').value || '0', 10);
+                        total += q * parseFloat(r.dataset.price || '0');
+                        count += q;
+                    });
+                    var t = document.getElementById('dkTotal');
+                    if (t) t.textContent = count === 0 ? '—' : (total > 0 ? '₹' + total.toLocaleString('en-IN') : 'Free');
+                    var cta = document.getElementById('dkCta');
+                    if (cta) {
+                        cta.disabled = count === 0;
+                        cta.querySelector('.lbl').textContent = count === 0
+                            ? 'Select tickets'
+                            : 'Proceed · ' + count + (count === 1 ? ' ticket' : ' tickets');
+                    }
+                }
+                function dkScrollToTix() {
+                    var t = document.querySelector('.dk-tix') || document.querySelector('.dk-rail');
+                    if (!t) return;
+                    t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    t.classList.add('dk-pulse');
+                    setTimeout(function () { t.classList.remove('dk-pulse'); }, 1300);
+                }
+                function dkToggleAbout() {
+                    var w = document.getElementById('dkAboutWrap');
+                    var about = w.querySelector('.dk-about');
+                    var b = document.getElementById('dkAboutToggle');
+                    if (w.classList.contains('is-clamped')) {
+                        w.classList.remove('is-clamped');
+                        about.style.maxHeight = 'none';
+                        b.querySelector('.lbl').textContent = 'Read less';
+                        b.classList.add('is-open');
+                    } else {
+                        w.classList.add('is-clamped');
+                        about.style.maxHeight = (w.dataset.max || '176') + 'px';
+                        b.querySelector('.lbl').textContent = 'Read more';
+                        b.classList.remove('is-open');
+                        w.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+                document.addEventListener('DOMContentLoaded', function () {
+                    if (!window.matchMedia('(min-width: 1025px)').matches) return;
+                    // "About" — clamp to 6 lines + reveal the Read more toggle only when
+                    // the copy actually overflows (short descriptions stay fully shown).
+                    var aw = document.getElementById('dkAboutWrap');
+                    if (aw) {
+                        var about = aw.querySelector('.dk-about');
+                        var tog = document.getElementById('dkAboutToggle');
+                        var lh = parseFloat(getComputedStyle(about).lineHeight) || 30;
+                        var max = Math.round(lh * 6);
+                        aw.dataset.max = max;
+                        if (about.scrollHeight > max + 8) {
+                            aw.classList.add('is-clamped');
+                            about.style.maxHeight = max + 'px';
+                            if (tog) tog.hidden = false;
+                        }
+                    }
+                    // Disable the leading "−" on load (all rows start at 0).
+                    document.querySelectorAll('.dk-tix .dk-step button[aria-label="Fewer"]').forEach(function (b) {
+                        if (!b.disabled) b.disabled = true;
+                    });
+                    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                    if (!reduce && 'IntersectionObserver' in window) {
+                        var io = new IntersectionObserver(function (entries) {
+                            entries.forEach(function (e) {
+                                if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+                            });
+                        }, { rootMargin: '0px 0px -60px 0px' });
+                        document.querySelectorAll('.dr-desk .dk-sec, .dr-desk .dk-more').forEach(function (s) {
+                            s.classList.add('dk-reveal'); io.observe(s);
+                        });
+                    }
+                });
+            </script>
         </main>
     </div>
 

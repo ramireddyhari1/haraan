@@ -119,11 +119,26 @@ final class PublicWebController extends Controller
         $hostProfile = $event->partner?->hostProfile;
         $hostProfile = $hostProfile && $hostProfile->isLive() ? $hostProfile : null;
 
+        // "More events you may like" — real published events, never this one.
+        // Prefer the same category, then the same city, then anything upcoming,
+        // so the rail is relevant without inventing data. Ordered soonest-first.
+        $similar = Event::query()
+            ->where('status', 'published')
+            ->with('ticketTypes')
+            ->whereKeyNot($event->getKey())
+            ->orderByRaw('CASE WHEN category = ? THEN 0 ELSE 1 END', [$event->category])
+            ->orderByRaw('CASE WHEN city = ? THEN 0 ELSE 1 END', [$event->city])
+            ->orderByRaw('CASE WHEN date >= ? THEN 0 ELSE 1 END', [now()->startOfDay()])
+            ->orderBy('date')
+            ->limit(6)
+            ->get();
+
         return view('site.event', [
             'title' => $event->title,
             'event' => $event,
             'id'    => $id,
             'hostProfile' => $hostProfile,
+            'similar' => $similar,
             'seo'   => $this->eventSeo($event),
         ]);
     }
