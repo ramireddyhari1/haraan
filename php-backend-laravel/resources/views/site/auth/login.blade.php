@@ -18,7 +18,8 @@
 
     .lgn__head { padding: 30px 30px 8px; text-align: center; position: relative; }
     .lgn__head::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #2563EB 0%, #10B981 100%); }
-    .lgn__brand { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -.02em; display: inline-block; margin-bottom: 12px; background: linear-gradient(100deg, #2563EB 0%, #10B981 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .lgn__brand { display: inline-block; margin-bottom: 12px; line-height: 0; }
+    .lgn__brand img { height: 30px; width: auto; display: block; }
     .lgn__title { margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 800; color: #0F172A; letter-spacing: -.02em; }
     .lgn__sub { margin: 6px 0 0; font-size: 13px; color: #64748B; }
 
@@ -76,7 +77,7 @@
 <div class="lgn">
     <div class="lgn__card">
         <div class="lgn__head">
-            <div class="lgn__brand">Haraan</div>
+            <div class="lgn__brand"><img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan"></div>
             @if(session('whatsapp_phone'))
                 <h1 class="lgn__title">Verify your number</h1>
                 <p class="lgn__sub">Enter the 6-digit code sent to your WhatsApp.</p>
