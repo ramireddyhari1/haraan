@@ -176,6 +176,17 @@ Route::post('/auth/firebase-phone', [\App\Http\Controllers\Auth\FirebasePhoneAut
     ->middleware('throttle:auth')
     ->name('firebase.phone.login');
 
+// Partner console sign-in (phone OTP / Google / email) — the console's own login
+// page (/partner/login) posts here. Unlike the member flows above, these authenticate
+// ONLY existing PARTNER accounts and land on the partner dashboard (see PartnerAuthController).
+Route::controller(\App\Http\Controllers\Auth\PartnerAuthController::class)
+    ->middleware('throttle:auth')
+    ->group(function (): void {
+        Route::post('/partner/auth/phone', 'phone')->name('partner.auth.phone');
+        Route::post('/partner/auth/google', 'google')->name('partner.auth.google');
+        Route::post('/partner/auth/email', 'email')->name('partner.auth.email');
+    });
+
 /*
 |--------------------------------------------------------------------------
 | ERP Portal Routes (Admin & Partner)
