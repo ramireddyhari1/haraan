@@ -48,12 +48,12 @@
     .lgn__vtag { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; color: #cfe0ff; padding: 3px 9px; border-radius: 999px; background: rgba(56,132,255,.28); }
 
     .lgn__head { padding: 32px 30px 14px; text-align: center; position: relative; overflow: hidden;
-        background: linear-gradient(180deg, #E9F1FF 0%, #F4F8FF 46%, #FFFFFF 100%); }
+        background: linear-gradient(180deg, #FAFCFF 0%, #FFFFFF 60%); }
     .lgn__head::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #2563EB 0%, #10B981 100%); z-index: 2; }
-    /* Soft aurora glow behind the brand so the card head reads premium, not flat. */
-    .lgn__head::after { content: ""; position: absolute; top: -70px; left: 50%; transform: translateX(-50%);
+    /* Whisper-faint glow behind the brand — just enough to lift it off flat white. */
+    .lgn__head::after { content: ""; position: absolute; top: -80px; left: 50%; transform: translateX(-50%);
         width: 320px; height: 200px; border-radius: 50%; z-index: 0; pointer-events: none;
-        background: radial-gradient(closest-side, rgba(37,99,235,.20), transparent 72%); filter: blur(10px); }
+        background: radial-gradient(closest-side, rgba(37,99,235,.06), transparent 72%); filter: blur(12px); }
     .lgn__head > * { position: relative; z-index: 1; }
     .lgn__brand { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; margin-bottom: 10px; line-height: 1; }
     .lgn__brand img { height: 30px; width: auto; display: block; }
