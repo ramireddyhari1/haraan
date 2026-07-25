@@ -47,13 +47,34 @@ final class PartnerAuthController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        $user = User::query()->where('phone', $phone)->first();
+        $user = $this->findByPhone($phone);
 
         return $this->completeOrReject(
             $request,
             $user,
             'We couldn\'t find a partner account for this number. Ask your admin to add it, or use email.',
         );
+    }
+
+    /**
+     * Match a verified E.164 number against however the partner's phone happens to be
+     * stored. Firebase always hands us +91XXXXXXXXXX, but admin-entered numbers live in
+     * the DB in every shape — bare 10 digits, a leading 0, "91…", "+91…" — so an exact
+     * `where('phone', $e164)` silently misses. Compare on the last 10 digits across the
+     * common variants instead.
+     */
+    private function findByPhone(string $e164): ?User
+    {
+        $digits = preg_replace('/\D/', '', $e164) ?? '';
+        $local  = substr($digits, -10);
+
+        if ($local === '' || strlen($local) < 10) {
+            return User::query()->where('phone', $e164)->first();
+        }
+
+        $candidates = array_unique([$e164, $local, '+91'.$local, '91'.$local, '0'.$local]);
+
+        return User::query()->whereIn('phone', $candidates)->first();
     }
 
     /** POST /partner/auth/google  { credential } — Google Identity Services token. */
