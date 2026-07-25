@@ -16,10 +16,18 @@
     .lgn { max-width: 420px; margin: 44px auto 64px; padding: 0 18px; }
     .lgn__card { background: #fff; border: 1px solid #EAEEF5; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 26px 56px -30px rgba(15,23,42,.26); }
 
-    .lgn__head { padding: 30px 30px 8px; text-align: center; position: relative; }
-    .lgn__head::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #2563EB 0%, #10B981 100%); }
-    .lgn__brand { display: inline-block; margin-bottom: 12px; line-height: 0; }
+    .lgn__head { padding: 32px 30px 14px; text-align: center; position: relative; overflow: hidden;
+        background: linear-gradient(180deg, #E9F1FF 0%, #F4F8FF 46%, #FFFFFF 100%); }
+    .lgn__head::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #2563EB 0%, #10B981 100%); z-index: 2; }
+    /* Soft aurora glow behind the brand so the card head reads premium, not flat. */
+    .lgn__head::after { content: ""; position: absolute; top: -70px; left: 50%; transform: translateX(-50%);
+        width: 320px; height: 200px; border-radius: 50%; z-index: 0; pointer-events: none;
+        background: radial-gradient(closest-side, rgba(37,99,235,.20), transparent 72%); filter: blur(10px); }
+    .lgn__head > * { position: relative; z-index: 1; }
+    .lgn__brand { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; margin-bottom: 10px; line-height: 1; }
     .lgn__brand img { height: 30px; width: auto; display: block; }
+    .lgn__brand-tag { font-family: "Segoe Script", "Bradley Hand", "Snell Roundhand", "Brush Script MT", "Comic Sans MS", cursive;
+        font-size: 18px; font-weight: 400; color: #2563EB; letter-spacing: .01em; transform: rotate(-4deg); }
     .lgn__title { margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 800; color: #0F172A; letter-spacing: -.02em; }
     .lgn__sub { margin: 6px 0 0; font-size: 13px; color: #64748B; }
 
@@ -77,7 +85,10 @@
 <div class="lgn">
     <div class="lgn__card">
         <div class="lgn__head">
-            <div class="lgn__brand"><img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan"></div>
+            <div class="lgn__brand">
+                <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan">
+                <span class="lgn__brand-tag">Login</span>
+            </div>
             @if(session('whatsapp_phone'))
                 <h1 class="lgn__title">Verify your number</h1>
                 <p class="lgn__sub">Enter the 6-digit code sent to your WhatsApp.</p>
