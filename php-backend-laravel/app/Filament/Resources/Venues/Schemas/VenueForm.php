@@ -138,7 +138,7 @@ class VenueForm
                             ->columnSpanFull(),
                         ViewField::make('map_picker')
                             ->hiddenLabel()
-                            ->view('filament.venue-map-picker')
+                            ->view('filament.venue-place-picker')
                             ->dehydrated(false)
                             ->columnSpanFull(),
                         TextInput::make('latitude')

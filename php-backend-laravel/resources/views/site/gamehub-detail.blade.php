@@ -31,6 +31,14 @@
         : trim($venue->title . ' ' . ($venue->address ?: $venue->location));
     $mvMapUrl = $venue->map_link ?: 'https://www.google.com/maps/search/?api=1&query=' . urlencode($mvQuery);
 
+    // Live embedded map — only when we have a real pin AND a Google key. Otherwise
+    // the "Show in Map" link alone stands (no fabricated location).
+    $mvHasCoords = $venue->latitude !== null && $venue->longitude !== null;
+    $mvMapsKey = (string) config('services.google_maps.key');
+    $mvEmbed = ($mvMapsKey !== '' && $mvHasCoords)
+        ? 'https://www.google.com/maps/embed/v1/place?' . http_build_query(['key' => $mvMapsKey, 'q' => $mvQuery, 'zoom' => '16'])
+        : null;
+
     // "Good to know" = cancellation policy first, then the admin-authored rules.
     $mvGoodToKnow = array_values(array_filter(array_merge(
         [$venue->cancellation],
@@ -142,6 +150,13 @@
                 Show in Map
             </a>
         </div>
+
+        @if($mvEmbed)
+            {{-- Live embedded Google map pinned to the venue's exact coordinates. --}}
+            <div class="mven__map" style="margin-top: 12px; border-radius: 16px; overflow: hidden; border: 1px solid #ececf1;">
+                <iframe src="{{ $mvEmbed }}" width="100%" height="200" style="border:0; display:block;" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="{{ $venue->title }} location map"></iframe>
+            </div>
+        @endif
 
         {{-- ── 3. Rating summary + RATE VENUE ────────────────────────────── --}}
         <div class="mven__rule"></div>

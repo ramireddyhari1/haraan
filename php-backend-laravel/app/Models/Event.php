@@ -58,6 +58,8 @@ final class Event extends Model
         'access_code',
         'location',
         'map_link',
+        'latitude',
+        'longitude',
         'city',
         'venue',
         'date',
@@ -101,6 +103,8 @@ final class Event extends Model
     {
         return [
             'date'           => 'datetime',
+            'latitude'       => 'float',
+            'longitude'      => 'float',
             'price'          => 'float',
             'convenience_fee_value' => 'float',
             'fees'           => 'array',
@@ -224,6 +228,56 @@ final class Event extends Model
     public function heroImageUrl(): ?string
     {
         return $this->imageUrls()[0] ?? null;
+    }
+
+    /** True once the event has a real geocoded pin (set via Places Autocomplete). */
+    public function hasCoordinates(): bool
+    {
+        return $this->latitude !== null && $this->longitude !== null;
+    }
+
+    /**
+     * The best map query for this event: the exact "lat,lng" pin when we have it,
+     * otherwise the venue + city free text (so the link still lands roughly right
+     * on older events created before coordinates existed).
+     */
+    public function mapsQuery(): string
+    {
+        if ($this->hasCoordinates()) {
+            return $this->latitude . ',' . $this->longitude;
+        }
+
+        $bits = array_filter([trim((string) $this->venue), trim((string) ($this->location ?: $this->city))]);
+
+        return $bits === [] ? (string) ($this->city ?: 'India') : implode(' ', $bits);
+    }
+
+    /** A "Directions" deep link — precise when coordinates exist, text search otherwise. */
+    public function directionsUrl(): string
+    {
+        return 'https://www.google.com/maps/dir/?api=1&destination=' . rawurlencode($this->mapsQuery());
+    }
+
+    /**
+     * An embeddable Google map URL centred on the event, or null when no API key is
+     * configured (the page then falls back to its plain Maps-search card). Uses the
+     * exact pin when known; otherwise a place search so it never claims a false spot.
+     */
+    public function mapEmbedUrl(?string $apiKey = null): ?string
+    {
+        $key = $apiKey ?? (string) config('services.google_maps.key');
+        if ($key === '') {
+            return null;
+        }
+
+        // "place" mode drops a marker at q — which is a "lat,lng" pin when we have
+        // coordinates, or a text search otherwise (so it never claims a false spot).
+        $params = ['key' => $key, 'q' => $this->mapsQuery()];
+        if ($this->hasCoordinates()) {
+            $params['zoom'] = '16';
+        }
+
+        return 'https://www.google.com/maps/embed/v1/place?' . http_build_query($params);
     }
 
     /**

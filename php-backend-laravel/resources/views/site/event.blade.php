@@ -818,7 +818,9 @@
                 $mTime = optional($event->date)->format('g:i A');
                 $mVenueShort = $event->venue ? \Illuminate\Support\Str::before($event->venue, ',') : 'Venue';
                 $mSchedule = $event->scheduleRows();
-                $mMapsUrl = 'https://www.google.com/maps/search/?api=1&query='.urlencode(trim(($event->venue ?: '').' '.($event->city ?: 'India')));
+                // Precise "Directions" deep link — uses the exact lat/lng pin when the
+                // event has one, else a venue+city text search (Event::directionsUrl()).
+                $mMapsUrl = $event->directionsUrl();
             @endphp
             <div class="dr-mmeta">
                 <div class="dr-trust">
@@ -878,10 +880,11 @@
                                 {!! $event->description !!}
                             </div>
 
-                            {{-- Premium Horizontal Maps Card — links to a real Maps
-                                 search for the venue. The preview is a generic map
-                                 texture, not a hardcoded (and previously wrong-city)
-                                 embed, so it never claims a false location. --}}
+                            {{-- Venue map. When the event has real coordinates and a
+                                 Google key is configured, show a live embedded map
+                                 pinned to the exact spot. Otherwise fall back to the
+                                 generic-texture card that links to a Maps search — it
+                                 never claims a false location. --}}
                             @php
                                 $mapLoc = $event->location ?: '';
                                 $mapVenue = $event->venue ?: '';
@@ -890,7 +893,25 @@
                                     ? trim($mapVenue.' '.$mapLoc)
                                     : ($mapLoc ?: $mapVenue);
                                 $mapQuery = urlencode(trim(trim($mapBase).', '.($event->city ?: 'India'), ', '));
+                                $mapEmbed = $event->mapEmbedUrl();
+                                $directions = $event->directionsUrl();
                             @endphp
+                            @if($mapEmbed && $event->hasCoordinates())
+                            {{-- Live embedded Google map (exact pin) --}}
+                            <div style="margin-top: 24px; border: 1px solid #f0f0f0; border-radius: 24px; background: #ffffff; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.03);">
+                                <iframe src="{{ $mapEmbed }}" width="100%" height="220" style="border:0; display:block;" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="Venue location map"></iframe>
+                                <div style="padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                                    <div style="min-width: 0;">
+                                        <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px;">Venue Location</div>
+                                        <h4 style="margin: 0 0 4px 0; font-size: 16px; font-weight: 800; color: #121620; line-height: 1.3;">{{ $event->venue }}</h4>
+                                        <div style="font-size: 13px; color: #71717a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ $event->location ?: ($event->city ? $event->city.', India' : 'India') }}</div>
+                                    </div>
+                                    <a href="{{ $directions }}" target="_blank" rel="noopener" style="flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border-radius: 14px; background: #3b82f6; color: #ffffff; font-weight: 700; font-size: 13px; text-decoration: none; box-shadow: 0 4px 12px rgba(59,130,246,0.3);">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>Directions
+                                    </a>
+                                </div>
+                            </div>
+                            @else
                             <a href="https://www.google.com/maps/search/?api=1&query={{ $mapQuery }}" target="_blank" rel="noopener" aria-label="Open venue location in Maps" style="margin-top: 24px; border: 1px solid #f0f0f0; border-radius: 24px; background: #ffffff; overflow: hidden; display: flex; height: 160px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.03); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; text-decoration: none; color: inherit;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 35px rgba(0, 0, 0, 0.06)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 8px 30px rgba(0, 0, 0, 0.03)';">
                                 {{-- Left Half: generic map texture with a pin affordance --}}
                                 <div style="width: 45%; position: relative; height: 100%; background: linear-gradient(135deg, #e0f2fe 0%, #eff6ff 100%); overflow: hidden;">
@@ -928,6 +949,7 @@
                                     </div>
                                 </div>
                             </a>
+                            @endif
 
                             {{-- Mobile-only app-parity rows: Organizer + Venue
                                  (EventOrganizerSection / EventVenueSection order). --}}

@@ -16,6 +16,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -290,6 +291,14 @@ class EventForm
                     // silently blocked Create for hosts who left it untouched.
                     ->default('7:00 PM')
                     ->placeholder('7:00 PM'),
+                // Google Places search + draggable pin. Auto-fills venue, area/address,
+                // the maps link and the lat/lng below. Falls back to a plain pin-picker
+                // when no API key is set. See filament/places-picker.blade.php.
+                ViewField::make('place_picker')
+                    ->hiddenLabel()
+                    ->view('filament.event-place-picker')
+                    ->dehydrated(false)
+                    ->columnSpanFull(),
                 Select::make('city')
                     ->label('City')
                     ->options(self::cityOptions())
@@ -300,7 +309,8 @@ class EventForm
                 TextInput::make('venue')
                     ->label('Venue name')
                     ->required()
-                    ->placeholder('e.g. Quake Arena'),
+                    ->placeholder('e.g. Quake Arena')
+                    ->helperText('Filled by the search above — or type it.'),
                 TextInput::make('location')
                     ->label('Area / address')
                     ->required()
@@ -311,8 +321,26 @@ class EventForm
                     ->url()
                     ->maxLength(600)
                     ->placeholder('https://maps.app.goo.gl/…')
-                    ->helperText('Open the venue in Google Maps → Share → Copy link, and paste it here. Powers the "Directions" button.')
+                    ->helperText('Set automatically when you pick a place above. Or paste one: Google Maps → Share → Copy link. Powers the "Directions" button.')
                     ->columnSpanFull(),
+                // Set by the picker; kept visible + editable as a fallback (right-click
+                // a spot in Google Maps for "lat, lng"). These persist to the event.
+                TextInput::make('latitude')
+                    ->numeric()
+                    ->step('0.0000001')
+                    ->minValue(-90)
+                    ->maxValue(90)
+                    ->live()
+                    ->placeholder('17.4239')
+                    ->helperText('Set by the search/pin above.'),
+                TextInput::make('longitude')
+                    ->numeric()
+                    ->step('0.0000001')
+                    ->minValue(-180)
+                    ->maxValue(180)
+                    ->live()
+                    ->placeholder('78.4738')
+                    ->helperText('Set by the search/pin above.'),
             ]);
     }
 

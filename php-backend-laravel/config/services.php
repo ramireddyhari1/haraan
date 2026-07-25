@@ -141,4 +141,15 @@ return [
         'credentials' => env('FCM_CREDENTIALS_PATH'),
     ],
 
+    // Google Maps Platform — one browser key, restricted by HTTP referrer, with
+    // Maps JavaScript API + Places API + Maps Embed API enabled. Used client-side:
+    // Places Autocomplete in the /control + /partner event/venue forms, and the
+    // embedded map on the public event/venue detail pages. It's exposed to the
+    // browser by design (that's what the referrer restriction is for). When unset,
+    // the forms fall back to the manual pin/text entry and the public pages fall
+    // back to a plain Maps search link — nothing breaks, it just isn't as good.
+    'google_maps' => [
+        'key' => env('GOOGLE_MAPS_API_KEY'),
+    ],
+
 ];
