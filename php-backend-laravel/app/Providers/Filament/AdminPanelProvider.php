@@ -7,11 +7,14 @@ use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use App\Filament\Pages\Dashboard;
+use App\Filament\Auth\ControlLogin;
 use Filament\Navigation\NavigationGroup;
 use Filament\Panel;
 use Filament\PanelProvider;
+use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
 use Filament\Support\Colors\Color;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -21,6 +24,21 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
+    public function register(): void
+    {
+        parent::register();
+
+        // BookMyShow-style split brand panel (blue aurora) on the left of the
+        // /control sign-in screen — the admin twin of the partner console's
+        // PartnerLogin. Scoped to ControlLogin so the rest of the panel (and the
+        // shared compiled theme) stay untouched.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::SIMPLE_LAYOUT_START,
+            fn (): string => Blade::render('@include(\'filament.control.auth-brand\')'),
+            scopes: ControlLogin::class,
+        );
+    }
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -36,7 +54,7 @@ class AdminPanelProvider extends PanelProvider
             // of the design system so tables/forms/dashboard inherit it too.
             ->font('Inter')
             ->viteTheme('resources/css/filament/control/theme.css')
-            ->login()
+            ->login(ControlLogin::class)
             ->profile()
             ->multiFactorAuthentication([
                 \Filament\Auth\MultiFactor\App\AppAuthentication::make()
