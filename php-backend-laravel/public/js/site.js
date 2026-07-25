@@ -729,7 +729,14 @@ document.addEventListener('DOMContentLoaded', () => {
     (function initGoogleSignIn() {
         const cfg  = window.HaraanGoogleAuth;
         const slots = document.querySelectorAll('.auth-google__btn');
-        if (!cfg || !slots.length) return;
+        if (!slots.length) return;
+        // No OAuth config on this page (e.g. the visitor is already signed in, so
+        // layout.blade.php omits HaraanGoogleAuth). Drop the empty Google slot so it
+        // never leaves a blank gap where the button would be.
+        if (!cfg) {
+            document.querySelectorAll('.auth-google').forEach((el) => el.remove());
+            return;
+        }
 
         const showError = (msg) => {
             document.querySelectorAll('.auth-google__error').forEach((el) => {

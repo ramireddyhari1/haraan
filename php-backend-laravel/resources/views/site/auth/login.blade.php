@@ -13,8 +13,39 @@
             #F4F6FA;
         min-height: 100vh;
     }
-    .lgn { max-width: 420px; margin: 44px auto 64px; padding: 0 18px; }
-    .lgn__card { background: #fff; border: 1px solid #EAEEF5; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 26px 56px -30px rgba(15,23,42,.26); }
+    /* Desktop: a 3-part hero — value copy (left) · card (centre) · brand visual
+       (right) — so the wide page no longer reads as an empty card floating in
+       whitespace. The side columns collapse away below 1024px (see media query). */
+    .lgn { max-width: 1160px; margin: 40px auto 64px; padding: 0 20px;
+        display: flex; align-items: center; justify-content: center; gap: clamp(28px, 4vw, 60px); }
+    .lgn__card { flex: 0 0 412px; max-width: 412px; background: #fff; border: 1px solid #EAEEF5; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 26px 56px -30px rgba(15,23,42,.26); }
+
+    /* ---- Left value-prop column ---- */
+    .lgn__aside { flex: 1 1 0; max-width: 356px; }
+    .lgn__aside h2 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: clamp(27px, 2.3vw, 34px); font-weight: 800; letter-spacing: -.03em; color: #0F172A; line-height: 1.12; margin: 0 0 14px; }
+    .lgn__aside h2 .g { background: linear-gradient(100deg, #2563EB 0%, #10B981 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .lgn__aside p { color: #5B6472; font-size: 15px; line-height: 1.6; margin: 0 0 24px; }
+    .lgn__feat { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+    .lgn__feat li { display: flex; align-items: center; gap: 12px; font-size: 14.5px; font-weight: 600; color: #334155; }
+    .lgn__feat .ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(180deg, #EAF1FF, #F5F9FF); box-shadow: inset 0 0 0 1px #E1E9F7; }
+    .lgn__feat .ic svg { width: 20px; height: 20px; stroke: #2563EB; fill: none; stroke-width: 2; }
+
+    /* ---- Right brand visual (decorative) ---- */
+    .lgn__visual { flex: 1 1 0; max-width: 336px; }
+    .lgn__vcard { position: relative; overflow: hidden; border-radius: 22px; padding: 24px 22px; min-height: 360px; color: #eaf0ff;
+        background: radial-gradient(520px 340px at 15% -10%, rgba(59,130,246,.55), transparent 62%), radial-gradient(420px 320px at 110% 10%, rgba(16,185,129,.4), transparent 60%), linear-gradient(160deg, #0b1c46 0%, #0a1738 55%, #0a1230 100%);
+        box-shadow: 0 34px 66px -34px rgba(10,23,56,.6); display: flex; flex-direction: column; }
+    .lgn__vcard-grid { position: absolute; inset: 0; opacity: .16; background-image: linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px); background-size: 38px 38px; -webkit-mask-image: radial-gradient(120% 90% at 30% 0%, #000 30%, transparent 74%); mask-image: radial-gradient(120% 90% at 30% 0%, #000 30%, transparent 74%); }
+    .lgn__vcard > * { position: relative; z-index: 1; }
+    .lgn__vcard-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #9db8ff; }
+    .lgn__vcard-h { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 21px; font-weight: 800; letter-spacing: -.02em; color: #fff; margin: 8px 0 16px; line-height: 1.2; }
+    .lgn__vlist { display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+    .lgn__vrow { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 13px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.13); backdrop-filter: blur(6px); }
+    .lgn__vthumb { flex: none; width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(150deg, #6ea0ff, #2f6bff); box-shadow: 0 6px 14px -6px rgba(47,107,255,.7); display: grid; place-items: center; font-size: 18px; }
+    .lgn__vmeta { min-width: 0; line-height: 1.25; }
+    .lgn__vmeta b { display: block; font-size: 13.5px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lgn__vmeta span { font-size: 11.5px; color: rgba(224,232,255,.62); }
+    .lgn__vtag { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; color: #cfe0ff; padding: 3px 9px; border-radius: 999px; background: rgba(56,132,255,.28); }
 
     .lgn__head { padding: 32px 30px 14px; text-align: center; position: relative; overflow: hidden;
         background: linear-gradient(180deg, #E9F1FF 0%, #F4F8FF 46%, #FFFFFF 100%); }
@@ -30,6 +61,13 @@
         font-size: 18px; font-weight: 400; color: #2563EB; letter-spacing: .01em; transform: rotate(-4deg); }
     .lgn__title { margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 800; color: #0F172A; letter-spacing: -.02em; }
     .lgn__sub { margin: 6px 0 0; font-size: 13px; color: #64748B; }
+
+    /* Tablet / mobile: drop the flanking columns, centre just the card. */
+    @media (max-width: 1023px) {
+        .lgn { max-width: 420px; display: block; }
+        .lgn__aside, .lgn__visual { display: none; }
+        .lgn__card { flex: none; max-width: none; }
+    }
 
     .lgn__body { padding: 20px 30px 28px; }
     .lgn-alert { background: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; border-radius: 12px; padding: 10px 13px; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
@@ -83,6 +121,17 @@
 </style>
 
 <div class="lgn">
+    {{-- Left: value proposition (desktop only). --}}
+    <aside class="lgn__aside">
+        <h2>One login for <span class="g">shows &amp; games</span> in your city.</h2>
+        <p>Book event tickets and organise your matches — Haraan keeps tickets and play under a single account.</p>
+        <ul class="lgn__feat">
+            <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16M4 8a2 2 0 0 1 0-4h16a2 2 0 0 1 0 4M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M12 12v5"/></svg></span> Instant tickets for events near you</li>
+            <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg></span> Find turfs, courts &amp; players in GameHub</li>
+            <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span> One account, secure &amp; free to join</li>
+        </ul>
+    </aside>
+
     <div class="lgn__card">
         <div class="lgn__head">
             <div class="lgn__brand">
@@ -248,5 +297,31 @@
             @endif
         </div>
     </div>
+
+    {{-- Right: decorative brand visual (desktop only). --}}
+    <aside class="lgn__visual" aria-hidden="true">
+        <div class="lgn__vcard">
+            <div class="lgn__vcard-grid"></div>
+            <span class="lgn__vcard-eyebrow">Live in Bengaluru</span>
+            <h2 class="lgn__vcard-h">Thousands of events &amp; games every week.</h2>
+            <div class="lgn__vlist">
+                <div class="lgn__vrow">
+                    <span class="lgn__vthumb">🎫</span>
+                    <span class="lgn__vmeta"><b>Weekend Live Music</b><span>Sat · from ₹499</span></span>
+                    <span class="lgn__vtag">Events</span>
+                </div>
+                <div class="lgn__vrow">
+                    <span class="lgn__vthumb">🏏</span>
+                    <span class="lgn__vmeta"><b>Box Cricket Turf</b><span>Tonight · 4 slots left</span></span>
+                    <span class="lgn__vtag">GameHub</span>
+                </div>
+                <div class="lgn__vrow">
+                    <span class="lgn__vthumb">⚡</span>
+                    <span class="lgn__vmeta"><b>Instant check-in</b><span>Scan &amp; go at the gate</span></span>
+                    <span class="lgn__vtag">Fast</span>
+                </div>
+            </div>
+        </div>
+    </aside>
 </div>
 @endsection
