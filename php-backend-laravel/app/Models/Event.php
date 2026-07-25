@@ -68,6 +68,7 @@ final class Event extends Model
         'total_slots',
         'available_slots',
         'images',
+        'gallery',
         'status',
         'placements',
         'rating',
@@ -104,6 +105,7 @@ final class Event extends Model
             'rating'         => 'float',
             'ratings_count'  => 'integer',
             'images'         => 'array',
+            'gallery'        => 'array',
             'placements'     => 'array',
             'seat_selection' => 'boolean',
             'seat_rows'      => 'integer',
@@ -216,6 +218,18 @@ final class Event extends Model
     public function heroImageUrl(): ?string
     {
         return $this->imageUrls()[0] ?? null;
+    }
+
+    /**
+     * The showcase gallery — extra photos beyond the poster, managed from the
+     * Gallery step in the partner console and rendered as the "Gallery" section
+     * on the event detail page. Absolute, browser-loadable URLs.
+     *
+     * @return list<string>
+     */
+    public function galleryUrls(): array
+    {
+        return \App\Support\MediaUrl::resolveMany(is_array($this->gallery) ? $this->gallery : []);
     }
 
     /**

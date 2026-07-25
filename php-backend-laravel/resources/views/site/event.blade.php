@@ -754,8 +754,9 @@
                     : null;
             @endphp
             @php
-                // Hero pager: swipe through all the event's photos (mobile).
-                $heroImgs = count($event->imageUrls()) ? array_slice($event->imageUrls(), 0, 6) : [$heroImg];
+                // Hero pager: swipe through the poster + gallery photos (mobile).
+                $heroPhotos = array_values(array_merge($event->imageUrls(), $event->galleryUrls()));
+                $heroImgs = count($heroPhotos) ? array_slice($heroPhotos, 0, 6) : [$heroImg];
             @endphp
             <div class="dr-hero-banner" style="margin-top: 0; margin-bottom: 12px;">
                 <div class="dr-hero__rail">
@@ -1069,11 +1070,11 @@
                 </section>
                 @endif
 
-                {{-- Gallery: the event's own images (not stock arcade photos).
-                     Shown only when there is more than the hero image, so we never
-                     pad the page with unrelated placeholders. --}}
-                @php $gallery = $event->imageUrls(); @endphp
-                @if(count($gallery) > 1)
+                {{-- Gallery: the host-curated showcase photos (the `gallery`
+                     column, managed from the partner console's Gallery step),
+                     separate from the poster. Hidden when the host added none. --}}
+                @php $gallery = $event->galleryUrls(); @endphp
+                @if(count($gallery) >= 1)
                 <section class="dr-gallery-desk" style="margin-top: 12px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Gallery</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
@@ -1193,9 +1194,9 @@
             {{-- Mobile-only Gallery — swipeable rail, LAST section on the sheet
                  (the stacked full-width version read like three extra heroes
                  mid-page). Tap a card for the fullscreen lightbox. --}}
-            @if(count($gallery) > 1)
+            @if(count($gallery) >= 1)
             <section class="dr-mgal">
-                <h3 class="dr-section-title" style="margin-bottom: 12px;">Gallery <span class="dr-mgal__count">{{ count($gallery) }} photos</span></h3>
+                <h3 class="dr-section-title" style="margin-bottom: 12px;">Gallery <span class="dr-mgal__count">{{ count($gallery) }} {{ \Illuminate\Support\Str::plural('photo', count($gallery)) }}</span></h3>
                 <div class="dr-mgal__rail">
                     @foreach(array_slice($gallery, 0, 8) as $img)
                         <button type="button" class="dr-mgal__item" onclick="drLbx(this)" aria-label="View photo full screen">

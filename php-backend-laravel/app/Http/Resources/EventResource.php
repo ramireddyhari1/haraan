@@ -41,6 +41,7 @@ final class EventResource extends JsonResource
             'totalSlots'     => $this->total_slots,
             'availableSlots' => $this->available_slots,
             'images'         => \App\Support\MediaUrl::resolveMany($this->images),
+            'gallery'        => $this->galleryUrls(),
             'status'         => $this->status,
             // Curated app rails this event appears in (e.g. ["for_you","trending"]).
             'placements'     => array_values(array_filter(

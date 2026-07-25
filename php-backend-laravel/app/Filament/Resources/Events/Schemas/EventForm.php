@@ -80,19 +80,34 @@ class EventForm
      */
     public static function mergeImageSources(array $data): array
     {
-        $files = array_values(array_filter(
-            (array) ($data['images'] ?? []),
-            static fn ($i): bool => is_string($i) && trim($i) !== '',
-        ));
-        $urls = array_values(array_filter(
-            array_map(static fn ($u) => trim((string) $u), (array) ($data['image_urls'] ?? [])),
-            static fn ($u): bool => $u !== '',
-        ));
-
-        $data['images'] = array_values(array_merge($files, $urls));
+        // Poster: a single image. Uploaded file wins over a pasted URL; only the
+        // first survives so `images` never carries stray gallery photos.
+        $posterFiles = self::cleanStrings($data['images'] ?? []);
+        $posterUrls  = self::cleanStrings($data['image_urls'] ?? []);
+        $poster = array_merge($posterFiles, $posterUrls);
+        $data['images'] = $poster === [] ? [] : [reset($poster)];
         unset($data['image_urls']);
 
+        // Gallery: the showcase photos, uploaded files then pasted URLs.
+        $galleryFiles = self::cleanStrings($data['gallery'] ?? []);
+        $galleryUrls  = self::cleanStrings($data['gallery_urls'] ?? []);
+        $data['gallery'] = array_values(array_merge($galleryFiles, $galleryUrls));
+        unset($data['gallery_urls']);
+
         return $data;
+    }
+
+    /**
+     * Trim + drop empties from a mixed array of image paths/URLs.
+     *
+     * @return list<string>
+     */
+    private static function cleanStrings(mixed $value): array
+    {
+        return array_values(array_filter(
+            array_map(static fn ($v) => is_string($v) ? trim($v) : '', (array) $value),
+            static fn ($v): bool => $v !== '',
+        ));
     }
 
     /**
@@ -106,21 +121,29 @@ class EventForm
      */
     public static function splitImageSources(array $data): array
     {
-        $all = array_values(array_filter(
-            (array) ($data['images'] ?? []),
-            static fn ($i): bool => is_string($i) && trim($i) !== '',
-        ));
+        // Poster → local file (FileUpload) vs pasted URL (TagsInput).
+        [$data['images'], $data['image_urls']] = self::partitionUrls($data['images'] ?? []);
 
-        $data['images'] = array_values(array_filter(
-            $all,
-            static fn ($i): bool => ! preg_match('#^https?://#i', $i),
-        ));
-        $data['image_urls'] = array_values(array_filter(
-            $all,
-            static fn ($i): bool => (bool) preg_match('#^https?://#i', $i),
-        ));
+        // Gallery → the same split for its own two fields.
+        [$data['gallery'], $data['gallery_urls']] = self::partitionUrls($data['gallery'] ?? []);
 
         return $data;
+    }
+
+    /**
+     * Partition a stored image list into [localFiles, httpUrls] so the FileUpload
+     * never chokes on a remote URL it can't resolve as a local file.
+     *
+     * @return array{0: list<string>, 1: list<string>}
+     */
+    private static function partitionUrls(mixed $value): array
+    {
+        $all = self::cleanStrings($value);
+
+        return [
+            array_values(array_filter($all, static fn ($i): bool => ! preg_match('#^https?://#i', $i))),
+            array_values(array_filter($all, static fn ($i): bool => (bool) preg_match('#^https?://#i', $i))),
+        ];
     }
 
     /**
@@ -147,6 +170,7 @@ class EventForm
                     self::lineupStep(),
                     self::ticketsStep(),
                     self::publishStep(),
+                    self::galleryStep(),
                 ])
                     ->columnSpanFull(),
                 // NB: deliberately NOT ->skippable(). A skippable wizard lets a host
@@ -454,19 +478,17 @@ class EventForm
             ->icon('heroicon-o-rocket-launch')
             ->schema([
                 FileUpload::make('images')
-                    ->label('Cover image(s) — upload')
+                    ->label('Event poster — upload')
                     ->image()
-                    ->multiple()
-                    ->reorderable()
                     ->disk('public')
                     ->directory('events')
                     ->imageEditor()
-                    ->helperText('Upload files, OR paste image links below — use whichever you prefer (or both). The first image (uploaded, then pasted) is the poster. Size: portrait 1080×1440px (3:4) — the event card AND the event page hero both use this exact shape, so a 3:4 poster shows uncropped everywhere. Other shapes get cropped to fit: landscape banners lose their sides, extra-tall images lose top/bottom — so keep titles away from the edges regardless. JPG or PNG · under 20MB.')
+                    ->helperText('One poster — the image on the event card AND the page hero. Upload a file, OR paste a link below (an uploaded file wins). Size: portrait 1080×1440px (3:4) shows uncropped everywhere; other shapes get cropped, so keep the title away from the edges. JPG or PNG · under 20MB. Extra showcase photos go in the Gallery step.')
                     ->columnSpanFull(),
                 TagsInput::make('image_urls')
-                    ->label('…or paste image URL(s)')
+                    ->label('…or paste a poster URL')
                     ->placeholder('https://…/poster.jpg  — press Enter')
-                    ->helperText('Paste direct image links instead of (or in addition to) uploading. Each link must end in the image itself.')
+                    ->helperText('Paste a direct image link instead of uploading. The link must end in the image itself.')
                     ->columnSpanFull(),
                 Select::make('booking_format')
                     ->label('Format')
@@ -537,5 +559,73 @@ class EventForm
                     ->visible(self::adminOnly())
                     ->helperText('How many people rated it (shown as "(123)" next to the star).'),
             ]);
+    }
+
+    /**
+     * Gallery — the showcase photos beyond the poster. These render as the
+     * "Gallery" section on the event detail page. Optional; folds into the
+     * `gallery` column via {@see mergeImageSources()}.
+     */
+    private static function galleryStep(): Step
+    {
+        return Step::make('Gallery')
+            ->description('Showcase photos')
+            ->icon('heroicon-o-photo')
+            ->schema(self::galleryFields());
+    }
+
+    /**
+     * The gallery upload + paste-URL fields, shared by the wizard's Gallery step
+     * and the per-event "Gallery" quick-manage modal (ManageGalleryAction).
+     *
+     * @return list<\Filament\Forms\Components\Component>
+     */
+    public static function galleryFields(): array
+    {
+        return [
+            FileUpload::make('gallery')
+                ->label('Gallery photos — upload')
+                ->image()
+                ->multiple()
+                ->reorderable()
+                ->appendFiles()
+                ->disk('public')
+                ->directory('events/gallery')
+                ->imageEditor()
+                ->helperText('Extra photos shown in the "Gallery" section on the event page — past-edition shots, venue vibe, stage setup. Drag to reorder. These do NOT replace the poster. JPG or PNG · under 20MB each.')
+                ->columnSpanFull(),
+            TagsInput::make('gallery_urls')
+                ->label('…or paste gallery image URL(s)')
+                ->placeholder('https://…/photo.jpg  — press Enter')
+                ->helperText('Paste direct image links to add to the gallery. Each link must end in the image itself.')
+                ->columnSpanFull(),
+        ];
+    }
+
+    /**
+     * Split a stored `gallery` column into the modal/step's two fields
+     * (uploaded files vs pasted URLs) for pre-filling.
+     *
+     * @return array{gallery: list<string>, gallery_urls: list<string>}
+     */
+    public static function splitGalleryData(mixed $gallery): array
+    {
+        [$files, $urls] = self::partitionUrls($gallery);
+
+        return ['gallery' => $files, 'gallery_urls' => $urls];
+    }
+
+    /**
+     * Fold the gallery fields back into a single ordered list for the `gallery`
+     * column — uploaded files first, then pasted URLs.
+     *
+     * @return list<string>
+     */
+    public static function mergeGalleryData(array $data): array
+    {
+        return array_values(array_merge(
+            self::cleanStrings($data['gallery'] ?? []),
+            self::cleanStrings($data['gallery_urls'] ?? []),
+        ));
     }
 }

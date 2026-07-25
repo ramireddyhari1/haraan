@@ -109,6 +109,7 @@ class EventHistory extends Page implements HasTable
                         : $q),
             ], layout: FiltersLayout::AboveContent)
             ->recordActions([
+                \App\Filament\Resources\Events\Actions\ManageGalleryAction::make(),
                 Action::make('analytics')
                     ->label('View report')
                     ->icon('heroicon-m-chart-bar')
