@@ -127,6 +127,18 @@
             return verifier;
         }
 
+        // Pre-warm the invisible reCAPTCHA the moment the block is wired, so the widget
+        // is already loaded and rendered by the time someone taps "Send OTP". Without
+        // this it cold-starts on the click — a multi-second hang that reads as the app
+        // freezing. render() is idempotent per widget; failures here are harmless
+        // because requestCode() re-creates/re-renders on demand.
+        function prewarmRecaptcha() {
+            try {
+                var v = ensureVerifier();
+                if (v && typeof v.render === 'function') { v.render().catch(function () {}); }
+            } catch (e) { /* SDK not ready yet — the send path will render on demand */ }
+        }
+
         function mapErr(err) {
             switch (err && err.code) {
                 case 'auth/invalid-phone-number': return 'That number looks invalid. Include the country code, e.g. +91…';
@@ -259,6 +271,9 @@
             if (enterStep) enterStep.hidden = false;
             if (phoneInput) phoneInput.focus();
         });
+
+        // Warm the reCAPTCHA now so the first OTP send is instant, not a cold-start hang.
+        prewarmRecaptcha();
     }
 
     ready(initAll);
