@@ -6,6 +6,7 @@ use App\Filament\Forms\OrganizationSelect;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -415,6 +416,66 @@ class EventForm
             ->description('Capacity & pricing')
             ->icon('heroicon-o-ticket')
             ->schema([
+                // Ticket tiers (Early Bird / VIP / …) are their own records, edited in
+                // the "Ticket Types" panel below the form — which only exists once the
+                // event is saved. So on the create wizard there is nothing to show; on
+                // edit we surface the saved tiers here (read-only) so the Tickets step
+                // isn't misread as "my tiers vanished", with a pointer to where they live.
+                Placeholder::make('ticket_tiers_summary')
+                    ->label('Ticket tiers')
+                    ->visible(fn (?\App\Models\Event $record): bool => $record !== null)
+                    ->content(function (?\App\Models\Event $record): ?\Illuminate\Support\HtmlString {
+                        if ($record === null) {
+                            return null;
+                        }
+
+                        $tiers = $record->ticketTypes()->get();
+
+                        if ($tiers->isEmpty()) {
+                            return new \Illuminate\Support\HtmlString(
+                                '<div style="color:#6b7280">No ticket tiers yet. Add Early Bird, VIP, '
+                                . 'and other tiers in the <strong>Ticket Types</strong> panel below the form.</div>'
+                            );
+                        }
+
+                        $items = $tiers->map(function ($t): string {
+                            $cap = ($t->capacity === null || $t->capacity === '')
+                                ? 'unlimited'
+                                : (string) (int) $t->capacity;
+
+                            return '<li style="margin:2px 0">'
+                                . '<strong>' . e($t->name) . '</strong> — ₹' . number_format((float) $t->price, 2)
+                                . ' · capacity ' . $cap
+                                . ' · sold ' . (int) $t->sold
+                                . '</li>';
+                        })->implode('');
+
+                        return new \Illuminate\Support\HtmlString(
+                            '<ul style="margin:0;padding-left:1rem;list-style:disc">' . $items . '</ul>'
+                            . '<div style="margin-top:6px;color:#6b7280">Manage these in the '
+                            . '<strong>Ticket Types</strong> panel below the form.</div>'
+                        );
+                    })
+                    ->columnSpanFull(),
+                // While CREATING an event there is no saved record yet, so the
+                // "Ticket Types" relation-manager panel can't exist. This repeater lets
+                // the host define tiers (Early Bird / VIP / Group…) right here during
+                // creation; ->relationship() saves them as TicketType rows once the event
+                // is created. On edit it's hidden — the richer Ticket Types panel (presets,
+                // dynamic pricing, sold counts) owns tier editing there, and hiding this on
+                // edit also means it never touches existing tiers.
+                Repeater::make('ticketTypes')
+                    ->relationship()
+                    ->label('Ticket tiers')
+                    ->visibleOn('create')
+                    ->addActionLabel('Add ticket tier')
+                    ->defaultItems(0)
+                    ->reorderable(false)
+                    ->itemLabel(fn (array $state): ?string => $state['name'] ?? 'New tier')
+                    ->helperText('Optional. Add tiers like Early Bird, VIP or Group now, or add and fine-tune them after saving.')
+                    // Same preset picker + fields as the post-save "Ticket Types" panel.
+                    ->schema(\App\Filament\Resources\Events\Schemas\TicketTypeFields::components())
+                    ->columnSpanFull(),
                 TextInput::make('total_slots')
                     ->label('Total capacity')
                     ->required()
@@ -430,28 +491,66 @@ class EventForm
                     ->default(0)
                     ->prefix('₹')
                     ->helperText('Starting price. Add Gold / VIP / Early-Bird tiers after saving.'),
-                Select::make('convenience_fee_type')
-                    ->label('Convenience fee')
+                // Order fees (Convenience fee, Gateway fee, …). Admin-only; each row is
+                // charged on top of the ticket subtotal and shown as its own line to
+                // buyers. Stored as the `fees` JSON array on the event.
+                Repeater::make('fees')
+                    ->label('Fees')
+                    ->visible(self::adminOnly())
+                    ->addActionLabel('Add fee')
+                    ->defaultItems(0)
+                    ->reorderable()
+                    ->itemLabel(fn (array $state): ?string => $state['label'] ?? 'New fee')
+                    ->helperText('Each fee is added on top of the ticket subtotal at checkout and shown as its own line to buyers.')
+                    ->schema([
+                        TextInput::make('label')
+                            ->label('Fee label (shown to buyers)')
+                            ->required()
+                            ->maxLength(40)
+                            ->placeholder('Convenience fee / Gateway fee')
+                            ->columnSpan(2),
+                        Select::make('type')
+                            ->label('Type')
+                            ->options([
+                                'flat'    => 'Flat ₹ amount',
+                                'percent' => 'Percentage of subtotal',
+                            ])
+                            ->default('flat')
+                            ->native(false)
+                            ->required()
+                            ->live(),
+                        TextInput::make('value')
+                            ->label(fn (Get $get): string => $get('type') === 'percent' ? 'Percentage' : 'Amount')
+                            ->numeric()
+                            ->minValue(0)
+                            ->default(0)
+                            ->required()
+                            ->prefix(fn (Get $get): ?string => $get('type') === 'flat' ? '₹' : null)
+                            ->suffix(fn (Get $get): ?string => $get('type') === 'percent' ? '%' : null),
+                    ])
+                    ->columns(2)
+                    ->columnSpanFull(),
+                Select::make('tax_type')
+                    ->label('Tax')
                     ->options([
-                        'none'    => 'No fee',
+                        'none'    => 'No tax',
                         'flat'    => 'Flat ₹ amount',
                         'percent' => 'Percentage of subtotal',
                     ])
                     ->default('none')
                     ->native(false)
                     ->live()
-                    // Platform fee — set by Haraan staff in /control, hidden from organisers.
+                    // Tax (e.g. GST) — set by Haraan staff in /control, hidden from organisers.
                     ->visible(self::adminOnly())
-                    ->helperText('Added on top of the ticket subtotal at checkout.'),
-                TextInput::make('convenience_fee_value')
-                    ->label(fn (Get $get): string => $get('convenience_fee_type') === 'percent' ? 'Fee percentage' : 'Fee amount')
+                    ->helperText('Not charged yet — stored on the event for now.'),
+                TextInput::make('tax_value')
+                    ->label(fn (Get $get): string => $get('tax_type') === 'percent' ? 'Tax percentage' : 'Tax amount')
                     ->numeric()
                     ->minValue(0)
                     ->default(0)
-                    ->prefix(fn (Get $get): ?string => $get('convenience_fee_type') === 'flat' ? '₹' : null)
-                    ->suffix(fn (Get $get): ?string => $get('convenience_fee_type') === 'percent' ? '%' : null)
-                    ->visible(fn (Get $get): bool => self::adminOnly() && in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
-                    ->helperText('Buyers see this as a "Convenience fee" line on the order summary.'),
+                    ->prefix(fn (Get $get): ?string => $get('tax_type') === 'flat' ? '₹' : null)
+                    ->suffix(fn (Get $get): ?string => $get('tax_type') === 'percent' ? '%' : null)
+                    ->visible(fn (Get $get): bool => self::adminOnly() && in_array($get('tax_type'), ['flat', 'percent'], true)),
                 Toggle::make('seat_selection')
                     ->label('Assigned seating (reserved seats)')
                     ->live()

@@ -322,12 +322,14 @@ final class EventBookingController extends Controller
         }
 
         $subtotal = round($subtotal, 2);
-        $fee      = $event->convenienceFeeFor($subtotal);
+        $feeLines = $event->feeLinesFor($subtotal);
+        $fee      = $event->feesTotalFor($subtotal);
 
         return [
             'lines'    => $priced,
             'subtotal' => $subtotal,
             'fee'      => $fee,
+            'feeLines' => $feeLines,
             'total'    => round($subtotal + $fee, 2),
         ];
     }

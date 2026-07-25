@@ -33,10 +33,19 @@ final class EventResource extends JsonResource
             'date'           => $this->date,
             'time'           => $this->time,
             'price'          => $this->price,
-            // Host-set convenience fee config — the app previews it, the server charges it.
+            // Host-set order fees (Convenience fee, Gateway fee, …) — the app previews
+            // them, the server charges them. Each is { label, type, value }.
+            'fees' => collect((array) ($this->fees ?? []))->map(fn (array $f): array => [
+                'label' => ($f['label'] ?? 'Fee') ?: 'Fee',
+                'type'  => $f['type'] ?? 'flat',
+                'value' => (float) ($f['value'] ?? 0),
+            ])->values(),
+            // Legacy single-fee shape for older app builds that predate `fees`; mirrors
+            // the first fee row so they still show one line. Newer builds read `fees`.
             'convenienceFee' => [
-                'type'  => $this->convenience_fee_type ?? 'none',
-                'value' => (float) ($this->convenience_fee_value ?? 0),
+                'type'  => $this->fees[0]['type'] ?? 'none',
+                'value' => (float) ($this->fees[0]['value'] ?? 0),
+                'label' => $this->fees[0]['label'] ?? 'Convenience fee',
             ],
             'totalSlots'     => $this->total_slots,
             'availableSlots' => $this->available_slots,

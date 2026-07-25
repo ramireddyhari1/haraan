@@ -112,9 +112,9 @@
 
         <div class="bk-card bk-sum">
             <div class="bk-line"><span>Subtotal</span><span>₹{{ number_format($subtotal, 2) }}</span></div>
-            @if($fee > 0)
-                <div class="bk-line"><span>Convenience fee</span><span>₹{{ number_format($fee, 2) }}</span></div>
-            @endif
+            @foreach(($feeLines ?? []) as $line)
+                <div class="bk-line"><span>{{ $line['label'] }}</span><span>₹{{ number_format($line['amount'], 2) }}</span></div>
+            @endforeach
             <div class="bk-total"><span>Total</span><span>₹{{ number_format($total, 2) }}</span></div>
         </div>
 

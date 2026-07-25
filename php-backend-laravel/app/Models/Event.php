@@ -65,6 +65,10 @@ final class Event extends Model
         'price',
         'convenience_fee_type',
         'convenience_fee_value',
+        'convenience_fee_label',
+        'fees',
+        'tax_type',
+        'tax_value',
         'total_slots',
         'available_slots',
         'images',
@@ -99,6 +103,8 @@ final class Event extends Model
             'date'           => 'datetime',
             'price'          => 'float',
             'convenience_fee_value' => 'float',
+            'fees'           => 'array',
+            'tax_value'      => 'float',
             'total_slots'    => 'integer',
             'available_slots'=> 'integer',
             'views'          => 'integer',
@@ -359,19 +365,69 @@ final class Event extends Model
     }
 
     /**
-     * The host-set convenience fee for an order of the given ticket subtotal.
+     * The admin-set order fees (Convenience fee, Gateway fee, …) computed for a
+     * given ticket subtotal, as display lines: [['label' => …, 'amount' => …], …].
      * `flat` is a fixed ₹ amount; `percent` is a share of the subtotal. Rounded to
-     * paise and never negative. Returns 0 when no fee is configured or the order is free.
+     * paise, never negative; zero-amount fees are dropped. Empty for a free order.
+     *
+     * @return list<array{label: string, amount: float}>
+     */
+    public function feeLinesFor(float $subtotal): array
+    {
+        if ($subtotal <= 0) {
+            return [];
+        }
+
+        $lines = [];
+
+        foreach ((array) ($this->fees ?? []) as $fee) {
+            $value  = max(0.0, (float) ($fee['value'] ?? 0));
+            $amount = match ($fee['type'] ?? null) {
+                'flat'    => round($value, 2),
+                'percent' => round($subtotal * $value / 100, 2),
+                default   => 0.0,
+            };
+
+            if ($amount > 0) {
+                $lines[] = [
+                    'label'  => ($fee['label'] ?? 'Fee') ?: 'Fee',
+                    'amount' => $amount,
+                ];
+            }
+        }
+
+        return $lines;
+    }
+
+    /** Total of all order fees for the given ticket subtotal. */
+    public function feesTotalFor(float $subtotal): float
+    {
+        return round(array_sum(array_column($this->feeLinesFor($subtotal), 'amount')), 2);
+    }
+
+    /**
+     * The total order fee charged on top of the subtotal. Kept for the callers
+     * that charge/store the aggregate — now backed by the unified fees list.
      */
     public function convenienceFeeFor(float $subtotal): float
+    {
+        return $this->feesTotalFor($subtotal);
+    }
+
+    /**
+     * The admin-set tax for an order of the given ticket subtotal, mirroring
+     * {@see convenienceFeeFor()}. NOT yet charged at checkout — provided so the
+     * later "collect tax" step has a single, tested place to compute it.
+     */
+    public function taxFor(float $subtotal): float
     {
         if ($subtotal <= 0) {
             return 0.0;
         }
 
-        $value = max(0.0, (float) $this->convenience_fee_value);
+        $value = max(0.0, (float) $this->tax_value);
 
-        return match ($this->convenience_fee_type) {
+        return match ($this->tax_type) {
             'flat'    => round($value, 2),
             'percent' => round($subtotal * $value / 100, 2),
             default   => 0.0,
