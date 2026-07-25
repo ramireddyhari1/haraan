@@ -431,8 +431,8 @@
             
             <div class="auth-modal__header">
                 <div class="auth-modal__logo">
-                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-                    <p>Book events, play sports, follow live scores — one account for both lanes.</p>
+                    <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan">
+                    <span class="auth-modal__tag">Login</span>
                 </div>
             </div>
 
@@ -663,6 +663,15 @@
                 <p>It helps organisers plan better events for you. Takes 5 seconds.</p>
                 <form method="POST" action="{{ route('site.account.demographics') }}">
                     @csrf
+                    {{-- Phone OTP sign-ups have no name yet (created as the placeholder
+                         "Member"), so ask for it here. Google users already have a real
+                         name, so they don't see this field — just age + gender as before. --}}
+                    @if(blank(auth()->user()->name) || auth()->user()->name === 'Member')
+                        <div class="demo-field" style="margin-bottom: 14px; text-align: left;">
+                            <label for="dpName">Name</label>
+                            <input type="text" name="name" id="dpName" maxlength="60" placeholder="Your full name" autocomplete="name" required>
+                        </div>
+                    @endif
                     <div class="demo-row">
                         <div class="demo-field">
                             <label for="dpAge">Age</label>
@@ -679,7 +688,7 @@
                         </div>
                     </div>
                     <button type="submit" class="btn btn--solid btn--full btn--large">Save</button>
-                    <button type="submit" name="skip" value="1" class="demo-skip">Skip for now</button>
+                    <button type="submit" name="skip" value="1" class="demo-skip" formnovalidate>Skip for now</button>
                 </form>
             </div>
         </div>

@@ -2496,9 +2496,9 @@ main.container {
     top: 20px;
     right: 20px;
     z-index: 20;
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(15, 23, 42, 0.06);
     border: 0;
-    color: #fff;
+    color: #64748B;
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -2506,20 +2506,22 @@ main.container {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, color 0.2s;
 }
 
 .auth-modal__close:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(15, 23, 42, 0.1);
+    color: #0F172A;
 }
 
-/* Brand gradient — EventsBlue → GameHubGreen, the two lanes of the product
-   (same ramp as the mobile footer). Replaces an off-brand indigo→purple. */
+/* Match the standalone /login card head: a near-white wash with the blue→green
+   accent bar on top and a whisper-faint glow behind the brand (was a full
+   blue→green gradient block with white text). */
 .auth-modal__header {
-    background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
-    padding: 44px 40px 36px;
+    background: linear-gradient(180deg, #FAFCFF 0%, #FFFFFF 60%);
+    padding: 34px 40px 18px;
     text-align: center;
-    color: #fff;
+    color: #0F172A;
     position: relative;
     overflow: hidden;
 }
@@ -2527,28 +2529,51 @@ main.container {
 .auth-modal__header::before {
     content: '';
     position: absolute;
-    inset: 0;
-    background: url('data:image/svg+xml,<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" fill="white" opacity="0.1"/></svg>');
-    opacity: 0.1;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 2;
+    background: linear-gradient(90deg, #2563EB 0%, #10B981 100%);
 }
 
-/* The wordmark PNG is navy; invert it to white so it reads on the gradient.
-   It carries the brand name, so no separate <h2> heading. */
+.auth-modal__header::after {
+    content: '';
+    position: absolute;
+    top: -80px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    height: 200px;
+    border-radius: 50%;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(37, 99, 235, 0.06), transparent 72%);
+    filter: blur(12px);
+}
+
+/* Blue wordmark + handwritten "Login" tag, mirroring the /login card. */
+.auth-modal__logo {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+}
 .auth-modal__logo img {
     height: 30px;
     width: auto;
-    margin: 0 auto 14px;
     display: block;
-    filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
 }
-
-.auth-modal__logo p {
-    margin: 0 auto;
-    max-width: 30ch;
-    font-size: 14px;
-    line-height: 1.5;
-    opacity: 0.92;
-    font-weight: 500;
+.auth-modal__tag {
+    font-family: "Segoe Script", "Bradley Hand", "Snell Roundhand", "Brush Script MT", "Comic Sans MS", cursive;
+    font-size: 18px;
+    font-weight: 400;
+    color: #2563EB;
+    letter-spacing: .01em;
+    transform: rotate(-4deg);
+    line-height: 1;
 }
 
 .auth-modal__body {
