@@ -491,6 +491,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasMany(Event::class, 'partner_id');
     }
 
+    /** Venues managed by this user (as a venue-owner partner). */
+    public function venues(): HasMany
+    {
+        return $this->hasMany(Venue::class, 'partner_id');
+    }
+
     /** Bookings placed by this user. */
     public function bookings(): HasMany
     {

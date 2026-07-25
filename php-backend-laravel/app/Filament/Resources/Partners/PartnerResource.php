@@ -5,16 +5,24 @@ namespace App\Filament\Resources\Partners;
 use App\Filament\Resources\Partners\Pages\CreatePartner;
 use App\Filament\Resources\Partners\Pages\EditPartner;
 use App\Filament\Resources\Partners\Pages\ListPartners;
+use App\Filament\Resources\Partners\Pages\ViewPartner;
+use App\Filament\Resources\Partners\RelationManagers\EventsRelationManager;
+use App\Filament\Resources\Partners\RelationManagers\VenuesRelationManager;
 use App\Filament\Support\AvatarColumn;
 use App\Models\User;
 use App\Support\ContactPrefill;
 use BackedEnum;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\ImageEntry;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\TextSize;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -118,6 +126,58 @@ class PartnerResource extends Resource
         ]);
     }
 
+    /**
+     * The identity card on the overview page. Sits below the KPI header widgets
+     * (revenue / listings) and the revenue chart, both rendered by ViewPartner.
+     */
+    public static function infolist(Schema $schema): Schema
+    {
+        return $schema->components([
+            Section::make()
+                ->columns(['default' => 1, 'md' => 3])
+                ->schema([
+                    ImageEntry::make('avatar')
+                        ->label('')
+                        ->circular()
+                        ->disk('public')
+                        ->defaultImageUrl(fn (User $record): string => 'https://ui-avatars.com/api/?background=EEF2FF&color=4F46E5&name='
+                            . urlencode((string) ($record->name ?: 'Partner'))),
+                    TextEntry::make('name')
+                        ->label('Name')
+                        ->weight('bold')
+                        ->size(TextSize::Large),
+                    TextEntry::make('partner_type')
+                        ->label('Type')
+                        ->badge()
+                        ->color('info')
+                        ->formatStateUsing(fn (?string $state): string => match (strtolower((string) $state)) {
+                            'venue' => 'Venue owner',
+                            'event' => 'Event organiser',
+                            default => '—',
+                        }),
+                    TextEntry::make('email')
+                        ->label('Email')
+                        ->icon('heroicon-m-envelope')
+                        ->copyable()
+                        ->placeholder('—'),
+                    TextEntry::make('phone')
+                        ->label('Phone')
+                        ->icon('heroicon-m-phone')
+                        ->placeholder('—'),
+                    TextEntry::make('status')
+                        ->label('Status')
+                        ->badge()
+                        ->formatStateUsing(fn (?string $state): string => ucfirst(strtolower((string) $state)))
+                        ->color(fn (?string $state): string => strtolower((string) $state) === 'active' ? 'success' : 'danger'),
+                    TextEntry::make('created_at')
+                        ->label('Partner since')
+                        ->dateTime('d M Y')
+                        ->icon('heroicon-m-calendar')
+                        ->placeholder('—'),
+                ]),
+        ]);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
@@ -152,8 +212,17 @@ class PartnerResource extends Resource
                     ->options(['active' => 'Active', 'suspended' => 'Suspended']),
             ])
             ->recordActions([
+                ViewAction::make(),
                 EditAction::make(),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            EventsRelationManager::class,
+            VenuesRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
@@ -161,6 +230,7 @@ class PartnerResource extends Resource
         return [
             'index' => ListPartners::route('/'),
             'create' => CreatePartner::route('/create'),
+            'view' => ViewPartner::route('/{record}'),
             'edit' => EditPartner::route('/{record}/edit'),
         ];
     }
