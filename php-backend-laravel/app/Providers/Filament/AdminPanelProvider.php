@@ -107,6 +107,22 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::TOPBAR_START,
                 fn (): string => view('filament.topbar-brand')->render(),
             )
+            // Sidebar footer identity card (who + role + quiet sign-out), the
+            // control twin of the partner console's account card. Fills the
+            // previously-empty footer so the shell reads finished.
+            ->renderHook(
+                PanelsRenderHook::SIDEBAR_FOOTER,
+                fn (): string => view('filament.account-card')->render(),
+            )
+            // Dashboard hero band: a time-aware greeting that leads the page (and
+            // hides the redundant "Dashboard" H1), the control twin of the partner
+            // console's launchpad. Scoped to the Dashboard page — Command Center
+            // users are redirected away, so only limited staff (marketing/ops) see it.
+            ->renderHook(
+                PanelsRenderHook::PAGE_START,
+                fn (): string => view('filament.dashboard-hero')->render(),
+                scopes: Dashboard::class,
+            )
             ->plugin(FilamentShieldPlugin::make());
     }
 }
