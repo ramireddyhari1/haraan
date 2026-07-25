@@ -27,9 +27,12 @@
     .auth-phone__btn[disabled] { opacity: .6; cursor: default; box-shadow: none; }
 
     .auth-phone .js-error { color: #B91C1C; font-size: 12.5px; font-weight: 600; margin: 10px 0 0; text-align: center; }
-    .auth-phone .js-change { color: #2563EB; text-decoration: none; font-weight: 600; }
+    .auth-phone__resendrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 2px 0; }
+    .auth-phone .js-change { color: #2563EB; text-decoration: none; font-weight: 600; font-size: 12.5px; }
     .auth-phone .js-change:hover { text-decoration: underline; }
-    .auth-phone__hint { margin: 10px 0 0; font-size: 12px; color: #94A3B8; text-align: center; }
+    .auth-phone__resend { background: none; border: 0; padding: 0; cursor: pointer; font-size: 12.5px; font-weight: 600; color: #2563EB; }
+    .auth-phone__resend[disabled] { color: #94A3B8; cursor: default; }
+    .auth-phone__resend:not([disabled]):hover { text-decoration: underline; }
     /* Invisible reCAPTCHA container must stay renderable (not display:none) to attach. */
     .auth-phone .js-recaptcha:empty { min-height: 0; }
 </style>
@@ -49,7 +52,10 @@
         <label class="auth-phone__label">Enter the 6-digit code</label>
         <input type="text" class="js-code" placeholder="••••••" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
         <button type="button" class="auth-phone__btn js-verify">Verify &amp; continue</button>
-        <p class="auth-phone__hint">Code sent to your number. <a href="#" class="js-change">Change number</a></p>
+        <div class="auth-phone__resendrow">
+            <button type="button" class="auth-phone__resend js-resend" disabled>Resend code</button>
+            <a href="#" class="js-change">Change number</a>
+        </div>
     </div>
 
     <p class="js-error" role="alert" hidden></p>

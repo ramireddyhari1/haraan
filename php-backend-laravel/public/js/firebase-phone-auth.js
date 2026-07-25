@@ -57,6 +57,7 @@
         var sendBtn = root.querySelector('.js-send');
         var verifyBtn = root.querySelector('.js-verify');
         var changeLink = root.querySelector('.js-change');
+        var resendBtn = root.querySelector('.js-resend');
         var enterStep = root.querySelector('.auth-phone__enter');
         var codeStep = root.querySelector('.auth-phone__code');
         var errorEl = root.querySelector('.js-error');
@@ -64,6 +65,7 @@
         var postUrl = root.getAttribute('data-post-url');
         var confirmation = null;
         var verifier = null;
+        var resendTimer = null;
 
         function showError(msg) {
             if (!errorEl) return;
@@ -113,27 +115,61 @@
             }
         }
 
-        if (sendBtn) sendBtn.addEventListener('click', function () {
+        // Disable "Resend code" for 30s after each send so people can't spam SMS,
+        // counting down in the button label; then re-enable it.
+        function startResendCountdown() {
+            if (!resendBtn) return;
+            var secs = 30;
+            clearInterval(resendTimer);
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Resend code in ' + secs + 's';
+            resendTimer = setInterval(function () {
+                secs -= 1;
+                if (secs <= 0) {
+                    clearInterval(resendTimer);
+                    resendBtn.disabled = false;
+                    resendBtn.textContent = 'Resend code';
+                } else {
+                    resendBtn.textContent = 'Resend code in ' + secs + 's';
+                }
+            }, 1000);
+        }
+
+        // Send (or resend) the OTP. `isResend` drives which button reflects progress.
+        function requestCode(isResend) {
             showError('');
             var phone = normalize(phoneInput && phoneInput.value);
             if (phone.length < 8) { showError('Enter a valid phone number with country code.'); return; }
-            busy(sendBtn, true, 'Sending…');
+
+            if (isResend) { if (resendBtn) { clearInterval(resendTimer); resendBtn.disabled = true; resendBtn.textContent = 'Resending…'; } }
+            else { busy(sendBtn, true, 'Sending…'); }
+
             var v;
             try { v = ensureVerifier(); }
-            catch (e) { busy(sendBtn, false); showError('Could not start verification. Reload and try again.'); return; }
+            catch (e) {
+                if (isResend) { if (resendBtn) { resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; } }
+                else { busy(sendBtn, false); }
+                showError('Could not start verification. Reload and try again.');
+                return;
+            }
 
             auth.signInWithPhoneNumber(phone, v).then(function (result) {
                 confirmation = result;
-                busy(sendBtn, false);
+                if (!isResend) busy(sendBtn, false);
                 if (enterStep) enterStep.hidden = true;
                 if (codeStep) codeStep.hidden = false;
-                if (codeInput) codeInput.focus();
+                if (codeInput) { codeInput.value = ''; codeInput.focus(); }
+                startResendCountdown();
             }).catch(function (err) {
-                busy(sendBtn, false);
+                if (isResend) { if (resendBtn) { resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; } }
+                else { busy(sendBtn, false); }
                 showError(mapErr(err));
                 // Keep the verifier — invisible reCAPTCHA re-executes on the next attempt.
             });
-        });
+        }
+
+        if (sendBtn) sendBtn.addEventListener('click', function () { requestCode(false); });
+        if (resendBtn) resendBtn.addEventListener('click', function () { requestCode(true); });
 
         if (verifyBtn) verifyBtn.addEventListener('click', function () {
             showError('');
@@ -169,6 +205,7 @@
         if (changeLink) changeLink.addEventListener('click', function (e) {
             e.preventDefault();
             confirmation = null;
+            clearInterval(resendTimer);
             showError('');
             if (codeInput) codeInput.value = '';
             if (codeStep) codeStep.hidden = true;
