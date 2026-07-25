@@ -63,6 +63,11 @@
         var errorEl = root.querySelector('.js-error');
         var recaptchaHost = root.querySelector('.js-recaptcha');
         var postUrl = root.getAttribute('data-post-url');
+        // Optional server pre-check: when present, we ask the server whether a number is
+        // even allowed to receive a code BEFORE hitting Firebase, so a public login can't
+        // be used to pump SMS to arbitrary numbers. The partner console sets this; the
+        // member /login (which sends to anyone, then find-or-creates) leaves it off.
+        var preCheckUrl = root.getAttribute('data-precheck-url');
         var confirmation = null;
         var verifier = null;
         var resendTimer = null;
@@ -147,20 +152,18 @@
             }, 1000);
         }
 
-        // Send (or resend) the OTP. `isResend` drives which button reflects progress.
-        function requestCode(isResend) {
-            showError('');
-            var phone = normalize(phoneInput && phoneInput.value);
-            if (phone.length < 8) { showError('Enter a valid phone number with country code.'); return; }
+        // Re-enable whichever button reflected progress after a send is aborted/failed.
+        function releaseSendBtns(isResend) {
+            if (isResend) { if (resendBtn) { resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; } }
+            else { busy(sendBtn, false); }
+        }
 
-            if (isResend) { if (resendBtn) { clearInterval(resendTimer); resendBtn.disabled = true; resendBtn.textContent = 'Resending…'; } }
-            else { busy(sendBtn, true, 'Sending…'); }
-
+        // The actual Firebase send — reached only after the pre-check (if any) passes.
+        function sendNow(isResend, phone) {
             var v;
             try { v = ensureVerifier(); }
             catch (e) {
-                if (isResend) { if (resendBtn) { resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; } }
-                else { busy(sendBtn, false); }
+                releaseSendBtns(isResend);
                 showError('Could not start verification. Reload and try again.');
                 return;
             }
@@ -173,10 +176,45 @@
                 if (codeInput) { codeInput.value = ''; codeInput.focus(); }
                 startResendCountdown();
             }).catch(function (err) {
-                if (isResend) { if (resendBtn) { resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; } }
-                else { busy(sendBtn, false); }
+                releaseSendBtns(isResend);
                 showError(mapErr(err));
                 // Keep the verifier — invisible reCAPTCHA re-executes on the next attempt.
+            });
+        }
+
+        // Send (or resend) the OTP. `isResend` drives which button reflects progress.
+        function requestCode(isResend) {
+            showError('');
+            var phone = normalize(phoneInput && phoneInput.value);
+            if (phone.length < 8) { showError('Enter a valid phone number with country code.'); return; }
+
+            if (isResend) { if (resendBtn) { clearInterval(resendTimer); resendBtn.disabled = true; resendBtn.textContent = 'Resending…'; } }
+            else { busy(sendBtn, true, 'Sending…'); }
+
+            // No pre-check configured → straight to Firebase (member /login behaviour).
+            if (!preCheckUrl) { sendNow(isResend, phone); return; }
+
+            // Pre-check first: only spend an SMS on a number the server will accept.
+            fetch(preCheckUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ phone: phone }),
+            }).then(function (res) {
+                return res.json().catch(function () { return {}; }).then(function (data) {
+                    if (res.ok && data.eligible) { sendNow(isResend, phone); return; }
+                    releaseSendBtns(isResend);
+                    showError(data.error || 'No partner account is registered for this number. Use Google or email, or contact your admin.');
+                });
+            }).catch(function () {
+                // Pre-check itself failed (network/500) — don't strand a real partner; fall
+                // through to the normal Firebase send, which still enforces server-side gating
+                // after verification.
+                sendNow(isResend, phone);
             });
         }
 

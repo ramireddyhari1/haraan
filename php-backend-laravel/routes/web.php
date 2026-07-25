@@ -182,6 +182,7 @@ Route::post('/auth/firebase-phone', [\App\Http\Controllers\Auth\FirebasePhoneAut
 Route::controller(\App\Http\Controllers\Auth\PartnerAuthController::class)
     ->middleware('throttle:auth')
     ->group(function (): void {
+        Route::post('/partner/auth/check-phone', 'checkPhone')->name('partner.auth.check-phone');
         Route::post('/partner/auth/phone', 'phone')->name('partner.auth.phone');
         Route::post('/partner/auth/google', 'google')->name('partner.auth.google');
         Route::post('/partner/auth/email', 'email')->name('partner.auth.email');

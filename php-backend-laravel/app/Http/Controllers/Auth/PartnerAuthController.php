@@ -36,6 +36,27 @@ final class PartnerAuthController extends Controller
     ) {
     }
 
+    /**
+     * POST /partner/auth/check-phone  { phone } — eligibility gate BEFORE any SMS.
+     *
+     * The browser calls this before asking Firebase to send a code, so a public login
+     * page can't be turned into an SMS-pump against arbitrary numbers: we only ever
+     * spend an SMS on a number that already belongs to a partner account. It leaks
+     * nothing an attacker couldn't learn by trying to log in, and it's rate-limited.
+     */
+    public function checkPhone(Request $request): JsonResponse
+    {
+        $data = $request->validate(['phone' => ['required', 'string', 'max:20']]);
+
+        $user = $this->findByPhone($data['phone']);
+        $eligible = $user && $user->hasRoleEither(['PARTNER']);
+
+        return response()->json([
+            'eligible' => (bool) $eligible,
+            'error'    => $eligible ? null : 'No partner account is registered for this number. Use Google or email, or contact your admin.',
+        ]);
+    }
+
     /** POST /partner/auth/phone  { id_token } — Firebase phone OTP. */
     public function phone(Request $request): JsonResponse
     {
@@ -68,13 +89,20 @@ final class PartnerAuthController extends Controller
         $digits = preg_replace('/\D/', '', $e164) ?? '';
         $local  = substr($digits, -10);
 
-        if ($local === '' || strlen($local) < 10) {
-            return User::query()->where('phone', $e164)->first();
+        $candidates = ($local !== '' && strlen($local) >= 10)
+            ? array_unique([$e164, $local, '+91'.$local, '91'.$local, '0'.$local])
+            : [$e164];
+
+        $matches = User::query()->whereIn('phone', $candidates)->get();
+
+        if ($matches->isEmpty()) {
+            return null;
         }
 
-        $candidates = array_unique([$e164, $local, '+91'.$local, '91'.$local, '0'.$local]);
-
-        return User::query()->whereIn('phone', $candidates)->first();
+        // The same digits can sit on more than one account — e.g. a member signed up with
+        // the number AND a partner has it too. On the partner login the partner must win,
+        // so prefer a PARTNER-role match over any member that merely shares the digits.
+        return $matches->first(fn (User $u): bool => $u->hasRoleEither(['PARTNER'])) ?? $matches->first();
     }
 
     /** POST /partner/auth/google  { credential } — Google Identity Services token. */

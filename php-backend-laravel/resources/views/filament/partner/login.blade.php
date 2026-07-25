@@ -29,7 +29,9 @@
 
     @if ($hasFirebase)
         {{-- Phone OTP (Firebase). firebase-phone-auth.js wires this by [data-phone-auth]. --}}
-        <div class="auth-phone" data-phone-auth data-post-url="{{ route('partner.auth.phone') }}">
+        <div class="auth-phone" data-phone-auth
+             data-post-url="{{ route('partner.auth.phone') }}"
+             data-precheck-url="{{ route('partner.auth.check-phone') }}">
             <div class="auth-phone__enter">
                 <label class="auth-phone__label">Mobile number</label>
                 <div class="auth-phone__inputwrap">
