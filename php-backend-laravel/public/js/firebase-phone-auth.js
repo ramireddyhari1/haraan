@@ -66,31 +66,6 @@
         var confirmation = null;
         var verifier = null;
         var resendTimer = null;
-        var sendCooldownTimer = null;
-
-        // After Firebase rate-limits a number (auth/too-many-requests), lock the
-        // "Send OTP" button behind a visible countdown so a frustrated tap-tap-tap
-        // can't dig the hole deeper — the limit is per-number and only clears with
-        // time. Google / email stay available throughout.
-        function startSendCooldown(secs) {
-            if (!sendBtn) return;
-            clearInterval(sendCooldownTimer);
-            var s = secs;
-            var base = sendBtn.dataset.idle || sendBtn.textContent;
-            sendBtn.dataset.idle = base;
-            sendBtn.disabled = true;
-            sendBtn.textContent = 'Try again in ' + s + 's';
-            sendCooldownTimer = setInterval(function () {
-                s -= 1;
-                if (s <= 0) {
-                    clearInterval(sendCooldownTimer);
-                    sendBtn.disabled = false;
-                    sendBtn.textContent = base;
-                } else {
-                    sendBtn.textContent = 'Try again in ' + s + 's';
-                }
-            }, 1000);
-        }
 
         function showError(msg) {
             if (!errorEl) return;
@@ -143,7 +118,7 @@
             switch (err && err.code) {
                 case 'auth/invalid-phone-number': return 'That number looks invalid. Include the country code, e.g. +91…';
                 case 'auth/missing-phone-number': return 'Please enter your phone number.';
-                case 'auth/too-many-requests': return 'Too many OTP attempts on this number. Wait a minute — or continue with Google or email below.';
+                case 'auth/too-many-requests': return 'This number is temporarily blocked by SMS verification (too many attempts). It can stay blocked for a while — please continue with Google or email below, or try a different number.';
                 case 'auth/invalid-verification-code': return 'Incorrect code. Please check and try again.';
                 case 'auth/code-expired': return 'That code expired. Request a new one.';
                 case 'auth/captcha-check-failed':
@@ -201,12 +176,6 @@
                 if (isResend) { if (resendBtn) { resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; } }
                 else { busy(sendBtn, false); }
                 showError(mapErr(err));
-                // Firebase rate-limited this number — hold the button on a countdown so
-                // repeated taps don't extend the lockout (the resend path already has its
-                // own cooldown, so only guard the initial "Send OTP" here).
-                if (!isResend && err && err.code === 'auth/too-many-requests') {
-                    startSendCooldown(60);
-                }
                 // Keep the verifier — invisible reCAPTCHA re-executes on the next attempt.
             });
         }
