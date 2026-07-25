@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Events\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
+use App\Services\EventCopyAI;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -14,15 +16,21 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
- * Guided event creation. A 4-step wizard (Basics → When & Where → Tickets →
- * Publish) so a host fills a handful of sensible fields per step instead of one
- * flat wall of inputs. Ticket tiers are added afterwards on the Edit page.
+ * Guided event creation. A 5-step wizard — the four that actually matter to go
+ * live (Basics → When & Where → Tickets → Publish), then a single optional
+ * "Extras" step (Good to Know · Lineup · Gallery) that a host can fill or leave
+ * blank. Required steps come first so the host reaches the Create button as soon
+ * as the real work is done; everything after it is enrichment.
  */
 class EventForm
 {
@@ -167,20 +175,21 @@ class EventForm
                 Wizard::make([
                     self::basicsStep(),
                     self::whenWhereStep(),
-                    self::goodToKnowStep(),
-                    self::lineupStep(),
                     self::ticketsStep(),
                     self::publishStep(),
-                    self::galleryStep(),
+                    self::extrasStep(),
                 ])
                     ->columnSpanFull(),
                 // NB: deliberately NOT ->skippable(). A skippable wizard lets a host
-                // jump straight to "Publish" past unfilled required steps; clicking
+                // jump straight to the last step past unfilled required steps; clicking
                 // Create then fails validation on those earlier steps, but Filament
                 // renders the errors on a hidden step and neither navigates to it nor
                 // flags the step header — so the button appears to do nothing. Keeping
                 // the wizard sequential validates each step on "Next", surfacing any
-                // error on the step the host is actually looking at.
+                // error on the step the host is actually looking at. It also means the
+                // final "Extras" step (all-optional) is only reachable once every
+                // required step has passed — so the Create button there never silently
+                // fails on a hidden required field.
             ]);
     }
 
@@ -207,6 +216,51 @@ class EventForm
                     ->required()
                     ->rows(4)
                     ->placeholder('Tell attendees what to expect — line-up, highlights, what to bring.')
+                    // One-tap AI first draft from the title + category (and whatever's
+                    // already in the box). Server-side via EventCopyAI; if there's no
+                    // API key or the call fails it quietly tells the host to write their
+                    // own rather than blanking the field.
+                    ->hintAction(
+                        Action::make('draftDescription')
+                            ->label('Draft with AI')
+                            ->icon('heroicon-m-sparkles')
+                            ->action(function (Get $get, Set $set): void {
+                                $title = trim((string) $get('title'));
+                                if ($title === '') {
+                                    Notification::make()
+                                        ->warning()
+                                        ->title('Add an event title first')
+                                        ->body('The AI drafts from your title and category — fill those in and try again.')
+                                        ->send();
+
+                                    return;
+                                }
+
+                                $draft = app(EventCopyAI::class)->draftDescription([
+                                    'title'    => $title,
+                                    'category' => (string) $get('category'),
+                                    'existing' => (string) $get('description'),
+                                ]);
+
+                                if ($draft === null) {
+                                    Notification::make()
+                                        ->warning()
+                                        ->title('Couldn’t draft it just now')
+                                        ->body('The AI writer isn’t available — write a couple of lines yourself and you’re good to go.')
+                                        ->send();
+
+                                    return;
+                                }
+
+                                $set('description', $draft);
+
+                                Notification::make()
+                                    ->success()
+                                    ->title('Draft added')
+                                    ->body('Give it a read and tweak anything — it’s just a starting point.')
+                                    ->send();
+                            }),
+                    )
                     ->columnSpanFull(),
             ]);
     }
@@ -266,13 +320,13 @@ class EventForm
      * "Good to Know" — the scannable attribute chips (language, age, layout…)
      * plus the real T&C bullets and any custom rows. All optional; whatever the
      * host leaves blank simply doesn't render on the app's event detail screen.
+     * Returns the field list so it can sit inside the combined "Extras" step.
+     *
+     * @return list<\Filament\Schemas\Components\Component>
      */
-    private static function goodToKnowStep(): Step
+    private static function goodToKnowFields(): array
     {
-        return Step::make('Good to Know')
-            ->description('What attendees should know before they book')
-            ->icon('heroicon-o-information-circle')
-            ->schema([
+        return [
                 TagsInput::make('languages')
                     ->label('Language(s)')
                     ->placeholder('Add a language')
@@ -363,20 +417,20 @@ class EventForm
                     ->collapsible()
                     ->itemLabel(fn (array $state): ?string => trim(($state['time'] ?? '').' — '.($state['title'] ?? ''), ' —') ?: null)
                     ->columnSpanFull(),
-            ]);
+        ];
     }
 
     /**
      * "Who takes the stage" — the performer lineup rendered as a coverflow
      * carousel on the app's event detail screen. Each card is an image + name +
-     * subtitle (role / genre / hit track). All optional.
+     * subtitle (role / genre / hit track). All optional. Returns the field list
+     * so it can sit inside the combined "Extras" step.
+     *
+     * @return list<\Filament\Schemas\Components\Component>
      */
-    private static function lineupStep(): Step
+    private static function lineupFields(): array
     {
-        return Step::make('Lineup')
-            ->description('Who takes the stage')
-            ->icon('heroicon-o-microphone')
-            ->schema([
+        return [
                 Repeater::make('lineup')
                     ->label('Performers')
                     ->helperText('Shown as a swipeable "Who takes the stage" carousel in the app.')
@@ -407,6 +461,38 @@ class EventForm
                     ->collapsible()
                     ->itemLabel(fn (array $state): ?string => $state['name'] ?? null)
                     ->columnSpanFull(),
+        ];
+    }
+
+    /**
+     * The combined optional final step: Good to Know, Lineup and Gallery grouped
+     * as collapsible sections. All-optional, so a host who just wants to publish
+     * can land here and hit Create; those who want a richer event page fill it in.
+     */
+    private static function extrasStep(): Step
+    {
+        return Step::make('Extras')
+            ->description('Optional — richer event page')
+            ->icon('heroicon-o-square-3-stack-3d')
+            ->schema([
+                Section::make('Good to Know')
+                    ->description('Language, age, seating, T&C — whatever helps attendees decide.')
+                    ->icon('heroicon-o-information-circle')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema(self::goodToKnowFields()),
+                Section::make('Lineup')
+                    ->description('Who takes the stage — shown as a swipeable carousel.')
+                    ->icon('heroicon-o-microphone')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema(self::lineupFields()),
+                Section::make('Gallery')
+                    ->description('Showcase photos beyond the poster.')
+                    ->icon('heroicon-o-photo')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema(self::galleryFields()),
             ]);
     }
 
@@ -576,6 +662,13 @@ class EventForm
             ->description('Media & visibility')
             ->icon('heroicon-o-rocket-launch')
             ->schema([
+                // Live "how your card looks on the app" preview. Reads the details the
+                // host already entered on earlier steps plus the poster set right here.
+                // image_urls is ->live() below so pasting a poster URL updates it at once.
+                Placeholder::make('card_preview')
+                    ->label('Preview')
+                    ->content(fn (Get $get): HtmlString => self::previewCard($get))
+                    ->columnSpanFull(),
                 FileUpload::make('images')
                     ->label('Event poster — upload')
                     ->image()
@@ -588,6 +681,7 @@ class EventForm
                     ->label('…or paste a poster URL')
                     ->placeholder('https://…/poster.jpg  — press Enter')
                     ->helperText('Paste a direct image link instead of uploading. The link must end in the image itself.')
+                    ->live()
                     ->columnSpanFull(),
                 Select::make('booking_format')
                     ->label('Format')
@@ -661,20 +755,68 @@ class EventForm
     }
 
     /**
-     * Gallery — the showcase photos beyond the poster. These render as the
-     * "Gallery" section on the event detail page. Optional; folds into the
-     * `gallery` column via {@see mergeImageSources()}.
+     * A live "event card" preview for the Publish step: renders the details the
+     * host has entered the way the app's Events list shows them (poster, title,
+     * category chip, city · date line, price). Purely presentational — reads the
+     * current form state via {@see Get} and never mutates it. Falls back to
+     * neutral placeholders for anything not yet filled.
      */
-    private static function galleryStep(): Step
+    private static function previewCard(Get $get): HtmlString
     {
-        return Step::make('Gallery')
-            ->description('Showcase photos')
-            ->icon('heroicon-o-photo')
-            ->schema(self::galleryFields());
+        $title    = trim((string) $get('title'));
+        $category = trim((string) $get('category'));
+        $city     = trim((string) $get('city'));
+        $venue    = trim((string) $get('venue'));
+        $date     = trim((string) $get('date'));
+        $price    = $get('price');
+
+        // Poster: first pasted URL wins for the preview (uploaded files aren't a
+        // resolvable public URL until saved, so we can't reliably show those here).
+        $urls = self::cleanStrings($get('image_urls') ?? []);
+        $poster = $urls[0] ?? null;
+
+        $categoryLabel = $category !== '' ? (self::CATEGORIES[$category] ?? $category) : null;
+
+        // "12 Jul 2026 · Hyderabad" when we have the pieces.
+        $when = null;
+        if ($date !== '') {
+            try {
+                $when = \Illuminate\Support\Carbon::parse($date)->format('d M Y');
+            } catch (\Throwable) {
+                $when = $date;
+            }
+        }
+        $whereBits = array_values(array_filter([$when, $city !== '' ? $city : ($venue !== '' ? $venue : null)]));
+        $whenWhere = $whereBits === [] ? 'Date · City' : implode(' · ', $whereBits);
+
+        $priceLabel = ($price === null || $price === '' || (float) $price <= 0)
+            ? 'Free'
+            : '₹' . number_format((float) $price);
+
+        $posterHtml = $poster !== null
+            ? '<img src="' . e($poster) . '" alt="" style="width:76px;height:102px;object-fit:cover;border-radius:12px;flex:none;background:#eef1f6" onerror="this.style.display=\'none\'">'
+            : '<div style="width:76px;height:102px;border-radius:12px;flex:none;background:linear-gradient(135deg,#e8ecf3,#d7deea);display:flex;align-items:center;justify-content:center;color:#9aa6b8;font-size:11px">Poster</div>';
+
+        $chip = $categoryLabel !== null
+            ? '<span style="display:inline-block;font-size:11px;font-weight:600;color:#1d4ed8;background:#e6efff;border-radius:999px;padding:2px 8px;margin-top:6px">' . e($categoryLabel) . '</span>'
+            : '';
+
+        $html = '<div style="display:flex;gap:14px;align-items:stretch;max-width:420px;padding:12px;border:1px solid #e6e9f0;border-radius:16px;background:#fff;box-shadow:0 8px 24px -16px rgba(11,18,32,.4)">'
+            . $posterHtml
+            . '<div style="display:flex;flex-direction:column;min-width:0;flex:1">'
+            . '<div style="font-size:15px;font-weight:700;color:#0b1220;line-height:1.25;overflow:hidden;text-overflow:ellipsis">' . e($title !== '' ? $title : 'Your event title') . '</div>'
+            . '<div style="font-size:12.5px;color:#6b7280;margin-top:4px">' . e($whenWhere) . '</div>'
+            . $chip
+            . '<div style="flex:1"></div>'
+            . '<div style="font-size:14px;font-weight:700;color:#1d4ed8;margin-top:8px">' . e($priceLabel) . '</div>'
+            . '</div></div>'
+            . '<div style="font-size:11.5px;color:#9aa6b8;margin-top:6px">This is roughly how your event appears in the app’s Events list.</div>';
+
+        return new HtmlString($html);
     }
 
     /**
-     * The gallery upload + paste-URL fields, shared by the wizard's Gallery step
+     * The gallery upload + paste-URL fields, shared by the wizard's Extras step
      * and the per-event "Gallery" quick-manage modal (ManageGalleryAction).
      *
      * @return list<\Filament\Forms\Components\Component>
