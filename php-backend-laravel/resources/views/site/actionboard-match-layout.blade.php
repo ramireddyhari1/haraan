@@ -70,7 +70,7 @@
                  mirrors the app's ribbon). Sized to the band by JS so it never distorts. --}}
             <svg class="mdx-ribbon" aria-hidden="true" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
                 <defs><path id="mdxRibPath" fill="none"></path></defs>
-                <text><textPath href="#mdxRibPath" startOffset="0"></textPath></text>
+                <text dominant-baseline="central"><textPath href="#mdxRibPath" startOffset="0" dominant-baseline="central"></textPath></text>
             </svg>
             <div class="mdx-hero-card">
                 <div class="mdx-hero-meta">{{ $metaLine }}</div>
@@ -182,7 +182,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-hero-wrap { padding: 8px 14px; background: var(--bg); }
 .mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 15px; overflow: hidden; }
 .mdx-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.mdx-ribbon text { fill: rgba(71,85,105,.72); font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+.mdx-ribbon text { fill: rgba(71,85,105,.72); font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 1px; dominant-baseline: central; }
 .mdx-hero-card {
     position: relative;
     border-radius: 12px;
@@ -224,7 +224,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 
 /* ── Content shell ── */
 .mdx-content { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; max-width: 720px; margin: 0 auto; }
-.mdx-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; }
+.mdx-card { background: var(--surface); border: 1px solid #EEF2F7; border-radius: 18px; padding: 20px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 24px rgba(15,23,42,.05); }
 .mdx-card--flush { padding: 0; overflow: hidden; }
 .mdx-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 .mdx-divider { height: 1px; background: var(--border); margin: 14px 0; }
