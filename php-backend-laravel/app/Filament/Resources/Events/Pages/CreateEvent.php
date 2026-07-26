@@ -31,4 +31,14 @@ class CreateEvent extends CreateRecord
 
         return $data;
     }
+
+    /**
+     * After creating, land back on the events list (not the edit form). Filament's
+     * default drops you on the new record's edit page, which reads as "nothing
+     * happened" — the user expects the new event to show up in the list.
+     */
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
+    }
 }

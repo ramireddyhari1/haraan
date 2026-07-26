@@ -35,4 +35,14 @@ class CreateVenue extends CreateRecord
         $this->record->update(['hours' => $this->record->displayHours()]);
         $this->record->regenerateSlotsFromHours();
     }
+
+    /**
+     * After creating, land back on the venues list (not the edit form). Filament's
+     * default drops you on the new record's edit page, which reads as "nothing
+     * happened" — the user expects the new venue to show up in the list.
+     */
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
+    }
 }

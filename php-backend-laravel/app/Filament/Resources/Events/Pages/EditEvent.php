@@ -35,6 +35,16 @@ class EditEvent extends EditRecord
         return $data;
     }
 
+    /**
+     * After saving, return to the events list. Filament's default keeps you on the
+     * edit page, so "Save changes" only flashed a toast and looked like it did
+     * nothing — the user expects to be taken back to the events page.
+     */
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
+    }
+
     protected function getHeaderActions(): array
     {
         return [
