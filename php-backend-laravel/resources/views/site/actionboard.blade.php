@@ -190,9 +190,9 @@
     <div class="mab__bar" id="mabBar">
         <div class="mab__head">
             <span class="mab__logo" role="img" aria-label="Haraan"></span>
-            <span class="mab__sp"></span>
-            <a class="mab__ic" href="/search" aria-label="Search">
+            <a class="mab__search" href="/search" aria-label="Search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.2" y2="16.2"></line></svg>
+                <span>Search matches, players…</span>
             </a>
             {{-- App-only actions (join-by-code / create) are removed from the mobile
                  web bar; the one CTA left is "get the app". --}}
@@ -2727,6 +2727,16 @@ main.container {
         mask: url("{{ asset('images/haraan-mark.png') }}") center / contain no-repeat;
     }
     .mab__sp { flex: 1; min-width: 0; }
+    /* Full-width search bar filling the gap between the logo and the app CTA. */
+    .mab__search {
+        flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px;
+        height: 38px; padding: 0 14px; border-radius: 19px;
+        background: #F1F5FA; border: 1px solid #E4EAF1; color: #94A0B0;
+        text-decoration: none; font-size: 13px; overflow: hidden; white-space: nowrap;
+    }
+    .mab__search svg { width: 18px; height: 18px; flex: 0 0 auto; }
+    .mab__search span { overflow: hidden; text-overflow: ellipsis; }
+    .mab__search:hover { background: #E9EFF6; }
     .mab__ic {
         width: 38px; height: 38px; border-radius: 12px; background: #F1F5F9; border: 0;
         display: inline-flex; align-items: center; justify-content: center;
