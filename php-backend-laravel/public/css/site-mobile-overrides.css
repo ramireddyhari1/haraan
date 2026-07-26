@@ -3,111 +3,57 @@
 .topbar .mobile-menu-toggle { display: none; }
 
 @media (max-width: 640px) {
-    /* Location picker: the desktop layout crams a full-width search input,
-       a text button, and a close button into one flex row, and adds a
-       120px alphabet-index column — both blow out on a 375px viewport and
-       squeeze the search box down to nothing. Turn it into a clean
-       full-screen sheet: sticky search + actions on top, one scrollable body,
-       and city cards that wrap long names instead of clipping them. */
-    .location-modal__card {
-        grid-template-columns: 1fr;
-        margin: 0;
-        max-width: 100%;
+    /* Location picker docks to the bottom edge as a true sheet: grab handle,
+       rounded top, springs up from below, one scrollable body. The base rules
+       in site-theme-overrides.css already define the internals; here we only
+       re-seat the panel and surface the grabber. */
+    .location-sheet {
         width: 100%;
-        height: 100%;
-        max-height: 100%;
-        border-radius: 0;
-        padding: 0;
-        gap: 0;
-        overflow: hidden;               /* body region scrolls, not the card */
-    }
-    /* The card's first child wraps the header + both city sections and is the
-       scroll container; the header sticks to its top while cities scroll. */
-    .location-modal__card > div:first-child {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        min-height: 0;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-    /* Sticky search + action bar. */
-    .location-modal__header {
-        position: sticky;
-        top: 0;
-        z-index: 3;
-        flex-direction: column;
-        align-items: stretch;
-        gap: 10px;
-        padding: 14px 16px;
         margin: 0;
-        background: #fff;
-        border-bottom: 1px solid #eef2f7;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        top: auto;
+        max-height: 90vh;
+        border-radius: 26px 26px 0 0;
+        box-shadow: 0 -12px 44px -14px rgba(9, 12, 20, .3);
     }
-    .location-search {
-        flex: initial !important;
+    .location-sheet.show {
+        animation: locSheetUp .40s cubic-bezier(.22, 1, .36, 1);
     }
-    .location-search input {
-        font-size: 16px;                /* ≥16px stops iOS auto-zoom on focus */
-    }
-    /* Button row sits under the search, full width. */
-    .location-modal__header > div:last-child {
-        margin-left: 0 !important;
-        display: flex;
-        gap: 8px;
-    }
-    #useCurrent {
-        flex: 1;
-        justify-content: center;
-        background: #2563EB;
-        border-color: #2563EB;
-        color: #fff;
-        font-weight: 700;
-        padding: 12px 14px;
-    }
-    #closeLocation {
-        flex: 0 0 auto;
-        padding: 12px 16px;
-    }
-    .alpha-index {
-        display: none;
-    }
-    /* City sections get side padding (header already has its own). */
-    .location-modal__card > div:first-child > section {
-        padding: 0 16px;
-    }
-    .location-modal__card > div:first-child > section:first-of-type {
-        margin-top: 14px;
-    }
-    .location-modal__card > div:first-child > section:last-of-type {
-        padding-bottom: 24px;
-    }
-    .popular-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-    }
-    /* Fixed 120px height clipped long city names; let cards grow and wrap. */
-    .city-card {
-        height: auto;
-        min-height: 92px;
-        padding: 12px 8px;
-        gap: 6px;
-    }
-    .city-card strong {
-        font-size: 12px;
-        line-height: 1.25;
-        text-align: center;
-        overflow-wrap: anywhere;        /* "Thiruvananthapuram" wraps, not clips */
-    }
-    .city-card .city-mono {
+    .location-sheet__grab {
+        display: block;
+        flex-shrink: 0;
         width: 38px;
-        height: 38px;
-        font-size: 17px;
+        height: 4px;
+        margin: 10px auto 0;
+        border-radius: 999px;
+        background: #dce0e7;
     }
-    .all-list {
-        max-height: none;               /* no nested scroll inside the sheet */
-        overflow: visible;
+    .location-sheet__head {
+        padding: 10px 20px 12px;
     }
+    .location-sheet__title {
+        font-size: 21px;
+    }
+    .location-sheet__body {
+        padding: 2px 18px calc(22px + env(safe-area-inset-bottom, 0px));
+    }
+    .loc-search input {
+        height: 50px;
+        font-size: 16px;               /* ≥16px stops iOS auto-zoom on focus */
+    }
+    /* Give the sticky letter a slightly taller fade so names never peek under it. */
+    .loc-letter {
+        background: linear-gradient(#fff 74%, rgba(255, 255, 255, 0));
+    }
+}
+@keyframes locSheetUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
+@media (max-width: 640px) {
 
     /* Profile header: the desktop row (120px avatar + name column + "Edit
        Profile" button, all in one nowrap flex row) pushes the button almost
@@ -1416,8 +1362,13 @@
         font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
         color: #94A3B8;
     }
-    .mhome__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px 12px; }
-    .mcard { text-decoration: none; color: inherit; display: block; }
+    /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), and with the grid
+       items' default min-width:auto the nowrap date/venue lines blow the first
+       track out to its min-content (~259px). That made the two columns unequal and
+       pushed the right column off-screen (84px of horizontal overflow). Flooring the
+       track at 0 keeps both columns equal; min-width:0 on the card lets it shrink. */
+    .mhome__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+    .mcard { text-decoration: none; color: inherit; display: block; min-width: 0; }
     .mcard__img {
         position: relative; width: 100%; aspect-ratio: 1 / 1;
         border-radius: 16px; overflow: hidden;
