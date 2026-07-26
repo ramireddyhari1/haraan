@@ -2791,18 +2791,24 @@ main.container {
     .mab__ltxt { flex: 1; font-size: 15px; font-weight: 800; letter-spacing: -.4px; color: #0F172A; }
     .mab__lsee { font-size: 12px; font-weight: 600; color: #2563EB; }
 
-    /* Match group (MatchGroup) — one surface, rows split by inset hairlines */
+    /* Match group — a plain stack; each match is its own separate card (with a gap)
+       rather than rows merged into one surface. */
     .mab__group {
-        background: #fff; border-radius: 14px; margin-bottom: 8px;
-        border: 1px solid #D9DFEA;
-        border-top-color: #F3F6FA; /* lit bevel: lighter top, darker bottom */
-        box-shadow: 0 8px 16px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .08);
-        overflow: hidden;
+        background: transparent; border: 0; box-shadow: none; border-radius: 0;
+        margin-bottom: 8px; overflow: visible;
+        display: flex; flex-direction: column; gap: 10px;
     }
+    .mab__group .mab__gdiv { display: none; } /* separate cards → no inter-row hairline */
     .mab__gdiv { height: 1px; background: #EEF0F4; margin: 0 14px; }
 
-    /* Match row (MatchLiveContent) */
-    .mab__match { display: block; text-decoration: none; color: inherit; }
+    /* Match card (MatchLiveContent) */
+    .mab__match {
+        display: block; text-decoration: none; color: inherit;
+        background: #fff; border-radius: 14px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .06);
+        overflow: hidden;
+    }
     .mab__match:active { transform: scale(.98); transition: transform .12s ease; }
     .mab__mctx { display: flex; align-items: center; gap: 6px; padding: 9px 14px; min-width: 0; }
     .mab__beacon {
