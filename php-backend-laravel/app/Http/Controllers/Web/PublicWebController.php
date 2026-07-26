@@ -418,6 +418,8 @@ final class PublicWebController extends Controller
             'home' => [
                 'abbr'    => $m->home,
                 'name'    => $m->home_full ?: $m->home,
+                'logo'    => (string) ($m->home_logo ?? ''),
+                'emblem'  => (string) ($m->home_emblem ?? ''),
                 'score'   => $homeBatted ? ($m->home_score . '/' . $homeWkts) : 'Yet to bat',
                 'overs'   => $battingHome ? $m->overs : '',
                 'batting' => $battingHome,
@@ -425,6 +427,8 @@ final class PublicWebController extends Controller
             'away' => [
                 'abbr'    => $m->away,
                 'name'    => $m->away_full ?: $m->away,
+                'logo'    => (string) ($m->away_logo ?? ''),
+                'emblem'  => (string) ($m->away_emblem ?? ''),
                 'score'   => $awayBatted ? ($m->away_score . '/' . $awayWkts) : 'Yet to bat',
                 'overs'   => $battingHome ? '' : $m->overs,
                 'batting' => ! $battingHome,

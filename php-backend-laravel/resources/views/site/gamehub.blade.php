@@ -1,6 +1,7 @@
 @extends('site.layout')
 @section('footer_icon_secondary', '#16a34a')
 @section('content')
+@include('site.partials.match-helpers')
 
 {{-- ================================================================= --}}
 {{-- MOBILE APP-STYLE GAMEHUB (mirrors the Android app; ≤720px)         --}}
@@ -102,8 +103,9 @@
             <div class="mhub__ab-strip">
                 @if($hubMeta)<p class="mhub__ab-meta">{{ $hubMeta }}</p>@endif
                 @foreach($hubRows as $team)
+                    @php $abIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
                     <div class="mhub__ab-row {{ $team['batting'] ? 'is-batting' : '' }}">
-                        <span class="mhub__ab-logo">{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}</span>
+                        <span class="mhub__ab-logo {{ $abIcon !== '' ? 'has-img' : '' }}">@if($abIcon !== '')<img src="{{ $abIcon }}" alt="{{ $team['abbr'] }}" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
                         <span class="mhub__ab-abbr">{{ $team['abbr'] }}</span>
                         <span class="mhub__ab-name">{{ $team['name'] }}</span>
                         <span class="mhub__ab-score">{{ $team['score'] }}</span>
@@ -314,8 +316,9 @@
                         <span class="gh-live__badge">LIVE</span>
                     </div>
                     @foreach([$lm['home'], $lm['away']] as $team)
+                        @php $glIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
                         <div class="gh-live__team {{ $team['batting'] ? 'is-batting' : '' }}">
-                            <span class="gh-live__logo">{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}</span>
+                            <span class="gh-live__logo {{ $glIcon !== '' ? 'has-img' : '' }}">@if($glIcon !== '')<img src="{{ $glIcon }}" alt="{{ $team['abbr'] }}" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
                             <span class="gh-live__abbr">{{ $team['abbr'] }}</span>
                             <span class="gh-live__name">{{ $team['name'] }}</span>
                             <span class="gh-live__score">{{ $team['score'] }}</span>
