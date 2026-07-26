@@ -189,8 +189,7 @@
     {{-- Fixed app bar — lifts (shadow) as the list scrolls beneath it. --}}
     <div class="mab__bar" id="mabBar">
         <div class="mab__head">
-            <span class="mab__logo"><img src="{{ asset('images/haraan-mark.png') }}" alt="" onerror="this.style.display='none'"></span>
-            <span class="mab__word">Haraan</span>
+            <span class="mab__logo" role="img" aria-label="Haraan"></span>
             <span class="mab__sp"></span>
             <a class="mab__ic" href="/search" aria-label="Search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.2" y2="16.2"></line></svg>
@@ -2720,12 +2719,13 @@ main.container {
     .mab.is-board .mab__bar { background: #EBEBF0; }
     .mab__bar.is-lifted { box-shadow: 0 4px 14px rgba(15, 23, 42, .10); }
     .mab__head { display: flex; align-items: center; gap: 8px; padding: 8px 0 12px; min-width: 0; }
+    /* Blue "H" mark only (no wordmark). The navy PNG is used as a mask over a blue
+       fill, so the icon is a crisp brand-blue regardless of the source colour. */
     .mab__logo {
-        width: 36px; height: 36px; border-radius: 12px; background: #F1F5F9;
-        display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+        width: 26px; height: 32px; flex: 0 0 auto; background-color: #2563EB;
+        -webkit-mask: url("{{ asset('images/haraan-mark.png') }}") center / contain no-repeat;
+        mask: url("{{ asset('images/haraan-mark.png') }}") center / contain no-repeat;
     }
-    .mab__logo img { width: 22px; height: 22px; object-fit: contain; }
-    .mab__word { font-size: 18px; font-weight: 800; letter-spacing: -.5px; color: #111827; white-space: nowrap; }
     .mab__sp { flex: 1; min-width: 0; }
     .mab__ic {
         width: 38px; height: 38px; border-radius: 12px; background: #F1F5F9; border: 0;
