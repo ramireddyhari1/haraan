@@ -64,6 +64,12 @@
     {{-- ── Live score hero ── --}}
     <div class="mdx-hero-wrap">
         <div class="mdx-hero-band">
+            {{-- Scrolling wordmark that crawls around the whole card border (SVG text-on-path,
+                 mirrors the app's ribbon). Sized to the band by JS so it never distorts. --}}
+            <svg class="mdx-ribbon" aria-hidden="true" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                <defs><path id="mdxRibPath" fill="none"></path></defs>
+                <text><textPath href="#mdxRibPath" startOffset="0"></textPath></text>
+            </svg>
             <div class="mdx-hero-card">
                 <div class="mdx-hero-meta">{{ $metaLine }}</div>
                 <div class="mdx-hero-row">
@@ -172,7 +178,9 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 
 /* ── Hero ── */
 .mdx-hero-wrap { padding: 8px 14px; background: var(--bg); }
-.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 14px; overflow: hidden; }
+.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 15px; overflow: hidden; }
+.mdx-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mdx-ribbon text { fill: rgba(100,116,139,.38); font-family: 'Inter', sans-serif; font-size: 10.5px; font-weight: 800; letter-spacing: 1px; }
 .mdx-hero-card {
     position: relative;
     border-radius: 12px;
@@ -330,6 +338,48 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 }
 </style>
 
+<script>
+    // Scrolling border ribbon — fit an SVG text path to the card border and crawl it.
+    (function () {
+        var band = document.querySelector('.mdx-hero-band');
+        var svg = document.querySelector('.mdx-ribbon');
+        if (!band || !svg) return;
+        var path = svg.querySelector('path');
+        var tp = svg.querySelector('textPath');
+        var seg = 'HARAAN  ·  LIVE  ·  ';
+        var segLen = 140;
+
+        function layout() {
+            var w = Math.round(band.clientWidth), h = Math.round(band.clientHeight);
+            if (!w || !h) return;
+            svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+            var i = 8, r = 18, x0 = i, y0 = i, x1 = w - i, y1 = h - i;
+            path.setAttribute('d',
+                'M ' + (x0 + r) + ' ' + y0 +
+                ' H ' + (x1 - r) + ' A ' + r + ' ' + r + ' 0 0 1 ' + x1 + ' ' + (y0 + r) +
+                ' V ' + (y1 - r) + ' A ' + r + ' ' + r + ' 0 0 1 ' + (x1 - r) + ' ' + y1 +
+                ' H ' + (x0 + r) + ' A ' + r + ' ' + r + ' 0 0 1 ' + x0 + ' ' + (y1 - r) +
+                ' V ' + (y0 + r) + ' A ' + r + ' ' + r + ' 0 0 1 ' + (x0 + r) + ' ' + y0 + ' Z');
+            tp.textContent = seg;
+            segLen = tp.getComputedTextLength() || 140;
+            var per = path.getTotalLength() || (w * 2 + h * 2);
+            var reps = Math.ceil((per + segLen) / segLen) + 2;
+            tp.textContent = new Array(reps + 1).join(seg);
+        }
+
+        layout();
+        var off = 0;
+        function tick() {
+            off -= 0.35;
+            if (off <= -segLen) off += segLen;
+            tp.setAttribute('startOffset', off);
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+        var rt;
+        window.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(layout, 150); });
+    })();
+</script>
 @if($isLive)
 <script>
     // Mirror the app's live auto-refresh — a live match ticks without a manual reload.
