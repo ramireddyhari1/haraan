@@ -194,11 +194,17 @@
             <a class="mab__ic" href="/search" aria-label="Search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.2" y2="16.2"></line></svg>
             </a>
-            <button class="mab__ic" type="button" onclick="mabJoinByCode()" aria-label="Join by code">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
-            </button>
-            {{-- "+ Create" intentionally web-hidden: match creation is an app-only
-                 action here (kept in the native app, removed from the mobile web bar). --}}
+            {{-- App-only actions (join-by-code / create) are removed from the mobile
+                 web bar; the one CTA left is "get the app". --}}
+            <a class="mab__get" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#00E3A5" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
+                    <path fill="#3DDCFF" d="M17.7 9.1 5.6 2l9 8.7z"/>
+                    <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
+                    <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
+                </svg>
+                <span>Get the app</span>
+            </a>
         </div>
 
         {{-- Live / Finished / District / State strip with the sliding indicator. --}}
@@ -2724,13 +2730,13 @@ main.container {
         color: #6B7280; cursor: pointer; flex: 0 0 auto; padding: 0; text-decoration: none;
     }
     .mab__ic svg { width: 18px; height: 18px; }
-    .mab__create {
-        height: 38px; border-radius: 22px; background: #2563EB; color: #fff;
-        display: inline-flex; align-items: center; gap: 4px; padding: 0 12px;
-        font-size: 13px; font-weight: 700; text-decoration: none; flex: 0 0 auto;
+    .mab__get {
+        height: 38px; border-radius: 22px; background: #111827; color: #fff;
+        display: inline-flex; align-items: center; gap: 6px; padding: 0 14px;
+        font-size: 12.5px; font-weight: 700; text-decoration: none; flex: 0 0 auto;
         white-space: nowrap;
     }
-    .mab__create svg { width: 16px; height: 16px; }
+    .mab__get svg { width: 16px; height: 16px; }
 
     /* ── Tabs strip (CrexTabsSection) ────────────────────────────────── */
     .mab__tabs { position: relative; display: flex; padding-bottom: 0; }
