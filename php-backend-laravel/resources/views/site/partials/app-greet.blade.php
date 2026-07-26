@@ -16,7 +16,15 @@
     if (!empty($gAvatar) && !preg_match('/^(http|https):\/\//', $gAvatar) && strpos($gAvatar, '/') !== 0) {
         $gAvatar = asset('storage/' . ltrim($gAvatar, '/'));
     }
-    $gFirstName = trim(strtok(trim($gUser->name ?? ''), ' ')) ?: 'there';
+    $gIsGuest = ! auth()->check();
+    // Real first name only — never derive an avatar letter or greeting from a
+    // placeholder. A logged-out visitor was getting "Hey there!" over a bogus
+    // "T" avatar (first letter of "there"), which reads as unfinished.
+    $gFirstName = trim(strtok(trim($gUser->name ?? ''), ' '));
+    $gGreeting  = $gIsGuest
+        ? 'Welcome to Haraan'
+        : 'Hey ' . ($gFirstName !== '' ? $gFirstName : 'there') . '!';
+    $gInitial   = $gFirstName !== '' ? mb_strtoupper(mb_substr($gFirstName, 0, 1)) : '';
 @endphp
 
 <div class="app-greet {{ $onDark ? 'app-greet--dark' : '' }}">
@@ -25,15 +33,21 @@
        @guest data-login-open @endguest
        aria-label="{{ auth()->check() ? ($gUser->name ?? 'Account') : 'Log in' }}">
         {{-- Initial sits underneath so a missing or failed photo still shows a
-             letter rather than an empty circle (same fallback as the app). --}}
-        <span class="app-greet__initial">{{ mb_strtoupper(mb_substr($gFirstName, 0, 1)) }}</span>
+             letter rather than an empty circle (same fallback as the app). A
+             guest (or a named-less account) gets a neutral user glyph instead of
+             a letter pulled from placeholder text. --}}
+        @if($gInitial !== '')
+            <span class="app-greet__initial">{{ $gInitial }}</span>
+        @else
+            <svg class="app-greet__initial-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4.5 3.6-7.5 8-7.5s8 3 8 7.5"></path></svg>
+        @endif
         @if(!empty($gAvatar))
             <img src="{{ $gAvatar }}" alt="" class="app-greet__photo">
         @endif
     </a>
 
     <div class="app-greet__lockup">
-        <span class="app-greet__hey">Hey {{ $gFirstName }}!</span>
+        <span class="app-greet__hey">{{ $gGreeting }}</span>
         <a class="app-greet__loc" href="#" data-location-toggle>
             <span class="app-greet__loc-text">{{ $selectedCity ?? 'Set location' }}</span>
             <svg class="app-greet__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>

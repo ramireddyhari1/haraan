@@ -209,6 +209,8 @@
         color: #0F172A;
         line-height: 1;
     }
+    /* Guest / named-less fallback: neutral user glyph in the same ink as the letter. */
+    .app-greet__initial-glyph { color: #0F172A; }
     .app-greet__photo {
         position: absolute;
         inset: 0;
@@ -1522,6 +1524,7 @@
     .app-greet--dark .app-greet__hey { color: #FFFFFF; }
     .app-greet--dark .app-greet__loc { color: rgba(255, 255, 255, 0.85); }
     .app-greet--dark .app-greet__initial { color: #FFFFFF; }
+    .app-greet--dark .app-greet__initial-glyph { color: #FFFFFF; }
     .app-greet--dark .app-greet__avatar {
         background: rgba(255, 255, 255, 0.14);
         border-color: rgba(255, 255, 255, 0.35);
