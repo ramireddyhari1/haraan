@@ -1524,6 +1524,10 @@
                 $dkGtk          = $event->goodToKnowRows();
                 $dkNotes        = array_values(array_filter((array) ($event->info_notes ?? []), fn ($n) => is_string($n) && trim($n) !== ''));
                 $dkMapEmbed     = $event->mapEmbedUrl();
+                // Always show a real Google map on desktop: prefer the keyed Embed API
+                // when configured, else the keyless embed (works with no API key and no
+                // stored coordinates — searches the venue/address text).
+                $dkMapSrc       = $dkMapEmbed ?: 'https://maps.google.com/maps?q=' . rawurlencode($event->mapsQuery()) . '&z=15&output=embed';
                 $dkDirections   = $event->directionsUrl();
                 $dkVenueName    = $event->venue ?: ($event->city ?: 'Venue');
                 $dkVenueAddr    = $event->location ?: ($event->city ? $event->city . ', India' : 'India');
@@ -1658,11 +1662,7 @@
                         <section class="dk-sec">
                             <div class="dk-h"><h2>Location</h2></div>
                             <div class="dk-venue">
-                                @if($dkMapEmbed && $event->hasCoordinates())
-                                    <iframe src="{{ $dkMapEmbed }}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="Venue location map"></iframe>
-                                @else
-                                    <div class="dk-venue__map"><span class="dk-venue__pin"></span></div>
-                                @endif
+                                <iframe src="{{ $dkMapSrc }}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="Venue location map"></iframe>
                                 <div class="dk-venue__ft">
                                     <div style="min-width:0;">
                                         <h4>{{ $dkVenueName }}</h4>
