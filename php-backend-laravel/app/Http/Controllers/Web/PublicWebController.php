@@ -509,6 +509,102 @@ final class PublicWebController extends Controller
         ];
     }
 
+    /**
+     * The viewer's coordinates for ActionBoard proximity sorting. A precise device
+     * fix (browser geolocation, stored in the `hb_geo` cookie as "lat,lng") wins;
+     * otherwise the chosen city is geocoded via Google Maps. Returns [null, null]
+     * when neither is available (proximity then falls back to district/state names).
+     *
+     * @return array{0: ?float, 1: ?float}
+     */
+    private function viewerLatLng(): array
+    {
+        $geo = (string) request()->cookie('hb_geo', '');
+        if (preg_match('/^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/', $geo, $m)) {
+            $lat = (float) $m[1];
+            $lng = (float) $m[2];
+            if ($lat >= -90 && $lat <= 90 && $lng >= -180 && $lng <= 180) {
+                return [$lat, $lng];
+            }
+        }
+
+        $city = CityResolver::selected();
+        if ($city !== null && $city !== '') {
+            return $this->geocodeCity($city);
+        }
+
+        return [null, null];
+    }
+
+    private function geocodeCity(string $city): array
+    {
+        return $this->geocode($city . ', India');
+    }
+
+    /**
+     * Geocode a free-form place string to [lat, lng] via the Google Maps Geocoding
+     * API, cached for 30 days (places don't move). Returns [null, null] on any failure
+     * or when no API key is configured, so callers silently fall back.
+     *
+     * @return array{0: ?float, 1: ?float}
+     */
+    private function geocode(string $address): array
+    {
+        $address = trim($address);
+        $key = (string) config('services.google_maps.key');
+        if ($address === '' || $key === '') {
+            return [null, null];
+        }
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            'geocode:' . md5(mb_strtolower($address)),
+            now()->addDays(30),
+            function () use ($address, $key): array {
+                try {
+                    $resp = \Illuminate\Support\Facades\Http::timeout(4)
+                        ->get('https://maps.googleapis.com/maps/api/geocode/json', [
+                            'address' => $address,
+                            'key' => $key,
+                        ]);
+                    $loc = $resp->json('results.0.geometry.location');
+                    if (is_array($loc) && isset($loc['lat'], $loc['lng'])) {
+                        return [(float) $loc['lat'], (float) $loc['lng']];
+                    }
+                } catch (\Throwable $e) {
+                    // fall through to the null fix
+                }
+
+                return [null, null];
+            }
+        );
+    }
+
+    /**
+     * Fill in a match's coordinates from its place names (locality → district → state)
+     * via Google geocoding, IN MEMORY only, so MatchProximity can measure true distance
+     * even though these rows were created without a GPS fix. No-op when it already has
+     * coordinates or has no usable place name.
+     */
+    private function ensureMatchCoords(LiveMatch $m): void
+    {
+        if ($m->latitude !== null && $m->longitude !== null) {
+            return;
+        }
+        $place = trim(implode(', ', array_filter([
+            trim((string) ($m->locality ?? '')),
+            trim((string) ($m->district ?? '')),
+            trim((string) ($m->state ?? '')),
+        ])));
+        if ($place === '') {
+            return;
+        }
+        [$lat, $lng] = $this->geocode($place . ', India');
+        if ($lat !== null && $lng !== null) {
+            $m->latitude = $lat;
+            $m->longitude = $lng;
+        }
+    }
+
     public function actionBoard(): View
     {
         $matches = LiveMatch::orderBy('created_at', 'desc')->get()->toArray();
@@ -523,10 +619,20 @@ final class PublicWebController extends Controller
             ->limit(200)
             ->get();
 
-        // Same ranking as the app. The server-rendered page has no device GPS, so
-        // proximity here leans on the signed-in profile; a guest simply gets the
-        // starred-then-live order (adding browser geolocation is a later pass).
+        // Same ranking as the app, now with a real viewer position: a precise device
+        // fix from the browser (cookie set by the page's geolocation JS) if we have it,
+        // otherwise the viewer's chosen city geocoded via Google Maps. Either gives
+        // MatchProximity real coordinates so matches sort by true km distance; admin
+        // featured still leads (MatchProximity::sortKey #1) regardless of distance.
+        [$viewerLat, $viewerLng] = $this->viewerLatLng();
+        // Give each match real coordinates (geocoded from its place names, cached) so
+        // distance is measurable against the viewer even though these rows carry no GPS.
+        if ($viewerLat !== null && $viewerLng !== null) {
+            $feed->each(fn (LiveMatch $m) => $this->ensureMatchCoords($m));
+        }
         $near = new \App\Support\MatchProximity(
+            latitude: $viewerLat,
+            longitude: $viewerLng,
             district: (string) ($viewer->district ?? ''),
             state: (string) ($viewer->state ?? ''),
         );

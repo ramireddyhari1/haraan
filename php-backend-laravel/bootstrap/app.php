@@ -15,7 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // The header city pill is set client-side (document.cookie) and read
         // server-side to scope listings, so it must not be encrypted.
-        $middleware->encryptCookies(except: ['haraan_city']);
+        $middleware->encryptCookies(except: ['haraan_city', 'hb_geo']);
 
         // ETag/304 on API GETs so the app's auto-refresh polls re-download nothing
         // when data is unchanged. Backward-compatible (adds a header; 304 only when
