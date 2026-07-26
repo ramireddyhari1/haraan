@@ -734,42 +734,61 @@
         @endif
     @endauth
 
-    <!-- Location selector modal (improved) -->
+    <!-- Location selector — bottom sheet -->
     <div id="locationModal" class="location-modal" aria-hidden="true">
         <div class="location-modal__backdrop" id="locationBackdrop"></div>
-        <div class="location-modal__card" role="dialog" aria-modal="true" aria-labelledby="locationTitle">
-            <button id="closeLocation" class="location-modal__close" aria-label="Close">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
+        <div class="location-sheet" role="dialog" aria-modal="true" aria-labelledby="locationTitle">
+            <span class="location-sheet__grab" aria-hidden="true"></span>
 
-            <div class="location-modal__titles">
-                <h3 id="locationTitle" class="location-modal__title">Choose your city</h3>
-                <p class="location-modal__sub" id="locationCurrent">Set where you want to play &amp; attend</p>
-            </div>
-
-            <div class="location-modal__header">
-                <label class="location-search">
-                    <svg class="location-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                    <input type="search" id="locationSearch" placeholder="Search cities">
-                </label>
-                <button id="useCurrent" class="btn btn--use-location">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                    Use current location
-                </button>
-            </div>
-
-            <section class="loc-section">
-                <h4 class="loc-section__title">Popular Cities</h4>
-                <div id="popularCities" class="popular-grid" role="list"></div>
-            </section>
-
-            <section class="loc-section">
-                <h4 class="loc-section__title">All Cities</h4>
-                <div class="all-cities-wrap">
-                    <div id="allCities" class="all-list" role="list"></div>
-                    <aside class="alpha-index" aria-hidden="false" id="alphaIndex" title="Jump to letter"></aside>
+            <header class="location-sheet__head">
+                <div class="location-sheet__heading">
+                    <h3 id="locationTitle" class="location-sheet__title">Choose your city</h3>
+                    <p class="location-sheet__sub" id="locationCurrent">Set where you want to play &amp; attend</p>
                 </div>
-            </section>
+                <button id="closeLocation" class="location-sheet__close" aria-label="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+
+            <div class="location-sheet__body" id="locationBody">
+                <label class="loc-search">
+                    <svg class="loc-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="search" id="locationSearch" placeholder="Search for a city" autocomplete="off" spellcheck="false">
+                </label>
+
+                <button id="useCurrent" class="loc-current">
+                    <span class="loc-current__icon" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
+                    </span>
+                    <span class="loc-current__text">
+                        <span class="loc-current__title">Use my current location</span>
+                        <span class="loc-current__sub">Find events &amp; venues near you</span>
+                    </span>
+                    <svg class="loc-current__chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+
+                <section class="loc-group" id="locRecentWrap" hidden>
+                    <h4 class="loc-group__label">Recent</h4>
+                    <div id="locRecent" class="loc-chips" role="list"></div>
+                </section>
+
+                <section class="loc-group" id="locPopularWrap">
+                    <h4 class="loc-group__label">Popular cities</h4>
+                    <div id="popularCities" class="loc-chips" role="list"></div>
+                </section>
+
+                <section class="loc-group loc-group--list">
+                    <h4 class="loc-group__label" id="locAllLabel">All cities</h4>
+                    <div id="allCities" class="loc-rows" role="list"></div>
+                    <div id="locEmpty" class="loc-empty" hidden>
+                        <span class="loc-empty__icon" aria-hidden="true">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                        </span>
+                        <p class="loc-empty__title">No matching city</p>
+                        <p class="loc-empty__sub">Check the spelling, or pick one from the list.</p>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 

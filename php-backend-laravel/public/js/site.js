@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /* ------------------------------------------------------------------ */
 
     const locationModal    = document.getElementById('locationModal');
-    const locationCard     = locationModal?.querySelector('.location-modal__card');
+    const locationCard     = locationModal?.querySelector('.location-sheet');
     // Two triggers open the picker: the desktop pill and the mobile greeting's
     // location line. Bind by attribute so either can open it.
     const locationToggles  = document.querySelectorAll('[data-location-toggle]');
@@ -83,7 +83,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const popularGrid      = document.getElementById('popularCities');
     const allList          = document.getElementById('allCities');
     const useCurrentBtn    = document.getElementById('useCurrent');
-    const alphaIndex       = document.getElementById('alphaIndex');
+    const sheetBody        = document.getElementById('locationBody');
+    const recentWrap       = document.getElementById('locRecentWrap');
+    const recentList       = document.getElementById('locRecent');
+    const emptyState       = document.getElementById('locEmpty');
 
     /** Cache for the cities data fetched from /data/cities.json */
     let cachedCities = [];
@@ -95,10 +98,13 @@ document.addEventListener('DOMContentLoaded', () => {
         locationModal.style.display = 'block';
         locationCard?.classList.add('show');
         window.HaraanOverlay.push('location', closeLocationModal);
-        locationSearch?.focus();
-        // Now that the list has layout, reset to the top and light up the
-        // matching A-Z letter (syncing before this point sees zero offsets).
-        if (allList) { allList.scrollTop = 0; syncActiveLetter(); }
+        // Always open scrolled to the top of the sheet.
+        if (sheetBody) sheetBody.scrollTop = 0;
+        // Only pull up the keyboard on pointer/desktop — on touch it would slam
+        // the on-screen keyboard over the sheet the instant it opens.
+        if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+            locationSearch?.focus();
+        }
     }
 
     /** Hide the location-selector modal. */
@@ -150,11 +156,25 @@ document.addEventListener('DOMContentLoaded', () => {
      * list, plus the A-Z sidebar index.
      */
     function renderCities(cities) {
-        if (!popularGrid || !allList || !alphaIndex) return;
+        if (!popularGrid || !allList) return;
 
         popularGrid.innerHTML = '';
         allList.innerHTML     = '';
-        alphaIndex.innerHTML  = '';
+        if (recentList) recentList.innerHTML = '';
+
+        // --- Recent (recently chosen cities) — personal, only if we have any. ---
+        const recents = recentCities()
+            .map(r => cities.find(c => c.name === r.name))
+            .filter(Boolean)
+            .slice(0, 4);
+        if (recentWrap) {
+            if (recents.length && recentList) {
+                recents.forEach(c => recentList.appendChild(buildCityCard(c)));
+                recentWrap.hidden = false;
+            } else {
+                recentWrap.hidden = true;
+            }
+        }
 
         // --- Popular cities (top 8) ---
         cities
@@ -162,51 +182,75 @@ document.addEventListener('DOMContentLoaded', () => {
             .slice(0, 8)
             .forEach(c => popularGrid.appendChild(buildCityCard(c)));
 
-        // --- All cities, sorted A-Z ---
-        const sorted  = cities.slice().sort((a, b) => a.name.localeCompare(b.name));
-        const letters = {};
+        // --- All cities, sorted A-Z, grouped under quiet letter headers ---
+        const sorted = cities.slice().sort((a, b) => a.name.localeCompare(b.name));
+        let lastLetter = null;
         sorted.forEach(c => {
             const first = (c.name || '').charAt(0).toUpperCase();
-            letters[first] = true;
+            if (first !== lastLetter) {
+                lastLetter = first;
+                const header = document.createElement('div');
+                header.className = 'loc-letter';
+                header.dataset.divider = '1';
+                header.textContent = first;
+                allList.appendChild(header);
+            }
             allList.appendChild(buildCityRow(c));
         });
 
-        // --- Alphabet quick-jump sidebar ---
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter => {
-            const btn       = document.createElement('button');
-            btn.textContent = letter;
-            btn.className   = letters[letter] ? '' : 'disabled';
-
-            if (letters[letter]) {
-                btn.addEventListener('click', () => scrollToLetter(letter));
-            }
-            alphaIndex.appendChild(btn);
-        });
-
-        // Keep the active letter in sync as the list scrolls.
-        allList.onscroll = syncActiveLetter;
-        syncActiveLetter();
-
         // Current-city context line under the title.
-        const currentLine = document.getElementById('locationCurrent');
-        if (currentLine) {
+        if (locationCurrentLine()) {
             const sel = selectedCityName();
-            currentLine.textContent = sel
-                ? 'Currently showing: ' + sel
+            locationCurrentLine().textContent = sel
+                ? 'Currently browsing ' + sel
                 : 'Set where you want to play & attend';
         }
 
-        // --- Wire up the search input ---
+        // --- Search: instant filter + collapse browse sections + empty state ---
         if (locationSearch) {
             locationSearch.value   = '';
+            if (sheetBody) sheetBody.classList.remove('is-searching');
+            if (emptyState) emptyState.hidden = true;
             locationSearch.oninput = function () {
-                const query = this.value.toLowerCase();
+                const query = this.value.trim().toLowerCase();
+                if (sheetBody) sheetBody.classList.toggle('is-searching', !!query);
+
+                let visible = 0;
                 Array.from(allList.children).forEach(row => {
-                    const name = row.querySelector('strong').textContent.toLowerCase();
-                    row.style.display = name.includes(query) ? '' : 'none';
+                    // Letter headers only make sense in the full, unfiltered list.
+                    if (row.dataset.divider) {
+                        row.style.display = query ? 'none' : '';
+                        return;
+                    }
+                    const strong = row.querySelector('.loc-row__name');
+                    const name   = strong ? strong.textContent.toLowerCase() : '';
+                    const hit    = name.includes(query);
+                    row.style.display = hit ? '' : 'none';
+                    if (hit) visible++;
                 });
+                if (emptyState) emptyState.hidden = !(query && visible === 0);
             };
         }
+    }
+
+    /** The subtitle line element under the sheet title. */
+    function locationCurrentLine() {
+        return document.getElementById('locationCurrent');
+    }
+
+    /** Recently-selected cities (most-recent first), from localStorage. */
+    function recentCities() {
+        try { return JSON.parse(localStorage.getItem('bv_recent_cities') || '[]'); }
+        catch (_) { return []; }
+    }
+
+    /** Remember a city as recently chosen (dedup, most-recent first, cap 4). */
+    function pushRecentCity(city) {
+        try {
+            const list = recentCities().filter(c => c.name !== city.name);
+            list.unshift({ name: city.name, country: city.country || '' });
+            localStorage.setItem('bv_recent_cities', JSON.stringify(list.slice(0, 4)));
+        } catch (_) {}
     }
 
     /** Name of the currently-selected city, for highlighting in the list. */
@@ -215,42 +259,44 @@ document.addEventListener('DOMContentLoaded', () => {
         catch (_) { return ''; }
     }
 
-    /**
-     * A colored monogram chip for a city — deterministic hue from the name, so
-     * each city reads as a distinct branded tile instead of a gray placeholder.
-     */
-    function cityMonogram(city, cls) {
-        let h = 0;
-        for (const ch of (city.name || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
-        // Constrain to the brand blue/indigo family (198–238°) so the modal reads
-        // as one product with the now-blue header, not a bag of random pastels.
-        const hue = 198 + (h % 40);
-        const letter = (city.name || '?').charAt(0).toUpperCase();
-        return `<span class="${cls}" style="background:hsl(${hue} 70% 94%);color:hsl(${hue} 62% 42%)">${letter}</span>`;
-    }
+    /** A tick glyph for the currently-selected city. */
+    const CHECK_SVG =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<polyline points="20 6 9 17 4 12"></polyline></svg>';
 
-    /** Build a card element for the "Popular Cities" grid. */
+    /**
+     * A curated city chip. Typography does the work — the selected city fills
+     * with ink so the choice reads instantly without a coloured badge on every
+     * one. Used for both the "Recent" and "Popular" rows.
+     */
     function buildCityCard(city) {
+        const selected = city.name === selectedCityName();
         const btn = document.createElement('button');
-        btn.className = 'city-card' + (city.name === selectedCityName() ? ' is-selected' : '');
+        btn.className = 'loc-chip' + (selected ? ' is-selected' : '');
+        btn.type = 'button';
         btn.setAttribute('role', 'listitem');
-        btn.innerHTML = `
-            <div class="icon">${cityMonogram(city, 'city-mono')}</div>
-            <div><strong>${city.name}</strong></div>`;
+        if (selected) btn.setAttribute('aria-current', 'true');
+        btn.innerHTML = `<span class="loc-chip__name">${city.name}</span>` +
+            (selected ? `<span class="loc-chip__tick">${CHECK_SVG}</span>` : '');
         btn.addEventListener('click', () => selectCity(city));
         return btn;
     }
 
-    /** Build a row element for the "All Cities" list. */
+    /**
+     * A city row in the A-Z list. No avatar, no repeated country label — just a
+     * confident name, generous height, and a quiet tick when it's the current
+     * city. Alignment and rhythm carry it.
+     */
     function buildCityRow(city) {
+        const selected = city.name === selectedCityName();
         const div = document.createElement('div');
-        div.className = 'city-row' + (city.name === selectedCityName() ? ' is-selected' : '');
+        div.className = 'loc-row' + (selected ? ' is-selected' : '');
         div.setAttribute('role', 'listitem');
         div.dataset.letter = (city.name || '?').charAt(0).toUpperCase();
-        div.innerHTML = `
-            <div class="thumb">${cityMonogram(city, 'city-mono city-mono--sm')}</div>
-            <div><strong>${city.name}</strong></div>
-            ${city.name === selectedCityName() ? '<span class="city-row__check" aria-label="Selected">✓</span>' : ''}`;
+        div.innerHTML =
+            `<span class="loc-row__name">${city.name}</span>` +
+            (selected ? `<span class="loc-row__tick">${CHECK_SVG}</span>` : '');
         div.addEventListener('click', () => selectCity(city));
         return div;
     }
@@ -267,39 +313,11 @@ document.addEventListener('DOMContentLoaded', () => {
             document.cookie = 'haraan_city=' + encodeURIComponent(city.name) +
                 '; path=/; max-age=' + maxAge + '; SameSite=Lax';
             localStorage.setItem('bv_selected_city', JSON.stringify(city));
+            pushRecentCity(city);
         } catch (_) {}
         closeLocationModal();
         // Reload so the server re-filters listings and updates the header pill.
         window.location.reload();
-    }
-
-    /** Scroll the "All Cities" list to the first city under a given letter. */
-    function scrollToLetter(letter) {
-        const target = Array.from(allList.children)
-            .find(row => row.dataset.letter === letter);
-        if (target) {
-            allList.scrollTop = target.offsetTop - allList.offsetTop;
-            // Programmatic scrollTop doesn't reliably fire 'scroll', so refresh
-            // the active-letter highlight directly.
-            syncActiveLetter();
-        }
-    }
-
-    /** Highlight the A-Z button matching the topmost visible row as you scroll. */
-    function syncActiveLetter() {
-        if (!allList || !alphaIndex) return;
-        // No layout yet (modal still hidden) → skip; every offset is 0 and the
-        // loop would otherwise fall through to the last letter.
-        if (!allList.offsetParent && allList.offsetHeight === 0) return;
-        const top = allList.scrollTop;
-        let current = null;
-        for (const row of allList.children) {
-            if (row.offsetTop - allList.offsetTop <= top + 4) current = row.dataset.letter;
-            else break;
-        }
-        Array.from(alphaIndex.children).forEach(btn => {
-            btn.classList.toggle('active', btn.textContent === current);
-        });
     }
 
     // --- Location modal event wiring ---
@@ -408,17 +426,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     useCurrentBtn?.addEventListener('click', () => {
-        const originalLabel = useCurrentBtn.textContent;
+        // Update only the title line so the icon/subtext/structure survive.
+        const titleEl  = useCurrentBtn.querySelector('.loc-current__title');
+        const subEl    = useCurrentBtn.querySelector('.loc-current__sub');
+        const label0   = titleEl ? titleEl.textContent : '';
+        const sub0     = subEl ? subEl.textContent : '';
+        const setText  = (t, s) => {
+            if (titleEl) titleEl.textContent = t;
+            if (subEl && s != null) subEl.textContent = s;
+        };
         const resetBtn = () => {
-            useCurrentBtn.textContent = originalLabel;
+            setText(label0, sub0);
             useCurrentBtn.disabled = false;
+            useCurrentBtn.classList.remove('is-loading');
         };
         const fail = () => {
             resetBtn();
             alert('Could not detect your location. Please pick a city from the list.');
         };
-        useCurrentBtn.textContent = 'Locating…';
+        setText('Detecting your location…', 'Hang tight for a moment');
         useCurrentBtn.disabled = true;
+        useCurrentBtn.classList.add('is-loading');
 
         // IP fallback — used when precise geolocation is unavailable/denied.
         const tryIp = () => resolveCityByIp().then((ok) => { if (!ok) fail(); }).catch(fail);
