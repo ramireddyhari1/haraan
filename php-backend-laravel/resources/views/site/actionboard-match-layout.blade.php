@@ -182,7 +182,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-hero-wrap { padding: 8px 14px; background: var(--bg); }
 .mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 15px; overflow: hidden; }
 .mdx-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.mdx-ribbon text { fill: rgba(100,116,139,.38); font-family: 'Inter', sans-serif; font-size: 10.5px; font-weight: 800; letter-spacing: 1px; }
+.mdx-ribbon text { fill: rgba(71,85,105,.72); font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
 .mdx-hero-card {
     position: relative;
     border-radius: 12px;
