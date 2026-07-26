@@ -18,6 +18,17 @@
     $battingAvg = $matches > 0 ? number_format($runs / $matches, 1) : '0.0';
     $bowlingEcon = $totalBallsBowled > 0 ? number_format(($runsConceded / $totalBallsBowled) * 6, 2) : '0.00';
 
+    // Honesty guards — this profile must never invent data it doesn't have. A
+    // user with no cricket history was shown fake ranks (#2 / #12 / #248) and a
+    // fake "Kadapa, Andhra Pradesh" location, which even contradicted the real
+    // zeros above (rank #2 with 0 matches). Show only what's actually set.
+    $locBits = array_filter([
+        filled($player->district) ? trim($player->district) . ' District' : null,
+        filled($player->state) ? trim($player->state) : null,
+    ]);
+    $locationLine = implode(', ', $locBits);
+    $hasAnyRank = filled($player->rank_district) || filled($player->rank_state) || filled($player->rank_country);
+
     // Recent form scores
     $recentStats = \App\Models\PlayerMatchStat::where('player_id', $player->player_id)
         ->orderBy('id', 'desc')
@@ -95,30 +106,6 @@
         </div>
     </header>
 
-    <!-- Custom Bottom Navigation (Mobile Only) -->
-    <div class="actionboard-mobile-nav">
-        <a class="nav-tab" href="{{ route('site.gamehub.actionboard') }}#home">
-            <svg class="tab-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-            <span>Home</span>
-        </a>
-        <a class="nav-tab" href="{{ route('site.gamehub.actionboard') }}#live-center">
-            <svg class="tab-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
-            <span>Live</span>
-        </a>
-        <a class="nav-tab" href="{{ route('site.gamehub.actionboard') }}#series-center">
-            <svg class="tab-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.67 4.41 4.96-.1.82-.16 1.66-.16 2.54 0 .32.02.63.04.94L3.18 19.3c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0L7.1 18.2c.86.53 1.83.8 2.9.8v3h4v-3c1.07 0 2.04-.27 2.9-.8l2.51 2.51c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41l-4.11-4.9c.02-.31.04-.62.04-.94 0-.88-.06-1.72-.16-2.54C19.08 12.67 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"/></svg>
-            <span>Series</span>
-        </a>
-        <a class="nav-tab active" href="{{ route('site.gamehub.actionboard') }}#players-center">
-            <svg class="tab-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
-            <span>Players</span>
-        </a>
-        <a class="nav-tab" href="{{ route('site.gamehub.actionboard') }}#stats-center">
-            <svg class="tab-icon" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="18" cy="12" r="2" fill="currentColor"/></svg>
-            <span>More</span>
-        </a>
-    </div>
-
     <!-- Profile Page Container -->
     <div class="actionboard-profile-main-container">
         <!-- Hero Header section -->
@@ -133,30 +120,48 @@
                 <div class="player-vital-meta">
                     <div class="title-row">
                         <h1>{{ $player->name }}</h1>
-                        <span class="role-pill">{{ $player->player_role ?? 'All-Rounder' }}</span>
+                        @if(filled($player->player_role))
+                            <span class="role-pill">{{ $player->player_role }}</span>
+                        @endif
                     </div>
-                    <p class="id-str">🏏 ID: <strong>{{ $player->player_id }}</strong> • 📍 {{ $player->district ?? 'Kadapa' }} District, {{ $player->state ?? 'Andhra Pradesh' }}</p>
-                    
-                    <!-- Ranks row -->
+                    <p class="id-str">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;opacity:.7"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="10" x2="7" y2="10"/><line x1="11" y1="10" x2="17" y2="10"/><line x1="7" y1="14" x2="15" y2="14"/></svg>
+                        ID: <strong>{{ $player->player_id }}</strong>
+                        @if($locationLine)
+                            <span aria-hidden="true">&nbsp;•&nbsp;</span>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;opacity:.7"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            {{ $locationLine }}
+                        @endif
+                    </p>
+
+                    <!-- Ranks row — only the ranks the player actually holds. -->
+                    @if($hasAnyRank)
                     <div class="rank-badges-row">
+                        @if(filled($player->rank_district))
                         <div class="rank-badge">
                             <span class="sub">District Rank</span>
-                            <strong class="val val-emerald">#{{ $player->rank_district ?? '2' }}</strong>
+                            <strong class="val val-emerald">#{{ $player->rank_district }}</strong>
                         </div>
+                        @endif
+                        @if(filled($player->rank_state))
                         <div class="rank-badge">
                             <span class="sub">State Rank</span>
-                            <strong class="val val-blue">#{{ $player->rank_state ?? '12' }}</strong>
+                            <strong class="val val-blue">#{{ $player->rank_state }}</strong>
                         </div>
+                        @endif
+                        @if(filled($player->rank_country))
                         <div class="rank-badge">
                             <span class="sub">India Rank</span>
-                            <strong class="val val-amber">#{{ $player->rank_country ?? '248' }}</strong>
+                            <strong class="val val-amber">#{{ $player->rank_country }}</strong>
                         </div>
+                        @endif
                     </div>
+                    @endif
                 </div>
             </div>
             
             <div class="hero-right-col">
-                <button class="btn-follow active" onclick="toggleFollow()">Following</button>
+                <button class="btn-follow" onclick="toggleFollow()">Follow</button>
                 <button class="btn-share" onclick="navigator.clipboard.writeText(window.location.href); alert('Player profile link copied!');">
                     <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg>
                     Share
@@ -208,15 +213,15 @@
                     <div class="specs-grid">
                         <div class="spec-cell">
                             <span class="tag">Batting Style</span>
-                            <strong>{{ $player->batting_style ?? $player->playing_style ?? 'Right-hand bat' }}</strong>
+                            <strong>{{ $player->batting_style ?? $player->playing_style ?? '—' }}</strong>
                         </div>
                         <div class="spec-cell">
                             <span class="tag">Bowling Style</span>
-                            <strong>{{ $player->bowling_style ?? 'Right-arm medium' }}</strong>
+                            <strong>{{ $player->bowling_style ?? '—' }}</strong>
                         </div>
                         <div class="spec-cell">
                             <span class="tag">Primary Role</span>
-                            <strong>{{ $player->player_role ?? 'All-Rounder' }}</strong>
+                            <strong>{{ $player->player_role ?? '—' }}</strong>
                         </div>
                         <div class="spec-cell">
                             <span class="tag">Overs Bowled</span>
@@ -262,7 +267,9 @@
             <!-- RIGHT SIDE COL: Innings charts & Form -->
             <div class="profile-right-col">
                 
-                <!-- dynamic SVG innings runs trend chart -->
+                <!-- dynamic SVG innings runs trend chart — hidden until the player has
+                     real innings, so a 0-match profile doesn't show a flat empty line. -->
+                @if($recentStats->count() > 0)
                 <div class="stats-panel">
                     <h3>Performance Innings Trend</h3>
                     <p class="chart-desc">Runs scored across last 5 matches</p>
@@ -308,6 +315,7 @@
                         </div>
                     </div>
                 </div>
+                @endif
 
                 <!-- Form stats checklist (Last 5 Innings) -->
                 <div class="stats-panel">
@@ -364,7 +372,7 @@ main.container {
     color: #1E293B !important;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     min-height: 100vh;
-    padding-bottom: 80px;
+    padding-bottom: 24px;
     overflow-x: hidden;
 }
 
@@ -907,9 +915,6 @@ main.container {
 @media (max-width: 1024px) {
     .actionboard-desktop-header {
         display: none !important;
-    }
-    .actionboard-mobile-nav {
-        display: flex;
     }
     .actionboard-profile-main-container {
         padding: 0 16px;
