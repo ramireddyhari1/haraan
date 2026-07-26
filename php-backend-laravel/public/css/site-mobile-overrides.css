@@ -1070,11 +1070,11 @@
            main.container's) instead of guessing at them. */
         margin-left: calc(50% - 50vw);
         margin-right: calc(50% - 50vw);
-        /* Half the free space either side — the card is (100vw − 92px), so this is a
-           constant 46px at any width. It centres the poster and lets the first and
+        /* Half the free space either side — the card is (100vw − 130px), so this is a
+           constant 65px at any width. It centres the poster and lets the first and
            last card reach the middle. With `start` alignment and a 16px pad the card
            sat against the left edge: a peek on the right, dead space on the left. */
-        padding: 4px 46px 8px;
+        padding: 4px 65px 8px;
     }
     .mpager::-webkit-scrollbar { display: none; }
 
@@ -1089,12 +1089,14 @@
        scroll width and the snap points don't move. */
     .mfy__page {
         position: relative;
-        flex: 0 0 calc(100vw - 92px);
-        /* Centred, like the app: a sliver of the previous poster on the left and the
-           next one on the right, ~34px each. */
+        flex: 0 0 calc(100vw - 130px);
+        /* Web divergence from the app's near-full-width hero: a smaller card that
+           shows a real slice of the next poster (~53px each side, not ~34px) so the
+           rail reads as a swipeable feed of events, and the section below (Trending)
+           peeks above the fold instead of one giant card owning the whole screen. */
         scroll-snap-align: center;
         content-visibility: auto;
-        contain-intrinsic-size: calc(100vw - 92px) calc((100vw - 92px) * 4 / 3);
+        contain-intrinsic-size: calc(100vw - 130px) calc((100vw - 130px) * 4 / 3);
     }
 
     /* The hero poster, at the app's real size — 283px at 375 (the page is
