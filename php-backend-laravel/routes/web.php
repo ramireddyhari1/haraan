@@ -45,6 +45,7 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
     Route::get('/gamehub/actionboard/match/{id}', 'actionBoardMatchLive')->name('site.gamehub.actionboard.match');
     Route::get('/gamehub/actionboard/match/{id}/info', 'actionBoardMatchInfo')->name('site.gamehub.actionboard.match.info');
+    Route::get('/gamehub/actionboard/match/{id}/commentary', 'actionBoardMatchCommentary')->name('site.gamehub.actionboard.match.commentary');
     Route::get('/gamehub/actionboard/match/{id}/scorecard', 'actionBoardMatchScorecard')->name('site.gamehub.actionboard.match.scorecard');
     Route::get('/gamehub/actionboard/match/{id}/json', 'actionBoardMatchJson')->name('site.gamehub.actionboard.match.json');
     Route::get('/gamehub/actionboard/matches/json', 'actionBoardMatchesJson')->name('site.gamehub.actionboard.matches.json');

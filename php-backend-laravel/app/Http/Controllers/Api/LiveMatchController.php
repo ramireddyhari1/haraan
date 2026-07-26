@@ -175,6 +175,16 @@ class LiveMatchController extends Controller
         return response()->json($this->matchDetail($match, $viewer));
     }
 
+    /**
+     * Public accessor for the assembled detail payload, so the server-rendered web
+     * match pages can render from the exact same data the app's Match Details screen
+     * consumes (score, live crease, replayed innings cards, commentary feed).
+     */
+    public function detailPayload(LiveMatch $match, ?User $viewer = null): array
+    {
+        return $this->matchDetail($match, $viewer);
+    }
+
     /** Build the flat detail payload the app's Match Details screen expects. */
     private function matchDetail(LiveMatch $match, ?User $viewer = null): array
     {

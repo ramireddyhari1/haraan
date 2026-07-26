@@ -595,28 +595,37 @@ final class PublicWebController extends Controller
         ]);
     }
 
+    /**
+     * The web ActionBoard match-detail pages mirror the app's Match Details screen
+     * (Info · Commentary · Live · Scorecard). All four render from the SAME assembled
+     * payload the app consumes — score + live crease + replayed innings cards +
+     * commentary — via LiveMatchController::detailPayload().
+     */
+    private function matchDetailFor(string $id): array
+    {
+        $match = LiveMatch::findOrFail($id);
+        $viewer = auth()->user();
+        return app(\App\Http\Controllers\Api\LiveMatchController::class)->detailPayload($match, $viewer);
+    }
+
     public function actionBoardMatchLive(string $id): View
     {
-        $match = LiveMatch::findOrFail($id)->toArray();
-        $matches = LiveMatch::orderBy('created_at', 'desc')->get()->toArray();
-        $timeline = $match['timeline'] ?? [];
-        return view('site.actionboard-match-live', ['title' => 'Live Match', 'match' => $match, 'id' => $id, 'activeTab' => 'live', 'matches' => $matches, 'timeline' => $timeline]);
+        return view('site.actionboard-match-live', ['title' => 'Live Match', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'live']);
     }
 
     public function actionBoardMatchInfo(string $id): View
     {
-        $match = LiveMatch::findOrFail($id)->toArray();
-        $matches = LiveMatch::orderBy('created_at', 'desc')->get()->toArray();
-        $timeline = $match['timeline'] ?? [];
-        return view('site.actionboard-match-info', ['title' => 'Match Info', 'match' => $match, 'id' => $id, 'activeTab' => 'info', 'matches' => $matches, 'timeline' => $timeline]);
+        return view('site.actionboard-match-info', ['title' => 'Match Info', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'info']);
+    }
+
+    public function actionBoardMatchCommentary(string $id): View
+    {
+        return view('site.actionboard-match-commentary', ['title' => 'Commentary', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'commentary']);
     }
 
     public function actionBoardMatchScorecard(string $id): View
     {
-        $match = LiveMatch::findOrFail($id)->toArray();
-        $matches = LiveMatch::orderBy('created_at', 'desc')->get()->toArray();
-        $timeline = $match['timeline'] ?? [];
-        return view('site.actionboard-match-scorecard', ['title' => 'Match Scorecard', 'match' => $match, 'id' => $id, 'activeTab' => 'scorecard', 'matches' => $matches, 'timeline' => $timeline]);
+        return view('site.actionboard-match-scorecard', ['title' => 'Match Scorecard', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'scorecard']);
     }
 
     public function login(): View
