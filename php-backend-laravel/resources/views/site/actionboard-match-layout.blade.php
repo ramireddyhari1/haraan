@@ -64,7 +64,6 @@
     {{-- ── Live score hero ── --}}
     <div class="mdx-hero-wrap">
         <div class="mdx-hero-band">
-            <div class="mdx-ribbon" aria-hidden="true"><span>@for($i=0;$i<12;$i++)HARAAN &nbsp;·&nbsp; LIVE &nbsp;·&nbsp; @endfor</span></div>
             <div class="mdx-hero-card">
                 <div class="mdx-hero-meta">{{ $metaLine }}</div>
                 <div class="mdx-hero-row">
@@ -173,10 +172,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 
 /* ── Hero ── */
 .mdx-hero-wrap { padding: 8px 14px; background: var(--bg); }
-.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 18px; overflow: hidden; }
-.mdx-ribbon { position: absolute; left: 0; right: 0; bottom: 5px; overflow: hidden; white-space: nowrap; pointer-events: none; }
-.mdx-ribbon span { display: inline-block; color: rgba(100,116,139,.4); font-size: 10.5px; font-weight: 800; letter-spacing: 1px; animation: mdxCrawl 22s linear infinite; }
-@keyframes mdxCrawl { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 14px; overflow: hidden; }
 .mdx-hero-card {
     position: relative;
     border-radius: 12px;
