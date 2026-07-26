@@ -89,6 +89,25 @@ if (!function_exists('hrn_overs_from_balls')) {
     }
 }
 
+if (!function_exists('hrn_team_icon')) {
+    /** Resolve a team's crest image URL: an uploaded logo (http or storage path) wins;
+     *  otherwise a default emblem key (action1..4) maps to the bundled web image. Returns
+     *  '' when there's nothing — callers fall back to a coloured monogram. */
+    function hrn_team_icon(?string $logo, ?string $emblem = ''): string
+    {
+        $logo = trim((string) $logo);
+        if ($logo !== '' && strtolower($logo) !== 'null') {
+            if (str_starts_with($logo, 'http://') || str_starts_with($logo, 'https://')) return $logo;
+            return \Illuminate\Support\Facades\URL::to($logo);
+        }
+        $key = strtolower(trim((string) $emblem));
+        if (preg_match('/^action[1-4]$/', $key)) {
+            return asset('images/emblems/' . $key . '.jpg');
+        }
+        return '';
+    }
+}
+
 if (!function_exists('hrn_mono_color')) {
     /** Deterministic vivid colour from a name — so monogram avatars/crests read as a
      *  real, varied roster instead of a wall of identical grey placeholder circles. */

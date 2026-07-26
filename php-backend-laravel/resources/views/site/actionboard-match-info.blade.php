@@ -7,8 +7,8 @@
     $team2 = (string) ($d['team2'] ?? '');
     $team1Full = trim((string) ($d['team1Full'] ?? '')) ?: $team1;
     $team2Full = trim((string) ($d['team2Full'] ?? '')) ?: $team2;
-    $logo1 = (string) ($d['team1Logo'] ?? '');
-    $logo2 = (string) ($d['team2Logo'] ?? '');
+    $logo1 = hrn_team_icon($d['team1Logo'] ?? '', $d['team1Emblem'] ?? '');
+    $logo2 = hrn_team_icon($d['team2Logo'] ?? '', $d['team2Emblem'] ?? '');
     $col1 = hrn_mono_color($team1Full);
     $col2 = hrn_mono_color($team2Full);
     $competition = trim((string) ($d['formatLabel'] ?? ''));

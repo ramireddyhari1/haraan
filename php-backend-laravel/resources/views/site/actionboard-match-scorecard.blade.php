@@ -23,7 +23,7 @@
     @foreach($cards as $card)
         @php
             $bt = (int) ($card['battingTeam'] ?? 1);
-            $logo = $bt === 2 ? (string) ($d['team2Logo'] ?? '') : (string) ($d['team1Logo'] ?? '');
+            $logo = $bt === 2 ? hrn_team_icon($d['team2Logo'] ?? '', $d['team2Emblem'] ?? '') : hrn_team_icon($d['team1Logo'] ?? '', $d['team1Emblem'] ?? '');
             $code = hrn_team_code($bt === 2 ? (string) ($d['team2'] ?? '') : (string) ($d['team1'] ?? ''));
             $innCol = hrn_mono_color((string) ($card['battingName'] ?? $code));
             $batters = is_array($card['batters'] ?? null) ? $card['batters'] : [];

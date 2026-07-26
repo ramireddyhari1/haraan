@@ -546,6 +546,12 @@ final class PublicWebController extends Controller
                     'id'          => (string) $m->id,
                     'team1'       => (string) $m->home,
                     'team2'       => (string) $m->away,
+                    // Team crests: uploaded logo path/URL + default emblem key (action1..4)
+                    // so the list can render real icons, not just monograms.
+                    'team1Logo'   => (string) ($m->home_logo ?? ''),
+                    'team1Emblem' => (string) ($m->home_emblem ?? ''),
+                    'team2Logo'   => (string) ($m->away_logo ?? ''),
+                    'team2Emblem' => (string) ($m->away_emblem ?? ''),
                     'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
                     'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
                     'overs1'      => $battingTeam === 2 ? '' : $overs,

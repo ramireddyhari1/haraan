@@ -1,6 +1,7 @@
 @extends('site.layout')
 
 @section('content')
+@include('site.partials.match-helpers')
 @php
     $featuredMatch = $activeMatch ?? ($matches[0] ?? null);
     $liveMatches = array_values(array_filter($matches, fn ($match) => strcasecmp($match['status'], 'Live') === 0));
@@ -247,6 +248,8 @@
                                 $s1 = $swap ? $m['score2'] : $m['score1']; $s2 = $swap ? $m['score1'] : $m['score2'];
                                 $o1 = $swap ? $m['overs2'] : $m['overs1']; $o2 = $swap ? $m['overs1'] : $m['overs2'];
                                 $c1 = $abCode($t1); $c2 = $abCode($t2);
+                                $icon1 = hrn_team_icon($swap ? ($m['team2Logo'] ?? '') : ($m['team1Logo'] ?? ''), $swap ? ($m['team2Emblem'] ?? '') : ($m['team1Emblem'] ?? ''));
+                                $icon2 = hrn_team_icon($swap ? ($m['team1Logo'] ?? '') : ($m['team2Logo'] ?? ''), $swap ? ($m['team1Emblem'] ?? '') : ($m['team2Emblem'] ?? ''));
                                 $yet2 = $abYetToBat($s2, $o2);
                                 $place = $m['locality'] !== '' ? $m['locality'] : (strcasecmp($m['venue'], 'Custom Match') !== 0 ? $m['venue'] : '');
                                 $loc = implode(' · ', array_filter([$place, $m['district']]));
@@ -291,12 +294,12 @@
                                 <div class="mab__mbody">
                                     <div class="mab__mteams">
                                         <div class="mab__trow">
-                                            <span class="mab__tlogo" style="background: {{ $abColor($t1) }}">{{ mb_substr($c1, 0, 3) }}</span>
+                                            <span class="mab__tlogo" style="background: {{ $icon1 !== '' ? '#fff' : $abColor($t1) }}">@if($icon1 !== '')<img src="{{ $icon1 }}" alt="{{ $c1 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c1,0,3) }}'))">@else{{ mb_substr($c1, 0, 3) }}@endif</span>
                                             <span class="mab__tname is-bat">{{ $c1 }}</span>
                                             <span class="mab__tscore is-bat">{{ $s1 }}@if ($o1 !== '')<small>{{ $o1 }}</small>@endif</span>
                                         </div>
                                         <div class="mab__trow">
-                                            <span class="mab__tlogo is-dim" style="background: {{ $abColor($t2) }}">{{ mb_substr($c2, 0, 3) }}</span>
+                                            <span class="mab__tlogo is-dim" style="background: {{ $icon2 !== '' ? '#fff' : $abColor($t2) }}">@if($icon2 !== '')<img src="{{ $icon2 }}" alt="{{ $c2 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c2,0,3) }}'))">@else{{ mb_substr($c2, 0, 3) }}@endif</span>
                                             <span class="mab__tname is-dim">{{ $c2 }}</span>
                                             @if ($yet2)
                                                 <span class="mab__tyet">Yet to bat</span>
@@ -2827,6 +2830,8 @@ main.container {
         color: #fff; font-size: 10px; font-weight: 800;
         border: 1px solid rgba(15, 23, 42, .1); margin-right: 10px;
     }
+    .mab__tlogo { overflow: hidden; }
+    .mab__tlogo img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
     .mab__tlogo.is-dim { opacity: .4; }
     .mab__tname { flex: 1; font-size: 16px; font-weight: 600; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .mab__tname.is-bat { font-weight: 800; }

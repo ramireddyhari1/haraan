@@ -33,8 +33,8 @@
     }
     $lastBallKind = $lastBall !== '' ? hrn_ball_kind($lastBall) : 'dot';
 
-    $logo1 = (string) ($d['team1Logo'] ?? '');
-    $logo2 = (string) ($d['team2Logo'] ?? '');
+    $logo1 = hrn_team_icon($d['team1Logo'] ?? '', $d['team1Emblem'] ?? '');
+    $logo2 = hrn_team_icon($d['team2Logo'] ?? '', $d['team2Emblem'] ?? '');
 
     $active = $activeTab ?? 'live';
     $tabs = [
