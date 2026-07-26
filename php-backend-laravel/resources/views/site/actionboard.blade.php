@@ -294,12 +294,12 @@
                                 <div class="mab__mbody">
                                     <div class="mab__mteams">
                                         <div class="mab__trow">
-                                            <span class="mab__tlogo" style="background: {{ $icon1 !== '' ? '#fff' : $abColor($t1) }}">@if($icon1 !== '')<img src="{{ $icon1 }}" alt="{{ $c1 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c1,0,3) }}'))">@else{{ mb_substr($c1, 0, 3) }}@endif</span>
+                                            <span class="mab__tlogo {{ $icon1 !== '' ? 'has-img' : '' }}" style="background: {{ $icon1 !== '' ? '#fff' : $abColor($t1) }}">@if($icon1 !== '')<img src="{{ $icon1 }}" alt="{{ $c1 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c1,0,3) }}'))">@else{{ mb_substr($c1, 0, 3) }}@endif</span>
                                             <span class="mab__tname is-bat">{{ $c1 }}</span>
                                             <span class="mab__tscore is-bat">{{ $s1 }}@if ($o1 !== '')<small>{{ $o1 }}</small>@endif</span>
                                         </div>
                                         <div class="mab__trow">
-                                            <span class="mab__tlogo is-dim" style="background: {{ $icon2 !== '' ? '#fff' : $abColor($t2) }}">@if($icon2 !== '')<img src="{{ $icon2 }}" alt="{{ $c2 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c2,0,3) }}'))">@else{{ mb_substr($c2, 0, 3) }}@endif</span>
+                                            <span class="mab__tlogo is-dim {{ $icon2 !== '' ? 'has-img' : '' }}" style="background: {{ $icon2 !== '' ? '#fff' : $abColor($t2) }}">@if($icon2 !== '')<img src="{{ $icon2 }}" alt="{{ $c2 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c2,0,3) }}'))">@else{{ mb_substr($c2, 0, 3) }}@endif</span>
                                             <span class="mab__tname is-dim">{{ $c2 }}</span>
                                             @if ($yet2)
                                                 <span class="mab__tyet">Yet to bat</span>
@@ -2833,6 +2833,8 @@ main.container {
     .mab__tlogo { overflow: hidden; }
     .mab__tlogo img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
     .mab__tlogo.is-dim { opacity: .4; }
+    /* A real crest image must stay clearly visible — the .4 dim is only for monogram tiles. */
+    .mab__tlogo.is-dim.has-img { opacity: 1; }
     .mab__tname { flex: 1; font-size: 16px; font-weight: 600; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .mab__tname.is-bat { font-weight: 800; }
     .mab__tname.is-dim, .mab__tscore.is-dim { color: #B0BAC8; }
