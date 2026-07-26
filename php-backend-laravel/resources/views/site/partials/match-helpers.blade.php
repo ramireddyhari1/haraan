@@ -89,6 +89,17 @@ if (!function_exists('hrn_overs_from_balls')) {
     }
 }
 
+if (!function_exists('hrn_mono_color')) {
+    /** Deterministic vivid colour from a name — so monogram avatars/crests read as a
+     *  real, varied roster instead of a wall of identical grey placeholder circles. */
+    function hrn_mono_color(?string $name): string
+    {
+        $palette = ['#2563EB','#16A34A','#7C3AED','#DB2777','#EA580C','#0891B2','#D97706','#0D9488','#4F46E5','#BE123C'];
+        $key = mb_strtolower(trim((string) $name));
+        return $palette[abs(crc32($key)) % count($palette)];
+    }
+}
+
 if (!function_exists('hrn_parse_rb')) {
     /** "34 (19)" -> ['runs' => 34, 'balls' => 19]. */
     function hrn_parse_rb(?string $s): array

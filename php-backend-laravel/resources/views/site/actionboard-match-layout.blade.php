@@ -11,6 +11,8 @@
     $team2 = (string) ($d['team2'] ?? '');
     $code1 = hrn_team_code($team1);
     $code2 = hrn_team_code($team2);
+    $col1 = hrn_mono_color(trim((string) ($d['team1Full'] ?? '')) ?: $team1);
+    $col2 = hrn_mono_color(trim((string) ($d['team2Full'] ?? '')) ?: $team2);
 
     $scoreBatting = hrn_sanitize_score((string) ($d['score'] ?? '0'));
     $scoreOpp     = hrn_sanitize_score((string) ($d['opponentScore'] ?? '0'));
@@ -75,7 +77,7 @@
                 <div class="mdx-hero-row">
                     {{-- Team 1 --}}
                     <div class="mdx-team mdx-team-l">
-                        <div class="mdx-crest">
+                        <div class="mdx-crest" @if($logo1==='')style="background:{{ $col1 }};border-color:transparent;"@endif>
                             @if($logo1 !== '')<img src="{{ $logo1 }}" alt="{{ $code1 }}">@else<span>{{ $code1 }}</span>@endif
                         </div>
                         <div class="mdx-team-code">{{ $code1 }}</div>
@@ -95,7 +97,7 @@
 
                     {{-- Team 2 --}}
                     <div class="mdx-team mdx-team-r">
-                        <div class="mdx-crest">
+                        <div class="mdx-crest" @if($logo2==='')style="background:{{ $col2 }};border-color:transparent;"@endif>
                             @if($logo2 !== '')<img src="{{ $logo2 }}" alt="{{ $code2 }}">@else<span>{{ $code2 }}</span>@endif
                         </div>
                         <div class="mdx-team-code">{{ $code2 }}</div>
@@ -193,7 +195,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-team-r { align-items: flex-end; text-align: right; }
 .mdx-crest { width: 42px; height: 42px; border-radius: 50%; background: #fff; border: 1.5px solid #CBD5E1; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
 .mdx-crest img { width: 100%; height: 100%; object-fit: cover; }
-.mdx-crest span { color: var(--blue); font-size: 13px; font-weight: 800; }
+.mdx-crest span { color: #fff; font-size: 13px; font-weight: 800; }
 .mdx-team-code { margin-top: 8px; font-size: 14px; font-weight: 600; color: #1E293B; }
 .mdx-team-score { margin-top: 2px; display: flex; align-items: flex-end; line-height: 1; }
 .mdx-team-r .mdx-team-score { justify-content: flex-end; }

@@ -25,6 +25,7 @@
             $bt = (int) ($card['battingTeam'] ?? 1);
             $logo = $bt === 2 ? (string) ($d['team2Logo'] ?? '') : (string) ($d['team1Logo'] ?? '');
             $code = hrn_team_code($bt === 2 ? (string) ($d['team2'] ?? '') : (string) ($d['team1'] ?? ''));
+            $innCol = hrn_mono_color((string) ($card['battingName'] ?? $code));
             $batters = is_array($card['batters'] ?? null) ? $card['batters'] : [];
             $bowlers = is_array($card['bowlers'] ?? null) ? $card['bowlers'] : [];
             $fow = is_array($card['fow'] ?? null) ? $card['fow'] : [];
@@ -36,7 +37,7 @@
         @endphp
         <div class="mdx-card mdx-card--flush mdx-inn">
             <div class="mdx-inn-head" onclick="this.closest('.mdx-inn').classList.toggle('collapsed')">
-                <span class="mdx-logo-sm" style="width:30px;height:30px;">@if($logo!=='')<img src="{{ $logo }}" alt="">@else{{ $code }}@endif</span>
+                <span class="mdx-logo-sm" style="width:30px;height:30px;background:{{ $innCol }};color:#fff;border-color:transparent;">@if($logo!=='')<img src="{{ $logo }}" alt="">@else{{ $code }}@endif</span>
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:15px;font-weight:900;">{{ $card['battingName'] ?? '' }}</div>
                     <div class="mdx-muted" style="font-size:10px;font-weight:600;">Innings {{ $card['number'] ?? '' }}</div>
