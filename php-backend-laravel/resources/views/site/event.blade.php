@@ -661,11 +661,14 @@
     .dr-tix__closed { padding: 18px 0; text-align: center; font-size: 14px; color: #64748B; }
 
     /* Good to Know — app-style card of icon-chip cells (EventGoodToKnowCard) */
-    .dr-gtk__card { background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; }
-    .dr-gtk__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; }
-    .dr-gtk__cell { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
-    .dr-gtk__ico { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 10px; background: rgba(37, 99, 235, 0.10); display: grid; place-items: center; }
-    .dr-gtk__ico svg { width: 18px; height: 18px; color: #2563EB; }
+    .dr-gtk__card { background: #F8FAFC; border: 1px solid #EEF2F7; border-radius: 16px; padding: 16px 18px; }
+    .dr-gtk__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .dr-gtk__cell { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+    /* De-chipped: a small muted glyph per cell instead of a blue-tinted icon box.
+       Seven colored icon chips in a grid read as template "chip soup"; a quiet
+       monochrome mark keeps the scanning cue without the visual noise. */
+    .dr-gtk__ico { flex: 0 0 auto; width: 18px; height: 18px; display: grid; place-items: center; margin-top: 1px; color: #94A3B8; }
+    .dr-gtk__ico svg { width: 17px; height: 17px; color: inherit; }
     .dr-gtk__txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .dr-gtk__txt small { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94A3B8; }
     .dr-gtk__txt strong { font-size: 14px; font-weight: 600; color: #0F172A; line-height: 1.3; overflow-wrap: anywhere; }
@@ -674,8 +677,8 @@
     @media (max-width: 430px) {
         .dr-gtk__grid { gap: 14px 12px; }
         .dr-gtk__card { padding: 14px; }
-        .dr-gtk__ico { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px; }
-        .dr-gtk__ico svg { width: 15px; height: 15px; }
+        .dr-gtk__ico { flex: 0 0 auto; width: 16px; height: 16px; }
+        .dr-gtk__ico svg { width: 16px; height: 16px; }
         .dr-gtk__txt strong { font-size: 13px; }
     }
 
