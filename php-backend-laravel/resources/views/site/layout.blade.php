@@ -340,7 +340,7 @@
          a PageHeader (back + title) instead of the greeting/search/tabs, so the phone
          does too. Desktop keeps the topbar — it's the only nav a wide screen has, and
          CSS decides which of the two shows (see .pagebar). --}}
-    @if(request()->is('profile', 'bookings', 'account/*', 'legal/*'))
+    @if(request()->is('profile', 'bookings', 'account/*', 'legal/*', 'support', 'notifications'))
         <header class="pagebar">
             <button type="button" class="pagebar__back" aria-label="Back" data-back>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
@@ -366,8 +366,13 @@
         $footTag   = $footIsHub ? 'Play. Compete. Climb.' : 'Discover. Book. Play.';
     @endphp
     <footer class="mfoot">
-        <div class="mfoot__app">
-            <div>
+        {{-- Brand-gradient hairline: keeps the two-lane (Events blue · GameHub green)
+             identity as a quiet accent instead of flooding the whole sheet. --}}
+        <span class="mfoot__accent" aria-hidden="true"></span>
+
+        {{-- Get-the-app card --}}
+        <div class="mfoot__cta">
+            <div class="mfoot__cta-copy">
                 <strong>{{ $footHead }}</strong>
                 <p>{{ $footBlurb }}</p>
             </div>
@@ -378,26 +383,46 @@
                     <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
                     <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
                 </svg>
-                <span><small>Get it on</small><b>Google Play</b></span>
+                <span><small>GET IT ON</small><b>Google Play</b></span>
             </a>
-            <a class="mfoot__apk" href="/haraan.apk">or download the Android APK directly</a>
+            <a class="mfoot__apk" href="/haraan.apk">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download the Android APK
+            </a>
         </div>
-        <nav class="mfoot__links" aria-label="Footer">
-            @if($footIsHub)
-            <a href="/gamehub">GameHub</a>
-            <a href="/gamehub/leaderboard">Leaderboard</a>
-            @else
-            <a href="/events">Events</a>
-            <a href="/gamehub">GameHub</a>
-            @endif
-            <a href="/support">Support</a>
-            <a href="/notifications">Notifications</a>
-            <a href="/profile">My profile</a>
-        </nav>
+
+        {{-- Tidy, labelled link columns — the structure that reads as a real product
+             footer rather than a single wrapped row. --}}
+        <div class="mfoot__cols">
+            <nav class="mfoot__col" aria-label="Explore">
+                <h4>Explore</h4>
+                <a href="/events">Events</a>
+                <a href="/gamehub">GameHub</a>
+                <a href="/gamehub/leaderboard">Leaderboard</a>
+            </nav>
+            <nav class="mfoot__col" aria-label="Your account">
+                <h4>Your account</h4>
+                <a href="/profile">My profile</a>
+                <a href="/bookings">My bookings</a>
+                <a href="/notifications">Notifications</a>
+            </nav>
+            <nav class="mfoot__col" aria-label="Help and legal">
+                <h4>Help &amp; legal</h4>
+                <a href="/support">Support</a>
+                <a href="/legal/terms">Terms of Use</a>
+                <a href="/legal/privacy">Privacy</a>
+            </nav>
+        </div>
+
         <div class="mfoot__base">
-            <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-            <span>{{ $footTag }}</span>
-            <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
+            <div class="mfoot__brand">
+                <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                <span class="mfoot__tag">{{ $footTag }}</span>
+            </div>
+            <div class="mfoot__meta">
+                <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
+                <span class="mfoot__made">Made in India</span>
+            </div>
         </div>
     </footer>
     @endif

@@ -901,60 +901,99 @@
         .mbrandmark__dots i { animation: none; opacity: 0.7; }
     }
 
-    /* --- Mobile footer: brand-gradient sheet (EventsBlue → GameHubGreen —
-       the two lanes of the product) with the app CTA + links + brand base --- */
+    /* --- Mobile footer: premium ink sheet.
+       Redesigned from the full-bleed blue→green gradient to a structured,
+       BookMyShow-grade footer — a deep-navy surface, a brand-gradient hairline
+       that keeps the two-lane identity without shouting, an app-download card,
+       three labelled link columns and a legal base. --- */
     .mfoot {
+        position: relative;
         margin-top: 44px;
-        /* Linear EventsBlue → GameHubGreen ramp — user compared this against an
-           aurora/radial-glow variant and preferred the linear. Keep it. */
-        background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
-        color: #ffffff;
+        /* Deep ink with two faint corner glows in the brand hues — depth, not a
+           rainbow wash. */
+        background:
+            radial-gradient(120% 78% at 0% 0%, rgba(37, 99, 235, .18) 0%, transparent 55%),
+            radial-gradient(120% 78% at 100% 0%, rgba(0, 177, 90, .15) 0%, transparent 55%),
+            #0B1220;
+        color: #E7ECF4;
         border-radius: 24px 24px 0 0;
-        padding: 26px 20px calc(30px + env(safe-area-inset-bottom, 0px));
+        padding: 30px 20px calc(26px + env(safe-area-inset-bottom, 0px));
         font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+        overflow: hidden;
+    }
+    .mfoot__accent {
+        position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: linear-gradient(90deg, #2563EB 0%, #22C55E 100%);
     }
     /* The page's own bottom padding would leave a slate band above the footer. */
     body:has(.mfoot) main.container { padding-bottom: 0; }
 
-    .mfoot__app {
+    /* ── App-download card ─────────────────────────────────────────────── */
+    .mfoot__cta {
         display: flex; flex-direction: column; gap: 14px;
-        background: rgba(255, 255, 255, 0.12);
-        border: 1px solid rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, .05);
+        border: 1px solid rgba(255, 255, 255, .10);
         border-radius: 18px; padding: 18px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
     }
-    .mfoot__app strong {
+    .mfoot__cta-copy strong {
         display: block; font-size: 17px; font-weight: 800;
-        letter-spacing: -0.02em; color: #ffffff; margin-bottom: 4px;
+        letter-spacing: -.02em; color: #fff; margin-bottom: 5px;
     }
-    .mfoot__app p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.85); }
+    .mfoot__cta-copy p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(231, 236, 244, .66); }
     .mfoot__play {
         display: inline-flex; align-items: center; gap: 11px; width: fit-content;
-        background: #000000; border: 1px solid rgba(255, 255, 255, 0.28);
+        background: #000; border: 1px solid rgba(255, 255, 255, .18);
         border-radius: 12px; padding: 9px 18px 9px 14px;
-        text-decoration: none; color: #ffffff;
+        text-decoration: none; color: #fff;
+        transition: transform .15s ease, border-color .15s ease;
     }
+    .mfoot__play:active { transform: scale(.98); }
     .mfoot__play svg { width: 24px; height: 24px; flex-shrink: 0; }
     .mfoot__play small {
-        display: block; font-size: 9.5px; font-weight: 600;
-        letter-spacing: 0.09em; text-transform: uppercase; color: #CBD5E1;
+        display: block; font-size: 9px; font-weight: 700;
+        letter-spacing: .12em; text-transform: uppercase; color: #AEB6C4;
     }
     .mfoot__play b { display: block; font-size: 16px; font-weight: 700; line-height: 1.2; }
-    .mfoot__apk { font-size: 12.5px; font-weight: 700; color: #ffffff; text-decoration: underline; text-underline-offset: 3px; }
+    .mfoot__apk {
+        display: inline-flex; align-items: center; gap: 7px; width: fit-content;
+        font-size: 12.5px; font-weight: 700; color: rgba(231, 236, 244, .72);
+        text-decoration: none; transition: color .15s ease;
+    }
+    .mfoot__apk svg { opacity: .7; }
+    .mfoot__apk:hover { color: #fff; }
 
-    .mfoot__links { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 24px 2px 22px; }
-    .mfoot__links a { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.95); text-decoration: none; }
+    /* ── Link columns ──────────────────────────────────────────────────── */
+    .mfoot__cols {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 22px 14px; margin: 26px 2px 24px;
+    }
+    .mfoot__col { display: flex; flex-direction: column; gap: 11px; }
+    .mfoot__col h4 {
+        margin: 0 0 3px; font-size: 10.5px; font-weight: 800;
+        letter-spacing: .1em; text-transform: uppercase; color: rgba(231, 236, 244, .42);
+    }
+    .mfoot__col a {
+        font-size: 13px; font-weight: 600; color: rgba(231, 236, 244, .86);
+        text-decoration: none; transition: color .15s ease;
+    }
+    .mfoot__col a:hover { color: #fff; }
 
+    /* ── Legal base ────────────────────────────────────────────────────── */
     .mfoot__base {
-        display: flex; flex-direction: column; gap: 7px;
-        border-top: 1px solid rgba(255, 255, 255, 0.28); padding-top: 20px;
+        display: flex; flex-direction: column; gap: 14px;
+        border-top: 1px solid rgba(255, 255, 255, .10); padding-top: 20px;
     }
+    .mfoot__brand { display: flex; align-items: center; gap: 12px; }
     /* The navy wordmark inverts to white on the ink footer. */
-    .mfoot__base img { height: 16px; width: auto; align-self: flex-start; filter: brightness(0) invert(1); opacity: 0.92; }
-    .mfoot__base span {
-        font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
-        text-transform: uppercase; color: rgba(255, 255, 255, 0.8);
+    .mfoot__brand img { height: 17px; width: auto; filter: brightness(0) invert(1); opacity: .95; }
+    .mfoot__tag {
+        font-size: 10px; font-weight: 800; letter-spacing: .1em;
+        text-transform: uppercase; color: rgba(231, 236, 244, .5);
     }
-    .mfoot__base small { font-size: 11px; color: rgba(255, 255, 255, 0.62); }
+    .mfoot__meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .mfoot__meta small { font-size: 11px; color: rgba(231, 236, 244, .5); }
+    .mfoot__made { font-size: 11px; font-weight: 700; color: rgba(231, 236, 244, .62); white-space: nowrap; }
 
     /* One canvas: at the top of the page the sticky header matches the white
        the section below starts with (no border, so no band). Once scrolled
@@ -1422,6 +1461,14 @@
     /* The sub-pages' footer "← Account" link is the desktop's only way back;
        with the back button present it's a second door to the same room. */
     body:has(.pagebar) .aprof-doc__back { display: none; }
+
+    /* Support & Notifications get the same .pagebar (back + "Support"/"Notifications"
+       title) as the account pages, so their greeting topbar is already hidden above.
+       Their own in-content page header now just repeats that title, so drop it on the
+       phone — the pagebar carries it. Desktop keeps the topbar and shows this head as
+       normal. */
+    body:has(.pagebar) .support-page__head,
+    body:has(.pagebar) .notif-page__head { display: none; }
 }
 
 /* ================================================================= */
