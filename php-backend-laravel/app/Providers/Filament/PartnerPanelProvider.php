@@ -79,7 +79,7 @@ class PartnerPanelProvider extends PanelProvider
         // · search + profile (right).
         FilamentView::registerRenderHook(
             PanelsRenderHook::TOPBAR_START,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
                     <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan Partner">
                     <span class="hrn-topbar-tag">partner</span>
@@ -111,7 +111,7 @@ class PartnerPanelProvider extends PanelProvider
         // + a full-basis tag drops it onto its own line directly beneath the logo.
         FilamentView::registerRenderHook(
             PanelsRenderHook::SIDEBAR_LOGO_AFTER,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 <span class="hrn-sidebar-tag">partner</span>
                 <span class="hrn-sidebar-tag hrn-sidebar-brand">Haraan</span>
                 <style>
@@ -165,7 +165,7 @@ class PartnerPanelProvider extends PanelProvider
         // state, more breathing room, and clearer section labels.
         FilamentView::registerRenderHook(
             PanelsRenderHook::SIDEBAR_FOOTER,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 @php
                     $u = auth()->user();
                     $name = $u?->name ?: 'Partner';
@@ -251,7 +251,7 @@ class PartnerPanelProvider extends PanelProvider
         // gate, so a desk person without listings access never sees it.
         FilamentView::registerRenderHook(
             PanelsRenderHook::SIDEBAR_NAV_START,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 @php
                     $isEvent = auth()->user()?->partner_type === 'event';
                     if ($isEvent) {
@@ -331,12 +331,44 @@ class PartnerPanelProvider extends PanelProvider
             scopes: \App\Filament\Pages\Dashboard::class,
         );
 
+        // Mobile: tighten the whole partner console's vertical rhythm. Stock
+        // Filament leaves a 2rem gap between the header widgets (KPI cards) and
+        // the content below, another 2rem between page sections, and 1.5rem
+        // between widgets — which on a phone reads as big empty bands between
+        // the stats, the search bar and the list. Halve them (partner panel
+        // only, and only below the desktop breakpoint) so the screen feels
+        // dense and app-like without touching the desktop layout.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::PAGE_START,
+            function (): string {
+                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
+                    return '';
+                }
+
+                return Blade::render(<<<'BLADE'
+                    <style>
+                        @media (max-width:1023px){
+                            /* Gap between header widgets → table, and between page sections. */
+                            .fi-page-content{row-gap:.85rem;}
+                            .fi-page-main{gap:.85rem;}
+                            /* Gap between stacked widgets / KPI cards in a widget group. */
+                            .fi-wi{gap:.7rem;}
+                            /* Trim the KPI stat cards' own padding + oversized number. */
+                            .fi-wi-stats-overview-stat{padding:12px 13px 11px;}
+                            .fi-wi-stats-overview-stat-value{font-size:22px;margin-top:3px;}
+                            .fi-wi-stats-overview-stat-description{margin-top:6px;}
+                        }
+                    </style>
+                BLADE);
+            },
+        );
+
         // Mobile: collapse the global search into a magnifier icon that sits beside the
         // profile menu; tapping it drops the real search field down as a full-width bar
         // under the top bar (and auto-focuses it). Desktop keeps the inline search field.
         FilamentView::registerRenderHook(
             PanelsRenderHook::GLOBAL_SEARCH_BEFORE,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 <button type="button" class="hrn-search-btn" aria-label="Search"
                         onclick="window.hrnToggleSearch(event)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"

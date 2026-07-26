@@ -27,6 +27,17 @@ class CreateEvent extends CreateRecord
         // (and visible to) its creating partner. See ScopesToOrganization.
         if (Filament::getCurrentPanel()?->getId() === 'partner') {
             $data['partner_id'] = auth()->user()?->effectivePartnerId();
+
+            // Partners can't self-publish: a partner-created event lands as
+            // "pending review" and shows up in /control, where Haraan staff set
+            // the publish controls (status · visibility · app rails) and go live.
+            // These three form fields are hidden + non-dehydrated in the partner
+            // console (see EventForm), so we seed sensible values here — the admin
+            // overrides them at review time. (Only on create: partner edits to an
+            // already-live event never touch status, so those stay live.)
+            $data['status']      = 'pending';
+            $data['visibility']  = $data['visibility'] ?? 'PUBLIC';
+            $data['placements']  = $data['placements'] ?? ['for_you', 'trending', 'nearby'];
         }
 
         return $data;

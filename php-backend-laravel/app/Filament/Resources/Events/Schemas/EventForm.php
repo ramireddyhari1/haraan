@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Events\Schemas;
 
+use App\Filament\Forms\Components\ClockTimePicker;
 use App\Filament\Forms\OrganizationSelect;
 use App\Services\EventCopyAI;
 use Filament\Actions\Action;
@@ -14,7 +15,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
@@ -278,19 +278,15 @@ class EventForm
                     ->native(false)
                     ->minDate(now()->startOfDay())
                     ->displayFormat('D, d M Y'),
-                TimePicker::make('time')
+                // Tap-to-select analog clock (like the phone time picker) instead of
+                // Filament's 24-hour spinner. Hosts tap the hour, then minutes, then
+                // AM/PM. Stores the same "7:00 PM" string the rest of the app expects.
+                // A real ->default() (not just a placeholder) avoids the old required-
+                // field trap where the field looked pre-filled but was actually empty.
+                ClockTimePicker::make('time')
                     ->label('Start time')
                     ->required()
-                    ->native(false)
-                    ->seconds(false)
-                    ->format('g:i A')       // store "7:00 PM" to match existing display strings
-                    ->displayFormat('g:i A')
-                    // A real default (not just a placeholder). Previously "7:00 PM"
-                    // was only placeholder text, so the field looked pre-filled but
-                    // was actually empty — a required-field validation trap that
-                    // silently blocked Create for hosts who left it untouched.
-                    ->default('7:00 PM')
-                    ->placeholder('7:00 PM'),
+                    ->default('7:00 PM'),
                 // Google Places search + draggable pin. Auto-fills venue, area/address,
                 // the maps link and the lat/lng below. Falls back to a plain pin-picker
                 // when no API key is set. See filament/places-picker.blade.php.
@@ -721,6 +717,12 @@ class EventForm
                     ->required()
                     ->native(false)
                     ->default('OFFLINE'),
+                // Publish controls (visibility · status · which app rails) are a
+                // platform/editorial decision, so they live in /control only. A
+                // partner fills in the event's content; Haraan staff review it and
+                // set these before it goes live. Hidden AND ->dehydrated(false) for
+                // partners so a partner's own edit to a live event can never rewrite
+                // them (edits stay live — see CreateEvent for the pending gate).
                 Select::make('visibility')
                     ->options([
                         'PUBLIC'  => 'Public — anyone can find it',
@@ -729,19 +731,25 @@ class EventForm
                     ->required()
                     ->native(false)
                     ->live()
-                    ->default('PUBLIC'),
+                    ->default('PUBLIC')
+                    ->visible(self::adminOnly())
+                    ->dehydrated(self::adminOnly()),
                 TextInput::make('access_code')
                     ->label('Access code')
-                    ->visible(fn (Get $get): bool => $get('visibility') === 'PRIVATE')
+                    ->visible(fn (Get $get): bool => self::adminOnly() && $get('visibility') === 'PRIVATE')
+                    ->dehydrated(self::adminOnly())
                     ->helperText('Attendees enter this to unlock a private event.'),
                 Select::make('status')
                     ->options([
+                        'pending'   => 'Pending review — submitted by host',
                         'draft'     => 'Draft — not visible yet',
                         'published' => 'Published — live now',
                     ])
                     ->required()
                     ->native(false)
-                    ->default('draft'),
+                    ->default('draft')
+                    ->visible(self::adminOnly())
+                    ->dehydrated(self::adminOnly()),
                 Select::make('placements')
                     ->label('Show in sections')
                     ->multiple()
@@ -752,6 +760,8 @@ class EventForm
                     ])
                     ->default(['for_you', 'trending', 'nearby'])
                     ->native(false)
+                    ->visible(self::adminOnly())
+                    ->dehydrated(self::adminOnly())
                     ->helperText('Which rails on the app\'s Events tab this event appears in. Leave all on to show it everywhere.'),
                 // Host assignment + editorial ratings are platform controls: hidden in
                 // /partner (a partner's own ownership is stamped server-side on create,
@@ -779,6 +789,20 @@ class EventForm
                     ->default(0)
                     ->visible(self::adminOnly())
                     ->helperText('How many people rated it (shown as "(123)" next to the star).'),
+                // Partner-only: explain the review gate, since the partner no
+                // longer sees a "publish" control (that's staff-only, above).
+                Placeholder::make('review_note')
+                    ->hiddenLabel()
+                    ->visible(fn (): bool => ! self::adminOnly())
+                    ->content(new HtmlString(
+                        '<div style="display:flex;gap:10px;padding:12px 14px;border-radius:12px;'
+                        . 'background:#eef4ff;border:1px solid #d3e2ff;color:#1e3a8a;font-size:.85rem;line-height:1.45;">'
+                        . '<span style="font-size:1.1rem;line-height:1;">🚀</span>'
+                        . '<span><strong>Submitted for review.</strong> Haraan checks new events before '
+                        . 'they go live — once approved it appears in the app automatically. You can keep '
+                        . 'editing it here anytime; your changes stay live after approval.</span></div>'
+                    ))
+                    ->columnSpanFull(),
             ]);
     }
 

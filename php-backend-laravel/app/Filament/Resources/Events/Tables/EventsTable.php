@@ -112,6 +112,7 @@ class EventsTable
             ->filters([
                 SelectFilter::make('status')
                     ->options([
+                        'pending' => 'Pending review',
                         'published' => 'Published',
                         'draft' => 'Draft',
                         'cancelled' => 'Cancelled',

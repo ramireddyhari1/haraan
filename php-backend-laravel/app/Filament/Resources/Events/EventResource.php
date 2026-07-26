@@ -12,6 +12,7 @@ use App\Filament\Resources\Events\Tables\EventsTable;
 use App\Filament\Concerns\ScopesToOrganization;
 use App\Models\Event;
 use BackedEnum;
+use Filament\Facades\Filament;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -28,6 +29,27 @@ class EventResource extends Resource
     protected static ?string $cluster = \App\Filament\Clusters\Events\EventsCluster::class;
 
     protected static ?int $navigationSort = 1;
+
+    /**
+     * Pending-review count as a nav badge — the "these are waiting on you" signal
+     * so partner-submitted events surface in /control the moment they land. Only
+     * on the admin panel; partners don't review, so it stays off /partner.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        if (Filament::getCurrentPanel()?->getId() !== 'control') {
+            return null;
+        }
+
+        $count = Event::whereRaw('lower(status) = ?', ['pending'])->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
 
     public static function canAccess(): bool
     {
