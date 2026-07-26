@@ -443,15 +443,8 @@
         /* App layout: date/venue live in the metadata cards below, not on the hero. */
         .district-event-page .dr-info-row .dr-meta-chips { display: none !important; }
 
-        /* Trust strip + metadata cards (mirror the app EventTrustIndicators + EventMetadataCards) */
+        /* Metadata cards (mirror the app EventMetadataCards) */
         .dr-mmeta { padding: 0 20px; margin: 6px 0 20px; }
-        .dr-trust { display: flex; gap: 8px; margin-bottom: 10px; }
-        .dr-trust__chip {
-            flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-            background: #F4F7FB; border-radius: 14px; padding: 9px 6px;
-            font-size: 12px; font-weight: 700; color: #0F172A; white-space: nowrap;
-        }
-        .dr-trust__chip svg { width: 15px; height: 15px; color: #64748B; flex-shrink: 0; }
         .dr-mcards { display: flex; gap: 8px; }
         .dr-mcard {
             flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -1052,6 +1045,14 @@
 
             {{-- Content sheet — overlaps the poster with a rounded top (mirrors the app) --}}
             <div class="dr-sheet">
+            @php
+                // The event's real start time is the `time` string column ("7:00 PM").
+                // `date` is date-only, so its clock reads 00:00 — formatting it gave
+                // every event a bogus "12:00 AM". Use the real field, and simply omit
+                // the time (→ "Time TBA" where a slot needs filling) when it's unset.
+                $evTime  = trim((string) ($event->time ?? ''));
+                $hasTime = $evTime !== '';
+            @endphp
             {{-- Info Header --}}
             <div class="dr-info-row" style="margin-bottom: 16px; padding-bottom: 12px;">
                 <div>
@@ -1063,14 +1064,14 @@
                         @endif
                     </div>
                     <h1 class="dr-main-title" style="margin-bottom: 8px;">{{ $event->title }}</h1>
-                    <p class="dr-date-line">{{ optional($event->date)->format('D, d M') }} • {{ optional($event->date)->format('g:i A') }}@if($event->city) • {{ $event->city }}@endif</p>
-                    <p class="dr-meta-text">{{ optional($event->date)->format('D, d M Y') }} • {{ optional($event->date)->format('g:i A') }}</p>
+                    <p class="dr-date-line">{{ optional($event->date)->format('D, d M') }}@if($hasTime) • {{ $evTime }}@endif@if($event->city) • {{ $event->city }}@endif</p>
+                    <p class="dr-meta-text">{{ optional($event->date)->format('D, d M Y') }}@if($hasTime) • {{ $evTime }}@endif</p>
                     {{-- Mobile-only glass meta chips overlaid on the hero --}}
                     <div class="dr-meta-chips">
                         @if($event->date)
                         <span class="dr-chip">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            <span>{{ $event->date->format('D, d M') }} · {{ $event->date->format('g:i A') }}</span>
+                            <span>{{ $event->date->format('D, d M') }}@if($hasTime) · {{ $evTime }}@endif</span>
                         </span>
                         @endif
                         @if($event->venue)
@@ -1090,7 +1091,7 @@
             @php
                 $mDay = optional($event->date)->format('j');
                 $mMonth = optional($event->date)->format('M');
-                $mTime = optional($event->date)->format('g:i A');
+                $mTime = $evTime;
                 $mVenueShort = $event->venue ? \Illuminate\Support\Str::before($event->venue, ',') : 'Venue';
                 $mSchedule = $event->scheduleRows();
                 // Precise "Directions" deep link — uses the exact lat/lng pin when the
@@ -1098,17 +1099,11 @@
                 $mMapsUrl = $event->directionsUrl();
             @endphp
             <div class="dr-mmeta">
-                <div class="dr-trust">
-                    <span class="dr-trust__chip">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verified
-                    </span>
-                    <span class="dr-trust__chip">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secure
-                    </span>
-                    <span class="dr-trust__chip">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Instant
-                    </span>
-                </div>
+                {{-- The old "Verified · Secure · Instant" chip strip was hardcoded
+                     filler (shown on every event regardless of truth) — the classic
+                     template tell. Real trust lives where it means something: the
+                     "Verified organizer" line in the Organizer section, and the
+                     secure-checkout note by the Book bar. --}}
                 <div class="dr-mcards">
                     <div class="dr-mcard">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
@@ -1124,14 +1119,14 @@
                     {{-- Tapping opens the run-of-show sheet, like the app's Doors Open card. --}}
                     <button type="button" class="dr-mcard" onclick="drSchedToggle(true)">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
-                        <strong>{{ $mTime ?: 'On time' }}</strong>
+                        <strong>{{ $hasTime ? $mTime : 'TBA' }}</strong>
                         <small class="dr-mcard__link">Schedule</small>
                     </button>
                     @else
                     <div class="dr-mcard">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
-                        <strong>{{ $mTime ?: 'On time' }}</strong>
-                        <small>Doors Open</small>
+                        <strong>{{ $hasTime ? $mTime : 'TBA' }}</strong>
+                        <small>{{ $hasTime ? 'Doors Open' : 'Time' }}</small>
                     </div>
                     @endif
                 </div>
@@ -1535,7 +1530,7 @@
                 $dkHeroImg      = $event->heroImageUrl() ?? asset('events.png');
                 $dkDateLong     = optional($event->date)->format('l, d M Y');
                 $dkDateShort    = optional($event->date)->format('D, d M');
-                $dkTime         = optional($event->date)->format('g:i A');
+                $dkTime         = trim((string) ($event->time ?? ''));
                 $dkDesc         = trim(strip_tags((string) $event->description));
                 $dkBookDisabled = $dkSoldOut || $dkSalesClosed;
                 $dkBookLabel    = $dkSoldOut ? 'Sold out' : ($dkSalesClosed ? 'Sales closed' : 'Book tickets');
