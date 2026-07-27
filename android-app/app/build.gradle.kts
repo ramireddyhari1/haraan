@@ -22,8 +22,8 @@ android {
         applicationId = "com.haraan.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 9
+        versionName = "1.0.8"
         // Points at the deployed server over HTTPS (nginx TLS -> Laravel) so the app works
         // on any device on any network without `adb reverse`. For local dev, switch back to
         // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000` (and temporarily allow
@@ -33,6 +33,9 @@ android {
         // Google Cloud Console. The backend uses the same value as the token audience. Empty
         // until configured — the "Continue with Google" button hides itself when blank.
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
+        // Google Maps key for the event-detail venue map preview (Static Maps + Geocoding).
+        // Blank hides the map card gracefully.
+        buildConfigField("String", "GOOGLE_MAPS_API_KEY", "\"${project.findProperty("GOOGLE_MAPS_API_KEY") ?: ""}\"")
     }
 
     signingConfigs {
@@ -143,4 +146,6 @@ dependencies {
   // Cloud Messaging (FCM) powers push notifications (see the notifications inbox work).
   implementation(platform(libs.firebase.bom))
   implementation(libs.firebase.messaging)
+  // Phone-number sign-in (SMS OTP), matching the website's login options.
+  implementation(libs.firebase.auth)
 }

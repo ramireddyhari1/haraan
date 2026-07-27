@@ -427,6 +427,23 @@
         .district-event-page .dr-content-grid section { min-width: 0 !important; }
         .district-event-page .dr-description { overflow-wrap: anywhere; min-width: 0; }
 
+        /* Overview: show ~6 lines, then a soft fade + "Read more" toggle.
+           JS sets the exact max-height and only reveals the button when the
+           copy actually overflows (short descriptions stay fully visible). */
+        .district-event-page .dr-about-wrap.is-clamped .dr-description { position: relative; overflow: hidden; }
+        .district-event-page .dr-about-wrap.is-clamped .dr-description::after {
+            content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 62px;
+            background: linear-gradient(rgba(255,255,255,0), #fff 92%); pointer-events: none;
+        }
+        .district-event-page .dr-readmore {
+            display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 0;
+            background: none; border: 0; cursor: pointer; color: #2563EB;
+            font: inherit; font-size: 14px; font-weight: 700; letter-spacing: -0.01em;
+        }
+        .district-event-page .dr-readmore:active { opacity: 0.65; }
+        .district-event-page .dr-readmore svg { width: 16px; height: 16px; transition: transform 0.2s ease; }
+        .district-event-page .dr-readmore.is-open svg { transform: rotate(180deg); }
+
         /* Info row: stretch children to full width so the title wraps instead of
            shrink-wrapping to its longest line (flex-column + flex-start bug). */
         .district-event-page .dr-info-row { align-items: stretch !important; }
@@ -475,9 +492,10 @@
         /* Date line under the title is accent-blue like the app EventHeader. */
         .dr-date-line { color: #2563EB !important; font-weight: 700 !important; }
 
-        /* The desktop map card + organizer card are replaced by app-style row
-           cards (EventOrganizerSection / EventVenueSection) in .dr-mobrows. */
-        .district-event-page a[aria-label="Open venue location in Maps"] { display: none !important; }
+        /* The desktop organizer card is replaced by an app-style row card in
+           .dr-mobrows. The venue map card (live iframe or the fallback texture
+           card) now stays visible on mobile too — it's the single venue block,
+           so the old plain Venue row was removed. */
         .district-event-page .dr-organizer-desk { display: none !important; }
 
         /* App-style compact row cards: Organizer + Venue */
@@ -1149,8 +1167,14 @@
                     <div>
                         <section style="margin-bottom: 0px;">
                             <h3 class="dr-section-title" style="margin-bottom: 12px;">Overview</h3>
-                            <div class="dr-description">
-                                {!! $event->description !!}
+                            <div class="dr-about-wrap" id="drAboutWrap">
+                                <div class="dr-description">
+                                    {!! $event->description !!}
+                                </div>
+                                <button type="button" class="dr-readmore" id="drAboutToggle" onclick="drToggleAbout()" hidden>
+                                    <span class="lbl">Read more</span>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </button>
                             </div>
 
                             {{-- Venue map. When the event has real coordinates and a
@@ -1272,21 +1296,9 @@
                                     </div>
                                 </section>
                                 @endif
-                                @if($event->venue)
-                                <section>
-                                    <h3 class="dr-section-title">Venue</h3>
-                                    <div class="dr-mrow">
-                                        <span class="dr-mrow__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
-                                        <span class="dr-mrow__txt">
-                                            <strong>{{ $mVenueName }}</strong>
-                                            @if($mVenueAddr)<small>{{ $mVenueAddr }}</small>@endif
-                                        </span>
-                                        <a class="dr-mrow__cta" href="{{ $mMapsUrl }}" target="_blank" rel="noopener">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>Directions
-                                        </a>
-                                    </div>
-                                </section>
-                                @endif
+                                {{-- The plain "Venue" row card was removed: it duplicated the
+                                     Venue Location map card above (same name/address/Directions).
+                                     The map card is the single source now, mirroring the app. --}}
                             </div>
                         </section>
                     </div>
@@ -1513,7 +1525,7 @@
             @php
                 $dkTiers        = $event->ticketTypes->filter->isOnSale()->values();
                 $dkFrom         = $dkTiers->count() ? (float) $dkTiers->min(fn ($t) => $t->effectivePrice()) : (float) $event->price;
-                $dkSoldOut      = (int) $event->available_slots <= 0;
+                $dkSoldOut      = $event->soldOut();
                 $dkSalesClosed  = $event->ticketTypes->isNotEmpty() && $dkTiers->isEmpty();
                 $dkPriceLabel   = $dkFrom > 0 ? '₹' . number_format($dkFrom) : 'Free';
                 $dkPriceSuffix  = $dkTiers->count() > 1 ? 'onwards' : ($dkFrom > 0 ? 'per ticket' : 'entry');
@@ -1887,7 +1899,42 @@
                         w.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     }
                 }
+                // Mobile "Overview" — same clamp/reveal behaviour as the desktop "About".
+                function drToggleAbout() {
+                    var w = document.getElementById('drAboutWrap');
+                    if (!w) return;
+                    var about = w.querySelector('.dr-description');
+                    var b = document.getElementById('drAboutToggle');
+                    if (w.classList.contains('is-clamped')) {
+                        w.classList.remove('is-clamped');
+                        about.style.maxHeight = 'none';
+                        b.querySelector('.lbl').textContent = 'Read less';
+                        b.classList.add('is-open');
+                    } else {
+                        w.classList.add('is-clamped');
+                        about.style.maxHeight = (w.dataset.max || '176') + 'px';
+                        b.querySelector('.lbl').textContent = 'Read more';
+                        b.classList.remove('is-open');
+                        w.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
                 document.addEventListener('DOMContentLoaded', function () {
+                    // Clamp the mobile "Overview" to 6 lines when it overflows.
+                    if (!window.matchMedia('(min-width: 1025px)').matches) {
+                        var aw = document.getElementById('drAboutWrap');
+                        if (aw) {
+                            var dabout = aw.querySelector('.dr-description');
+                            var dtog = document.getElementById('drAboutToggle');
+                            var dlh = parseFloat(getComputedStyle(dabout).lineHeight) || 29;
+                            var dmax = Math.round(dlh * 6);
+                            aw.dataset.max = dmax;
+                            if (dabout.scrollHeight > dmax + 8) {
+                                aw.classList.add('is-clamped');
+                                dabout.style.maxHeight = dmax + 'px';
+                                if (dtog) dtog.hidden = false;
+                            }
+                        }
+                    }
                     if (!window.matchMedia('(min-width: 1025px)').matches) return;
                     // "About" — clamp to 6 lines + reveal the Read more toggle only when
                     // the copy actually overflows (short descriptions stay fully shown).
@@ -1962,7 +2009,7 @@
     @php
         $tixTiers = $event->ticketTypes->filter->isOnSale()->values();
         $tixSalesClosed = $event->ticketTypes->isNotEmpty() && $tixTiers->isEmpty();
-        $tixSoldOut = (int) $event->available_slots <= 0;
+        $tixSoldOut = $event->soldOut();
     @endphp
     <div class="dr-tix__backdrop" onclick="drTixToggle(false)"></div>
     <form class="dr-tix" method="GET" action="/events/{{ $event->id }}/book" role="dialog" aria-modal="true" aria-label="Select tickets">

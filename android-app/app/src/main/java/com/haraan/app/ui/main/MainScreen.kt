@@ -502,8 +502,9 @@ internal fun MainAppContainer(
   }
   var showLocationSheet by remember { mutableStateOf(false) }
   com.haraan.app.ui.DismissOnBack(showLocationSheet) { showLocationSheet = false }
-  // Search radius for nearby content; 0 == "Any distance". (Phase 3)
-  var searchRadiusKm by remember { mutableStateOf(10) }
+  // Search radius for nearby content; 0 == "Any distance". Default 30 km so GameHub
+  // venues show what's genuinely near the user out of the box.
+  var searchRadiusKm by remember { mutableStateOf(30) }
   // Pull the latest city catalog (cities.json) once so the picker + normaliser are current.
   LaunchedEffect(Unit) { runCatching { locationRepository.refreshCatalog() } }
 
@@ -542,8 +543,14 @@ internal fun MainAppContainer(
       onRadiusChange = { searchRadiusKm = it },
       onUseCurrentLocation = { requestCurrentLocation() },
       onSelectCity = { option ->
-        locationState = locationRepository.selectCity(option)
+        // Show the city immediately, then upgrade it with Google-geocoded coordinates
+        // so distance-based sorting (events) and the 30 km venue filter work for a
+        // manually-picked city too — not just a GPS fix.
+        locationState = locationRepository.selectCityQuick(option)
         showLocationSheet = false
+        locationScope.launch {
+          locationState = locationRepository.selectCity(option)
+        }
       },
       onDismiss = { showLocationSheet = false },
       popularCities = locationRepository.popularCities(),
@@ -883,6 +890,8 @@ internal fun MainAppContainer(
               EventsTabScreen(
                 searchQuery = searchQuery,
                 currentCity = (locationState as? com.haraan.app.data.LocationState.Resolved)?.city?.trim().orEmpty(),
+                userLat = (locationState as? com.haraan.app.data.LocationState.Resolved)?.latitude,
+                userLng = (locationState as? com.haraan.app.data.LocationState.Resolved)?.longitude,
                 onEventClick = { event ->
                   onItemClick(
                     EventDetail(
@@ -997,6 +1006,8 @@ internal fun MainAppContainer(
 private fun EventsTabScreen(
   searchQuery: String,
   currentCity: String = "",
+  userLat: Double? = null,
+  userLng: Double? = null,
   onEventClick: (EventItem) -> Unit
 ) {
   var selectedCategory by remember { mutableStateOf("All") }
@@ -1080,7 +1091,7 @@ private fun EventsTabScreen(
       val fetched = runCatching { eventRepo.getEvents() }.getOrNull().orEmpty()
       if (fetched.isNotEmpty()) {
         eventsData = fetched.map {
-          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast, it.rating, it.placements, it.city)
+          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast, it.rating, it.placements, it.city, it.latitude, it.longitude, it.soldOut)
         }
       }
     }
@@ -1099,11 +1110,22 @@ private fun EventsTabScreen(
     }
     matchesSearch && matchesCategory
   }.let { list ->
-    // Local-first: float events in the user's city to the top (stable — original
-    // order preserved within each group). Still shows every event. No-op when the
-    // user hasn't set a location.
-    if (currentCity.isBlank()) list
-    else list.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
+    // Location-wise ordering — every event stays visible, nothing is filtered out.
+    //  1. With a location fix (GPS or a Google-geocoded chosen city), sort by real
+    //     km distance from the user to each event's venue coordinates. Events the
+    //     host never pinned (no lat/lng) sink to the end, city-first.
+    //  2. No fix at all → old behaviour: float the chosen city to the top.
+    when {
+      userLat != null && userLng != null -> {
+        val (pinned, unpinned) = list.partition { it.latitude != null && it.longitude != null }
+        val nearest = pinned.sortedBy { haversineKm(userLat, userLng, it.latitude!!, it.longitude!!) }
+        val rest = if (currentCity.isBlank()) unpinned
+          else unpinned.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
+        nearest + rest
+      }
+      currentCity.isBlank() -> list
+      else -> list.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
+    }
   }
 
   // Sponsored ad from the Filament admin (GET /api/ads?placement=events);
@@ -1377,7 +1399,10 @@ private data class EventItem(
   val isFillingFast: Boolean = false,
   val rating: Double = 0.0,
   val placements: List<String> = emptyList(),
-  val city: String = ""
+  val city: String = "",
+  val latitude: Double? = null,
+  val longitude: Double? = null,
+  val soldOut: Boolean = false
 )
 
 // Category-aware blurb so the detail page reads about THIS event instead of one
@@ -1428,8 +1453,39 @@ private fun EventListCard(
         modifier = Modifier.fillMaxSize()
       )
 
+      // Sold-out events get a dim scrim so the card reads as unavailable at a glance.
+      if (event.soldOut) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+        )
+      }
+
+      // Sold-out badge wins over "filling fast" — a closed event can't be filling.
+      if (event.soldOut) {
+        Box(
+          modifier = Modifier
+            .padding(10.dp)
+            .background(
+              color = Color(0xFFDC2626), // red — sales closed
+              shape = RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .align(Alignment.TopStart)
+        ) {
+          Text(
+            text = "SOLD OUT",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            letterSpacing = 0.5.sp
+          )
+        }
+      }
+
       // High-End Frosted Dark Badge (Sleek, minimalist, premium app execution)
-      if (event.isFillingFast) {
+      if (event.isFillingFast && !event.soldOut) {
         Box(
           modifier = Modifier
             .padding(10.dp)
@@ -1572,7 +1628,7 @@ private fun GameHubTabScreen(
   locationState: com.haraan.app.data.LocationState,
   showLocationSheet: Boolean,
   onLocationClick: () -> Unit,
-  searchRadiusKm: Int = 10,
+  searchRadiusKm: Int = 30,
   onLocateClick: () -> Unit = {},
   onMatchClick: (String) -> Unit = {},
   onVenueClick: (VenueItem) -> Unit = {},
@@ -1721,56 +1777,35 @@ private fun GameHubTabScreen(
   androidx.compose.foundation.lazy.LazyColumn(
     modifier = Modifier
       .fillMaxSize()
-      // Cooler/deeper slate than the old slate-50 (0xFFF8FAFC). The white cards were
-      // near-invisible against that — this gives them a surface to lift off so the page
-      // reads as distinct cards, not one merged sheet.
-      .background(Color(0xFFE9EEF4)),
+      // Soft, clean off-white canvas so white cards lift with just a whisper of a shadow —
+      // the premium "content floats on light" look, not a heavy slate slab.
+      .background(Color(0xFFF5F6F8)),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // 1. Dark Green Header Section (edge-to-edge)
+    // 1. Header — a clean, light app bar (greeting · search · Events/GameHub switch). The old
+    // saturated green gradient band + faint watermark monogram read as templated/AI; a white
+    // hero with a strong type hierarchy, green used only as an accent, and a hairline seam is
+    // the calmer, premium look (Airbnb/Linear/Playo territory).
     item {
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          // Clip the whole node so every draw layer (incl. the sheen below) respects
-          // the rounded bottom — otherwise the rectangular drawBehind squares it off.
-          .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-          // Vertical gradient gives the hero depth instead of a flat green fill.
-          .background(
-            brush = Brush.verticalGradient(
-              colors = listOf(Color(0xFF0F3D15), Color(0xFF1B5E20), Color(0xFF227A2B))
-            ),
-            shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
-          )
-          // Top sheen — a soft radial highlight so the header reads as a lit surface
-          // with depth, not a flat green slab.
+          .background(Color.White)
+          // Hairline seam so the white hero separates cleanly from the light content canvas
+          // below without a heavy band or shadow.
           .drawBehind {
-            drawRect(
-              Brush.radialGradient(
-                colors = listOf(Color.White.copy(alpha = 0.10f), Color.Transparent),
-                center = Offset(size.width * 0.5f, 0f),
-                radius = size.width * 0.95f
-              )
+            drawLine(
+              color = Color(0xFFECEEF2),
+              start = Offset(0f, size.height),
+              end = Offset(size.width, size.height),
+              strokeWidth = 1f
             )
           }
       ) {
-        // Brand watermark — giant faint "H" monogram bleeding off the top-right corner.
-        // Identity-as-texture: kills the empty feel without competing with content.
-        Image(
-          painter = painterResource(id = com.haraan.app.R.drawable.haraan_copy),
-          contentDescription = null,
-          contentScale = ContentScale.Fit,
-          colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White),
-          modifier = Modifier
-            .align(Alignment.TopEnd)
-            .offset(x = 58.dp, y = (-44).dp)
-            .size(210.dp)
-            .alpha(0.11f)
-        )
       Column(
         modifier = Modifier
           .statusBarsPadding()
-          .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp) // Tightened hero so the first venue card peeks above the fold (8pt grid)
+          .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp)
       ) {
         // Personalized greeting header (avatar + name + location + utility icons) on the
         // dark hero. Replaces the old location-pill / bell / profile row.
@@ -1778,7 +1813,7 @@ private fun GameHubTabScreen(
           name = userName,
           avatarUrl = avatarUrl,
           locationState = locationState,
-          onDark = true,
+          onDark = false,
           onAvatarClick = onProfileClick,
           onLocationClick = onLocationClick,
           onChatClick = onSupportClick,
@@ -1842,6 +1877,7 @@ private fun GameHubTabScreen(
         GameHubSegmentedSwitch(
           selectedTab = activeSubTab,
           onTabSelected = onTabSelected,
+          onLight = true,
         )
 
         // Hero ends after the switch — the dense ActionBoard moved out of the green band
@@ -1868,12 +1904,13 @@ private fun GameHubTabScreen(
     val useRemoteLayout = com.haraan.app.data.RemoteConfigStore.isEnabled("server_driven_home") &&
       remoteBlocks.isNotEmpty()
     val orderedBlocks: List<com.haraan.app.data.HomeBlock> =
-      if (useRemoteLayout) remoteBlocks
+      (if (useRemoteLayout) remoteBlocks
       else listOf("actionboard", "leaderboard", "sports_chips", "venues")
-        .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) }
-    // The seam-straddle (overlapAbove) only makes sense when ActionBoard is the very first block,
-    // touching the hero. When the chips lead, a negative top offset overlaps them — so off then.
-    val actionBoardIsFirst = orderedBlocks.firstOrNull()?.type == "actionboard"
+        .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) })
+        // The "For You" curated rail was cut — it duplicated the Events "For You" and added
+        // clutter without pulling its weight on GameHub. Drop any for_you feed_section from
+        // either the remote or built-in layout so it never renders here.
+        .filterNot { it.type == "feed_section" && (it.config["section"] ?: "for_you") == "for_you" }
     // ActionBoard matches are cricket today (LiveMatchRow has no sport field yet), so the sport
     // filter treats them as Cricket: a non-cricket selection shows the honest empty state. Swap
     // for a real per-match sport filter once the backend tags matches with a sport.
@@ -1895,7 +1932,8 @@ private fun GameHubTabScreen(
         modifier = Modifier
           .fillMaxWidth()
           .padding(horizontal = 16.dp)
-          .then(if (actionBoardIsFirst) Modifier.overlapAbove(32.dp) else Modifier) // seam straddle only when first
+          // No green seam to straddle on the light hero — the card sits on the canvas with the
+          // list's normal 16dp gap below the header.
           .graphicsLayer { scaleX = abScale; scaleY = abScale }
           .premiumCardShadow(radius = UnifiedCornerRadius)
           .clickable(interactionSource = abInteraction, indication = null) { onActionBoardClick() },
@@ -2223,9 +2261,9 @@ private fun GameHubVenuesSkeleton() {
         colors = CardDefaults.cardColors(containerColor = Color.White),
       ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-          Box(Modifier.fillMaxWidth().height(120.dp).haraanShimmer())
+          Box(Modifier.fillMaxWidth().height(140.dp).haraanShimmer())
           Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
           ) {
             Box(Modifier.fillMaxWidth(0.7f).height(14.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
@@ -2753,12 +2791,15 @@ private fun ActionboardLiveTeamRow(
 private fun GameHubSegmentedSwitch(
   selectedTab: String,
   onTabSelected: (String) -> Unit,
-  modifier: Modifier = Modifier
+  modifier: Modifier = Modifier,
+  // Light hero variant: a neutral track with a white active pill and dark text, instead of
+  // the translucent-white-on-green treatment used on the old dark hero band.
+  onLight: Boolean = false,
 ) {
   val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
-  val containerBg = Color.White.copy(alpha = 0.15f)
+  val containerBg = if (onLight) Color(0xFFEDEFF3) else Color.White.copy(alpha = 0.15f)
   val activeBg = Color.White
-  
+
   BoxWithConstraints(
     modifier = modifier
       .fillMaxWidth()
@@ -2804,7 +2845,11 @@ private fun GameHubSegmentedSwitch(
           ) {
             Text(
               text = label,
-              color = if (isSelected) Color(0xFF1B5E20) else Color.White.copy(alpha = 0.75f),
+              color = when {
+                isSelected -> Color(0xFF1B5E20)
+                onLight -> HaraanColors.TextSecondary
+                else -> Color.White.copy(alpha = 0.75f)
+              },
               fontSize = 13.sp,
               fontWeight = FontWeight.Bold
             )
@@ -2856,10 +2901,14 @@ private fun PopularArenaCard(
     // No border — the soft shadow alone separates the card (one unified card language).
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+      // Clean photo hero. No floating category pill or "Tonight" badge slapped on top —
+      // the image just carries the venue. Identity (sport), quality (rating) and
+      // availability live in the typographic block below, where hierarchy + spacing do
+      // the work. This is the single biggest change away from the "template" look.
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(120.dp)
+          .height(140.dp)
           .background(rememberShimmerBrush())
       ) {
         AsyncImage(
@@ -2868,126 +2917,92 @@ private fun PopularArenaCard(
           contentScale = ContentScale.Crop,
           modifier = Modifier.fillMaxSize()
         )
-        // Scrim for badge/rating legibility
-        Box(
-          modifier = Modifier
-            .fillMaxSize()
-            .background(
-              Brush.verticalGradient(
-                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.30f)),
-                startY = 70f
-              )
-            )
-        )
-        // Category badge (top-left)
-        Box(
-          modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(8.dp)
-            .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-          Text(
-            text = venue.category,
-            color = HaraanColors.GameHubDeep,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp
-          )
-        }
-        // Available-tonight badge (top-right)
-        if (venue.availableTonight) {
-          Row(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .padding(8.dp)
-              .background(HaraanColors.GameHubDeep, RoundedCornerShape(8.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(modifier = Modifier.size(5.dp).background(Color(0xFF7CFFB0), CircleShape))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(text = "Tonight", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
-          }
-        }
-        // Rating (bottom-left over scrim)
-        Row(
-          modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Text(text = "★", color = Color(0xFFFFC107), fontSize = 12.sp)
-          Spacer(modifier = Modifier.width(3.dp))
-          Text(text = venue.rating, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-        }
       }
 
-      Column(modifier = Modifier.padding(HaraanSpacing.Compact)) {
-        Text(
-          text = venue.title,
-          color = HaraanColors.TextPrimary,
-          fontWeight = FontWeight.Bold,
-          fontSize = 14.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-          text = venue.tagline,
-          color = HaraanColors.TextSecondary,
-          fontSize = 11.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(8.dp))
+      Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp)) {
+        // Title + rating share the first line — the two things the eye scans first, weighted
+        // so the name leads and the rating is a quiet gold anchor on the right (Airbnb pattern).
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = venue.title,
+            color = HaraanColors.TextPrimary,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+          )
+          val ratingValue = venue.rating.toFloatOrNull()
+          if (ratingValue != null && ratingValue > 0f) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = "★", color = HaraanColors.RatingGold, fontSize = 13.sp)
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = venue.rating,
+              color = HaraanColors.TextPrimary,
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Secondary line — the sport(s) you can play + the room detail, in one quiet muted row.
+        // Replaces the loud category pill that used to sit on the image.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          if (venue.sports.isNotEmpty()) {
+            VenueSportsIcons(sports = venue.sports)
+            Spacer(modifier = Modifier.width(7.dp))
+          }
+          Text(
+            text = venue.tagline,
+            color = HaraanColors.TextSecondary,
+            style = HaraanTypography.BodyMedium.copy(fontSize = 13.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Price is the commitment signal (strong ink). Distance is quiet metadata — plain
+        // text, no slate pill, so nothing competes with the price for attention.
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.Bottom) {
-              Text(
-                text = "₹${venue.price}",
-                color = HaraanColors.TextPrimary,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 15.sp
-              )
-              Text(
-                text = "/hr",
-                color = HaraanColors.TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(bottom = 2.dp)
-              )
-            }
-            // Sports playable here — fills the gap between price and distance. Two icons max,
-            // then a "+N" pill, so a multi-sport turf reads at a glance without crowding.
-            if (venue.sports.isNotEmpty()) {
-              Spacer(modifier = Modifier.width(8.dp))
-              VenueSportsIcons(sports = venue.sports)
-            }
+          Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+              text = "₹${venue.price}",
+              color = HaraanColors.TextPrimary,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 16.sp
+            )
+            Text(
+              text = " /hr",
+              color = HaraanColors.TextMuted,
+              fontSize = 12.sp,
+              modifier = Modifier.padding(bottom = 1.dp)
+            )
           }
           if (venue.distance.isNotBlank()) {
-            // Neutral slate chip — distance is metadata, not an accent. (Was brand-blue,
-            // which competed with green/red/gold for attention.)
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(Color(0xFFF1F5F9))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
               Icon(
                 imageVector = Icons.Default.LocationOn,
                 contentDescription = null,
-                tint = HaraanColors.TextSecondary,
-                modifier = Modifier.size(11.dp)
+                tint = HaraanColors.TextMuted,
+                modifier = Modifier.size(12.dp)
               )
               Spacer(modifier = Modifier.width(3.dp))
               Text(
                 text = venue.distance,
                 color = HaraanColors.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                // Never wrap — a wrapped "2.4 km" made this card taller than its neighbours.
                 maxLines = 1,
                 softWrap = false
               )
@@ -3016,8 +3031,10 @@ private fun VenueSportsIcons(sports: List<String>) {
       Icon(
         imageVector = venueSportIcon(sport),
         contentDescription = sport,
-        tint = HaraanColors.GameHubDeep,
-        modifier = Modifier.size(16.dp)
+        // Neutral slate, not brand green — the sport is metadata here, not an accent, so it
+        // stays quiet and lets the rating (gold) and price (ink) carry the hierarchy.
+        tint = HaraanColors.TextSecondary,
+        modifier = Modifier.size(15.dp)
       )
     }
     if (extra > 0) {
@@ -3115,6 +3132,8 @@ private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
     // No border — unified shadow-based card language.
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+      // Clean photo — no badges, no scrim, no overlaid tagline. Everything reads in the
+      // structured block below.
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -3127,96 +3146,74 @@ private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
           contentScale = ContentScale.Crop,
           modifier = Modifier.fillMaxSize()
         )
-        // Top + bottom scrim for badge / tagline legibility
-        Box(
-          modifier = Modifier
-            .fillMaxSize()
-            .background(
-              Brush.verticalGradient(
-                colors = listOf(
-                  Color.Black.copy(alpha = 0.18f),
-                  Color.Transparent,
-                  Color.Black.copy(alpha = 0.40f)
-                )
-              )
-            )
-        )
-        // Category badge (top-left)
-        Box(
-          modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(10.dp)
-            .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-          Text(text = venue.category, color = HaraanColors.GameHubDeep, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-        }
-        // Available-tonight badge (top-right)
-        if (venue.availableTonight) {
-          Row(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .padding(10.dp)
-              .background(HaraanColors.GameHubDeep, RoundedCornerShape(8.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(modifier = Modifier.size(5.dp).background(Color(0xFF7CFFB0), CircleShape))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(text = "Available tonight", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
-          }
-        }
-        // Tagline (bottom-left over scrim)
-        Text(
-          text = venue.tagline,
-          color = Color.White,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 12.sp,
-          modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)
-        )
       }
 
       Column(modifier = Modifier.padding(HaraanSpacing.Medium)) {
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+          verticalAlignment = Alignment.Top
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
               text = venue.title,
               color = HaraanColors.TextPrimary,
               fontWeight = FontWeight.Bold,
-              fontSize = 16.sp
+              fontSize = 16.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(3.dp))
+            // Sport + room detail, quiet and muted (replaces the pill + image-overlay tagline).
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(
-                imageVector = Icons.Default.LocationOn,
-                contentDescription = null,
-                tint = HaraanColors.TextMuted,
-                modifier = Modifier.size(13.dp)
-              )
-              Spacer(modifier = Modifier.width(2.dp))
+              if (venue.sports.isNotEmpty()) {
+                VenueSportsIcons(sports = venue.sports)
+                Spacer(modifier = Modifier.width(7.dp))
+              }
               Text(
-                text = "${venue.location} • ${venue.distance}",
+                text = venue.tagline,
                 color = HaraanColors.TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+          val ratingValue = venue.rating.toFloatOrNull()
+          if (ratingValue != null && ratingValue > 0f) {
+            Spacer(modifier = Modifier.width(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(text = "★", color = HaraanColors.RatingGold, fontSize = 14.sp)
+              Spacer(modifier = Modifier.width(3.dp))
+              Text(
+                text = venue.rating,
+                color = HaraanColors.TextPrimary,
+                fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
               )
             }
           }
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = "★", color = Color(0xFFFFB000), fontSize = 14.sp)
-            Spacer(modifier = Modifier.width(2.dp))
-            Text(
-              text = venue.rating,
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
-            )
-          }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        // Location + distance — quiet metadata line.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.LocationOn,
+            contentDescription = null,
+            tint = HaraanColors.TextMuted,
+            modifier = Modifier.size(13.dp)
+          )
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(
+            text = listOf(venue.location, venue.distance).filter { it.isNotBlank() }.joinToString(" • "),
+            color = HaraanColors.TextSecondary,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
@@ -3511,13 +3508,14 @@ private fun CrexMatchesScreen(
   // so the screen falls back to its demo leagues and never shows an error.
   // The token scopes the feed to the viewer's district (+ FEATURED); admins get all.
   var liveFeed by remember { mutableStateOf<List<com.haraan.app.data.LiveMatchRow>?>(null) }
+  val locationRepo = remember { com.haraan.app.data.LocationRepository(context) }
   val loadLiveFeed: suspend () -> Unit = remember {
     {
       val token = com.haraan.app.data.TokenStore.getToken(context)
-      // Rank by where the device already knows it is. Deliberately the *cached* fix,
-      // never a fresh detect: opening the scores tab must not throw a permission
-      // prompt at anyone. No cache → the server ranks by profile district instead.
-      val here = com.haraan.app.data.LocationRepository(context).cached()
+      // Rank by the device's cached fix — a real GPS fix or a Google-geocoded chosen
+      // city. It's kept current by the one-shot detect below (web parity), so the feed
+      // sorts by true km distance. No cache → the server ranks by profile district.
+      val here = locationRepo.cached()
         as? com.haraan.app.data.LocationState.Resolved
       // On refresh, keep the last good feed if a fetch fails rather than flashing back
       // to the demo leagues; only the initial null shows the loading state.
@@ -3536,6 +3534,34 @@ private fun CrexMatchesScreen(
   // Keep the live feed ticking without a manual pull: refresh on tab re-focus / app
   // foreground and every 20s while visible; paused entirely in the background.
   AutoRefresh(intervalMs = 20_000L) { loadLiveFeed() }
+
+  // Location-wise sorting, mirroring the website's ActionBoard: grab one precise device
+  // fix so "Matches near you" ranks by real distance, then re-sort. We only reach for a
+  // fix when we have no coordinates yet (a fresh GPS detect OR a geocoded chosen city) —
+  // exactly how the web guards on its hb_geo cookie — so this never re-prompts or burns a
+  // GPS read on every visit. If permission isn't granted, ask once; if denied, the server
+  // falls back to the profile district and the feed still renders.
+  val geoPermissionLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+  ) { grants ->
+    if (grants.values.any { it }) scope.launch { locationRepo.detectCurrent(); loadLiveFeed() }
+  }
+  LaunchedEffect(Unit) {
+    val hasCoords = (locationRepo.cached() as? com.haraan.app.data.LocationState.Resolved)
+      ?.latitude != null
+    if (hasCoords) return@LaunchedEffect
+    if (locationRepo.hasPermission()) {
+      locationRepo.detectCurrent()
+      loadLiveFeed()
+    } else {
+      geoPermissionLauncher.launch(
+        arrayOf(
+          android.Manifest.permission.ACCESS_FINE_LOCATION,
+          android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+      )
+    }
+  }
 
   // District Home snapshot — lazily loaded the first time the District tab opens.
   // null = not loaded / unavailable (guest or no district set); the card hides itself then.
@@ -6155,15 +6181,14 @@ private fun MatchLiveContent(
       // Location — the local-identity signal: the most specific place we have (village/
       // locality, else a real venue) + the stamped district, with the bare "Custom Match"
       // placeholder dropped. Hidden when we have nothing.
-      val locationText = run {
-        val place = locality.takeIf { it.isNotBlank() }
-          ?: venue.takeIf { it.isNotBlank() && !it.equals("Custom Match", ignoreCase = true) }
-        // Append the measured distance when we actually have one — it's the single
-        // most useful thing on this line for deciding whether to walk over.
-        val far = distanceKm?.let { if (it < 1.0) "under 1 km" else "${"%.1f".format(it)} km" }
-        listOfNotNull(place, district.takeIf { it.isNotBlank() }, far).joinToString(" · ")
-      }
-      if (locationText.isNotBlank()) {
+      val place = locality.takeIf { it.isNotBlank() }
+        ?: venue.takeIf { it.isNotBlank() && !it.equals("Custom Match", ignoreCase = true) }
+      // The measured distance is the single most useful thing on this line for
+      // deciding whether to walk over, so it must ALWAYS show — never be the bit
+      // that gets ellipsised away when the place name runs long.
+      val far = distanceKm?.let { if (it < 1.0) "under 1 km" else "${"%.1f".format(it)} km" }
+      val placeText = listOfNotNull(place, district.takeIf { it.isNotBlank() }).joinToString(" · ")
+      if (placeText.isNotBlank() || far != null) {
         Box(Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFCBD5E1)))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
           Icon(
@@ -6173,7 +6198,28 @@ private fun MatchLiveContent(
             modifier = Modifier.size(12.dp),
           )
           Spacer(Modifier.width(3.dp))
-          Text(locationText, color = Color(0xFF94A3B8), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          // Place + district ellipsise (weight, fill=false) so they yield space…
+          if (placeText.isNotBlank()) {
+            Text(
+              placeText,
+              color = Color(0xFF94A3B8),
+              fontSize = 11.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f, fill = false),
+            )
+          }
+          // …while the distance keeps its intrinsic width and is never clipped. A
+          // touch darker + semibold so it reads as the primary signal on the line.
+          if (far != null) {
+            Text(
+              (if (placeText.isNotBlank()) " · " else "") + far,
+              color = Color(0xFF475569),
+              fontSize = 11.sp,
+              fontWeight = FontWeight.SemiBold,
+              maxLines = 1,
+            )
+          }
         }
       } else {
         Spacer(Modifier.weight(1f))

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\User;
+use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,6 +43,16 @@ class LiveMatchController extends Controller
             ->orderByDesc('updated_at')
             ->limit(200)
             ->get();
+
+        // Most matches were created without a GPS fix and carry only place names, so
+        // give each one real coordinates geocoded from those names (in memory, cached)
+        // — exactly what the web ActionBoard does. Without this every distanceKm comes
+        // back null and the app can't show "2.4 km" chips or rank by true distance.
+        // Only worth doing when the viewer has a position to measure against.
+        if ($near->hasPosition()) {
+            $geocoder = new MatchGeocoder();
+            $matches->each(fn (LiveMatch $m) => $geocoder->ensureCoords($m));
+        }
 
         $matches = $near->sort($matches)->take(40);
 

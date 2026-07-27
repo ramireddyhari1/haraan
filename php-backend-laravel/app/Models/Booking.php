@@ -64,6 +64,7 @@ final class Booking extends Model
         'user_id',
         'event_id',
         'ticket_type_id',
+        'event_slot_id',
         'organization_id',
         // Venue-slot bookings (Phase B)
         'booking_type',
@@ -119,6 +120,12 @@ final class Booking extends Model
     public function ticketType(): BelongsTo
     {
         return $this->belongsTo(TicketType::class);
+    }
+
+    /** The event session this booking is for (null for single-slot / venue bookings). */
+    public function slot(): BelongsTo
+    {
+        return $this->belongsTo(EventSlot::class, 'event_slot_id');
     }
 
     /** The venue this booking reserves a slot at (null for event bookings). */

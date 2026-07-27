@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Services\EventService;
 use App\Services\LeaderboardService;
 use App\Support\CityResolver;
+use App\Support\MatchGeocoder;
 use Illuminate\Support\Collection;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -542,67 +543,24 @@ final class PublicWebController extends Controller
     }
 
     /**
-     * Geocode a free-form place string to [lat, lng] via the Google Maps Geocoding
-     * API, cached for 30 days (places don't move). Returns [null, null] on any failure
-     * or when no API key is configured, so callers silently fall back.
+     * Geocode a free-form place string to [lat, lng]. Delegates to the shared
+     * {@see MatchGeocoder} so the web and app feeds resolve places identically.
      *
      * @return array{0: ?float, 1: ?float}
      */
     private function geocode(string $address): array
     {
-        $address = trim($address);
-        $key = (string) config('services.google_maps.key');
-        if ($address === '' || $key === '') {
-            return [null, null];
-        }
-
-        return \Illuminate\Support\Facades\Cache::remember(
-            'geocode:' . md5(mb_strtolower($address)),
-            now()->addDays(30),
-            function () use ($address, $key): array {
-                try {
-                    $resp = \Illuminate\Support\Facades\Http::timeout(4)
-                        ->get('https://maps.googleapis.com/maps/api/geocode/json', [
-                            'address' => $address,
-                            'key' => $key,
-                        ]);
-                    $loc = $resp->json('results.0.geometry.location');
-                    if (is_array($loc) && isset($loc['lat'], $loc['lng'])) {
-                        return [(float) $loc['lat'], (float) $loc['lng']];
-                    }
-                } catch (\Throwable $e) {
-                    // fall through to the null fix
-                }
-
-                return [null, null];
-            }
-        );
+        return (new MatchGeocoder())->geocode($address);
     }
 
     /**
-     * Fill in a match's coordinates from its place names (locality → district → state)
-     * via Google geocoding, IN MEMORY only, so MatchProximity can measure true distance
-     * even though these rows were created without a GPS fix. No-op when it already has
-     * coordinates or has no usable place name.
+     * Fill in a match's coordinates from its place names so MatchProximity can
+     * measure true distance even though these rows were created without a GPS fix.
+     * Delegates to the shared {@see MatchGeocoder} (same logic the app feed uses).
      */
     private function ensureMatchCoords(LiveMatch $m): void
     {
-        if ($m->latitude !== null && $m->longitude !== null) {
-            return;
-        }
-        $place = trim(implode(', ', array_filter([
-            trim((string) ($m->locality ?? '')),
-            trim((string) ($m->district ?? '')),
-            trim((string) ($m->state ?? '')),
-        ])));
-        if ($place === '') {
-            return;
-        }
-        [$lat, $lng] = $this->geocode($place . ', India');
-        if ($lat !== null && $lng !== null) {
-            $m->latitude = $lat;
-            $m->longitude = $lng;
-        }
+        (new MatchGeocoder())->ensureCoords($m);
     }
 
     public function actionBoard(): View

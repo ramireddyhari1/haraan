@@ -187,6 +187,32 @@ class HaraanAuthRepository(
     }
 
   /**
+   * "Continue with phone": exchange a Firebase phone-auth ID token (from [PhoneAuthHelper])
+   * for an app JWT. The backend verifies the token with Firebase and finds-or-creates the
+   * account by the verified E.164 number, matching the website's phone login. [name] is only
+   * used when creating a brand-new account.
+   */
+  suspend fun firebasePhoneLogin(idToken: String, name: String? = null): VerifyOtpResult =
+    withContext(Dispatchers.IO) {
+      val body = JSONObject().put("id_token", idToken)
+      if (!name.isNullOrBlank()) body.put("name", name.trim())
+
+      val response = postJson(path = "/api/auth/firebase-phone", jsonBody = body)
+
+      if (response.code !in 200..299) {
+        throw IllegalStateException(parseErrorMessage(response.body, "Phone sign-in failed. Please try again."))
+      }
+
+      val json = JSONObject(response.body)
+      val user = json.getJSONObject("user")
+      VerifyOtpResult(
+        token = json.getString("token"),
+        userName = user.optString("name", "Haraan user"),
+        message = json.optString("message", "Welcome to Haraan!"),
+      )
+    }
+
+  /**
    * "Continue with Google": exchange a Google ID token (from Credential Manager) for an app
    * JWT. The backend verifies the token with Google and creates the account on first sign-in,
    * so there's no separate profile step — the name comes from the Google account.

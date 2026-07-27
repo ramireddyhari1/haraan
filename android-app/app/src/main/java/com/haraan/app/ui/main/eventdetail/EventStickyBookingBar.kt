@@ -46,6 +46,9 @@ fun EventStickyBookingBar(
     modifier: Modifier = Modifier,
     eventId: Int? = null,
     ticketTypes: List<EventTicketType> = emptyList(),
+    // Host closed sales (manual "Sold out" override) or no slots left. When true
+    // the bar shows a disabled "Sold out" and never opens the cart sheet.
+    soldOut: Boolean = false,
     // Handoff to the Order Summary page: the chosen cart of order lines.
     onCheckout: (List<OrderLine>) -> Unit = {},
 ) {
@@ -59,7 +62,7 @@ fun EventStickyBookingBar(
     var showSheet by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
 
-    if (showSheet) {
+    if (showSheet && !soldOut) {
         BookingSheet(
             eventId = eventId,
             ticketTypes = ticketTypes,
@@ -77,7 +80,7 @@ fun EventStickyBookingBar(
             .padding(horizontal = HaraanSpacing.Medium, vertical = HaraanSpacing.Compact)
     ) {
         Surface(
-            color = HaraanColors.EventsBlue,
+            color = if (soldOut) HaraanColors.TextSecondary else HaraanColors.EventsBlue,
             shape = RoundedCornerShape(28.dp),
             shadowElevation = 12.dp,
             modifier = Modifier.fillMaxWidth()
@@ -91,14 +94,14 @@ fun EventStickyBookingBar(
             ) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        text = priceLabel,
+                        text = if (soldOut) "Sold out" else priceLabel,
                         style = HaraanTypography.TitleLarge.copy(
                             fontSize = 22.sp,
                             color = Color.White,
                             fontWeight = FontWeight.ExtraBold
                         )
                     )
-                    if (showOnwards) {
+                    if (showOnwards && !soldOut) {
                         Text(
                             text = " onwards",
                             style = HaraanTypography.BodyMedium.copy(
@@ -110,27 +113,50 @@ fun EventStickyBookingBar(
                     }
                 }
 
-                Surface(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showSheet = true
-                    },
-                    shape = RoundedCornerShape(22.dp),
-                    color = Color.White,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 28.dp),
-                        contentAlignment = Alignment.Center
+                if (soldOut) {
+                    // Non-interactive chip: sales are closed, no cart to open.
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = Color.White.copy(alpha = 0.18f),
+                        modifier = Modifier.height(44.dp)
                     ) {
-                        Text(
-                            text = "Book tickets",
-                            style = HaraanTypography.TitleMedium.copy(
-                                color = HaraanColors.EventsBlue,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
+                        Box(
+                            modifier = Modifier.padding(horizontal = 28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Unavailable",
+                                style = HaraanTypography.TitleMedium.copy(
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             )
-                        )
+                        }
+                    }
+                } else {
+                    Surface(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showSheet = true
+                        },
+                        shape = RoundedCornerShape(22.dp),
+                        color = Color.White,
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Book tickets",
+                                style = HaraanTypography.TitleMedium.copy(
+                                    color = HaraanColors.EventsBlue,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
                     }
                 }
             }

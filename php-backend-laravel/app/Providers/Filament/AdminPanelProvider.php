@@ -118,6 +118,17 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::HEAD_END,
                 fn (): string => view('filament.theme')->render(),
             )
+            // Premium visual theme for the Event create/edit wizard — scoped to those
+            // two pages so it restyles the ticketing/authoring experience without
+            // touching the rest of the panel. See the blade for the exact overrides.
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => view('filament.forms.event-form-theme')->render(),
+                scopes: [
+                    \App\Filament\Resources\Events\Pages\CreateEvent::class,
+                    \App\Filament\Resources\Events\Pages\EditEvent::class,
+                ],
+            )
             // Haraan logo in the mobile topbar (the sidebar brand is hidden behind
             // the hamburger below the lg breakpoint). The partial reveals itself
             // only on mobile via CSS.

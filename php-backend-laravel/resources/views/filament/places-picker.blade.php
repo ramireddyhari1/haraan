@@ -2,18 +2,19 @@
     Shared location picker for the /control + /partner event and venue forms.
 
     Google Places Autocomplete (search a place → auto-fills name/address/city/pin)
-    layered over a free Leaflet/OpenStreetMap map with a draggable marker for fine
-    tuning. The two forms map different column names, so the caller passes a $fields
-    map (event: venue/location; venue: name/address). Every entry is optional — a
-    null skips that write.
+    over a Google Maps draggable marker for fine tuning. The two forms map
+    different column names, so the caller passes a $fields map (event:
+    venue/location; venue: name/address). Every entry is optional — a null skips
+    that write.
 
-    Degrades cleanly: with no API key the search box is hidden and it's just the
-    Leaflet pin-picker (exactly what the venue form had before). Whatever the map
-    can't help with, the plain text fields below it still accept manual entry.
+    Degrades cleanly: with NO API key the search box is hidden and the map falls
+    back to a free Leaflet/OpenStreetMap pin-picker (exactly what the venue form
+    had before). Whatever the map can't help with, the plain text fields below it
+    still accept manual entry.
 
     All behaviour lives inside x-data (with the heavy libs cached on window) so it
     survives Filament's wire:navigate SPA transitions — an inline <script> global
-    would not re-run on a soft navigation. Mirrors the old venue-map-picker pattern.
+    would not re-run on a soft navigation.
 
     Expected @include data:
       $fields  array{lat?:string, lng?:string, name?:string, address?:string,
@@ -33,11 +34,17 @@
         fields: @js($fields),
         map: null,
         marker: null,
+        mapType: null, // 'google' | 'leaflet'
 
         init() {
-            this.loadLeaflet().then(() => this.buildMap());
+            // With a key: Google map + Places search. On any Google failure, fall
+            // back to the free Leaflet pin-picker so the form is never mapless.
             if (this.key) {
-                this.loadGoogle().then(() => this.buildAutocomplete()).catch(() => {});
+                this.loadGoogle()
+                    .then(() => { this.buildGoogleMap(); this.buildAutocomplete(); })
+                    .catch(() => this.loadLeaflet().then(() => this.buildLeafletMap()));
+            } else {
+                this.loadLeaflet().then(() => this.buildLeafletMap());
             }
         },
 
@@ -88,9 +95,47 @@
             return (isNaN(lat) || isNaN(lng)) ? fallback : { lat, lng };
         },
 
-        // ── map + marker ───────────────────────────────────────────────────
-        buildMap() {
+        // ── Google map + marker ────────────────────────────────────────────
+        buildGoogleMap() {
             const start = this.currentLatLng({ lat: 17.4239, lng: 78.4738 }); // Hyderabad default
+            const hasPin = this.currentLatLng(null) !== null;
+
+            this.map = new google.maps.Map(this.$refs.map, {
+                center: start,
+                zoom: hasPin ? 16 : 11,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: false,
+                clickableIcons: false,
+                gestureHandling: 'greedy',
+            });
+            this.marker = new google.maps.Marker({
+                position: start, map: this.map, draggable: true,
+            });
+            this.marker.addListener('dragend', (e) => this.setCoords(e.latLng.lat(), e.latLng.lng()));
+            this.map.addListener('click', (e) => {
+                this.marker.setPosition(e.latLng);
+                this.setCoords(e.latLng.lat(), e.latLng.lng());
+            });
+            this.mapType = 'google';
+
+            // The picker lives in a wizard step that is hidden until navigated to;
+            // a Google map built while hidden renders grey. Re-render + re-center
+            // the first time the container actually becomes visible.
+            const io = new IntersectionObserver((entries) => {
+                entries.forEach((en) => {
+                    if (en.isIntersecting && this.map) {
+                        google.maps.event.trigger(this.map, 'resize');
+                        this.map.setCenter(this.currentLatLng(start));
+                    }
+                });
+            });
+            io.observe(this.$refs.map);
+        },
+
+        // ── Leaflet map + marker (no-key / Google-failure fallback) ─────────
+        buildLeafletMap() {
+            const start = this.currentLatLng({ lat: 17.4239, lng: 78.4738 });
             const hasPin = this.currentLatLng(null) !== null;
 
             this.map = L.map(this.$refs.map).setView([start.lat, start.lng], hasPin ? 15 : 11);
@@ -101,9 +146,11 @@
             this.marker = L.marker([start.lat, start.lng], { draggable: true }).addTo(this.map);
             this.marker.on('dragend', (e) => this.setCoords(e.target.getLatLng().lat, e.target.getLatLng().lng));
             this.map.on('click', (e) => { this.marker.setLatLng(e.latlng); this.setCoords(e.latlng.lat, e.latlng.lng); });
+            this.mapType = 'leaflet';
 
             setTimeout(() => this.map.invalidateSize(), 200);
         },
+
         setCoords(lat, lng) {
             const rlat = Number(lat.toFixed(7));
             const rlng = Number(lng.toFixed(7));
@@ -112,7 +159,15 @@
             this.wSet('mapLink', 'https://www.google.com/maps/search/?api=1&query=' + rlat + ',' + rlng);
         },
         recenter(lat, lng) {
-            if (this.map) { this.map.setView([lat, lng], 16); this.marker.setLatLng([lat, lng]); }
+            if (! this.map) return;
+            if (this.mapType === 'google') {
+                this.map.setCenter({ lat, lng });
+                this.map.setZoom(16);
+                this.marker.setPosition({ lat, lng });
+            } else {
+                this.map.setView([lat, lng], 16);
+                this.marker.setLatLng([lat, lng]);
+            }
         },
 
         // ── Google Places Autocomplete ─────────────────────────────────────

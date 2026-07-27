@@ -30,6 +30,10 @@ final class StoreBookingRequest extends FormRequest
     {
         return [
             'eventId'              => ['required', 'integer', 'exists:events,id'],
+            // Which session ("time slot") the order is for. Nullable so single-session
+            // events and older clients keep working; required-when-multi is enforced
+            // server-side in BookingService.
+            'eventSlotId'          => ['nullable', 'integer', 'exists:event_slots,id'],
             // Cart shape: a list of {ticketTypeId, quantity} lines.
             'items'                => ['nullable', 'array', 'min:1'],
             'items.*.ticketTypeId' => ['required_with:items', 'integer', 'exists:ticket_types,id'],
@@ -47,6 +51,12 @@ final class StoreBookingRequest extends FormRequest
             'contact.email'        => ['nullable', 'email', 'max:255'],
             'contact.phone'        => ['nullable', 'string', 'max:32'],
         ];
+    }
+
+    /** The chosen session id for this order, or null (single-session / legacy client). */
+    public function eventSlotId(): ?int
+    {
+        return $this->filled('eventSlotId') ? (int) $this->input('eventSlotId') : null;
     }
 
     /**

@@ -48,7 +48,11 @@ final class FirebasePhoneAuthController extends Controller
         $user = User::query()->firstOrCreate(
             ['phone' => $phone],
             [
-                'name'     => trim((string) ($data['name'] ?? '')) ?: 'Member',
+                'name' => trim((string) ($data['name'] ?? '')) ?: 'Member',
+                // users.email is NOT NULL; phone sign-ups have no address, so synthesize a
+                // unique placeholder from the (unique) E.164 number — same convention as the
+                // WhatsApp flow's `@whatsapp.local`. Without this a brand-new number 500s on insert.
+                'email'    => $phone.'@phone.haraan.local',
                 'password' => bcrypt(Str::random(32)),
                 'role'     => 'user',
                 'status'   => 'active',

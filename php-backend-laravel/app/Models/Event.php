@@ -72,7 +72,17 @@ final class Event extends Model
         'tax_type',
         'tax_value',
         'total_slots',
+        'tickets_per_slot',
+        'release_phases',
+        'inquiry_phone',
+        'gateway_fee_payer',
+        'gateway_fee_type',
+        'gateway_fee_value',
+        'platform_fee_payer',
+        'platform_fee_type',
+        'platform_fee_value',
         'available_slots',
+        'is_sold_out',
         'images',
         'gallery',
         'status',
@@ -110,7 +120,12 @@ final class Event extends Model
             'fees'           => 'array',
             'tax_value'      => 'float',
             'total_slots'    => 'integer',
+            'tickets_per_slot' => 'boolean',
+            'release_phases' => 'array',
+            'gateway_fee_value'  => 'float',
+            'platform_fee_value' => 'float',
             'available_slots'=> 'integer',
+            'is_sold_out'    => 'boolean',
             'views'          => 'integer',
             'rating'         => 'float',
             'ratings_count'  => 'integer',
@@ -416,6 +431,67 @@ final class Event extends Model
     public function ticketTypes(): HasMany
     {
         return $this->hasMany(TicketType::class)->orderBy('sort')->orderBy('id');
+    }
+
+    /** Sessions ("time slots") this event runs across (ordered for display). */
+    public function slots(): HasMany
+    {
+        return $this->hasMany(EventSlot::class)->orderBy('sort')->orderBy('id');
+    }
+
+    /** Discount codes scoped to this event. */
+    public function coupons(): HasMany
+    {
+        return $this->hasMany(Coupon::class);
+    }
+
+    /**
+     * Whether this event runs across more than one session. A single-slot event
+     * behaves like the old single-date event; multi-slot turns on slot selection
+     * in the app / web checkout.
+     */
+    public function hasMultipleSlots(): bool
+    {
+        return $this->slots()->count() > 1;
+    }
+
+    /**
+     * Whether the given release phase is open for sale yet. Phase 0 (and any event
+     * with no configured phases) is always open; a later phase opens once every
+     * capacity-bearing tier in the earlier phases has sold out. Unlimited earlier
+     * tiers never block (they'd otherwise keep a later phase closed forever).
+     */
+    public function phaseReleased(int $phaseIndex): bool
+    {
+        if ($phaseIndex <= 0 || empty($this->release_phases)) {
+            return true;
+        }
+
+        foreach ($this->ticketTypes as $tier) {
+            if ((int) $tier->release_phase < $phaseIndex) {
+                $remaining = $tier->remaining();
+                if ($remaining !== null && $remaining > 0) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether the event should read as sold out to buyers. True when the host has
+     * manually flipped the "Sold out" override (`is_sold_out`) OR when the event
+     * genuinely has no slots left. The manual override lets a host close sales at
+     * the door or when inventory is tracked off-platform, even with slots on paper.
+     */
+    public function soldOut(): bool
+    {
+        if ($this->is_sold_out) {
+            return true;
+        }
+
+        return (int) $this->total_slots > 0 && (int) $this->available_slots <= 0;
     }
 
     /**

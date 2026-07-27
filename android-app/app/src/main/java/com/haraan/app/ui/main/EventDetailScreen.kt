@@ -182,6 +182,17 @@ fun EventDetailScreen(
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
+                // Venue map preview — Static Maps card with a pin + Directions. Hides
+                // itself when no coordinates resolve (no key / place can't be located).
+                EventVenueMap(
+                    venue = event.venue,
+                    mapLink = detail.mapLink,
+                    latitude = detail.latitude,
+                    longitude = detail.longitude
+                )
+
+                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+
                 // Organizer — who's running / selling the event (hides if unknown)
                 EventOrganizerSection(
                     organizer = event.organizer,
@@ -198,10 +209,9 @@ fun EventDetailScreen(
                     Spacer(modifier = Modifier.height(HaraanSpacing.Large))
                 }
 
-                // Venue — name, address & a working "Get directions" action
-                EventVenueSection(venue = event.venue, mapLink = detail.mapLink)
-
-                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                // (Venue is now shown by the EventVenueMap card above the Organizer —
+                // it carries the venue name, address and Directions, so the plain
+                // text venue section here was a duplicate and has been removed.)
 
                 // Good to Know — admin-authored attribute grid (hides when empty)
                 if (detail.goodToKnow.isNotEmpty()) {
@@ -229,6 +239,7 @@ fun EventDetailScreen(
             barRise = barRise,
             eventId = eventIdInt,
             ticketTypes = ticketTypes,
+            soldOut = detail.soldOut,
             onCheckout = { lines ->
                 onCheckout(
                     OrderSummary(

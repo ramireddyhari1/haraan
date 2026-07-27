@@ -88,6 +88,7 @@ final class BookingsController extends Controller
                 $request->orderLines(),
                 $request->validated('couponCode'),
                 $request->contact(),
+                eventSlotId: $request->eventSlotId(),
             )->load('ticketType');
 
             BookingNotifier::dispatch($legacy->first());
@@ -104,6 +105,7 @@ final class BookingsController extends Controller
             $request->orderLines(),
             $request->validated('couponCode'),
             $request->contact(),
+            eventSlotId: $request->eventSlotId(),
             reserve: true,
         )->load('ticketType');
 

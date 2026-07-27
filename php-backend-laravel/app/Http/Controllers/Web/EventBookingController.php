@@ -83,6 +83,8 @@ final class EventBookingController extends Controller
 
         $coupon = trim((string) $request->input('couponCode', ''));
 
+        $slotId = $request->filled('eventSlotId') ? (int) $request->input('eventSlotId') : null;
+
         try {
             $order = $this->bookings->createOrder(
                 $request->user(),
@@ -90,6 +92,7 @@ final class EventBookingController extends Controller
                 $lines,
                 $coupon !== '' ? $coupon : null,
                 $contact,
+                eventSlotId: $slotId,
                 reserve: true,
             );
         } catch (ConflictHttpException|NotFoundHttpException $e) {

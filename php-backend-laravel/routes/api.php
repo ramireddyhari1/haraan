@@ -68,6 +68,11 @@ Route::prefix('auth/email')->controller(EmailAuthController::class)->group(funct
 // "Continue with Google" — the app posts a Google ID token; we verify it and log in.
 Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login'])->middleware('throttle:auth');
 
+// "Continue with phone" — the app posts a Firebase phone-auth ID token; we verify it
+// and log in (creating the account on first sign-in). Token-based twin of the website's
+// session-based /auth/firebase-phone.
+Route::post('/auth/firebase-phone', [\App\Http\Controllers\Api\FirebasePhoneAuthController::class, 'login'])->middleware('throttle:auth');
+
 // -------------------------------------------------------------------------
 //  Users (admin-only)
 // -------------------------------------------------------------------------

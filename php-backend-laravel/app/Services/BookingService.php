@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Coupon;
 use App\Models\Event;
+use App\Models\EventSlot;
 use App\Models\TicketType;
 use App\Models\User;
 use App\Models\Venue;
@@ -74,6 +75,7 @@ final class BookingService
             (int) $data['eventId'],
             $lines,
             $data['couponCode'] ?? null,
+            eventSlotId: isset($data['eventSlotId']) ? (int) $data['eventSlotId'] : null,
         )->first();
     }
 
@@ -96,7 +98,7 @@ final class BookingService
      *         Who the ticket is for, captured at checkout. Optional so older callers
      *         (and venue bookings) keep working; stored on every row of the order.
      */
-    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], bool $reserve = false): Collection
+    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], ?int $eventSlotId = null, bool $reserve = false): Collection
     {
         // Reserve mode holds inventory in a PENDING row until payment confirms. Sweep any
         // holds that were never paid first, so their seats are back in the pool for this order.
@@ -133,15 +135,47 @@ final class BookingService
             'attendee_phone' => self::clean($contact['phone'] ?? null) ?? (trim((string) $user->phone) ?: null),
         ];
 
-        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee, $reserve): Collection {
+        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee, $eventSlotId, $reserve): Collection {
             $event = Event::query()->lockForUpdate()->find($eventId);
 
             if ($event === null) {
                 throw new NotFoundHttpException('Event not found');
             }
 
+            // Host's manual "Sold out" override closes sales regardless of slot count.
+            if ($event->is_sold_out) {
+                throw new ConflictHttpException('This event is sold out');
+            }
+
             if ($event->available_slots < $totalTickets) {
                 throw new ConflictHttpException('Not enough seats available');
+            }
+
+            // Resolve the session ("time slot") this order is for. When the event runs
+            // across several sessions one must be chosen; a single-session event defaults
+            // to its sole slot so per-session inventory stays accurate everywhere.
+            $slot     = null;
+            $slotIds  = $event->slots()->orderBy('sort')->orderBy('id')->pluck('id');
+            $slotCount = $slotIds->count();
+
+            if ($eventSlotId !== null) {
+                /** @var EventSlot|null $slot */
+                $slot = EventSlot::query()->lockForUpdate()->where('event_id', $event->id)->find($eventSlotId);
+
+                if ($slot === null) {
+                    throw new NotFoundHttpException('Session not found');
+                }
+            } elseif ($slotCount > 1) {
+                throw new ConflictHttpException('Please choose a session');
+            } elseif ($slotCount === 1) {
+                $slot = EventSlot::query()->lockForUpdate()->find($slotIds->first());
+            }
+
+            if ($slot !== null) {
+                $slotLeft = $slot->remaining();
+                if ($slotLeft !== null && $slotLeft < $totalTickets) {
+                    throw new ConflictHttpException("Only {$slotLeft} left for “{$slot->displayLabel()}”");
+                }
             }
 
             // Eloquent's collection, not collect(): callers relation-load the result
@@ -171,9 +205,24 @@ final class BookingService
                         throw new ConflictHttpException("“{$tier->name}” is not on sale right now");
                     }
 
+                    // Sequential release: a later-phase tier can't be bought until every
+                    // earlier phase has sold out (see Event::phaseReleased()).
+                    if (! $event->phaseReleased((int) $tier->release_phase)) {
+                        throw new ConflictHttpException("“{$tier->name}” isn’t on sale yet");
+                    }
+
                     $remaining = $tier->remaining();
                     if ($remaining !== null && $remaining < $qty) {
                         throw new ConflictHttpException("Only {$remaining} left for “{$tier->name}”");
+                    }
+
+                    // Bulk-booking bounds: a tier may set a min/max per order.
+                    ['min' => $minQty, 'max' => $maxQty] = $tier->orderBounds();
+                    if ($qty < $minQty) {
+                        throw new ConflictHttpException("Buy at least {$minQty} of “{$tier->name}”");
+                    }
+                    if ($qty > $maxQty) {
+                        throw new ConflictHttpException("At most {$maxQty} of “{$tier->name}” per order");
                     }
 
                     // Price the whole line at the tier's live phase price. Inventory
@@ -195,8 +244,16 @@ final class BookingService
                     'user_id'        => $user->id,
                     'event_id'       => $event->id,
                     'ticket_type_id' => $tier?->id,
+                    'event_slot_id'  => $slot?->id,
                     ...$attendee,
                 ]));
+            }
+
+            // Advance the session's own sold count so per-session inventory tracks
+            // alongside the tier and event totals.
+            if ($slot !== null) {
+                $slot->sold += $totalTickets;
+                $slot->save();
             }
 
             // Host-set convenience fee on the ticket subtotal — charged once for the
@@ -425,6 +482,14 @@ final class BookingService
                     if ($tier !== null) {
                         $tier->sold = max(0, (int) $tier->sold - (int) $booking->quantity);
                         $tier->save();
+                    }
+                }
+
+                if ($booking->event_slot_id !== null) {
+                    $slot = EventSlot::query()->lockForUpdate()->find($booking->event_slot_id);
+                    if ($slot !== null) {
+                        $slot->sold = max(0, (int) $slot->sold - (int) $booking->quantity);
+                        $slot->save();
                     }
                 }
 
@@ -725,6 +790,22 @@ final class BookingService
             if ($event !== null) {
                 $event->available_slots += (int) $booking->quantity;
                 $event->save();
+            }
+
+            if ($booking->ticket_type_id !== null) {
+                $tier = TicketType::query()->lockForUpdate()->find($booking->ticket_type_id);
+                if ($tier !== null) {
+                    $tier->sold = max(0, (int) $tier->sold - (int) $booking->quantity);
+                    $tier->save();
+                }
+            }
+
+            if ($booking->event_slot_id !== null) {
+                $slot = EventSlot::query()->lockForUpdate()->find($booking->event_slot_id);
+                if ($slot !== null) {
+                    $slot->sold = max(0, (int) $slot->sold - (int) $booking->quantity);
+                    $slot->save();
+                }
             }
 
             $booking->status = 'CANCELLED';

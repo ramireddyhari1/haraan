@@ -51,6 +51,16 @@ class PartnerPlanPage extends Page
         return static::canAccess();
     }
 
+    public static function getNavigationBadge(): ?string
+    {
+        return 'Beta';
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     private function partnerId(): int
     {
         return (int) auth()->user()->effectivePartnerId();

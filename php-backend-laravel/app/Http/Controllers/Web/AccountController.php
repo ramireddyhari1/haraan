@@ -118,12 +118,19 @@ final class AccountController extends Controller
     {
         if (! $request->boolean('skip')) {
             $data = $request->validate([
+                'name' => ['nullable', 'string', 'max:60'],
                 'age' => ['nullable', 'integer', 'min:5', 'max:120'],
                 'gender' => ['nullable', 'in:Male,Female,Other'],
             ]);
 
             $user = $request->user();
             $fill = [];
+            // Phone sign-ups land with the placeholder name "Member" (no name is collected
+            // during OTP), so treat that as blank and let this prompt set the real one.
+            $nameIsPlaceholder = blank($user->name) || $user->name === 'Member';
+            if ($nameIsPlaceholder && filled($data['name'] ?? null)) {
+                $fill['name'] = trim((string) $data['name']);
+            }
             if (blank($user->age) && filled($data['age'] ?? null)) {
                 $fill['age'] = $data['age'];
             }

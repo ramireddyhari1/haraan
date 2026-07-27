@@ -12,7 +12,7 @@
 
         // BMS-style demand tag, driven by real sell-through.
         $st = (int) $s['sellThrough'];
-        if ($s['total'] > 0 && $s['sold'] >= $s['total']) {
+        if ($e->is_sold_out || ($s['total'] > 0 && $s['sold'] >= $s['total'])) {
             $demand = ['label' => 'Sold out', 'tone' => 'full'];
         } elseif ($st >= 85) {
             $demand = ['label' => 'Almost full', 'tone' => 'hot'];
@@ -83,7 +83,23 @@
         .eh-btn svg{width:16px;height:16px;}
 
         /* Haraan brand lockup on the hero */
-        .eh-brand{display:flex;align-items:center;gap:11px;margin-bottom:2px;}
+        .eh-brand{display:flex;flex-wrap:wrap;align-items:center;gap:11px;margin-bottom:2px;}
+
+        /* Manual "Sold out" override toggle — sits top-right of the hero. Quiet
+           outline when off; solid red when the host has closed sales. */
+        .eh-so{margin-left:auto;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+            border:0;font:inherit;font-size:12px;font-weight:700;letter-spacing:.02em;
+            padding:7px 14px;border-radius:999px;color:#fff;background:rgba(255,255,255,.14);
+            box-shadow:inset 0 0 0 1px rgba(255,255,255,.30);
+            transition:background .15s,box-shadow .15s,opacity .15s;}
+        .eh-so:hover{background:rgba(255,255,255,.24);}
+        .eh-so-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.55);
+            box-shadow:inset 0 0 0 1px rgba(255,255,255,.4);transition:background .15s;}
+        .eh-so.is-on{background:rgba(239,68,68,.92);
+            box-shadow:inset 0 0 0 1px rgba(248,113,113,.9),0 8px 20px -8px rgba(239,68,68,.7);}
+        .eh-so.is-on:hover{background:rgba(220,38,38,.96);}
+        .eh-so.is-on .eh-so-dot{background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.28);}
+        .eh-so[disabled]{opacity:.55;cursor:default;}
         .eh-mark{display:inline-flex;background:#fff;border-radius:8px;padding:6px 11px;
             box-shadow:inset 0 0 0 1px rgba(0,0,0,.06),0 4px 12px -6px rgba(0,0,0,.4);}
         .eh-mark img{height:22px;width:auto;display:block;}
@@ -172,6 +188,15 @@
             <div class="eh-brand">
                 <span class="eh-mark"><img src="{{ asset('images/haraan-wordmark.png') }}" alt="Haraan"></span>
                 <span class="eh-kicker">Event Analytics</span>
+                <button type="button"
+                        class="eh-so {{ $e->is_sold_out ? 'is-on' : '' }}"
+                        wire:click="toggleSoldOut"
+                        wire:loading.attr="disabled"
+                        title="{{ $e->is_sold_out ? 'Tickets are closed — tap to put back on sale' : 'Close ticket sales and show “Sold out” to buyers' }}">
+                    <span class="eh-so-dot"></span>
+                    <span wire:loading.remove wire:target="toggleSoldOut">{{ $e->is_sold_out ? 'Sold out · On' : 'Mark sold out' }}</span>
+                    <span wire:loading wire:target="toggleSoldOut">Saving…</span>
+                </button>
             </div>
             <div class="eh-lead">
                 @if ($poster)

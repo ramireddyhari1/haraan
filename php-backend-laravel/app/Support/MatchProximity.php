@@ -47,6 +47,16 @@ final class MatchProximity
     }
 
     /**
+     * True when we have precise viewer coordinates (not just a place name). Only
+     * then is it worth geocoding match place-names into coordinates, since km
+     * distance needs both endpoints as numbers.
+     */
+    public function hasPosition(): bool
+    {
+        return $this->latitude !== null && $this->longitude !== null;
+    }
+
+    /**
      * Great-circle distance in km, or null when either side lacks a fix.
      */
     public function distanceKm(LiveMatch $match): ?float

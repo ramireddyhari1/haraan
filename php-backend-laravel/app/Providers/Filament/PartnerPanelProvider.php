@@ -71,6 +71,18 @@ class PartnerPanelProvider extends PanelProvider
             scopes: PartnerLogin::class,
         );
 
+        // Premium visual theme for the Event create/edit wizard — same overrides the
+        // control panel uses, scoped to those two pages so the partner's event-creation
+        // experience is just as polished without restyling the rest of the console.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => view('filament.forms.event-form-theme')->render(),
+            scopes: [
+                \App\Filament\Resources\Events\Pages\CreateEvent::class,
+                \App\Filament\Resources\Events\Pages\EditEvent::class,
+            ],
+        );
+
         // The brand logo lives in the sidebar header, which is collapsed behind the
         // hamburger on mobile — so on a phone the console opened with no Haraan mark
         // at all. Paint it into the top bar too, but only below the desktop breakpoint

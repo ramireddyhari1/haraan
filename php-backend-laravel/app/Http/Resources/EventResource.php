@@ -28,6 +28,9 @@ final class EventResource extends JsonResource
             'visibility'     => $this->visibility,
             'location'       => $this->location,
             'mapLink'        => $this->map_link,
+            // Host-set venue coordinates (nullable) — drives the app's venue map preview.
+            'latitude'       => $this->latitude !== null ? (float) $this->latitude : null,
+            'longitude'      => $this->longitude !== null ? (float) $this->longitude : null,
             'city'           => $this->city,
             'venue'          => $this->venue,
             'date'           => $this->date,
@@ -49,6 +52,28 @@ final class EventResource extends JsonResource
             ],
             'totalSlots'     => $this->total_slots,
             'availableSlots' => $this->available_slots,
+            // Authoritative sold-out flag: the manual host override OR genuinely no
+            // slots left. Clients should gate the buy UI on this, not on the raw
+            // slot count (which stays truthful for "filling fast" heuristics).
+            'soldOut'        => $this->resource->soldOut(),
+            // Whether tickets are configured per session ("Customize per slot").
+            'ticketsPerSlot' => (bool) $this->tickets_per_slot,
+            // Ordered release-phase names; empty when the event sells everything at once.
+            'releasePhases'  => array_values(array_map(
+                static fn ($p): string => (string) ($p['name'] ?? ''),
+                (array) ($this->release_phases ?? []),
+            )),
+            // Sessions ("time slots") this event runs across. Always present; a
+            // single-slot event just has one. Buyers pick one when there's >1.
+            'slots'          => $this->whenLoaded('slots', fn () => $this->slots->map(fn ($s) => [
+                'id'        => $s->id,
+                'label'     => $s->displayLabel(),
+                'startsAt'  => $s->starts_at,
+                'endsAt'    => $s->ends_at,
+                'capacity'  => $s->capacity,
+                'remaining' => $s->remaining(),
+                'soldOut'   => $s->soldOut(),
+            ])->values()),
             'images'         => \App\Support\MediaUrl::resolveMany($this->images),
             'gallery'        => $this->galleryUrls(),
             'status'         => $this->status,
@@ -71,22 +96,35 @@ final class EventResource extends JsonResource
             'goodToKnow'     => $this->resource->goodToKnowRows(),
             'schedule'       => $this->resource->scheduleRows(),
             'lineup'         => $this->resource->lineupRows(),
-            'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes->map(fn ($t) => [
-                'id'        => $t->id,
-                'name'      => $t->name,
-                'kind'      => $t->kind,
-                // `price` is the live price a buyer pays now (current phase, else flat).
-                'price'     => $t->effectivePrice(),
-                'basePrice' => $t->price,
-                'admits'    => $t->admits,
-                'minPrice'  => $t->min_price,
-                'capacity'  => $t->capacity,
-                'sold'      => $t->sold,
-                'remaining' => $t->remaining(),
-                'onSale'    => $t->isOnSale(),
-                // Empty for flat-price tiers; drives the app's "Pricing Schedule" widget.
-                'phases'    => $t->phaseSchedule(),
-            ])->values()),
+            // Buyer-facing tiers only — a host can hide a tier (visible = false)
+            // without deleting it, and hidden tiers must never reach checkout.
+            'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes
+                ->filter(fn ($t) => (bool) $t->visible)
+                ->map(fn ($t) => [
+                    'id'          => $t->id,
+                    'name'        => $t->name,
+                    'description' => $t->description,
+                    'kind'        => $t->kind,
+                    // The session this tier belongs to, or null when it applies to all.
+                    'slotId'      => $t->event_slot_id,
+                    // `price` is the live price a buyer pays now (current phase, else flat).
+                    'price'       => $t->effectivePrice(),
+                    'basePrice'   => $t->price,
+                    'admits'      => $t->admits,
+                    'minPrice'    => $t->min_price,
+                    'capacity'    => $t->capacity,
+                    'sold'        => $t->sold,
+                    'remaining'   => $t->remaining(),
+                    // On sale = inside its sales window AND its release phase has opened.
+                    'onSale'      => $t->isOnSale() && $this->resource->phaseReleased((int) $t->release_phase),
+                    'releasePhase' => (int) $t->release_phase,
+                    // Bulk-booking bounds the app/web quantity stepper should honour.
+                    'bulkBooking' => (bool) $t->bulk_booking,
+                    'minPerOrder' => $t->orderBounds()['min'],
+                    'maxPerOrder' => $t->orderBounds()['max'],
+                    // Empty for flat-price tiers; drives the app's "Pricing Schedule" widget.
+                    'phases'      => $t->phaseSchedule(),
+                ])->values()),
         ];
     }
 

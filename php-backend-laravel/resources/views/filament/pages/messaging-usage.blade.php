@@ -48,7 +48,10 @@
         {{-- ---------- Hero ---------- --}}
         <section class="hmu-hero" style="background:{{ $hero['grad'] }}">
             <div class="hmu-hero-in">
-                <h2 class="hmu-h1">{{ $hero['head'] }}</h2>
+                <div class="hmu-hero-top">
+                    <h2 class="hmu-h1">{{ $hero['head'] }}</h2>
+                    <span class="hmu-beta">Beta</span>
+                </div>
                 <p class="hmu-hsub">{{ $hero['sub'] }}</p>
             </div>
         </section>
@@ -247,7 +250,9 @@
         /* ---- hero ---- */
         .hmu-hero{border-radius:18px;padding:20px 24px;color:#fff;
             box-shadow:0 10px 30px -14px rgba(2,6,23,.45);}
+        .hmu-hero-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
         .hmu-h1{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em;}
+        .hmu-beta{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.4);padding:3px 8px;border-radius:999px;line-height:1;}
         .hmu-hsub{margin:3px 0 0;font-size:13px;color:rgba(255,255,255,.88);}
 
         /* ---- kpis ---- */

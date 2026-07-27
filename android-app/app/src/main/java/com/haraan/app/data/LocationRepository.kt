@@ -76,7 +76,12 @@ class LocationRepository(private val context: Context) {
     /** Refresh the city catalog from the server (call once when the app opens). */
     suspend fun refreshCatalog() = CityCatalog.refresh(context)
 
-    fun selectCity(option: CityOption): LocationState {
+    /**
+     * Instant city selection with no coordinates — used to update the UI the moment
+     * the user taps a city, before the (async) geocode returns. Distance features
+     * stay in city-string mode until [selectCity] upgrades this with real coords.
+     */
+    fun selectCityQuick(option: CityOption): LocationState {
         prefs.edit()
             .putString("city", option.name)
             .putString("district", option.district)
@@ -87,6 +92,35 @@ class LocationRepository(private val context: Context) {
             .apply()
         addRecent(option.name)
         return LocationState.Resolved(option.name, option.district)
+    }
+
+    /**
+     * Select a city and pin it to real coordinates via the Google Geocoding API
+     * (the same key that powers the venue map). Those coords let events sort by true
+     * km distance and the GameHub 30 km venue filter work off a chosen city, not just
+     * a GPS fix. Falls back to the coordinate-less selection when geocoding fails.
+     */
+    suspend fun selectCity(option: CityOption): LocationState {
+        val quick = selectCityQuick(option)
+        val query = listOf(option.name, option.district, "India")
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(", ")
+        val coords = com.haraan.app.ui.util.VenueMap.geocode(query) ?: return quick
+
+        val plusCode = PlusCode.localCode(coords.first, coords.second)
+        prefs.edit()
+            .putString("plusCode", plusCode)
+            .putString("lat", coords.first.toString())
+            .putString("lng", coords.second.toString())
+            .apply()
+        return LocationState.Resolved(
+            city = option.name,
+            district = option.district,
+            plusCode = plusCode,
+            latitude = coords.first,
+            longitude = coords.second,
+        )
     }
 
     suspend fun detectCurrent(): LocationState {

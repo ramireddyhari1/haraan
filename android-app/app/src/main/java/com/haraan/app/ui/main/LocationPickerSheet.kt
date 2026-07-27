@@ -29,7 +29,7 @@ import com.haraan.app.data.CityOption
 import com.haraan.app.data.LocationState
 
 // 0 == "Any distance".
-private val radiusOptions = listOf(2, 5, 10, 25, 0)
+private val radiusOptions = listOf(5, 10, 30, 50, 0)
 private val accent = Color(0xFF2563EB)
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -104,16 +104,20 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
      * Gate the Filament panels. Partners live in the dedicated /partner console
      * and must never reach the internal /control panel (where support threads
      * and other tenants' data would otherwise be exposed); internal department
-     * staff get /control but not /partner. Super-admins get both. The
-     * per-workspace clusters then decide what each role actually sees.
+     * staff and super-admins get /control but not /partner. The /partner console
+     * is for real partner accounts only. The per-workspace clusters then decide
+     * what each role actually sees.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        if ($this->isSuperAdmin()) {
-            return true;
-        }
-
         if ($panel->getId() === 'partner') {
+            // Admins belong in /control only — they are barred from the partner
+            // console even if their account also happens to carry a PARTNER role,
+            // so an internal login can never masquerade inside a partner workspace.
+            if ($this->isSuperAdmin()) {
+                return false;
+            }
+
             // A suspended desk person keeps their login but is locked out until an
             // owner reactivates them (owners themselves are never auto-suspended here).
             if ($this->isDeskStaff() && strtoupper((string) $this->status) === 'SUSPENDED') {
@@ -123,7 +127,11 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             return $this->hasRoleEither(['PARTNER']);
         }
 
-        // /control — internal staff only, never partners.
+        // /control — internal staff and super-admins, never partners.
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
         return $this->hasRoleEither(['FINANCE', 'MARKETING', 'OPS']);
     }
 

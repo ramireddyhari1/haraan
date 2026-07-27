@@ -45,7 +45,7 @@ final class EventsController extends Controller
         $city = trim((string) $request->query('city', '')) ?: CityResolver::selected();
 
         $query = Event::query()
-            ->with('partner.hostProfile')
+            ->with(['partner.hostProfile', 'slots'])
             ->whereRaw('lower(status) = ?', ['published']);
 
         if ($request->filled('search')) {
@@ -75,7 +75,7 @@ final class EventsController extends Controller
     public function show(string $id, Request $request): JsonResponse
     {
         $event = Event::query()
-            ->with('partner.hostProfile')
+            ->with(['partner.hostProfile', 'slots', 'ticketTypes'])
             ->whereRaw('lower(status) = ?', ['published'])
             ->where('id', $id)
             ->first();

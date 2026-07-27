@@ -8,6 +8,7 @@ use App\Services\EventCopyAI;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
@@ -16,6 +17,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
@@ -177,8 +179,9 @@ class EventForm
                     self::basicsStep(),
                     self::whenWhereStep(),
                     self::ticketsStep(),
-                    self::publishStep(),
+                    self::couponsStep(),
                     self::extrasStep(),
+                    self::publishStep(),
                 ])
                     ->columnSpanFull(),
                 // NB: deliberately NOT ->skippable(). A skippable wizard lets a host
@@ -523,9 +526,65 @@ class EventForm
     private static function ticketsStep(): Step
     {
         return Step::make('Tickets')
-            ->description('Capacity & pricing')
+            ->description('Sessions, capacity & pricing')
             ->icon('heroicon-o-ticket')
             ->schema([
+                // "Same for all slots" vs "Customize per slot". When on, each tier can
+                // be pinned to a specific session (done after saving, once sessions have
+                // ids — see the "Session" field on the ticket card).
+                // On create this lives inside the Ticket Studio's "Same for all slots /
+                // Customize per slot" selector; on edit it stays a plain toggle beside the
+                // Ticket Types relation manager.
+                Toggle::make('tickets_per_slot')
+                    ->label('Different tickets for each session')
+                    ->helperText('Off = the same tickets apply to every session. On = pin tickets to a specific session.')
+                    ->live()
+                    ->default(false)
+                    ->visibleOn('edit')
+                    ->columnSpanFull(),
+
+                // Sessions ("time slots"). Every event has at least one; add more to run
+                // the same event across multiple showtimes/days, each with its own
+                // capacity. Saved via the `slots` relationship.
+                Repeater::make('slots')
+                    ->relationship()
+                    ->label('Sessions / time slots')
+                    ->addActionLabel('Add another session')
+                    ->defaultItems(1)
+                    ->minItems(1)
+                    ->reorderable()
+                    ->orderColumn('sort')
+                    ->collapsible()
+                    // Create stays clean — a single default session is made from the
+                    // event's date/time (see CreateEvent::afterCreate). Add/manage extra
+                    // sessions on edit.
+                    ->visibleOn('edit')
+                    ->itemLabel(fn (array $state): ?string => self::slotItemLabel($state))
+                    ->schema([
+                        TextInput::make('label')
+                            ->label('Session name')
+                            ->placeholder('e.g. Day 1 · Evening')
+                            ->helperText('Optional — defaults to the date & time.')
+                            ->columnSpanFull(),
+                        DateTimePicker::make('starts_at')
+                            ->label('Starts')
+                            ->native(false)
+                            ->seconds(false)
+                            ->displayFormat('D, d M Y · g:i A'),
+                        DateTimePicker::make('ends_at')
+                            ->label('Ends (optional)')
+                            ->native(false)
+                            ->seconds(false)
+                            ->displayFormat('D, d M Y · g:i A'),
+                        TextInput::make('capacity')
+                            ->label('Session capacity')
+                            ->numeric()
+                            ->minValue(1)
+                            ->helperText('Leave blank to share the overall event capacity.'),
+                    ])
+                    ->columns(2)
+                    ->columnSpanFull(),
+
                 // Ticket tiers (Early Bird / VIP / …) are their own records, edited in
                 // the "Ticket Types" panel below the form — which only exists once the
                 // event is saved. So on the create wizard there is nothing to show; on
@@ -567,41 +626,21 @@ class EventForm
                         );
                     })
                     ->columnSpanFull(),
-                // While CREATING an event there is no saved record yet, so the
-                // "Ticket Types" relation-manager panel can't exist. This repeater lets
-                // the host define tiers (Early Bird / VIP / Group…) right here during
-                // creation; ->relationship() saves them as TicketType rows once the event
-                // is created. On edit it's hidden — the richer Ticket Types panel (presets,
-                // dynamic pricing, sold counts) owns tier editing there, and hiding this on
-                // edit also means it never touches existing tiers.
-                Repeater::make('ticketTypes')
-                    ->relationship()
-                    ->label('Ticket tiers')
+                // CREATE: the bespoke "Ticket Studio" — the District-style ticket-setup UI
+                // (mode selector, unified-config banner, ticket cards). Its state is
+                // reconciled into new TicketType rows in CreateEvent::afterCreate(). On EDIT
+                // the richer Ticket Types relation manager (presets, dynamic pricing, sold
+                // counts) owns tier editing, so the studio is create-only — it never risks
+                // existing tiers that already have bookings.
+                ViewField::make('ticketStudio')
+                    ->view('filament.forms.ticket-studio')
                     ->visibleOn('create')
-                    ->addActionLabel('Add ticket tier')
-                    ->defaultItems(0)
-                    ->reorderable(false)
-                    ->itemLabel(fn (array $state): ?string => $state['name'] ?? 'New tier')
-                    ->helperText('Optional. Add tiers like Early Bird, VIP or Group now, or add and fine-tune them after saving.')
-                    // Same preset picker + fields as the post-save "Ticket Types" panel.
-                    ->schema(\App\Filament\Resources\Events\Schemas\TicketTypeFields::components())
+                    ->dehydrated()
+                    ->default(fn (): array => self::studioDefault())
                     ->columnSpanFull(),
-                TextInput::make('total_slots')
-                    ->label('Total capacity')
-                    ->required()
-                    ->numeric()
-                    ->minValue(1)
-                    ->default(100)
-                    ->helperText('How many people can attend in total.'),
-                TextInput::make('price')
-                    ->label('Base price')
-                    ->required()
-                    ->numeric()
-                    ->minValue(0)
-                    ->default(0)
-                    ->prefix('₹')
-                    ->helperText('Starting price. Add Gold / VIP / Early-Bird tiers after saving.'),
-                // Order fees (Convenience fee, Gateway fee, …). Admin-only; each row is
+                // Total capacity + base price are no longer authored here — capacity is
+                // derived from the ticket seats and the price comes from the tiers (see
+                // CreateEvent). Order fees (Convenience fee, Gateway fee, …). Admin-only; each row is
                 // charged on top of the ticket subtotal and shown as its own line to
                 // buyers. Stored as the `fees` JSON array on the event.
                 Repeater::make('fees')
@@ -661,23 +700,243 @@ class EventForm
                     ->prefix(fn (Get $get): ?string => $get('tax_type') === 'flat' ? '₹' : null)
                     ->suffix(fn (Get $get): ?string => $get('tax_type') === 'percent' ? '%' : null)
                     ->visible(fn (Get $get): bool => self::adminOnly() && in_array($get('tax_type'), ['flat', 'percent'], true)),
+                // Seating: on create the Ticket Studio's "Seating Layout" toggle sets this;
+                // on edit it stays a plain toggle (+ optional grid dimensions).
                 Toggle::make('seat_selection')
                     ->label('Assigned seating (reserved seats)')
                     ->live()
                     ->default(false)
+                    ->visibleOn('edit')
                     ->helperText('Off = general admission. On = attendees pick a seat.')
                     ->columnSpanFull(),
                 TextInput::make('seat_rows')
                     ->label('Seat rows')
                     ->numeric()
                     ->minValue(1)
-                    ->visible(fn (Get $get): bool => (bool) $get('seat_selection')),
+                    ->visible(fn (Get $get): bool => (bool) $get('seat_selection'))
+                    ->visibleOn('edit'),
                 TextInput::make('seats_per_row')
                     ->label('Seats per row')
                     ->numeric()
                     ->minValue(1)
-                    ->visible(fn (Get $get): bool => (bool) $get('seat_selection')),
+                    ->visible(fn (Get $get): bool => (bool) $get('seat_selection'))
+                    ->visibleOn('edit'),
+
+                // ── Payment gateway fee (admin only — a platform setting) ──────
+                Section::make('Payment gateway fee')
+                    ->description('Small processing fee charged on each transaction.')
+                    ->icon('heroicon-o-credit-card')
+                    ->visible(self::adminOnly())
+                    ->columns(2)
+                    ->schema([
+                        ToggleButtons::make('gateway_fee_payer')
+                            ->hiddenLabel()
+                            ->options(['customer' => 'Customer pays', 'host' => 'Host pays'])
+                            ->default('customer')
+                            ->inline()
+                            ->grouped()
+                            ->columnSpanFull(),
+                        Select::make('gateway_fee_type')
+                            ->label('Fee type')
+                            ->options(['none' => 'No fee', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of subtotal'])
+                            ->default('none')
+                            ->native(false)
+                            ->live(),
+                        TextInput::make('gateway_fee_value')
+                            ->label(fn (Get $get): string => $get('gateway_fee_type') === 'percent' ? 'Percentage' : 'Amount')
+                            ->numeric()
+                            ->minValue(0)
+                            ->default(0)
+                            ->prefix(fn (Get $get): ?string => $get('gateway_fee_type') === 'flat' ? '₹' : null)
+                            ->suffix(fn (Get $get): ?string => $get('gateway_fee_type') === 'percent' ? '%' : null)
+                            ->visible(fn (Get $get): bool => in_array($get('gateway_fee_type'), ['flat', 'percent'], true)),
+                    ]),
+
+                // ── Platform fee (admin only) ──────────────────────────────────
+                Section::make('Platform fee')
+                    ->description('The platform’s share of each booking.')
+                    ->icon('heroicon-o-building-office-2')
+                    ->visible(self::adminOnly())
+                    ->columns(2)
+                    ->schema([
+                        ToggleButtons::make('platform_fee_payer')
+                            ->hiddenLabel()
+                            ->options(['customer' => 'Customer pays', 'host' => 'Host pays'])
+                            ->default('customer')
+                            ->inline()
+                            ->grouped()
+                            ->columnSpanFull(),
+                        Select::make('platform_fee_type')
+                            ->label('Fee type')
+                            ->options(['none' => 'No fee', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of subtotal'])
+                            ->default('none')
+                            ->native(false)
+                            ->live(),
+                        TextInput::make('platform_fee_value')
+                            ->label(fn (Get $get): string => $get('platform_fee_type') === 'percent' ? 'Percentage' : 'Amount')
+                            ->numeric()
+                            ->minValue(0)
+                            ->default(0)
+                            ->prefix(fn (Get $get): ?string => $get('platform_fee_type') === 'flat' ? '₹' : null)
+                            ->suffix(fn (Get $get): ?string => $get('platform_fee_type') === 'percent' ? '%' : null)
+                            ->visible(fn (Get $get): bool => in_array($get('platform_fee_type'), ['flat', 'percent'], true)),
+                    ]),
             ]);
+    }
+
+    /**
+     * A dedicated "Coupons" wizard step — its own top-level section so it's never
+     * buried inside Tickets. The relationship repeater saves the codes right after
+     * the event is created (works on both create and edit).
+     */
+    private static function couponsStep(): Step
+    {
+        return Step::make('Coupons')
+            ->description('Discounts & offers')
+            ->icon('heroicon-o-ticket')
+            ->schema([
+                Repeater::make('coupons')
+                    ->relationship()
+                    ->hiddenLabel()
+                    ->addActionLabel('Create Coupon')
+                    ->defaultItems(0)
+                    ->itemLabel(fn (array $state): ?string => isset($state['code']) && $state['code'] !== ''
+                        ? strtoupper((string) $state['code']).' — ₹'.number_format((float) ($state['discount'] ?? 0))
+                        : 'New coupon')
+                    ->helperText('Offer discounts to boost ticket sales and reward loyal customers. Buyers enter the code at checkout.')
+                    ->schema([
+                        TextInput::make('code')
+                            ->label('Coupon code')
+                            ->required()
+                            ->maxLength(40)
+                            ->placeholder('SAVE10')
+                            ->helperText('Case-insensitive; buyers type this at checkout.'),
+                        TextInput::make('discount')
+                            ->label('Discount')
+                            ->numeric()
+                            ->minValue(0)
+                            ->prefix('₹')
+                            ->required()
+                            ->helperText('Flat amount off the payable total.'),
+                        TextInput::make('max_uses')
+                            ->label('Max uses')
+                            ->numeric()
+                            ->minValue(1)
+                            ->helperText('Leave blank for unlimited.'),
+                        Toggle::make('active')
+                            ->label('Active')
+                            ->default(true),
+                    ])
+                    ->columns(2)
+                    ->columnSpanFull(),
+            ]);
+    }
+
+    /** The empty state the Ticket Studio starts from on a fresh event. */
+    public static function studioDefault(): array
+    {
+        return ['mode' => 'unified', 'seating' => false, 'slotCount' => 1, 'tickets' => [], 'phases' => []];
+    }
+
+    /**
+     * The cleaned list of release-phase definitions ([{name}]) authored in the
+     * studio, ready to store on events.release_phases. Blank names are dropped.
+     *
+     * @return list<array{name: string}>
+     */
+    public static function studioReleasePhases(mixed $studio): array
+    {
+        $phases = is_array($studio) ? ($studio['phases'] ?? []) : [];
+        if (! is_array($phases)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($phases as $p) {
+            $name = trim((string) (is_array($p) ? ($p['name'] ?? '') : ''));
+            $out[] = ['name' => $name !== '' ? $name : ('Phase ' . (count($out) + 1))];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Turn the Ticket Studio's state into clean TicketType attribute rows, ready to
+     * persist (see CreateEvent::afterCreate). Blank-named cards are dropped; capacity
+     * -1/blank means unlimited (null); a "free" card is priced at 0.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function studioTicketRows(mixed $studio): array
+    {
+        $tickets = is_array($studio) ? ($studio['tickets'] ?? []) : [];
+        if (! is_array($tickets)) {
+            return [];
+        }
+
+        $rows = [];
+        $sort = 0;
+
+        foreach ($tickets as $t) {
+            if (! is_array($t)) {
+                continue;
+            }
+            $name = trim((string) ($t['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            $free  = (bool) ($t['free'] ?? false);
+            $seats = $t['seats'] ?? -1;
+            $cap   = ($seats === null || $seats === '' || (int) $seats < 0) ? null : (int) $seats;
+            $bulk  = ! $free && (bool) ($t['bulk'] ?? false);
+
+            $rows[] = [
+                'name'          => $name,
+                'description'   => trim((string) ($t['description'] ?? '')) ?: null,
+                'kind'          => 'standard',
+                'price'         => $free ? 0 : max(0, (float) ($t['price'] ?? 0)),
+                'capacity'      => $cap,
+                'visible'       => (bool) ($t['visible'] ?? true),
+                'release_phase' => max(0, (int) ($t['phase'] ?? 0)),
+                'bulk_booking'  => $bulk,
+                'min_per_order' => $bulk ? max(1, (int) ($t['minPer'] ?? 1)) : null,
+                'max_per_order' => $bulk && ! empty($t['maxPer']) ? max(1, (int) $t['maxPer']) : null,
+                'sort'          => $sort++,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** Card label for a session row — the host's label, else "d M · g:i A", else "Session". */
+    private static function slotItemLabel(array $state): string
+    {
+        $label = trim((string) ($state['label'] ?? ''));
+        if ($label !== '') {
+            return $label;
+        }
+
+        $starts = trim((string) ($state['starts_at'] ?? ''));
+        if ($starts !== '') {
+            try {
+                return \Illuminate\Support\Carbon::parse($starts)->format('d M · g:i A');
+            } catch (\Throwable) {
+                // fall through
+            }
+        }
+
+        return 'Session';
+    }
+
+    /** Card label for a ticket row — name + price/Free, so collapsed cards read well. */
+    private static function ticketItemLabel(array $state): string
+    {
+        $name  = trim((string) ($state['name'] ?? '')) ?: 'New ticket';
+        $price = (float) ($state['price'] ?? 0);
+        $tag   = ($price <= 0 || ! empty($state['free'])) ? 'Free' : '₹'.number_format($price);
+
+        return $name.' · '.$tag;
     }
 
     private static function publishStep(): Step

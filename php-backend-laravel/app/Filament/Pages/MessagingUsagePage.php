@@ -47,6 +47,16 @@ class MessagingUsagePage extends Page
         return auth()->user()?->isSuperAdmin() ?? false;
     }
 
+    public static function getNavigationBadge(): ?string
+    {
+        return 'Beta';
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public function showMonth(int $monthsBack): void
     {
         $this->monthsBack = max(0, min(11, $monthsBack));

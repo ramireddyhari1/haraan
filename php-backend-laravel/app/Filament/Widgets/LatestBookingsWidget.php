@@ -39,6 +39,10 @@ class LatestBookingsWidget extends Widget
     public function getBookings(): array
     {
         return $this->scopedBookingQuery()
+            // This is the Events overview feed, so keep it to event bookings —
+            // on /control scopedBookingQuery() is unscoped and would otherwise
+            // leak venue/GameHub bookings onto the events page.
+            ->whereNotNull('event_id')
             ->with(['user', 'event', 'venue'])
             ->latest()
             ->limit(8)

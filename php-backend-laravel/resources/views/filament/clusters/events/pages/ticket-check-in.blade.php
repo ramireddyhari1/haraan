@@ -295,7 +295,7 @@
     </div>
 
     @assets
-        <script src="https://unpkg.com/html5-qrcode" defer></script>
+        <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
     @endassets
 
     @script
@@ -389,33 +389,65 @@
             $wire.scan(text);
         }
 
+        // Turn a getUserMedia/scanner error into a plain, actionable message.
+        function explainCameraError(err) {
+            const name = (err && (err.name || err.type)) || String(err || '');
+            if (/NotAllowed|Permission|Denied|Security/i.test(name)) {
+                return 'Camera permission is blocked. Tap the camera/lock icon in your browser’s address bar → Allow camera, then reload. Meanwhile you can admit tickets with the code box on the right.';
+            }
+            if (/NotFound|DevicesNotFound|OverconstrainedError/i.test(name)) {
+                return 'No camera was found on this device. Use the “Enter code manually” box instead.';
+            }
+            if (/NotReadable|TrackStart|InUse/i.test(name)) {
+                return 'The camera is being used by another app. Close that app (or other camera tabs) and tap Start camera again.';
+            }
+            return 'Couldn’t start the camera (' + name + '). If you opened this from inside another app, open it in Chrome or Safari — or use the code box on the right.';
+        }
+
+        function failStart(err) {
+            scanner = null;
+            setLive(false);
+            liveTxt.textContent = 'Camera off';
+            alert(explainCameraError(err));
+        }
+
+        const scanConfig = { fps: 10, qrbox: { width: 250, height: 250 } };
+
         startBtn?.addEventListener('click', () => {
             primeHaptics();
+
+            // Some in-app browsers / insecure contexts have no camera API at all.
+            if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('This browser can’t open the camera here. Open the page in Chrome or Safari, or admit tickets with the code box on the right.');
+                return;
+            }
             if (typeof Html5Qrcode === 'undefined') {
-                alert('Scanner library still loading — try again in a moment.');
+                alert('Scanner is still loading — wait a second and tap Start camera again.');
                 return;
             }
             if (scanner) return;
+
+            liveTxt.textContent = 'Starting…';
             scanner = new Html5Qrcode('qr-reader');
-            Html5Qrcode.getCameras().then((cameras) => {
-                if (!cameras || cameras.length === 0) {
-                    alert('No camera found.');
-                    scanner = null;
-                    return;
-                }
-                scanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: 250 },
-                    onDecoded,
-                    () => {} // ignore per-frame decode failures
-                ).then(() => setLive(true)).catch((err) => {
-                    alert('Could not start camera: ' + err + '\nCamera needs HTTPS.');
-                    scanner = null;
+
+            // Preferred path: start the rear camera directly (most reliable on phones).
+            scanner.start({ facingMode: 'environment' }, scanConfig, onDecoded, () => {})
+                .then(() => setLive(true))
+                .catch(() => {
+                    // Fallback: enumerate and use the last camera (usually the rear one).
+                    Html5Qrcode.getCameras()
+                        .then((cameras) => {
+                            if (!cameras || cameras.length === 0) {
+                                failStart({ name: 'NotFoundError' });
+                                return;
+                            }
+                            const camId = cameras[cameras.length - 1].id;
+                            scanner.start(camId, scanConfig, onDecoded, () => {})
+                                .then(() => setLive(true))
+                                .catch(failStart);
+                        })
+                        .catch(failStart);
                 });
-            }).catch((err) => {
-                alert('Camera access failed: ' + err + '\nCamera needs HTTPS.');
-                scanner = null;
-            });
         });
 
         stopBtn?.addEventListener('click', () => {

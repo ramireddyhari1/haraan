@@ -30,6 +30,12 @@ class WebEventBookingTest extends TestCase
         ]);
     }
 
+    /** The attendee-contact block the checkout form always requires. */
+    private function contact(): array
+    {
+        return ['contact' => ['name' => 'Web Buyer', 'email' => 'buyer@example.test', 'phone' => '9876543210']];
+    }
+
     private function event(array $overrides = []): Event
     {
         $partner = User::firstOrCreate(
@@ -126,7 +132,7 @@ class WebEventBookingTest extends TestCase
 
         $this->actingAs($this->user())
             ->from("/events/{$event->id}/book?qty[0]=3")
-            ->post("/events/{$event->id}/book", ['qty' => [0 => 3]])
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 3]] + $this->contact())
             ->assertRedirect()
             ->assertSessionHas('error');
 
@@ -164,7 +170,7 @@ class WebEventBookingTest extends TestCase
         $event = $this->event();
         $owner = $this->user();
 
-        $this->actingAs($owner)->post("/events/{$event->id}/book", ['qty' => [0 => 1]]);
+        $this->actingAs($owner)->post("/events/{$event->id}/book", ['qty' => [0 => 1]] + $this->contact());
         $booking = Booking::query()->firstOrFail();
 
         $stranger = User::create([
@@ -175,5 +181,40 @@ class WebEventBookingTest extends TestCase
         $this->actingAs($stranger)
             ->get("/bookings/{$booking->id}/pass")
             ->assertNotFound();
+    }
+
+    public function test_multi_slot_booking_requires_a_session_and_tracks_its_inventory(): void
+    {
+        $event = $this->event(['price' => 0]);
+        $user  = $this->user();
+        // Two sessions turn on slot selection; the second one is capped at 2 seats.
+        $morning = \App\Models\EventSlot::create(['event_id' => $event->id, 'label' => 'Morning', 'starts_at' => now()->addDays(7)->setTime(10, 0), 'sort' => 0]);
+        $evening = \App\Models\EventSlot::create(['event_id' => $event->id, 'label' => 'Evening', 'starts_at' => now()->addDays(7)->setTime(19, 0), 'capacity' => 2, 'sort' => 1]);
+
+        // No session chosen on a multi-session event → bounced, nothing booked.
+        $this->actingAs($user)
+            ->from("/events/{$event->id}")
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 1]] + $this->contact())
+            ->assertRedirect()
+            ->assertSessionHas('error');
+        $this->assertSame(0, Booking::query()->count());
+
+        // Booking the capped evening session decrements its own sold count. A ₹0
+        // event confirms immediately, so this redirects to the pass.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2], 'eventSlotId' => $evening->id] + $this->contact())
+            ->assertRedirect();
+
+        $this->assertSame(2, (int) $evening->fresh()->sold);
+        $this->assertSame(0, (int) $morning->fresh()->sold);
+        $this->assertSame($evening->id, (int) Booking::query()->value('event_slot_id'));
+
+        // The evening session is now full → a further booking there is refused.
+        $this->actingAs($user)
+            ->from("/events/{$event->id}")
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 1], 'eventSlotId' => $evening->id] + $this->contact())
+            ->assertRedirect()
+            ->assertSessionHas('error');
+        $this->assertSame(1, Booking::query()->count());
     }
 }

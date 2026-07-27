@@ -62,10 +62,13 @@ data class EventDetailInfo(
     val description: String = "", // the admin's real event description (Overview)
     val city: String = "",       // e.g. "Hyderabad" — shown beside the date line
     val mapLink: String = "",    // pasted Google Maps link; drives "Directions"
+    val latitude: Double? = null,  // venue coords when the host set them (drives the map preview)
+    val longitude: Double? = null,
     val feeType: String = "none", // convenience fee: none | flat | percent
     val feeValue: Double = 0.0,   // ₹ amount (flat) or % of subtotal (percent)
     val rating: Double = 0.0,     // aggregate rating; 0 = unrated (hide the star)
     val ratingsCount: Int = 0,    // how many people rated it
+    val soldOut: Boolean = false, // host closed sales (manual override) or no slots left
 )
 
 /** Browse-card shape for an event, sourced from the real API rather than sample data. */
@@ -81,6 +84,9 @@ data class EventApiItem(
     val rating: Double,      // 0 = unrated (card hides the star badge)
     val placements: List<String>, // curated rails: for_you | trending | nearby
     val city: String,        // e.g. "Kadapa" — used to float local events first
+    val latitude: Double? = null,  // venue coords (host-set) — drives real distance sort
+    val longitude: Double? = null,
+    val soldOut: Boolean = false,  // host closed sales (manual override) or no slots left
 )
 
 /**
@@ -123,6 +129,9 @@ class EventRepository(
                     (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
                 }.orEmpty(),
                 city = o.optString("city").takeIf { it.isNotBlank() && it != "null" } ?: "",
+                latitude = if (o.isNull("latitude")) null else o.optDouble("latitude").takeIf { !it.isNaN() },
+                longitude = if (o.isNull("longitude")) null else o.optDouble("longitude").takeIf { !it.isNaN() },
+                soldOut = o.optBoolean("soldOut", false),
             )
         }
     }
@@ -226,10 +235,13 @@ class EventRepository(
             description = d.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: "",
             city = d.optString("city").takeIf { it.isNotBlank() && it != "null" } ?: "",
             mapLink = d.optString("mapLink").takeIf { it.isNotBlank() && it != "null" } ?: "",
+            latitude = if (d.isNull("latitude")) null else d.optDouble("latitude").takeIf { !it.isNaN() },
+            longitude = if (d.isNull("longitude")) null else d.optDouble("longitude").takeIf { !it.isNaN() },
             feeType = fee?.optString("type", "none") ?: "none",
             feeValue = fee?.optDouble("value", 0.0) ?: 0.0,
             rating = if (d.isNull("rating")) 0.0 else d.optDouble("rating", 0.0),
             ratingsCount = d.optInt("ratingsCount", 0),
+            soldOut = d.optBoolean("soldOut", false),
         )
     }
 

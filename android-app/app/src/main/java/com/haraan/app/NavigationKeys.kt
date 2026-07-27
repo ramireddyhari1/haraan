@@ -47,6 +47,14 @@ data class OrderSummary(
 	val infoNotes: List<String> = emptyList(), // "Before you book" policy bullets
 ) : NavKey
 
+/**
+ * Sign-in wall in front of checkout: carries the [OrderSummary] the buyer was
+ * headed to, so after a successful login we drop the login screen and continue
+ * straight to that order instead of the event detail.
+ */
+@Serializable
+data class LoginGate(val pendingOrder: OrderSummary) : NavKey
+
 @Serializable
 data class MatchDetails(val id: String = "", val code: String = "") : NavKey
 

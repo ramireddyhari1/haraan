@@ -84,6 +84,27 @@ class EventAnalytics extends Page
         ];
     }
 
+    /**
+     * Flip the event's manual "Sold out" override from the hero toggle. When on,
+     * the event reads as sold out everywhere buyers see it (website, app, booking
+     * API) regardless of the real slot count, and the booking endpoint refuses new
+     * orders. Turning it back off restores normal availability-based selling.
+     */
+    public function toggleSoldOut(): void
+    {
+        $e = $this->getRecord();
+        $e->is_sold_out = ! $e->is_sold_out;
+        $e->save();
+
+        \Filament\Notifications\Notification::make()
+            ->title($e->is_sold_out ? 'Marked as sold out' : 'Back on sale')
+            ->body($e->is_sold_out
+                ? 'Buyers now see “Sold out” and can’t book this event.'
+                : 'Tickets are selling again, subject to availability.')
+            ->success()
+            ->send();
+    }
+
     public static function canAccess(array $parameters = []): bool
     {
         $user = auth()->user();
