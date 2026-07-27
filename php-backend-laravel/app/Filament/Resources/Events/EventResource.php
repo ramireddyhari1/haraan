@@ -115,6 +115,8 @@ class EventResource extends Resource
             // Clicking an event name opens this read-only analytics dashboard (see EventsTable
             // ->recordUrl); editing is a deliberate, separate action via the Edit button.
             'analytics' => EventAnalytics::route('/{record}/analytics'),
+            // Partner desk "register an attendee + take payment" flow (see EventRegister).
+            'register' => \App\Filament\Resources\Events\Pages\EventRegister::route('/{record}/register'),
             'edit' => EditEvent::route('/{record}/edit'),
         ];
     }
