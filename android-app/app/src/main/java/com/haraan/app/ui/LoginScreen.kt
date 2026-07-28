@@ -559,6 +559,18 @@ fun LoginScreen(
                                         colors = fieldColors
                                     )
 
+                                    // Auto-submit the moment the 6-digit code is complete — the user
+                                    // (or the keyboard's SMS autofill) never has to tap Verify.
+                                    // verifyPhoneCode() no-ops while loading; tracking the last
+                                    // submitted value stops a wrong code from resubmitting in a loop.
+                                    var lastAutoOtp by remember { mutableStateOf("") }
+                                    LaunchedEffect(uiState.otp, uiState.isLoading) {
+                                        if (uiState.isOtpValid && !uiState.isLoading && uiState.otp != lastAutoOtp) {
+                                            lastAutoOtp = uiState.otp
+                                            onVerifyPhoneCode()
+                                        }
+                                    }
+
                                     if (!uiState.errorMessage.isNullOrEmpty()) {
                                         Spacer(Modifier.height(GapM))
                                         Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)

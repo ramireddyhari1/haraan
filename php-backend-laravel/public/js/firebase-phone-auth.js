@@ -69,6 +69,7 @@
         // member /login (which sends to anyone, then find-or-creates) leaves it off.
         var preCheckUrl = root.getAttribute('data-precheck-url');
         var confirmation = null;
+        var webOtpAbort = null;
         var verifier = null;
         var resendTimer = null;
 
@@ -175,6 +176,7 @@
                 if (codeStep) codeStep.hidden = false;
                 if (codeInput) { codeInput.value = ''; codeInput.focus(); }
                 startResendCountdown();
+                startWebOtp();
             }).catch(function (err) {
                 releaseSendBtns(isResend);
                 showError(mapErr(err));
@@ -221,11 +223,14 @@
         if (sendBtn) sendBtn.addEventListener('click', function () { requestCode(false); });
         if (resendBtn) resendBtn.addEventListener('click', function () { requestCode(true); });
 
-        if (verifyBtn) verifyBtn.addEventListener('click', function () {
+        var submitting = false;
+        function submitCode() {
+            if (submitting) return;
             showError('');
             if (!confirmation) { showError('Please request a code first.'); return; }
-            var code = ((codeInput && codeInput.value) || '').trim();
+            var code = ((codeInput && codeInput.value) || '').replace(/\D/g, '');
             if (code.length < 6) { showError('Enter the 6-digit code.'); return; }
+            submitting = true;
             busy(verifyBtn, true, 'Verifying…');
 
             confirmation.confirm(code).then(function (cred) {
@@ -257,20 +262,49 @@
                             msg = 'Sign-in failed (error ' + res.status + '). Please try again in a moment.';
                         }
                         showError(msg);
+                        submitting = false;
                         busy(verifyBtn, false);
                         return;
                     }
                     window.location.assign(data.redirect || '/');
                 });
             }).catch(function (err) {
+                submitting = false;
                 busy(verifyBtn, false);
                 showError(mapErr(err));
             });
+        }
+        if (verifyBtn) verifyBtn.addEventListener('click', submitCode);
+
+        // Auto-submit the instant 6 digits are present — no button tap needed.
+        if (codeInput) codeInput.addEventListener('input', function () {
+            var digits = (codeInput.value || '').replace(/\D/g, '').slice(0, 6);
+            if (codeInput.value !== digits) codeInput.value = digits;
+            if (digits.length === 6) submitCode();
         });
+
+        // WebOTP autofill: when the browser + SMS support it, read the code straight from
+        // the SMS and submit — the user never types. No-op where unsupported / SMS isn't
+        // domain-bound (progressive enhancement; manual entry still works).
+        function startWebOtp() {
+            if (!('OTPCredential' in window) || !codeInput) return;
+            try {
+                webOtpAbort = new AbortController();
+                navigator.credentials.get({ otp: { transport: ['sms'] }, signal: webOtpAbort.signal })
+                    .then(function (otp) {
+                        if (otp && otp.code) {
+                            codeInput.value = (otp.code || '').replace(/\D/g, '').slice(0, 6);
+                            submitCode();
+                        }
+                    })
+                    .catch(function () { /* dismissed / unsupported — ignore */ });
+            } catch (e) { /* ignore */ }
+        }
 
         if (changeLink) changeLink.addEventListener('click', function (e) {
             e.preventDefault();
             confirmation = null;
+            if (webOtpAbort) { try { webOtpAbort.abort(); } catch (e2) {} webOtpAbort = null; }
             clearInterval(resendTimer);
             showError('');
             if (codeInput) codeInput.value = '';
