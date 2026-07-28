@@ -272,10 +272,24 @@ final class BookingsController extends Controller
             ]);
         }
 
+        // Optional cart subtotal lets us preview the real amount for a percentage coupon
+        // and enforce a minimum-order coupon before the buyer reaches payment.
+        $subtotal = (float) $request->input('subtotal', 0);
+
+        if ($subtotal > 0 && ! $coupon->meetsMinOrder($subtotal)) {
+            return response()->json([
+                'valid'   => false,
+                'message' => 'Add ₹' . number_format((float) $coupon->min_order) . ' worth of tickets to use this code.',
+            ]);
+        }
+
+        $discount = $subtotal > 0 ? $coupon->discountFor($subtotal) : (float) $coupon->discount;
+
         return response()->json([
             'valid'    => true,
             'code'     => $coupon->code,
-            'discount' => (float) $coupon->discount,
+            'type'     => $coupon->type,
+            'discount' => $discount,
             'message'  => 'Coupon applied.',
         ]);
     }

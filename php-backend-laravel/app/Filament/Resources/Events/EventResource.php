@@ -101,10 +101,12 @@ class EventResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            // Ticket tiers (Kid/Adult/Couple/… ) for the event — add, edit prices, delete.
-            TicketTypesRelationManager::class,
-        ];
+        // Ticket tiers are now authored in the Ticket Studio inside the edit form (see
+        // EventForm::ticketsStep + EditEvent reconciliation). Keeping the relation manager
+        // here too would be a second, conflicting tier editor on the same page — the
+        // studio hydrates at page load and reconciles on save, so it would overwrite any
+        // change the relation manager wrote. So it's retired from the edit page.
+        return [];
     }
 
     public static function getPages(): array

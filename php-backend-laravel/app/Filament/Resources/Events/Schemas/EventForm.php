@@ -520,6 +520,35 @@ class EventForm
                     ->collapsible()
                     ->collapsed()
                     ->schema(self::galleryFields()),
+                Section::make('FAQs')
+                    ->description('Frequently asked questions displayed last on your event page.')
+                    ->icon('heroicon-o-question-mark-circle')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema([
+                        Repeater::make('faqs')
+                            ->hiddenLabel()
+                            ->addActionLabel('Add FAQ')
+                            ->defaultItems(0)
+                            ->reorderable()
+                            ->collapsible()
+                            ->itemLabel(fn (array $state): ?string => ($q = trim((string) ($state['question'] ?? ''))) !== '' ? $q : 'New FAQ')
+                            ->helperText('Answer the questions attendees ask most — shown as an expandable list at the bottom of the event page.')
+                            ->schema([
+                                TextInput::make('question')
+                                    ->label('Question')
+                                    ->required()
+                                    ->placeholder('e.g. What should I wear to the event?')
+                                    ->columnSpanFull(),
+                                Textarea::make('answer')
+                                    ->label('Answer')
+                                    ->required()
+                                    ->rows(2)
+                                    ->placeholder('Enter the answer…')
+                                    ->columnSpanFull(),
+                            ])
+                            ->columnSpanFull(),
+                    ]),
             ]);
     }
 
@@ -535,12 +564,16 @@ class EventForm
                 // On create this lives inside the Ticket Studio's "Same for all slots /
                 // Customize per slot" selector; on edit it stays a plain toggle beside the
                 // Ticket Types relation manager.
+                // The Ticket Studio's "Same for all sessions / Customize per session"
+                // selector owns this on both create and edit now, so the standalone
+                // toggle is retired. Kept dehydrated(false) so it never overwrites the
+                // column — EditEvent/CreateEvent set it from the studio's mode.
                 Toggle::make('tickets_per_slot')
                     ->label('Different tickets for each session')
-                    ->helperText('Off = the same tickets apply to every session. On = pin tickets to a specific session.')
                     ->live()
                     ->default(false)
-                    ->visibleOn('edit')
+                    ->hidden()
+                    ->dehydrated(false)
                     ->columnSpanFull(),
 
                 // Sessions ("time slots"). Every event has at least one; add more to run
@@ -555,10 +588,13 @@ class EventForm
                     ->reorderable()
                     ->orderColumn('sort')
                     ->collapsible()
-                    // Create stays clean — a single default session is made from the
-                    // event's date/time (see CreateEvent::afterCreate). Add/manage extra
-                    // sessions on edit.
-                    ->visibleOn('edit')
+                    // Hidden on both create and edit — the Ticket Studio owns the ticket
+                    // step now. A single default session is seeded on create from the
+                    // event's date/time (CreateEvent::afterCreate); existing sessions stay
+                    // put on edit because Filament skips saving a hidden relationship by
+                    // default (shouldSaveRelationshipsWhenHidden = false), so bookings that
+                    // reference a slot are never orphaned.
+                    ->hidden()
                     ->itemLabel(fn (array $state): ?string => self::slotItemLabel($state))
                     ->schema([
                         TextInput::make('label')
@@ -592,7 +628,9 @@ class EventForm
                 // isn't misread as "my tiers vanished", with a pointer to where they live.
                 Placeholder::make('ticket_tiers_summary')
                     ->label('Ticket tiers')
-                    ->visible(fn (?\App\Models\Event $record): bool => $record !== null)
+                    // Retired: the Ticket Studio below now shows the live, editable tiers on
+                    // edit too, so this read-only summary would only duplicate it.
+                    ->visible(false)
                     ->content(function (?\App\Models\Event $record): ?\Illuminate\Support\HtmlString {
                         if ($record === null) {
                             return null;
@@ -632,9 +670,13 @@ class EventForm
                 // the richer Ticket Types relation manager (presets, dynamic pricing, sold
                 // counts) owns tier editing, so the studio is create-only — it never risks
                 // existing tiers that already have bookings.
+                // The bespoke "Ticket Studio" — the District-style ticket-setup UI (mode
+                // selector, seating/phases config, ticket cards). On CREATE its state is
+                // reconciled into new TicketType rows (CreateEvent::afterCreate); on EDIT it
+                // hydrates from the event's existing tiers and is reconciled back on save,
+                // preserving tiers that already have sold tickets (EditEvent).
                 ViewField::make('ticketStudio')
                     ->view('filament.forms.ticket-studio')
-                    ->visibleOn('create')
                     ->dehydrated()
                     ->default(fn (): array => self::studioDefault())
                     ->columnSpanFull(),
@@ -700,27 +742,29 @@ class EventForm
                     ->prefix(fn (Get $get): ?string => $get('tax_type') === 'flat' ? '₹' : null)
                     ->suffix(fn (Get $get): ?string => $get('tax_type') === 'percent' ? '%' : null)
                     ->visible(fn (Get $get): bool => self::adminOnly() && in_array($get('tax_type'), ['flat', 'percent'], true)),
-                // Seating: on create the Ticket Studio's "Seating Layout" toggle sets this;
-                // on edit it stays a plain toggle (+ optional grid dimensions).
+                // Seating is now owned by the Ticket Studio's "Seating Layout" card on both
+                // create and edit, so these standalone controls are hidden. dehydrated(false)
+                // keeps any existing seat_rows/seats_per_row values intact; seat_selection is
+                // set from the studio's seating toggle in CreateEvent/EditEvent.
                 Toggle::make('seat_selection')
                     ->label('Assigned seating (reserved seats)')
                     ->live()
                     ->default(false)
-                    ->visibleOn('edit')
-                    ->helperText('Off = general admission. On = attendees pick a seat.')
+                    ->hidden()
+                    ->dehydrated(false)
                     ->columnSpanFull(),
                 TextInput::make('seat_rows')
                     ->label('Seat rows')
                     ->numeric()
                     ->minValue(1)
-                    ->visible(fn (Get $get): bool => (bool) $get('seat_selection'))
-                    ->visibleOn('edit'),
+                    ->hidden()
+                    ->dehydrated(false),
                 TextInput::make('seats_per_row')
                     ->label('Seats per row')
                     ->numeric()
                     ->minValue(1)
-                    ->visible(fn (Get $get): bool => (bool) $get('seat_selection'))
-                    ->visibleOn('edit'),
+                    ->hidden()
+                    ->dehydrated(false),
 
                 // ── Payment gateway fee (admin only — a platform setting) ──────
                 Section::make('Payment gateway fee')
@@ -795,41 +839,120 @@ class EventForm
             ->description('Discounts & offers')
             ->icon('heroicon-o-ticket')
             ->schema([
-                Repeater::make('coupons')
-                    ->relationship()
-                    ->hiddenLabel()
-                    ->addActionLabel('Create Coupon')
-                    ->defaultItems(0)
-                    ->itemLabel(fn (array $state): ?string => isset($state['code']) && $state['code'] !== ''
-                        ? strtoupper((string) $state['code']).' — ₹'.number_format((float) ($state['discount'] ?? 0))
-                        : 'New coupon')
-                    ->helperText('Offer discounts to boost ticket sales and reward loyal customers. Buyers enter the code at checkout.')
-                    ->schema([
-                        TextInput::make('code')
-                            ->label('Coupon code')
-                            ->required()
-                            ->maxLength(40)
-                            ->placeholder('SAVE10')
-                            ->helperText('Case-insensitive; buyers type this at checkout.'),
-                        TextInput::make('discount')
-                            ->label('Discount')
-                            ->numeric()
-                            ->minValue(0)
-                            ->prefix('₹')
-                            ->required()
-                            ->helperText('Flat amount off the payable total.'),
-                        TextInput::make('max_uses')
-                            ->label('Max uses')
-                            ->numeric()
-                            ->minValue(1)
-                            ->helperText('Leave blank for unlimited.'),
-                        Toggle::make('active')
-                            ->label('Active')
-                            ->default(true),
-                    ])
-                    ->columns(2)
+                // The bespoke "Coupon Studio" — a premium 6-step coupon builder (Code ·
+                // Discount · Eligibility · Limits · Restrictions · Review). Its state is
+                // reconciled into the event's `coupons` on save (CreateEvent::afterCreate /
+                // EditEvent::afterSave), preserving each code's redeemed `uses` count.
+                ViewField::make('couponStudio')
+                    ->view('filament.forms.coupon-studio')
+                    ->dehydrated()
+                    ->default(fn (): array => self::couponStudioDefault())
                     ->columnSpanFull(),
             ]);
+    }
+
+    /** The empty state the Coupon Studio starts from. */
+    public static function couponStudioDefault(): array
+    {
+        return ['coupons' => []];
+    }
+
+    /**
+     * Map one Coupon Studio card to a Coupon attribute row (studio-owned columns only,
+     * so `uses` survives an edit), or null when the code is blank.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function couponRowAttributes(mixed $c): ?array
+    {
+        if (! is_array($c)) {
+            return null;
+        }
+        $code = strtoupper(trim((string) ($c['code'] ?? '')));
+        if ($code === '') {
+            return null;
+        }
+
+        $type = ($c['type'] ?? 'fixed') === 'percent' ? 'percent' : 'fixed';
+        $cap  = ($c['maxCap'] ?? null);
+        $per  = trim((string) ($c['perCustomer'] ?? ''));
+        $exp  = trim((string) ($c['expiresAt'] ?? ''));
+
+        return [
+            'code'               => $code,
+            'type'               => $type,
+            'discount'           => max(0, (float) ($c['discount'] ?? 0)),
+            'max_discount'       => ($type === 'percent' && $cap !== null && $cap !== '' && (float) $cap > 0) ? (float) $cap : null,
+            'min_order'          => max(0, (float) ($c['minOrder'] ?? 0)),
+            'per_customer_limit' => $per !== '' ? max(1, (int) $per) : null,
+            'expires_at'         => $exp !== '' ? $exp : null,
+            'active'             => (bool) ($c['active'] ?? true),
+            'multi_event'        => (bool) ($c['multiEvent'] ?? false),
+            'eligibility'        => ($c['eligibility'] ?? 'all') === 'phones' ? 'phones' : 'all',
+            'phone_numbers'      => is_array($c['phones'] ?? null) ? array_values(array_filter(array_map('trim', $c['phones']))) : null,
+            'restrict_dates'     => (bool) ($c['restrictDates'] ?? false),
+            'valid_dates'        => is_array($c['dates'] ?? null) ? array_values($c['dates']) : null,
+            'restrict_times'     => (bool) ($c['restrictTimes'] ?? false),
+            'valid_times'        => is_array($c['times'] ?? null) ? array_values($c['times']) : null,
+        ];
+    }
+
+    /**
+     * Clean Coupon attribute rows for the studio's cards (blank codes dropped).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function couponRows(mixed $studio): array
+    {
+        $coupons = is_array($studio) ? ($studio['coupons'] ?? []) : [];
+        if (! is_array($coupons)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($coupons as $c) {
+            $attrs = self::couponRowAttributes($c);
+            if ($attrs !== null) {
+                $rows[] = $attrs;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Reverse: build the Coupon Studio's state from an event's existing coupons so the
+     * edit page opens with them loaded. Each card carries its `id` for save-time matching.
+     *
+     * @return array<string, mixed>
+     */
+    public static function couponStudioFromEvent(\App\Models\Event $event): array
+    {
+        $coupons = $event->coupons()
+            ->orderBy('id')
+            ->get()
+            ->map(fn (\App\Models\Coupon $c): array => [
+                'id'            => (int) $c->id,
+                'active'        => (bool) $c->active,
+                'code'          => (string) $c->code,
+                'type'          => $c->type === 'percent' ? 'percent' : 'fixed',
+                'discount'      => (float) $c->discount,
+                'maxCap'        => $c->max_discount !== null ? (float) $c->max_discount : null,
+                'minOrder'      => (float) ($c->min_order ?? 0),
+                'eligibility'   => $c->eligibility === 'phones' ? 'phones' : 'all',
+                'phones'        => is_array($c->phone_numbers) ? array_values($c->phone_numbers) : [],
+                'perCustomer'   => $c->per_customer_limit !== null ? (string) $c->per_customer_limit : '',
+                'expiresAt'     => $c->expires_at !== null ? $c->expires_at->format('Y-m-d') : '',
+                'multiEvent'    => (bool) $c->multi_event,
+                'restrictDates' => (bool) $c->restrict_dates,
+                'dates'         => is_array($c->valid_dates) ? array_values($c->valid_dates) : [],
+                'restrictTimes' => (bool) $c->restrict_times,
+                'times'         => is_array($c->valid_times) ? array_values($c->valid_times) : [],
+            ])
+            ->values()
+            ->all();
+
+        return ['coupons' => $coupons];
     }
 
     /** The empty state the Ticket Studio starts from on a fresh event. */
@@ -878,35 +1001,128 @@ class EventForm
         $sort = 0;
 
         foreach ($tickets as $t) {
-            if (! is_array($t)) {
+            $attrs = self::studioRowAttributes($t, $sort);
+            if ($attrs === null) {
                 continue;
             }
-            $name = trim((string) ($t['name'] ?? ''));
-            if ($name === '') {
-                continue;
-            }
-
-            $free  = (bool) ($t['free'] ?? false);
-            $seats = $t['seats'] ?? -1;
-            $cap   = ($seats === null || $seats === '' || (int) $seats < 0) ? null : (int) $seats;
-            $bulk  = ! $free && (bool) ($t['bulk'] ?? false);
-
-            $rows[] = [
-                'name'          => $name,
-                'description'   => trim((string) ($t['description'] ?? '')) ?: null,
-                'kind'          => 'standard',
-                'price'         => $free ? 0 : max(0, (float) ($t['price'] ?? 0)),
-                'capacity'      => $cap,
-                'visible'       => (bool) ($t['visible'] ?? true),
-                'release_phase' => max(0, (int) ($t['phase'] ?? 0)),
-                'bulk_booking'  => $bulk,
-                'min_per_order' => $bulk ? max(1, (int) ($t['minPer'] ?? 1)) : null,
-                'max_per_order' => $bulk && ! empty($t['maxPer']) ? max(1, (int) $t['maxPer']) : null,
-                'sort'          => $sort++,
-            ];
+            $rows[] = $attrs;
+            $sort++;
         }
 
         return $rows;
+    }
+
+    /**
+     * Map one Ticket Studio card to a TicketType attribute row (the fields the studio
+     * owns), or null when the card is blank. Shared by the create path (bulk insert)
+     * and the edit reconciliation (per-row update/create) so both price tiers the same.
+     *
+     * NB: only studio-managed columns are returned — `sold`, `pricing_phases`,
+     * `sales_start/end`, `event_slot_id` etc. are deliberately absent so an update
+     * with these attrs never clobbers inventory or advanced pricing on an edit.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function studioRowAttributes(mixed $t, int $sort): ?array
+    {
+        if (! is_array($t)) {
+            return null;
+        }
+        $name = trim((string) ($t['name'] ?? ''));
+        if ($name === '') {
+            return null;
+        }
+
+        $free  = (bool) ($t['free'] ?? false);
+        $seats = $t['seats'] ?? -1;
+        $cap   = ($seats === null || $seats === '' || (int) $seats < 0) ? null : (int) $seats;
+        $bulk  = ! $free && (bool) ($t['bulk'] ?? false);
+
+        return [
+            'name'          => $name,
+            'description'   => trim((string) ($t['description'] ?? '')) ?: null,
+            'kind'          => 'standard',
+            'price'         => $free ? 0 : max(0, (float) ($t['price'] ?? 0)),
+            'capacity'      => $cap,
+            'visible'       => (bool) ($t['visible'] ?? true),
+            'release_phase' => max(0, (int) ($t['phase'] ?? 0)),
+            'bulk_booking'  => $bulk,
+            'min_per_order' => $bulk ? max(1, (int) ($t['minPer'] ?? 1)) : null,
+            'max_per_order' => $bulk && ! empty($t['maxPer']) ? max(1, (int) $t['maxPer']) : null,
+            'sort'          => $sort,
+        ];
+    }
+
+    /**
+     * The event's overall capacity derived from the studio's tier seats: the sum of the
+     * capped tiers, or a high cap when any tier is unlimited (or none are capped) so the
+     * per-tier limits do the gating. Shared by create and edit.
+     */
+    public static function studioCapacity(mixed $studio): int
+    {
+        $sum = 0;
+        $hasUnlimited = false;
+
+        foreach ((is_array($studio) ? ($studio['tickets'] ?? []) : []) as $t) {
+            if (! is_array($t) || trim((string) ($t['name'] ?? '')) === '') {
+                continue;
+            }
+            $seats = $t['seats'] ?? -1;
+            if ($seats === null || $seats === '' || (int) $seats < 0) {
+                $hasUnlimited = true;
+            } else {
+                $sum += max(0, (int) $seats);
+            }
+        }
+
+        return ($hasUnlimited || $sum <= 0) ? 100000 : $sum;
+    }
+
+    /**
+     * Reverse of {@see studioTicketRows}: build the Ticket Studio's state from an
+     * existing event so the edit page opens with the real tiers, sessions count,
+     * seating mode and release phases already loaded. Each ticket carries its `id`
+     * so the save-time reconciliation can update the right row in place.
+     *
+     * @return array<string, mixed>
+     */
+    public static function studioStateFromEvent(\App\Models\Event $event): array
+    {
+        $tickets = $event->ticketTypes()
+            ->orderBy('sort')
+            ->orderBy('id')
+            ->get()
+            ->map(function (\App\Models\TicketType $t): array {
+                $price = (float) $t->price;
+
+                return [
+                    'id'          => (int) $t->id,
+                    'name'        => (string) $t->name,
+                    'description' => (string) ($t->description ?? ''),
+                    'price'       => $price,
+                    'free'        => $price <= 0.0,
+                    'seats'       => $t->capacity === null ? -1 : (int) $t->capacity,
+                    'visible'     => (bool) $t->visible,
+                    'bulk'        => (bool) $t->bulk_booking,
+                    'minPer'      => (int) ($t->min_per_order ?? 1),
+                    'maxPer'      => $t->max_per_order !== null ? (int) $t->max_per_order : null,
+                    'phase'       => (int) $t->release_phase,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $phases = is_array($event->release_phases)
+            ? array_values(array_map(fn ($p): array => ['name' => (string) (is_array($p) ? ($p['name'] ?? '') : '')], $event->release_phases))
+            : [];
+
+        return [
+            'mode'      => $event->tickets_per_slot ? 'per_slot' : 'unified',
+            'seating'   => (bool) $event->seat_selection,
+            'slotCount' => max(1, $event->slots()->count()),
+            'tickets'   => $tickets,
+            'phases'    => $phases,
+        ];
     }
 
     /** Card label for a session row — the host's label, else "d M · g:i A", else "Session". */

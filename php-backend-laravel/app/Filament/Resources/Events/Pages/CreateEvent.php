@@ -48,6 +48,9 @@ class CreateEvent extends CreateRecord
     /** The Ticket Studio state lifted out of the form data before the event is saved. */
     private array $studioState = [];
 
+    /** The Coupon Studio state lifted out of the form data before the event is saved. */
+    private array $couponStudioState = [];
+
     /**
      * Seed the default session's start time from the event's date/time, then create
      * the ticket tiers authored in the Ticket Studio (create-only; edit uses the
@@ -74,6 +77,11 @@ class CreateEvent extends CreateRecord
 
         foreach (EventForm::studioTicketRows($this->studioState) as $row) {
             $event->ticketTypes()->create($row);
+        }
+
+        // Coupons authored in the Coupon Studio become the event's coupon rows.
+        foreach (EventForm::couponRows($this->couponStudioState) as $row) {
+            $event->coupons()->create($row);
         }
     }
 
@@ -136,6 +144,9 @@ class CreateEvent extends CreateRecord
         // in afterCreate(). Stored on the page so afterCreate() can read it.
         $this->studioState = is_array($data['ticketStudio'] ?? null) ? $data['ticketStudio'] : [];
         unset($data['ticketStudio']);
+
+        $this->couponStudioState = is_array($data['couponStudio'] ?? null) ? $data['couponStudio'] : [];
+        unset($data['couponStudio']);
         $data['tickets_per_slot'] = ($this->studioState['mode'] ?? 'unified') === 'per_slot';
         $data['seat_selection']   = (bool) ($this->studioState['seating'] ?? false);
         $data['release_phases']   = EventForm::studioReleasePhases($this->studioState) ?: null;

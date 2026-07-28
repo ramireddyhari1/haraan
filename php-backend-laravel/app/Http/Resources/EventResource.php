@@ -96,6 +96,17 @@ final class EventResource extends JsonResource
             'goodToKnow'     => $this->resource->goodToKnowRows(),
             'schedule'       => $this->resource->scheduleRows(),
             'lineup'         => $this->resource->lineupRows(),
+            // Per-event FAQs — clean {question, answer} rows for the app's detail page.
+            'faqs'           => collect($this->resource->faqs ?? [])
+                ->filter(fn ($f): bool => is_array($f)
+                    && trim((string) ($f['question'] ?? '')) !== ''
+                    && trim((string) ($f['answer'] ?? '')) !== '')
+                ->map(fn ($f): array => [
+                    'question' => trim((string) $f['question']),
+                    'answer'   => trim((string) $f['answer']),
+                ])
+                ->values()
+                ->all(),
             // Buyer-facing tiers only — a host can hide a tier (visible = false)
             // without deleting it, and hidden tiers must never reach checkout.
             'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes

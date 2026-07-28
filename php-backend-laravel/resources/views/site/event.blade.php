@@ -1514,6 +1514,32 @@
             </section>
             @endif
 
+            {{-- FAQs — always the last section on the mobile sheet. --}}
+            @php $faqs = collect($event->faqs ?? [])->filter(fn ($f) => is_array($f) && trim((string) ($f['question'] ?? '')) !== '' && trim((string) ($f['answer'] ?? '')) !== '')->values(); @endphp
+            @if($faqs->isNotEmpty())
+            <style>
+                .dr-faq__list{display:flex;flex-direction:column;gap:10px;}
+                .dr-faq__item{border:1px solid var(--dr-border,#e6e6e6);border-radius:14px;background:#fff;overflow:hidden;}
+                .dr-faq__q{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px;
+                    padding:15px 16px;font-size:14.5px;font-weight:700;letter-spacing:-.01em;color:#121620;}
+                .dr-faq__q::-webkit-details-marker{display:none;}
+                .dr-faq__chev{margin-left:auto;flex:none;transition:transform .2s;color:#8a94a6;font-size:12px;}
+                .dr-faq__item[open] .dr-faq__chev{transform:rotate(180deg);}
+                .dr-faq__a{padding:0 16px 15px;font-size:13.5px;line-height:1.6;color:#4b5563;}
+            </style>
+            <section class="dr-faq" style="margin-top:22px;">
+                <h3 class="dr-section-title" style="margin-bottom:12px;">Frequently asked questions</h3>
+                <div class="dr-faq__list">
+                    @foreach($faqs as $f)
+                    <details class="dr-faq__item">
+                        <summary class="dr-faq__q">{{ $f['question'] }}<span class="dr-faq__chev">▼</span></summary>
+                        <div class="dr-faq__a">{!! nl2br(e(trim((string) $f['answer']))) !!}</div>
+                    </details>
+                    @endforeach
+                </div>
+            </section>
+            @endif
+
             </div>{{-- /.dr-sheet --}}
 
             {{-- =====================================================================
@@ -1729,6 +1755,21 @@
                                     <strong>Loved by attendees</strong>
                                     <p>Rated {{ number_format((float) $event->rating, 1) }} out of 5 by {{ number_format($event->ratings_count) }} verified {{ \Illuminate\Support\Str::plural('attendee', $event->ratings_count) }} who booked this experience on Haraan.</p>
                                 </div>
+                            </div>
+                        </section>
+                        @endif
+                        {{-- FAQs — last section in the desktop main column (reuses the
+                             .dr-faq styles emitted with the mobile sheet). --}}
+                        @if($faqs->isNotEmpty())
+                        <section class="dk-sec">
+                            <div class="dk-h"><h2>Frequently asked questions</h2></div>
+                            <div class="dr-faq__list">
+                                @foreach($faqs as $f)
+                                <details class="dr-faq__item">
+                                    <summary class="dr-faq__q">{{ $f['question'] }}<span class="dr-faq__chev">▼</span></summary>
+                                    <div class="dr-faq__a">{!! nl2br(e(trim((string) $f['answer']))) !!}</div>
+                                </details>
+                                @endforeach
                             </div>
                         </section>
                         @endif

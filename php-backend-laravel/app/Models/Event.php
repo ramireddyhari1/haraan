@@ -106,6 +106,7 @@ final class Event extends Model
         'good_to_know',
         'schedule',
         'lineup',
+        'faqs',
     ];
 
     /** @return array<string, string> */
@@ -142,6 +143,7 @@ final class Event extends Model
             'good_to_know'   => 'array',
             'schedule'       => 'array',
             'lineup'         => 'array',
+            'faqs'           => 'array',
             'followers_notified_at' => 'datetime',
         ];
     }

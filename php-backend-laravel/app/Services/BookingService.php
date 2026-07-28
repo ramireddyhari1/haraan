@@ -261,12 +261,17 @@ final class BookingService
             $subtotal = (float) $bookings->sum('total_amount');
             $fee      = $event->convenienceFeeFor($subtotal);
 
-            // Coupon: a redeemable code takes a flat ₹ amount off the payable total
-            // (never below zero). Applied once for the order and its use is counted.
+            // Coupon: a redeemable code takes an amount off the payable total (never below
+            // zero). Honours the coupon's type (flat / percentage-with-cap), its minimum
+            // order value, and its per-customer usage cap. Applied once for the order.
             $discount = 0.0;
             $coupon   = Coupon::findByCode($couponCode);
-            if ($coupon !== null && $coupon->isRedeemable() && $coupon->appliesToEvent($event->id)) {
-                $discount = min((float) $coupon->discount, $subtotal + $fee);
+            if ($coupon !== null
+                && $coupon->isRedeemable()
+                && $coupon->appliesToEvent($event->id)
+                && $coupon->meetsMinOrder($subtotal)
+                && $this->couponWithinPerCustomerLimit($coupon, (int) $user->id)) {
+                $discount = min($coupon->discountFor($subtotal), $subtotal + $fee);
                 // A reserved (unpaid) order must not yet burn a coupon use — that's counted
                 // on confirmation, so an abandoned checkout doesn't consume the code.
                 if (! $reserve) {
@@ -286,6 +291,28 @@ final class BookingService
 
             return $bookings;
         });
+    }
+
+    /**
+     * Whether this user is still under the coupon's per-customer usage cap (null = unlimited).
+     *
+     * One discounted booking row is written per order (the discount lives on the first row of
+     * an order), so counting this user's discounted rows for this code counts their prior orders
+     * that actually used it.
+     */
+    private function couponWithinPerCustomerLimit(Coupon $coupon, int $userId): bool
+    {
+        if ($coupon->per_customer_limit === null) {
+            return true;
+        }
+
+        $used = Booking::query()
+            ->where('user_id', $userId)
+            ->whereRaw('lower(coupon_code) = ?', [strtolower((string) $coupon->code)])
+            ->where('discount', '>', 0)
+            ->count();
+
+        return $used < (int) $coupon->per_customer_limit;
     }
 
     /**
