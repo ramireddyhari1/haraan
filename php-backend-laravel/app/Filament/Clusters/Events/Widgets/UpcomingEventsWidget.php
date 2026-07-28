@@ -77,7 +77,9 @@ class UpcomingEventsWidget extends Widget
     {
         $bits = [];
         if ($r->date !== null) {
-            $bits[] = $r->date->format('D, d M · g:i A');
+            // Time is its own `time` string column; `date` is date-only (else 12:00 AM).
+            $time  = trim((string) $r->time);
+            $bits[] = $r->date->format('D, d M') . ($time !== '' ? ' · ' . $time : '');
         }
         $place = trim((string) ($r->venue ?: $r->location));
         if ($place !== '') {

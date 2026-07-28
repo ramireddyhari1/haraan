@@ -133,7 +133,11 @@ final class BookingNotifier
     private function when(Booking $booking): string
     {
         if ($booking->event !== null && $booking->event->date !== null) {
-            return $booking->event->date->format('D, d M Y · g:i A');
+            // Time is stored in the event's `time` string column; `date` is date-only,
+            // so formatting the time out of it would always read 12:00 AM on the ticket.
+            $time = trim((string) $booking->event->time);
+
+            return $booking->event->date->format('D, d M Y') . ($time !== '' ? ' · ' . $time : '');
         }
 
         // Venue booking: date + slot window (start–end).

@@ -173,7 +173,10 @@ class EventSpotlightWidget extends Widget
     {
         $bits = [];
         if ($e->date !== null) {
-            $bits[] = $e->date->format('D, d M Y · g:i A');
+            // Time lives in its own `time` column (a "g:i A" string); `date` is date-only,
+            // so formatting the time out of it always yields 12:00 AM.
+            $time  = trim((string) $e->time);
+            $bits[] = $e->date->format('D, d M Y') . ($time !== '' ? ' · ' . $time : '');
         }
         $place = trim((string) ($e->venue ?: $e->location));
         if ($place !== '') {
