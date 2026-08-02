@@ -3,6 +3,7 @@
 use App\Services\BookingService;
 use App\Services\MatchVerificationService;
 use App\Services\MessageJourneys;
+use App\Services\WaitlistService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -27,6 +28,17 @@ Artisan::command('bookings:release-expired', function (BookingService $bookings)
 })->purpose('Release expired ticket reservation holds');
 
 Schedule::command('bookings:release-expired')->everyMinute();
+
+// Waitlist offers on a freed court-hour are time-boxed. Without this they never
+// lapse, so the first person offered silently holds a slot they may never pay for
+// — which is worse than having no waitlist, because it looks sold and earns
+// nothing. Lapsing returns them to the queue rather than dropping them.
+Artisan::command('waitlist:release-lapsed', function (WaitlistService $waitlist) {
+    $count = $waitlist->releaseLapsedOffers();
+    $this->info("Returned {$count} lapsed waitlist offer(s) to the queue.");
+})->purpose('Expire unanswered waitlist offers on freed slots');
+
+Schedule::command('waitlist:release-lapsed')->everyFiveMinutes()->withoutOverlapping();
 
 // Outbound message journeys (event reminders + the post-event review request).
 // Two steps on purpose: enqueueing is idempotent bookkeeping that can run often

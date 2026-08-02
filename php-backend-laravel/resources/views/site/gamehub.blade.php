@@ -1,15 +1,15 @@
 @extends('site.layout')
-@section('footer_icon_secondary', '#16a34a')
+@section('footer_icon_secondary', '#2563EB')
 @section('content')
 @include('site.partials.match-helpers')
 
 {{-- ================================================================= --}}
 {{-- MOBILE APP-STYLE GAMEHUB (mirrors the Android app; ≤720px)         --}}
 {{--                                                                    --}}
-{{-- A port of MainScreen.kt GameHubTabScreen, in its order: green hero --}}
+{{-- A port of MainScreen.kt PulseTabScreen, in its order: green hero --}}
 {{-- → ActionBoard (straddling the seam) → Top Player → sport chips →   --}}
 {{-- Popular Venues reel → More venues. Values track the app's tokens    --}}
-{{-- (GameHubDeep #1B5E20, GameHubGreen #00C853, 20px card radius);      --}}
+{{-- (PulseDeep #1E3A8A, PulseGreen #2563EB, 20px card radius);      --}}
 {{-- change both together.                                              --}}
 {{--                                                                    --}}
 {{-- Two deliberate divergences from the app, both about not inventing   --}}
@@ -53,8 +53,8 @@
 
 <div class="mhub">
     {{-- 1. The app's green hero. This IS the page header, not a banner under one: on the
-         GameHub tab the app renders no outer header at all (MainScreen.kt skips it when
-         `isGameHubTab`) and stacks greeting → search → switch on the green band. So the
+         Pulse tab the app renders no outer header at all (MainScreen.kt skips it when
+         `isPulseTab`) and stacks greeting → search → switch on the green band. So the
          site's white topbar is hidden here (see the CSS) and its three controls live on
          the green, in the app's order — otherwise the page carries two search bars and
          two tab controls, one white and one green. --}}
@@ -71,11 +71,11 @@
             <input type="text" name="q" placeholder="Search grounds, matches, players..." autocomplete="off">
         </form>
 
-        {{-- The app's GameHubSegmentedSwitch: a translucent track with a white active
+        {{-- The app's PulseSegmentedSwitch: a translucent track with a white active
              pill. Real links here, since the web's two lanes are two pages. --}}
-        <div class="mhub__switch" role="tablist" aria-label="Events or GameHub">
+        <div class="mhub__switch" role="tablist" aria-label="Events or Pulse">
             <a class="mhub__switch-tab" href="/events" role="tab" aria-selected="false">Events</a>
-            <a class="mhub__switch-tab is-on" href="/gamehub" role="tab" aria-selected="true">GameHub</a>
+            <a class="mhub__switch-tab is-on" href="/gamehub" role="tab" aria-selected="true">Pulse</a>
         </div>
     </div>
 
@@ -346,7 +346,7 @@
         </div>
 
         <div class="gamehub-hero__art">
-            <img src="{{ asset('gamehub.png') }}" alt="GameHub artwork">
+            <img src="{{ asset('gamehub.png') }}" alt="Pulse artwork">
         </div>
     </section>
 

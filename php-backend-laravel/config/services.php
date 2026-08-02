@@ -47,11 +47,21 @@ return [
     // and one template registry shared with Instagram — rather than Meta's approval
     // process plus a reseller's on top.
     //
-    // NB there is no SMS here. Meta does WhatsApp, not SMS, so phone delivery is
-    // WhatsApp or nothing and email is the parallel path (see BookingNotifier).
+    // There is no SMS counterpart any more. It was a second transport, with its own
+    // DLT template registry, for a channel that was never switched on — see
+    // BookingNotifier, where a ticket now goes out over email, push and WhatsApp.
     'whatsapp' => [
         // Toggle: when false, WhatsAppService is a no-op (logs + ledger only).
-        'enabled' => env('META_WHATSAPP_ENABLED', false),
+        // WHATSAPP_ENABLED is the name to use; META_WHATSAPP_ENABLED is kept as a
+        // fallback so environments provisioned before the BSP split keep working.
+        'enabled' => env('WHATSAPP_ENABLED', env('META_WHATSAPP_ENABLED', false)),
+
+        // Who carries the message. Both talk to the SAME WhatsApp Business Account
+        // and the same approved templates — this only decides whose pipe it goes
+        // down, so switching is an env change and a re-approval of nothing.
+        //   'meta'  — WhatsApp Cloud API, direct. No reseller in the path.
+        //   'msg91' — MSG91 as the Business Solution Provider in front of the WABA.
+        'driver' => env('WHATSAPP_DRIVER', 'meta'),
 
         // From the Meta app dashboard → WhatsApp → API setup.
         'phone_number_id' => env('META_WHATSAPP_PHONE_NUMBER_ID'),
@@ -62,6 +72,43 @@ return [
         'access_token' => env('META_WHATSAPP_TOKEN'),
 
         'graph_version' => env('META_GRAPH_VERSION', 'v21.0'),
+
+        // WhatsApp's authentication templates are normally created WITH a copy-code
+        // button, and the OTP has to be sent for the body and the button both. Set
+        // this false only if login_otp was approved with no button — then the extra
+        // component is what gets the message rejected.
+        'auth_template_has_button' => env('WHATSAPP_AUTH_TEMPLATE_HAS_BUTTON', true),
+
+        'msg91' => [
+            // MSG91 dashboard → Authkey. Sends as the business, so treat it like a
+            // password. MSG91_AUTH_KEY is still honoured as a fallback so accounts
+            // provisioned under the old SMS naming keep working without an edit.
+            'auth_key' => env('MSG91_WHATSAPP_AUTH_KEY', env('MSG91_AUTH_KEY')),
+
+            // The WhatsApp number registered on the MSG91 panel, country code
+            // included, no plus (e.g. 918000000000). MSG91 calls this the
+            // "integrated number" and rejects a send without it.
+            'integrated_number' => env('MSG91_WHATSAPP_NUMBER'),
+
+            // WABA message-template namespace. Optional — MSG91 fills it in from the
+            // account when omitted, and only older WABAs need it stated.
+            'namespace' => env('MSG91_WHATSAPP_NAMESPACE'),
+
+            'base_url' => env('MSG91_BASE_URL', 'https://control.msg91.com/api/v5'),
+
+            // Inbound webhook. MSG91 signs nothing — the panel offers arbitrary
+            // request headers and no signature scheme — so this shared secret IS
+            // the authentication for /api/webhooks/msg91/whatsapp. Blank refuses
+            // every delivery: an open endpoint here would let anyone forge a STOP
+            // for a number they don't own.
+            'webhook_token' => env('MSG91_WEBHOOK_TOKEN'),
+            'webhook_header' => env('MSG91_WEBHOOK_HEADER', 'X-Haraan-Token'),
+
+            // Log the raw inbound body. Diagnostic only — it writes customer
+            // message content to the log, so turn it off once the field mapping
+            // is confirmed.
+            'log_payloads' => env('MSG91_LOG_PAYLOADS', false),
+        ],
 
         // Country code prepended to bare 10-digit local numbers (India = 91).
         'default_country' => env('WHATSAPP_DEFAULT_COUNTRY', '91'),
@@ -148,8 +195,15 @@ return [
     // browser by design (that's what the referrer restriction is for). When unset,
     // the forms fall back to the manual pin/text entry and the public pages fall
     // back to a plain Maps search link — nothing breaks, it just isn't as good.
+    //
+    // `server_key` is the same product from the other side: calls WE make from the
+    // box (Street View metadata + imagery). A browser key is normally locked to an
+    // HTTP referrer, which a server request can't present, so it needs its own
+    // IP-restricted key. Falls back to the browser key for local dev, where the
+    // key is usually unrestricted.
     'google_maps' => [
         'key' => env('GOOGLE_MAPS_API_KEY'),
+        'server_key' => env('GOOGLE_MAPS_SERVER_KEY') ?: env('GOOGLE_MAPS_API_KEY'),
     ],
 
 ];

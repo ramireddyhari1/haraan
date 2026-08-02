@@ -6,8 +6,6 @@
     $cover = $profile->coverUrl();
     $logo = $profile->logoUrl();
     $init = strtoupper(mb_substr(trim($profile->display_name), 0, 1)) ?: 'H';
-    $ogImg = $cover ?: $logo;
-    $desc = \Illuminate\Support\Str::limit(strip_tags($profile->tagline ?: $profile->about), 160);
     $socials = collect([
         ['k' => 'instagram', 'label' => 'Instagram', 'url' => $profile->social('instagram')],
         ['k' => 'x', 'label' => 'X', 'url' => $profile->social('x')],
@@ -17,26 +15,9 @@
     ])->filter(fn ($s) => filled($s['url']));
 @endphp
 
-@php
-    // Search + social metadata for this organiser/venue page (rendered by
-    // site/partials/seo.blade.php via the layout).
-    $seo = [
-        'type' => 'profile',
-        'description' => $desc ?: ($profile->display_name . ' on Haraan — upcoming events, venues and tickets.'),
-        'image' => $ogImg ?: null,
-        'canonical' => url('/host/' . $profile->slug),
-        'jsonld' => array_filter([
-            '@context' => 'https://schema.org',
-            '@type' => $isVenue ? 'LocalBusiness' : 'Organization',
-            'name' => $profile->display_name,
-            'url' => url('/host/' . $profile->slug),
-            'description' => $desc ?: null,
-            'logo' => $logo ?: null,
-            'image' => $ogImg ?: null,
-            'sameAs' => array_values(array_filter($socials->pluck('url')->all())) ?: null,
-        ]),
-    ];
-@endphp
+{{-- Search + social metadata comes from PublicWebController::hostSeo(), like the
+     event and venue pages. It used to be assembled here, which silently shadowed
+     the controller's version — keep it in one place. --}}
 
 @section('content')
 <div class="host-page">

@@ -104,8 +104,8 @@
 .actionboard-create-page {
     padding: 60px 0 90px;
     background-color: #f4f7f5;
-    background-image: radial-gradient(circle at 10% 20%, rgba(9, 55, 39, 0.03) 0%, transparent 40%),
-                      radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.03) 0%, transparent 40%);
+    background-image: radial-gradient(circle at 10% 20%, rgba(23, 37, 84, 0.03) 0%, transparent 40%),
+                      radial-gradient(circle at 90% 80%, rgba(37, 99, 235, 0.03) 0%, transparent 40%);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     min-height: 100vh;
 }
@@ -121,12 +121,12 @@
     background: #ffffff;
     border-radius: 16px;
     overflow: hidden;
-    box-shadow: 0 20px 50px rgba(9, 55, 39, 0.08);
-    border: 1px solid rgba(9, 55, 39, 0.07);
+    box-shadow: 0 20px 50px rgba(23, 37, 84, 0.08);
+    border: 1px solid rgba(23, 37, 84, 0.07);
 }
 
 .create-match-card__header {
-    background: linear-gradient(135deg, #093727 0%, #0d543c 50%, #111c18 100%);
+    background: linear-gradient(135deg, #172554 0%, #1E3A8A 50%, #111c18 100%);
     padding: 32px;
     color: #ffffff;
     text-align: center;
@@ -138,7 +138,7 @@
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    color: #34d399;
+    color: #60A5FA;
     margin-bottom: 8px;
 }
 
@@ -202,7 +202,7 @@
 .form-group label {
     font-size: 13px;
     font-weight: 800;
-    color: #093727;
+    color: #172554;
     letter-spacing: 0.2px;
 }
 
@@ -233,9 +233,9 @@
 }
 
 .input-wrapper input:focus {
-    border-color: #10b981;
+    border-color: #2563EB;
     outline: none;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
     background-color: #fcfefe;
 }
 
@@ -266,11 +266,11 @@
 }
 
 .cancel-link-btn:hover {
-    color: #093727;
+    color: #172554;
 }
 
 .create-submit-btn {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
     color: #ffffff;
     border: none;
     padding: 12px 24px;
@@ -280,13 +280,13 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
     transition: all 0.25s ease;
 }
 
 .create-submit-btn:hover {
-    background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-    box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+    background: linear-gradient(135deg, #60A5FA 0%, #2563EB 100%);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
     transform: translateY(-1.5px);
 }
 

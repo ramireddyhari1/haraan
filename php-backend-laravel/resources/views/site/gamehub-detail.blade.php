@@ -1,5 +1,5 @@
 @extends('site.layout')
-@section('footer_icon_secondary', '#16a34a')
+@section('footer_icon_secondary', '#2563EB')
 
 @section('content')
 
@@ -654,7 +654,7 @@
         </div>
 
         <button onclick="closeSuccessModal()" class="success-done-btn">
-            Done & Return to GameHub
+            Done & Return to Pulse
         </button>
     </div>
 </div>
@@ -703,9 +703,9 @@
     function toggleFavorite(btn) {
         const svg = document.getElementById('fav-icon');
         if (svg.getAttribute('fill') === 'none') {
-            svg.setAttribute('fill', '#16a34a');
-            svg.setAttribute('stroke', '#16a34a');
-            btn.style.borderColor = '#bbf7d0';
+            svg.setAttribute('fill', '#2563EB');
+            svg.setAttribute('stroke', '#2563EB');
+            btn.style.borderColor = '#DBEAFE';
         } else {
             svg.setAttribute('fill', 'none');
             svg.setAttribute('stroke', '#666');

@@ -1,4 +1,4 @@
-/* Lightweight theme overrides for Events (orange) and GameHub (green) */
+/* Lightweight theme overrides for the Events and Pulse lanes (one Haraan blue) */
 
 .theme-events {
     --accent-local: #2563EB; /* Haraan Events blue (app EventsBlue) */
@@ -7,10 +7,12 @@
 }
 
 .theme-gamehub {
-    --accent-local: #1B5E20; /* Haraan GameHub deep green (headings/hero, app GameHubDeep) */
-    --accent-cta: #00C853;   /* Haraan GameHub bright green (buttons/active states, app GameHubGreen) */
-    --accent-lite: #f0fbf6;  /* very light green */
-    --accent-ink: #14532D;   /* dark green text */
+    --accent-local: #1E3A8A; /* Haraan deep blue (headings/hero, app GameHubDeep) */
+    --accent-cta: #1E3A8A;   /* Pulse CTA = the DEEP Haraan blue, so the lane's
+                                buttons read apart from the Events #2563EB while
+                                staying in one brand family (app GameHubGreen) */
+    --accent-lite: #EFF6FF;  /* very light blue */
+    --accent-ink: #1E3A8A;   /* dark blue text */
 }
 
 /* Apply to key components */
@@ -66,7 +68,7 @@
 .theme-gamehub .events-section .section-shell__header .eyebrow,
 .theme-gamehub .gamehub-hero__copy h1,
 .theme-gamehub .promo-banner__content h2 {
-    color: #1B5E20 !important;
+    color: #1E3A8A !important;
 }
 
 .theme-gamehub .events-section .section-shell__header h2 {
@@ -100,7 +102,7 @@
 .theme-gamehub .action-card__title,
 .theme-gamehub .gamehub-hero__copy h1,
 .theme-gamehub .promo-banner__content h2 {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 /* Location selector modal */
@@ -126,7 +128,7 @@
 .location-sheet__heading{min-width:0}
 .location-sheet__title{margin:0;font-size:22px;font-weight:800;letter-spacing:-.022em;color:#0c1119;line-height:1.15}
 .location-sheet__sub{margin:6px 0 0;font-size:13px;color:#7b828d;display:inline-flex;align-items:center;gap:7px;line-height:1.3}
-.location-sheet__sub::before{content:"";flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.15)}
+.location-sheet__sub::before{content:"";flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 .location-sheet__close{flex-shrink:0;width:34px;height:34px;margin-top:2px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:#f1f3f6;color:#6b727d;cursor:pointer;transition:background .16s ease,color .16s ease,transform .12s ease}
 .location-sheet__close:hover{background:#e7eaef;color:#0c1119}
 .location-sheet__close:active{transform:scale(.9)}
@@ -290,7 +292,7 @@ h2, h3 {
 }
 
 .gamehub-venue-card__star {
-    color: #1B5E20;
+    color: #1E3A8A;
     font-weight: 700;
 }
 
@@ -308,8 +310,8 @@ h2, h3 {
 .gamehub-venue-card__rating--new {
     padding: 2px 8px;
     border-radius: 999px;
-    background: rgba(22, 94, 32, 0.10);
-    color: #1B5E20;
+    background: rgba(30, 58, 138, 0.10);
+    color: #1E3A8A;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -333,14 +335,14 @@ h2, h3 {
     padding: 8px 18px;
     font-size: 12.5px;
     font-weight: 700;
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #ffffff;
     border-radius: 999px;
     transition: transform 0.2s, background-color 0.2s;
 }
 
 .gamehub-venue-card__btn:hover {
-    background: #15803d;
+    background: #172554;
     transform: scale(1.02);
 }
 
@@ -396,7 +398,7 @@ h2, h3 {
 }
 
 .detail-badge {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
     font-size: 12px;
     font-weight: 800;
@@ -404,7 +406,7 @@ h2, h3 {
     border-radius: 6px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    box-shadow: 0 2px 6px rgba(22, 163, 74, 0.2);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
 }
 
 .detail-badge--dark {
@@ -571,8 +573,8 @@ h2, h3 {
 }
 
 .date-pill:hover {
-    border-color: #1B5E20;
-    background: #f0fdf4;
+    border-color: #1E3A8A;
+    background: #EFF6FF;
 }
 
 .date-pill__day {
@@ -619,15 +621,15 @@ h2, h3 {
 }
 
 .sport-tab:hover {
-    border-color: #1B5E20;
-    color: #1B5E20;
+    border-color: #1E3A8A;
+    color: #1E3A8A;
 }
 
 .sport-tab.is-active {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
-    border-color: #1B5E20;
-    box-shadow: 0 4px 14px rgba(22,163,74,0.25);
+    border-color: #1E3A8A;
+    box-shadow: 0 4px 14px rgba(37, 99, 235,0.25);
 }
 
 .sport-tab.is-active img {
@@ -689,8 +691,8 @@ h2, h3 {
 .slot-item {
     padding: 16px 14px;
     border-radius: 12px;
-    border: 1.5px solid #bbf7d0;
-    background: #f0fdf4;
+    border: 1.5px solid #DBEAFE;
+    background: #EFF6FF;
     cursor: pointer;
     text-align: center;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -700,13 +702,13 @@ h2, h3 {
 .slot-item__time {
     font-size: 13px;
     font-weight: 700;
-    color: #15803d;
+    color: #1D4ED8;
 }
 
 .slot-item__price {
     font-size: 11px;
     font-weight: 600;
-    color: #166534;
+    color: #1E40AF;
     margin-top: 4px;
 }
 
@@ -726,18 +728,18 @@ h2, h3 {
 }
 
 .slot-item.is-selected {
-    border-color: #1B5E20 !important;
-    background: #f0fdf4 !important;
-    box-shadow: 0 4px 14px rgba(22,163,74,0.18) !important;
+    border-color: #1E3A8A !important;
+    background: #EFF6FF !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235,0.18) !important;
     transform: translateY(-2px);
 }
 
 .slot-item.is-selected .slot-item__time {
-    color: #1B5E20 !important;
+    color: #1E3A8A !important;
 }
 
 .slot-item.is-selected .slot-item__price {
-    color: #1B5E20 !important;
+    color: #1E3A8A !important;
 }
 
 /* Amenities Grid */
@@ -791,7 +793,7 @@ h2, h3 {
     transition: transform 0.2s ease;
     font-size: 18px;
     font-weight: bold;
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .accordion-body {
@@ -826,13 +828,13 @@ h2, h3 {
 }
 
 .reviews-count-badge {
-    background: #f0fdf4;
-    color: #1B5E20;
+    background: #EFF6FF;
+    color: #1E3A8A;
     font-size: 14px;
     font-weight: 700;
     padding: 4px 14px;
     border-radius: 99px;
-    border: 1px solid #bbf7d0;
+    border: 1px solid #DBEAFE;
 }
 
 .review-card {
@@ -857,14 +859,14 @@ h2, h3 {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: #f0fdf4;
-    color: #1B5E20;
+    background: #EFF6FF;
+    color: #1E3A8A;
     font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 15px;
-    border: 1.5px solid #bbf7d0;
+    border: 1.5px solid #DBEAFE;
 }
 
 .review-user-name {
@@ -935,7 +937,7 @@ h2, h3 {
 
 .star-btn:hover,
 .star-btn.is-active {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .review-input-field {
@@ -951,12 +953,12 @@ h2, h3 {
 }
 
 .review-input-field:focus {
-    border-color: #1B5E20;
-    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.1);
+    border-color: #1E3A8A;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .review-submit-btn {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
     border: none;
     border-radius: 10px;
@@ -968,8 +970,8 @@ h2, h3 {
 }
 
 .review-submit-btn:hover {
-    background: #15803d;
-    box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+    background: #172554;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
 
 /* Sticky Booking Sidebar Card */
@@ -1041,8 +1043,8 @@ h2, h3 {
 }
 
 .selected-slot-item-pill {
-    background: #f0fdf4;
-    border: 1px solid #bbf7d0;
+    background: #EFF6FF;
+    border: 1px solid #DBEAFE;
     padding: 12px 14px;
     border-radius: 10px;
     margin-bottom: 8px;
@@ -1053,7 +1055,7 @@ h2, h3 {
 .selected-slot-item-pill__header {
     font-size: 11px;
     font-weight: 700;
-    color: #1B5E20;
+    color: #1E3A8A;
     text-transform: uppercase;
     margin-bottom: 2px;
 }
@@ -1071,7 +1073,7 @@ h2, h3 {
 }
 
 .selected-slot-item-pill__price {
-    color: #1B5E20;
+    color: #1E3A8A;
     font-weight: 800;
 }
 
@@ -1120,7 +1122,7 @@ h2, h3 {
 }
 
 .calc-row--bold .total-green {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 /* Submit and Lock Button */
@@ -1139,15 +1141,15 @@ h2, h3 {
 }
 
 .book-now-button-widget.is-ready {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
     cursor: pointer;
-    box-shadow: 0 8px 24px rgba(22, 163, 74, 0.25);
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.25);
 }
 
 .book-now-button-widget.is-ready:hover {
-    background: #15803d;
-    box-shadow: 0 12px 30px rgba(22, 163, 74, 0.35);
+    background: #172554;
+    box-shadow: 0 12px 30px rgba(37, 99, 235, 0.35);
     transform: translateY(-1px);
 }
 
@@ -1174,7 +1176,7 @@ h2, h3 {
     width: 90%;
     text-align: center;
     box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
-    border: 1px solid #bbf7d0;
+    border: 1px solid #DBEAFE;
 }
 
 .success-check-badge {
@@ -1208,8 +1210,8 @@ h2, h3 {
 }
 
 .success-receipt-box {
-    background: #f0fdf4;
-    border: 1.5px solid #bbf7d0;
+    background: #EFF6FF;
+    border: 1.5px solid #DBEAFE;
     border-radius: 14px;
     padding: 22px;
     text-align: left;
@@ -1229,7 +1231,7 @@ h2, h3 {
 .receipt-ref-id {
     font-family: monospace;
     font-weight: 700;
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .receipt-highlight {
@@ -1239,7 +1241,7 @@ h2, h3 {
 
 .receipt-total {
     font-weight: 900;
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .success-done-btn {
@@ -1269,7 +1271,7 @@ h2, h3 {
 .mb-32 { margin-bottom: 32px !important; }
 
 .detail-meta-star {
-    color: #1B5E20;
+    color: #1E3A8A;
     font-weight: 700;
     font-size: 18px;
 }
@@ -1290,7 +1292,7 @@ h2, h3 {
 }
 
 .review-star.is-active {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .review-comment-textarea {
@@ -1371,14 +1373,14 @@ html {
 .gamehub-action-card:hover {
     transform: translateY(-3px);
     background: #ffffff;
-    border-color: rgba(27, 94, 32, 0.3);
-    box-shadow: 0 12px 28px rgba(27, 94, 32, 0.06), 0 4px 10px rgba(27, 94, 32, 0.02);
+    border-color: rgba(30, 58, 138, 0.3);
+    box-shadow: 0 12px 28px rgba(30, 58, 138, 0.06), 0 4px 10px rgba(30, 58, 138, 0.02);
 }
 
 .gamehub-action-card.active {
     background: #ffffff;
     border-color: var(--accent-local);
-    box-shadow: 0 14px 32px rgba(27, 94, 32, 0.08), 0 4px 12px rgba(27, 94, 32, 0.03);
+    box-shadow: 0 14px 32px rgba(30, 58, 138, 0.08), 0 4px 12px rgba(30, 58, 138, 0.03);
 }
 
 /* Light indicator line on the left side of active card */
@@ -1400,7 +1402,7 @@ html {
     width: 46px;
     height: 46px;
     border-radius: 12px;
-    background: rgba(27, 94, 32, 0.06);
+    background: rgba(30, 58, 138, 0.06);
     color: var(--accent-local);
     transition: all 0.3s ease;
     flex-shrink: 0;
@@ -1454,11 +1456,11 @@ html {
     right: 14px;
     font-size: 10px;
     font-weight: 800;
-    color: #15803d;
-    background: #f0fdf4;
+    color: #1D4ED8;
+    background: #EFF6FF;
     padding: 3px 8px;
     border-radius: 6px;
-    border: 1px solid #bbf7d0;
+    border: 1px solid #DBEAFE;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     animation: pulseBadge 2s infinite ease-in-out;

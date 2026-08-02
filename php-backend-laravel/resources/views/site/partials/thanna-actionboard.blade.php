@@ -164,7 +164,7 @@
 
     <style>
     /* --------------------------------------------------
-       CREX-inspired Premium Modal Styling for GameHub
+       CREX-inspired Premium Modal Styling for Pulse
     -------------------------------------------------- */
     .thanna-modal {
         position: fixed;
@@ -238,7 +238,7 @@
     .modal-brand-header h2 {
         font-size: 18px;
         font-weight: 900;
-        color: #093727;
+        color: #0F2557;
         margin: 0;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -296,7 +296,7 @@
     }
     
     .tab-row button.active {
-        background: linear-gradient(135deg, #093727 0%, #0d543c 100%);
+        background: linear-gradient(135deg, #0F2557 0%, #1e3a8a 100%);
         color: #ffffff;
         border-color: transparent;
         box-shadow: 0 4px 10px rgba(9, 55, 39, 0.15);
@@ -338,14 +338,14 @@
     .refresh-action-btn {
         background: none;
         border: none;
-        color: #059669;
+        color: #1D4ED8;
         font-size: 13px;
         font-weight: 700;
         cursor: pointer;
     }
 
     .refresh-action-btn:hover {
-        color: #10b981;
+        color: #3b82f6;
     }
 
     /* Match Items & Grid */
@@ -365,7 +365,7 @@
     }
 
     .match-item:hover {
-        border-color: #10b981;
+        border-color: #3b82f6;
         box-shadow: 0 6px 15px rgba(9, 55, 39, 0.04);
     }
 
@@ -470,7 +470,7 @@
 
     .modal-action-btn {
         background: rgba(9, 55, 39, 0.05);
-        color: #093727;
+        color: #0F2557;
         border: none;
         padding: 6px 12px;
         border-radius: 6px;
@@ -481,12 +481,12 @@
     }
 
     .modal-action-btn:hover {
-        background: #093727;
+        background: #0F2557;
         color: #ffffff;
     }
 
     .modal-link-btn {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        background: linear-gradient(135deg, #3b82f6 0%, #1D4ED8 100%);
         color: #ffffff;
         text-decoration: none;
         padding: 6px 12px;
@@ -497,8 +497,8 @@
     }
 
     .modal-link-btn:hover {
-        background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-        box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
+        background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+        box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2);
     }
 
     /* Scoreboard Detail View */
@@ -519,7 +519,7 @@
     }
 
     .back-btn:hover {
-        color: #093727;
+        color: #0F2557;
     }
 
     .featured-comp {
@@ -529,7 +529,7 @@
     }
 
     .scoreboard-main-card {
-        background: linear-gradient(135deg, #093727 0%, #0d543c 100%);
+        background: linear-gradient(135deg, #0F2557 0%, #1e3a8a 100%);
         border-radius: 12px;
         padding: 20px;
         color: #ffffff;
@@ -557,7 +557,7 @@
     .hero-team-name {
         font-size: 15px;
         font-weight: 850;
-        color: #34d399;
+        color: #60a5fa;
         margin-bottom: 4px;
         text-transform: uppercase;
         letter-spacing: 0.3px;
@@ -654,7 +654,7 @@
     }
 
     .modal-premium-btn {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        background: linear-gradient(135deg, #3b82f6 0%, #1D4ED8 100%);
         color: #ffffff;
         border: none;
         padding: 10px 20px;
@@ -669,16 +669,16 @@
     }
 
     .modal-premium-btn:hover {
-        background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-        box-shadow: 0 5px 15px rgba(16, 185, 129, 0.25);
+        background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+        box-shadow: 0 5px 15px rgba(59, 130, 246, 0.25);
     }
 
     .modal-premium-btn.accent {
-        background: linear-gradient(135deg, #093727 0%, #0d543c 100%);
+        background: linear-gradient(135deg, #0F2557 0%, #1e3a8a 100%);
     }
 
     .modal-premium-btn.accent:hover {
-        background: linear-gradient(135deg, #0d543c 0%, #111c18 100%);
+        background: linear-gradient(135deg, #1e3a8a 0%, #111c18 100%);
         box-shadow: 0 5px 15px rgba(9, 55, 39, 0.2);
     }
 
@@ -700,7 +700,7 @@
     .tourney-preview-box h3 {
         font-size: 18px;
         font-weight: 900;
-        color: #093727;
+        color: #0F2557;
         margin: 0 0 10px;
     }
 
@@ -746,7 +746,7 @@
         width: 32px;
         height: 32px;
         border: 3px solid rgba(9, 55, 39, 0.08);
-        border-top-color: #10b981;
+        border-top-color: #3b82f6;
         border-radius: 50%;
         animation: spin 0.8s infinite linear;
         margin-bottom: 12px;

@@ -158,6 +158,15 @@ Route::middleware('auth.jwt')->prefix('account')->controller(\App\Http\Controlle
 });
 
 // -------------------------------------------------------------------------
+//  Account deletion, in-app half (Account → Privacy → Delete account).
+//  Google Play requires an in-app deletion path AND a public web URL; the web
+//  twin is Web\AccountDeletionController at /account/delete. Throttled because
+//  it is irreversible and there is no reason to call it twice.
+// -------------------------------------------------------------------------
+Route::middleware(['auth.jwt', 'throttle:6,60'])
+    ->delete('/account', [\App\Http\Controllers\Api\AccountController::class, 'destroy']);
+
+// -------------------------------------------------------------------------
 //  In-app support chat — user <-> admin. Backed by SupportController; the
 //  admin side lives in the Filament "Support" resource. Requires a signed-in
 //  user (JWT); the app opens the thread and polls it while the chat is open.
@@ -328,3 +337,18 @@ Route::post('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::
 Route::get('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify']);
 Route::post('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
     ->middleware('throttle:240,1');
+
+// MSG91 inbound WhatsApp, when MSG91 is the BSP instead of Meta. Same destination
+// (InboundMessages), different envelope. MSG91 signs nothing, so a shared secret in
+// a request header is the authentication — configured in the panel under the
+// number's Action menu → Webhook — and it fails closed.
+Route::post('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'handle'])
+    ->middleware('throttle:240,1')
+    ->name('webhooks.msg91.whatsapp');
+
+// GET is a reachability check only — it carries no data and does nothing. It
+// exists because a provider validating the URL (or a human pasting it into a
+// browser) otherwise gets a 405, which reads as a broken endpoint.
+Route::get('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'ping'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.msg91.whatsapp.ping');

@@ -303,8 +303,8 @@
                         <svg class="performance-chart-svg" viewBox="0 0 {{ $width }} {{ $height }}">
                             <defs>
                                 <linearGradient id="chartGlow" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stop-color="#00D26A" stop-opacity="0.3"/>
-                                    <stop offset="100%" stop-color="#00D26A" stop-opacity="0.0"/>
+                                    <stop offset="0%" stop-color="#2563EB" stop-opacity="0.3"/>
+                                    <stop offset="100%" stop-color="#2563EB" stop-opacity="0.0"/>
                                 </linearGradient>
                             </defs>
                             
@@ -317,7 +317,7 @@
                             <polygon points="{{ $areaPointsString }}" fill="url(#chartGlow)" />
                             
                             <!-- Line Path -->
-                            <polyline points="{{ $pointsString }}" fill="none" stroke="#00D26A" stroke-width="2.5" stroke-linecap="round" />
+                            <polyline points="{{ $pointsString }}" fill="none" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round" />
                             
                             <!-- Value marker dots & labels -->
                             @for($i = 0; $i < 5; $i++)
@@ -325,9 +325,9 @@
                                     $x = $padding + ($i * ($width - 2 * $padding) / 4);
                                     $y = $height - $padding - (($inningsRuns[$i] / $maxVal) * ($height - 2 * $padding));
                                 @endphp
-                                <circle cx="{{ $x }}" cy="{{ $y }}" r="4" fill="#FFFFFF" stroke="#00D26A" stroke-width="2" />
+                                <circle cx="{{ $x }}" cy="{{ $y }}" r="4" fill="#FFFFFF" stroke="#2563EB" stroke-width="2" />
                                 @if($inningsRuns[$i] > 0)
-                                    <text x="{{ $x }}" y="{{ $y - 8 }}" fill="#00D26A" font-size="9" font-weight="900" text-anchor="middle">{{ $inningsRuns[$i] }}</text>
+                                    <text x="{{ $x }}" y="{{ $y - 8 }}" fill="#2563EB" font-size="9" font-weight="900" text-anchor="middle">{{ $inningsRuns[$i] }}</text>
                                 @endif
                             @endfor
                         </svg>
@@ -465,15 +465,15 @@ main.container {
 .logo-pulse {
     width: 10px;
     height: 10px;
-    background: #00D26A;
+    background: #2563EB;
     border-radius: 50%;
-    box-shadow: 0 0 0 3px rgba(0, 210, 106, 0.25);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
     animation: livePulseDot 2s infinite ease-in-out;
 }
 @keyframes livePulseDot {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 210, 106, 0.5); }
-    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(0, 210, 106, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 210, 106, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.5); }
+    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
 
 .desktop-menu {
@@ -494,7 +494,7 @@ main.container {
     background: rgba(255, 255, 255, 0.05);
 }
 .menu-link.font-accent {
-    color: #00D26A;
+    color: #2563EB;
 }
 
 .header-actions {
@@ -517,24 +517,24 @@ main.container {
     background: rgba(255, 255, 255, 0.12);
 }
 .btn-create-match {
-    background: linear-gradient(135deg, #00D26A 0%, #22C55E 100%);
+    background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
     color: #000000;
     font-weight: 800;
     padding: 9px 18px;
     border-radius: 8px;
     font-size: 13px;
     text-decoration: none;
-    box-shadow: 0 4px 12px rgba(0, 210, 106, 0.2);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
     transition: all 0.25s ease;
 }
 .btn-create-match:hover {
     transform: translateY(-1.5px);
-    box-shadow: 0 6px 16px rgba(0, 210, 106, 0.35);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
 }
 .player-badge {
-    background: rgba(0, 210, 106, 0.08);
-    border: 1px solid rgba(0, 210, 106, 0.18);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    color: #2563EB;
     padding: 6px 12px;
     border-radius: 20px;
     font-size: 12px;
@@ -630,9 +630,9 @@ main.container {
     margin: 0;
 }
 .role-pill {
-    background: rgba(0, 210, 106, 0.08);
-    border: 1px solid rgba(0, 210, 106, 0.25);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.25);
+    color: #2563EB;
     font-size: 10px;
     font-weight: 800;
     padding: 3px 8px;
@@ -686,7 +686,7 @@ main.container {
     font-size: 14px;
     font-weight: 900;
 }
-.val-emerald { color: #00D26A; }
+.val-emerald { color: #2563EB; }
 .val-blue { color: #2563EB; }
 .val-amber { color: #D97706; }
 
@@ -740,7 +740,7 @@ main.container {
     color: #0F172A;
     margin: 0 0 16px;
     letter-spacing: 0.5px;
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
     padding-left: 8px;
 }
 
@@ -769,7 +769,7 @@ main.container {
     font-weight: 900;
     color: #0F172A;
 }
-.counter-card.highlight-runs strong { color: #00D26A; }
+.counter-card.highlight-runs strong { color: #2563EB; }
 .counter-card.highlight-sr strong { color: #2563EB; }
 .counter-card.highlight-wkts strong { color: #FF4D6D; }
 
@@ -816,7 +816,7 @@ main.container {
     margin-bottom: 6px;
 }
 .perf-header .comp { color: #64748B; }
-.perf-header .status.live { color: #00D26A; }
+.perf-header .status.live { color: #2563EB; }
 .perf-header .status.scheduled { color: #2563EB; }
 .perf-header .status { color: #64748B; }
 
@@ -848,7 +848,7 @@ main.container {
 .perf-body .score strong {
     font-size: 14px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
 }
 .link-match-center {
     font-size: 11px;
@@ -951,8 +951,8 @@ main.container {
     height: 64px;
     margin: 0 auto 18px;
     border-radius: 50%;
-    background: rgba(0, 210, 106, 0.09);
-    color: #00A85A;
+    background: rgba(37, 99, 235, 0.09);
+    color: #2563EB;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -981,19 +981,19 @@ main.container {
     flex-wrap: wrap;
 }
 .rookie-cta {
-    background: linear-gradient(135deg, #00D26A 0%, #22C55E 100%);
+    background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
     color: #000000;
     font-weight: 800;
     font-size: 13px;
     padding: 10px 22px;
     border-radius: 8px;
     text-decoration: none;
-    box-shadow: 0 4px 12px rgba(0, 210, 106, 0.2);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
     transition: all 0.2s ease;
 }
 .rookie-cta:hover {
     transform: translateY(-1.5px);
-    box-shadow: 0 6px 16px rgba(0, 210, 106, 0.35);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
 }
 .rookie-cta.secondary {
     background: #F8FAFC;

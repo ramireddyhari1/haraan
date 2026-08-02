@@ -411,9 +411,9 @@
         box-shadow: 0 2px 6px rgba(0,87,184,0.18);
     }
     .mobile-action-btn.is-active.mobile-action-btn--gamehub {
-        background: #00C853; /* green */
+        background: #2563EB; /* green */
         color: #fff;
-        box-shadow: 0 2px 6px rgba(40,167,69,0.18);
+        box-shadow: 0 2px 6px rgba(37,99,235,0.18);
     }
 
     /* Hide desktop nav & hamburger */
@@ -564,8 +564,8 @@
     .gamehub-venue-card__price { font-size: 17px; font-weight: 800; color: #0F172A; background: transparent; box-shadow: none; padding: 0; }
     .gamehub-venue-card__btn {
         padding: 10px 16px; font-size: 12px; font-weight: 700;
-        background: #00C853; border-radius: 12px;
-        box-shadow: 0 6px 14px rgba(0, 200, 83, 0.28);
+        background: #2563EB; border-radius: 12px;
+        box-shadow: 0 6px 14px rgba(37, 99, 235, 0.28);
     }
     .gamehub-venue-card .venue-badge {
         top: 10px; left: 10px; border-radius: 8px; padding: 4px 10px; font-size: 10px;
@@ -586,7 +586,7 @@
         70%  { box-shadow: 0 0 0 7px rgba(211, 47, 47, 0); }
         100% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
     }
-    .gh-live__all { font-size: 13px; font-weight: 700; color: #00A046; text-decoration: none; }
+    .gh-live__all { font-size: 13px; font-weight: 700; color: #1D4ED8; text-decoration: none; }
     .gh-live__scroll {
         display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory;
         -webkit-overflow-scrolling: touch; margin: 0 -16px; padding: 2px 16px 6px; scrollbar-width: none;
@@ -813,7 +813,7 @@
 /* ================================================================= */
 /* APP-STYLE MOBILE HOME — mirrors the Android app (Haraan tokens)    */
 /*   bg #F4F7FB · surface #fff · text #0F172A/#64748B/#94A3B8         */
-/*   EventsBlue #2563EB · GameHubGreen #00C853 · LiveRed #D32F2F      */
+/*   EventsBlue #2563EB · GameHubGreen #2563EB · LiveRed #D32F2F      */
 /* ================================================================= */
 @media (max-width: 720px) {
     /* Slate app canvas + edge-to-edge feel */
@@ -833,76 +833,90 @@
        Events/GameHub tabs and "For You") — black wordmark with the blue
        calligraphy flourish BESIDE it, dropped slightly below the baseline
        like a signature (user: beside + a bit down, not underneath). */
-    /* The wordmark itself is centred on the page; the calligraphy accent hangs
-       off its right edge (absolute) so it can't pull the lockup off-centre. */
-    .mbrandmark {
-        position: relative;
-        display: flex; align-items: flex-end; justify-content: center;
-        padding: 22px 0 18px; /* tighter band (user: reduce some space) */
-        overflow: visible;
+    /* Brand band — a rounded gradient card inset from the page edges, contents
+       centred (user-specified). It sits INSIDE .mhome's padding rather than
+       bleeding to the viewport: rounded corners only read as corners when there
+       is page either side of them.
+       Holds the lockup alone — the strapline and CTA were removed on request, so
+       the padding is tuned to sit the wordmark in the optical centre of the card
+       rather than leaving the hole they used to fill. */
+    .mband {
+        position: relative; overflow: hidden;
+        margin: 10px 0 10px; padding: 20px 20px 21px;
+        border-radius: 20px;
+        /* Events blue — the exact value of the Events tab pill above it (user's
+           call: keep the reworked lockup, put the brand blue back as the fill).
+           It stopped reading as an empty coloured box once the band lost ~30px of
+           height and the lockup was tightened, so the slab problem was proportion
+           and lockup, not the colour. FLAT — never reintroduce a colour gradient
+           here; it drifts off-brand. Depth comes from the overlays below. */
+        background: #2563EB;
+        /* A defined edge — premium surfaces have one; a borderless slab floats. */
+        box-shadow:
+            inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+            0 10px 24px -14px rgba(37, 99, 235, 0.55);
+        color: #fff;
+        text-align: center;
     }
-    /* Wordmark rendered pure black (the PNG is navy). Nudged left so the whole
-       "Haraan special" lockup (wordmark + the script that hangs off the right)
-       is optically centred, not just the wordmark. */
-    .mbrandmark img { height: 30px; width: auto; display: block; filter: brightness(0); position: relative; z-index: 2; transform: translateX(-23px); }
-    /* The script tucks in close against the wordmark's tail — shifted left the
-       same 23px so it moves with the wordmark and the pair reads centred. */
-    .mbrandmark span {
-        position: absolute; left: 50%; bottom: 12px; z-index: 2;
-        margin-left: 29px; white-space: nowrap;
-        font-family: 'Great Vibes', 'Segoe Script', cursive;
-        font-size: 26px; line-height: 1; letter-spacing: 0.01em;
-        color: #2563EB;
-        transform: rotate(-2deg);
+    /* Hairline along the top edge — the same device as the mobile footer, so the
+       band belongs to the existing language. Light on the blue fill: a blue rule
+       on a blue surface is invisible. */
+    .mband__rule {
+        position: absolute; top: 0; left: 0; right: 0; height: 2px;
+        background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.30) 24%, rgba(255,255,255,0.62) 52%, rgba(255,255,255,0.30) 78%, transparent 100%);
     }
-
-    /* Blue dots scattered around the name — a light constellation that twinkles
-       (scale + fade on a stagger). 26 dots spread across the full width of the
-       band and above/below, sitting behind the wordmark so they fill the space
-       without crowding the letters. */
-    .mbrandmark__dots { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-    .mbrandmark__dots i {
-        position: absolute; border-radius: 50%;
-        animation: mbd-twinkle 3s ease-in-out infinite;
+    /* Line grid behind the lockup — the same device as the venue-map texture card
+       on the event page, so the pattern is part of the existing language rather
+       than a new ornament. Sized to a 26px box at 16% white — raised from 7%,
+       which was so faint the texture read as a rendering artifact rather than
+       structure. Still masked away from the centre so it never fights the
+       wordmark; the fade starts tighter now so more of the grid survives. */
+    .mband::before {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        background-image:
+            linear-gradient(rgba(255,255,255,0.16) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.16) 1px, transparent 1px);
+        background-size: 26px 26px, 26px 26px;
+        -webkit-mask-image: radial-gradient(ellipse at 50% 50%, transparent 6%, #000 58%);
+        mask-image: radial-gradient(ellipse at 50% 50%, transparent 6%, #000 58%);
     }
-    /* left gap */
-    .mbrandmark__dots i:nth-child(1)  { left: 5%;  top: 22px; width: 6px; height: 6px; background: #2563EB; animation-delay: 0s;   }
-    .mbrandmark__dots i:nth-child(2)  { left: 12%; top: 44px; width: 4px; height: 4px; background: #60A5FA; animation-delay: .5s;  }
-    .mbrandmark__dots i:nth-child(3)  { left: 20%; top: 12px; width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.0s; }
-    .mbrandmark__dots i:nth-child(4)  { left: 8%;  top: 58px; width: 5px; height: 5px; background: #2563EB; animation-delay: .3s;  }
-    .mbrandmark__dots i:nth-child(5)  { left: 25%; top: 34px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .8s;  }
-    .mbrandmark__dots i:nth-child(6)  { left: 16%; top: 62px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.3s; }
-    .mbrandmark__dots i:nth-child(7)  { left: 3%;  top: 40px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .65s; }
-    .mbrandmark__dots i:nth-child(8)  { left: 22%; top: 50px; width: 4px; height: 4px; background: #2563EB; animation-delay: 1.15s;}
-    /* right gap */
-    .mbrandmark__dots i:nth-child(9)  { left: 95%; top: 20px; width: 6px; height: 6px; background: #60A5FA; animation-delay: .2s;  }
-    .mbrandmark__dots i:nth-child(10) { left: 88%; top: 46px; width: 4px; height: 4px; background: #2563EB; animation-delay: .7s;  }
-    .mbrandmark__dots i:nth-child(11) { left: 80%; top: 12px; width: 7px; height: 7px; background: #93C5FD; animation-delay: 1.1s; }
-    .mbrandmark__dots i:nth-child(12) { left: 92%; top: 60px; width: 5px; height: 5px; background: #60A5FA; animation-delay: .4s;  }
-    .mbrandmark__dots i:nth-child(13) { left: 75%; top: 34px; width: 3px; height: 3px; background: #2563EB; animation-delay: .95s; }
-    .mbrandmark__dots i:nth-child(14) { left: 84%; top: 64px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.45s;}
-    .mbrandmark__dots i:nth-child(15) { left: 97%; top: 42px; width: 3px; height: 3px; background: #2563EB; animation-delay: .6s;  }
-    .mbrandmark__dots i:nth-child(16) { left: 78%; top: 52px; width: 4px; height: 4px; background: #60A5FA; animation-delay: 1.2s; }
-    /* top row across */
-    .mbrandmark__dots i:nth-child(17) { left: 38%; top: 3px;  width: 3px; height: 3px; background: #93C5FD; animation-delay: .55s; }
-    .mbrandmark__dots i:nth-child(18) { left: 62%; top: 5px;  width: 3px; height: 3px; background: #2563EB; animation-delay: 1.0s; }
-    .mbrandmark__dots i:nth-child(19) { left: 50%; top: 1px;  width: 4px; height: 4px; background: #60A5FA; animation-delay: .35s; }
-    .mbrandmark__dots i:nth-child(20) { left: 30%; top: 6px;  width: 3px; height: 3px; background: #60A5FA; animation-delay: .85s; }
-    /* bottom row across */
-    .mbrandmark__dots i:nth-child(21) { left: 40%; top: 62px; width: 3px; height: 3px; background: #2563EB; animation-delay: .5s;  }
-    .mbrandmark__dots i:nth-child(22) { left: 58%; top: 64px; width: 4px; height: 4px; background: #93C5FD; animation-delay: 1.2s; }
-    .mbrandmark__dots i:nth-child(23) { left: 50%; top: 66px; width: 3px; height: 3px; background: #60A5FA; animation-delay: .9s;  }
-    .mbrandmark__dots i:nth-child(24) { left: 68%; top: 60px; width: 3px; height: 3px; background: #2563EB; animation-delay: 1.35s;}
-    /* sparse upper accents near the name */
-    .mbrandmark__dots i:nth-child(25) { left: 33%; top: 22px; width: 3px; height: 3px; background: #93C5FD; animation-delay: .75s; }
-    .mbrandmark__dots i:nth-child(26) { left: 66%; top: 24px; width: 3px; height: 3px; background: #60A5FA; animation-delay: 1.05s;}
-
-    @keyframes mbd-twinkle {
-        0%, 100% { transform: scale(0.6); opacity: 0.3; }
-        50%      { transform: scale(1);   opacity: 0.95; }
+    /* A single diagonal sheen across the top-left corner — one highlight, the way
+       a real surface catches light. */
+    .mband::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        /* One diagonal sheen off the top-left, the way a real surface catches
+           light. Kept faint — on ink it only has to suggest a plane. */
+        background: linear-gradient(118deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 30%, transparent 56%);
     }
-    @media (prefers-reduced-motion: reduce) {
-        .mbrandmark__dots i { animation: none; opacity: 0.7; }
+    /* Soft light source above the lockup so the fill isn't one dead plane. A pale
+       blue tint — white overlays lift #2563EB without shifting its hue. */
+    .mband__glow {
+        position: absolute; top: -150px; left: 50%; transform: translateX(-50%);
+        width: 340px; height: 280px; border-radius: 50%; pointer-events: none;
+        background: radial-gradient(circle, rgba(219,234,254,0.30) 0%, rgba(219,234,254,0.10) 44%, rgba(219,234,254,0) 72%);
+    }
+    .mband__brand {
+        position: relative; z-index: 1;
+        display: flex; align-items: center; justify-content: center; gap: 11px;
+    }
+    /* Ships white, so no invert filter — a filtered PNG loses its edge quality at
+       this size, and the white asset already exists. */
+    .mband__brand img { height: 21px; width: auto; display: block; }
+    /* Hairline rule between wordmark and tag: the lockup convention that makes a
+       qualifier read as part of the mark instead of a sticker beside it. */
+    .mband__brand::before {
+        content: ''; width: 1px; height: 15px; order: 1;
+        background: linear-gradient(180deg, transparent, rgba(255,255,255,0.28), transparent);
+    }
+    .mband__tag { order: 2; }
+    /* Tighter tracking than the old 0.3em — wide-spaced micro-caps floating in a
+       big box is exactly what read as cheap. Sized and weighted to sit as the
+       wordmark's qualifier, optically aligned to its cap height. */
+    .mband__tag {
+        font-size: 9.5px; font-weight: 700; line-height: 1;
+        letter-spacing: 0.16em; text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.86);
+        margin-top: 1px;
     }
 
     /* --- Mobile footer: premium ink sheet.
@@ -913,11 +927,15 @@
     .mfoot {
         position: relative;
         margin-top: 44px;
-        /* Deep ink with two faint corner glows in the brand hues — depth, not a
-           rainbow wash. */
+        /* Deep ink with two faint corner glows. BOTH are blue: the right-hand glow
+           used to be GameHub green (rgba(0,177,90,.15)), which tinted the whole
+           top-right — including the app-download card sitting in it — teal, so the
+           footer read as a different brand to the blue above it. The two-lane
+           identity is carried by the GameHub link in the columns, not by washing
+           the surface. */
         background:
             radial-gradient(120% 78% at 0% 0%, rgba(37, 99, 235, .18) 0%, transparent 55%),
-            radial-gradient(120% 78% at 100% 0%, rgba(0, 177, 90, .15) 0%, transparent 55%),
+            radial-gradient(120% 78% at 100% 0%, rgba(59, 130, 246, .14) 0%, transparent 55%),
             #0B1220;
         color: #E7ECF4;
         border-radius: 24px 24px 0 0;
@@ -925,9 +943,11 @@
         font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
         overflow: hidden;
     }
+    /* Was #2563EB → #22C55E. Now blue into a lighter blue: the hairline still
+       gives the top edge a gradient without introducing a second hue. */
     .mfoot__accent {
         position: absolute; top: 0; left: 0; right: 0; height: 3px;
-        background: linear-gradient(90deg, #2563EB 0%, #22C55E 100%);
+        background: linear-gradient(90deg, #2563EB 0%, #60A5FA 100%);
     }
     /* The page's own bottom padding would leave a slate band above the footer. */
     body:has(.mfoot) main.container { padding-bottom: 0; }
@@ -1326,31 +1346,34 @@
        10dp gaps), line icons rather than emoji, active card accented in EventsBlue. */
     /* Columns follow the card count — the row is built from categories that actually
        have events, so it can be 2 or 3 wide. A fixed repeat(3) left a hole. */
-    .mhome__cats { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
+    /* Filter CHIPS, not cards. The previous row was three 96px bordered boxes in a
+       fixed grid, each carrying a count ("4 Total", "2 Events", "1 Event"). Three
+       problems: equal boxed tiles in a rigid grid is the default template look; the
+       counts advertised how thin the catalogue is; and the labels disagreed with
+       each other ("Total" vs "Events"). A category filter is a control, so it now
+       looks like one — a scrolling row of pills that stays honest at 3 categories
+       or 30. */
+    .mhome__cats {
+        display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+        margin: 0 -16px; padding: 2px 16px;
+        -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+        mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    }
+    .mhome__cats::-webkit-scrollbar { display: none; }
     .mcat {
-        display: flex; flex-direction: column; align-items: flex-start;
-        justify-content: space-between; gap: 12px; height: 96px;
-        background: #fff; border: 1px solid #E2E8F0; border-radius: 16px;
-        padding: 12px; text-decoration: none; text-align: left;
-        transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+        flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px;
+        background: #fff; border: 1px solid #E2E8F0; border-radius: 999px;
+        padding: 9px 15px; text-decoration: none; white-space: nowrap;
+        transition: border-color 120ms ease, background 120ms ease;
     }
-    .mcat__ico {
-        width: 36px; height: 36px; border-radius: 10px;
-        display: grid; place-items: center;
-        background: rgba(37, 99, 235, 0.10);
-        color: #2563EB;
-    }
-    .mcat__name { display: block; font-size: 13px; font-weight: 700; color: #0F172A; line-height: 1.2; }
-    .mcat__stat { display: block; font-size: 11px; color: #94A3B8; margin-top: 2px; }
+    .mcat__ico { display: grid; place-items: center; color: #2563EB; line-height: 0; }
+    .mcat__ico svg { width: 16px; height: 16px; }
+    .mcat__name { font-size: 13.5px; font-weight: 700; color: #0F172A; line-height: 1.2; }
 
     /* Selected state, as in the app's `selected` + activeColor. */
-    .mcat.is-on {
-        background: #2563EB;
-        border-color: #2563EB;
-    }
-    .mcat.is-on .mcat__ico { background: rgba(255, 255, 255, 0.18); color: #fff; }
+    .mcat.is-on { background: #2563EB; border-color: #2563EB; }
+    .mcat.is-on .mcat__ico { color: #fff; }
     .mcat.is-on .mcat__name { color: #fff; }
-    .mcat.is-on .mcat__stat { color: rgba(255, 255, 255, 0.75); }
 
     /* --- Sponsored slot (the app's AdSpaceBanner), only rendered for a real creative --- */
     .mad {
@@ -1479,7 +1502,7 @@
 
 /* ================================================================= */
 /* APP-STYLE MOBILE GAMEHUB â€” mirrors MainScreen.kt GameHubTabScreen  */
-/*   canvas #E9EEF4 Â· GameHubDeep #1B5E20 Â· GameHubGreen #00C853      */
+/*   canvas #E9EEF4 Â· GameHubDeep #1E3A8A Â· GameHubGreen #2563EB      */
 /*   cards: white, 20px radius, premiumCardShadow (see Shapes.kt)     */
 /*   The desktop GameHub sections it replaces are hidden in site.css. */
 /* ================================================================= */
@@ -1519,7 +1542,7 @@
         /* Own the status-bar/notch inset the topbar used to absorb. */
         padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 24px;
         border-radius: 0 0 32px 32px;
-        background: linear-gradient(180deg, #0F3D15 0%, #1B5E20 55%, #227A2B 100%);
+        background: linear-gradient(180deg, #172554 0%, #1E3A8A 55%, #1D4ED8 100%);
     }
 
     /* The greeting row sits on the green: white ink, and the topbar's grid
@@ -1537,7 +1560,7 @@
     .app-greet--dark .app-greet__icon:active { background: rgba(255, 255, 255, 0.12); }
     /* The unread pip is ringed in the band's own green so it reads as a pip and
        not a red smudge (the app rings it in GameHubDeep on dark). */
-    .app-greet--dark .app-greet__dot { box-shadow: 0 0 0 1.5px #1B5E20; }
+    .app-greet--dark .app-greet__dot { box-shadow: 0 0 0 1.5px #1E3A8A; }
 
     /* GameHubSegmentedSwitch: 44px track, 22px radius, 3px inset, white active pill
        with GameHubDeep text. Two links, since the web's lanes are two pages. */
@@ -1562,7 +1585,7 @@
     }
     .mhub__switch-tab.is-on {
         background: #FFFFFF;
-        color: #1B5E20;
+        color: #1E3A8A;
         /* Soft lift, kept light: a heavy black shadow on the green band read as a
            muddy halo. */
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.16);
@@ -1604,7 +1627,7 @@
         border-radius: 24px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
     }
-    .mhub__search:focus-within { border-color: #00C853; }
+    .mhub__search:focus-within { border-color: #2563EB; }
     .mhub__search svg { color: #64748B; flex-shrink: 0; }
     .mhub__search input {
         flex: 1;
@@ -1755,17 +1778,17 @@
         white-space: normal;
         line-height: 1.35;
     }
-    .mhub__top-rank { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #1B5E20; }
+    .mhub__top-rank { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #1E3A8A; }
     .mhub__top-cta {
         flex-shrink: 0;
         padding: 6px 12px;
         border-radius: 12px;
-        background: rgba(27, 94, 32, 0.08);
+        background: rgba(30, 58, 138, 0.08);
         font-size: 11px;
         font-weight: 700;
         letter-spacing: 0.5px;
         white-space: nowrap;
-        color: #1B5E20;
+        color: #1E3A8A;
     }
 
     /* --- 4. Sport chips ------------------------------------------------- */
@@ -1798,7 +1821,7 @@
         white-space: nowrap;
         transition: background-color 200ms ease, color 200ms ease;
     }
-    .mhub__chip.is-on { background: #1B5E20; border-color: transparent; color: #fff; }
+    .mhub__chip.is-on { background: #1E3A8A; border-color: transparent; color: #fff; }
 
     /* --- 5. Section headers --------------------------------------------- */
     /* Asymmetric padding: space above (separates from the previous section),
@@ -1814,7 +1837,7 @@
     .mhub__head--tight { padding-top: 12px; }
     .mhub__head h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; color: #0F172A; }
     .mhub__head p { margin: 2px 0 0; font-size: 12px; font-weight: 500; color: #64748B; }
-    .mhub__head > a { flex-shrink: 0; font-size: 13px; font-weight: 700; color: #1B5E20; text-decoration: none; }
+    .mhub__head > a { flex-shrink: 0; font-size: 13px; font-weight: 700; color: #1E3A8A; text-decoration: none; }
     .mhub__empty { margin: 20px 16px; text-align: center; font-size: 13px; color: #64748B; }
 
     /* Shared price lockup: value + a smaller "/hr" sitting on the baseline. */
@@ -1824,7 +1847,7 @@
     .mhub__price--lg i { font-size: 12px; }
 
     /* Sports playable here â€” fills the gap between price and the card edge. */
-    .mhub__sports { display: inline-flex; align-items: center; gap: 4px; color: #1B5E20; }
+    .mhub__sports { display: inline-flex; align-items: center; gap: 4px; color: #1E3A8A; }
     .mhub__sports i { font-size: 11px; font-weight: 700; font-style: normal; color: #64748B; }
 
     /* --- 5b. Popular Venues reel (PopularArenaCard, 220px wide) ---------- */
@@ -1869,7 +1892,7 @@
         background: rgba(255, 255, 255, 0.92);
         font-size: 11px;
         font-weight: 700;
-        color: #1B5E20;
+        color: #1E3A8A;
     }
     .mhub__arena-rate {
         position: absolute;
@@ -1975,7 +1998,7 @@
         flex-shrink: 0;
         padding: 10px 16px;
         border-radius: 12px;
-        background: #00C853;
+        background: #2563EB;
         font-size: 12px;
         font-weight: 700;
         color: #fff;
@@ -1985,7 +2008,7 @@
 /* ================================================================= */
 /* APP-STYLE MOBILE VENUE DETAIL â€” mirrors VenueDetailScreen.kt       */
 /*   canvas #E9EEF4 Â· sheet #fff lapping 24px over a 280px hero       */
-/*   GameHubDeep #1B5E20 Â· GameHubGreen #00C853 Â· RatingGold #F5A623  */
+/*   GameHubDeep #1E3A8A Â· GameHubGreen #2563EB Â· RatingGold #F5A623  */
 /*   The desktop two-column page it replaces is hidden in site.css.   */
 /* ================================================================= */
 @media (max-width: 720px) {
@@ -2138,7 +2161,7 @@
         text-decoration: none;
         color: #0F172A;
     }
-    .mven__mappill svg { color: #00C853; }
+    .mven__mappill svg { color: #2563EB; }
 
     /* Sections are flat and divider-separated on one white sheet â€” not cards.
        Asymmetric by design: 18px either side of the rule, 12px under a title. */
@@ -2162,16 +2185,16 @@
         align-items: center;
         gap: 6px;
         padding: 10px 16px;
-        border: 1px solid #00C853;
+        border: 1px solid #2563EB;
         border-radius: 50px;
         background: none;
         font-size: 12px;
         font-weight: 700;
         white-space: nowrap;
-        color: #1B5E20;
+        color: #1E3A8A;
         cursor: pointer;
     }
-    .mven__rate svg { color: #00C853; }
+    .mven__rate svg { color: #2563EB; }
 
     /* --- 4. Available Sports -------------------------------------------- */
     .mven__sport {
@@ -2186,7 +2209,7 @@
         text-align: left;
         cursor: pointer;
     }
-    .mven__sport-ico { flex-shrink: 0; display: inline-flex; color: #1B5E20; }
+    .mven__sport-ico { flex-shrink: 0; display: inline-flex; color: #1E3A8A; }
     .mven__sport-copy { flex: 1; min-width: 0; }
     .mven__sport-copy strong { display: block; font-size: 15px; font-weight: 700; color: #0F172A; }
     .mven__sport-copy small { display: block; margin-top: 2px; font-size: 12px; color: #64748B; }
@@ -2212,8 +2235,8 @@
         width: 34px;
         height: 34px;
         border-radius: 10px;
-        background: rgba(0, 200, 83, 0.10);
-        color: #1B5E20;
+        background: rgba(37, 99, 235, 0.10);
+        color: #1E3A8A;
     }
 
     /* --- 7. Good to know -------------------------------------------------- */
@@ -2226,7 +2249,7 @@
         line-height: 19px;
         color: #64748B;
     }
-    .mven__know svg { flex-shrink: 0; margin-top: 2px; color: #00C853; }
+    .mven__know svg { flex-shrink: 0; margin-top: 2px; color: #2563EB; }
 
     /* --- 8. Location ------------------------------------------------------ */
     .mven__dir {
@@ -2235,7 +2258,7 @@
         font-size: 13px;
         font-weight: 700;
         text-decoration: none;
-        color: #00C853;
+        color: #2563EB;
     }
 
     /* --- 9. Reviews ------------------------------------------------------- */
@@ -2249,10 +2272,10 @@
         width: 32px;
         height: 32px;
         border-radius: 50%;
-        background: rgba(0, 200, 83, 0.15);
+        background: rgba(37, 99, 235, 0.15);
         font-size: 13px;
         font-weight: 700;
-        color: #1B5E20;
+        color: #1E3A8A;
     }
     .mven__review-who { flex: 1; min-width: 0; }
     .mven__review-who strong { display: block; font-size: 13px; font-weight: 600; color: #0F172A; }
@@ -2286,7 +2309,7 @@
         padding: 0 24px;
         border: 0;
         border-radius: 50px;
-        background: #00C853;
+        background: #2563EB;
         font-size: 15px;
         font-weight: 700;
         color: #fff;

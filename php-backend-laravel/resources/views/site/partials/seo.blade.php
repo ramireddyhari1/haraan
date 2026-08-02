@@ -11,6 +11,9 @@
       robots      — defaults to index,follow on public pages and noindex on the
                     private lanes below (account, checkout, auth, consoles)
       jsonld      — one schema.org array, or a list of them
+      breadcrumbs — [['name' => 'Events', 'url' => '…'], …] for the trail Google
+                    shows in place of the raw URL; the current page comes last
+                    and may omit its url
 --}}
 @php
     $seoIn = $seo ?? [];
@@ -27,14 +30,20 @@
     $seoDefaultDesc = 'Haraan — book concerts, comedy, workshops and sports events near you, '
         . 'find turfs and courts to play, and follow live gully cricket scores.';
 
+    // The default share image is a purpose-built 1200x630 card. The bare wordmark
+    // that used to sit here was 1680x445 and transparent, so every client that
+    // crops to 1.91:1 mangled it and composited the gaps onto black.
+    $seoDefaultImage = asset('images/haraan-social-card.png');
+
     $seoMeta = array_merge([
         'title' => $title ?? 'Haraan',
         'description' => $seoDefaultDesc,
-        'image' => asset('images/haraan-logo-blue.png'),
+        'image' => $seoDefaultImage,
         'type' => 'website',
         'canonical' => url($seoPath === '/' ? '/' : $seoPath),
         'robots' => $seoPrivate ? 'noindex,nofollow' : 'index,follow,max-image-preview:large',
         'jsonld' => null,
+        'breadcrumbs' => null,
     ], array_filter($seoIn, static fn ($v) => $v !== null && $v !== ''));
 
     $seoDesc = \Illuminate\Support\Str::limit(
@@ -46,6 +55,28 @@
     $seoBlocks = $seoMeta['jsonld'] ?? [];
     if (is_array($seoBlocks) && isset($seoBlocks['@type'])) {
         $seoBlocks = [$seoBlocks];
+    }
+
+    // Breadcrumbs let Google print "haraan.app › Events › Concert name" instead of
+    // a bare URL. The last crumb is the current page, so its `item` is omitted —
+    // schema.org treats a self-referencing last crumb as redundant.
+    $seoCrumbs = array_values(array_filter((array) ($seoMeta['breadcrumbs'] ?? [])));
+    if ($seoCrumbs !== [] && ! $seoPrivate) {
+        $seoLast = count($seoCrumbs) - 1;
+        $seoBlocks[] = [
+            '@context' => 'https://schema.org',
+            '@type' => 'BreadcrumbList',
+            'itemListElement' => array_map(
+                static fn (int $i, array $c) => array_filter([
+                    '@type' => 'ListItem',
+                    'position' => $i + 1,
+                    'name' => $c['name'] ?? null,
+                    'item' => $i === $seoLast ? null : ($c['url'] ?? null),
+                ], static fn ($v) => $v !== null),
+                array_keys($seoCrumbs),
+                $seoCrumbs,
+            ),
+        ];
     }
 
     // Site-wide identity: helps Google resolve the brand entity and show a
@@ -62,7 +93,16 @@
                 'name' => 'Haraan',
                 'alternateName' => 'Haraan App',
                 'url' => url('/'),
-                'logo' => asset('images/haraan-logo-blue.png'),
+                // MUST be square: Google renders this as the round icon beside the
+                // search result, so the wide wordmark that used to be here came out
+                // as a white circle with unreadable "Haraan" text letterboxed in it.
+                'logo' => [
+                    '@type' => 'ImageObject',
+                    'url' => asset('images/haraan-logo-square.png'),
+                    'width' => 512,
+                    'height' => 512,
+                ],
+                'image' => asset('images/haraan-logo-square.png'),
                 'description' => 'Haraan — book concerts, comedy, workshops and sports events, '
                     . 'reserve cricket turfs and courts, and follow live gully-cricket scores.',
                 // sameAs is the brand-verification signal: it links this entity to
@@ -99,17 +139,25 @@
 <meta property="og:description" content="{{ $seoDesc }}">
 <meta property="og:url" content="{{ $seoMeta['canonical'] }}">
 <meta property="og:image" content="{{ $seoMeta['image'] }}">
+<meta property="og:image:alt" content="{{ $seoMeta['title'] }}">
+@if ($seoMeta['image'] === $seoDefaultImage)
+    {{-- Dimensions only for our own card: crawlers can lay the preview out before
+         the image loads, but guessing them for a partner's poster would be a lie. --}}
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+@endif
 <meta property="og:locale" content="en_IN">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ $seoMeta['title'] }}">
 <meta name="twitter:description" content="{{ $seoDesc }}">
 <meta name="twitter:image" content="{{ $seoMeta['image'] }}">
+<meta name="twitter:image:alt" content="{{ $seoMeta['title'] }}">
 
 @foreach ($seoBlocks as $seoBlock)
-    <script type="application/ld+json">{!! json_encode($seoBlock, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) !!}</script>
+    <script type="application/ld+json">{!! json_encode($seoBlock, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
 @endforeach
 
 @unless ($seoPrivate)
-    <script type="application/ld+json">{!! json_encode($seoSiteGraph, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) !!}</script>
+    <script type="application/ld+json">{!! json_encode($seoSiteGraph, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
 @endunless

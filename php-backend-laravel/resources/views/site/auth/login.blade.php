@@ -9,7 +9,7 @@
     .auth-page-body {
         background:
             radial-gradient(55% 45% at 12% 0%, rgba(37,99,235,.08), transparent 60%),
-            radial-gradient(50% 40% at 100% 15%, rgba(16,185,129,.08), transparent 60%),
+            radial-gradient(50% 40% at 100% 15%, rgba(96,165,250,.10), transparent 60%),
             #F4F6FA;
         min-height: 100vh;
     }
@@ -23,7 +23,7 @@
     /* ---- Left value-prop column ---- */
     .lgn__aside { flex: 1 1 0; max-width: 356px; }
     .lgn__aside h2 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: clamp(27px, 2.3vw, 34px); font-weight: 800; letter-spacing: -.03em; color: #0F172A; line-height: 1.12; margin: 0 0 14px; }
-    .lgn__aside h2 .g { background: linear-gradient(100deg, #2563EB 0%, #10B981 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .lgn__aside h2 .g { background: linear-gradient(100deg, #2563EB 0%, #60A5FA 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
     .lgn__aside p { color: #5B6472; font-size: 15px; line-height: 1.6; margin: 0 0 24px; }
     .lgn__feat { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
     .lgn__feat li { display: flex; align-items: center; gap: 12px; font-size: 14.5px; font-weight: 600; color: #334155; }
@@ -33,7 +33,7 @@
     /* ---- Right brand visual (decorative) ---- */
     .lgn__visual { flex: 1 1 0; max-width: 336px; }
     .lgn__vcard { position: relative; overflow: hidden; border-radius: 22px; padding: 24px 22px; min-height: 360px; color: #eaf0ff;
-        background: radial-gradient(520px 340px at 15% -10%, rgba(59,130,246,.55), transparent 62%), radial-gradient(420px 320px at 110% 10%, rgba(16,185,129,.4), transparent 60%), linear-gradient(160deg, #0b1c46 0%, #0a1738 55%, #0a1230 100%);
+        background: radial-gradient(520px 340px at 15% -10%, rgba(59,130,246,.55), transparent 62%), radial-gradient(420px 320px at 110% 10%, rgba(96,165,250,.4), transparent 60%), linear-gradient(160deg, #0b1c46 0%, #0a1738 55%, #0a1230 100%);
         box-shadow: 0 34px 66px -34px rgba(10,23,56,.6); display: flex; flex-direction: column; }
     .lgn__vcard-grid { position: absolute; inset: 0; opacity: .16; background-image: linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px); background-size: 38px 38px; -webkit-mask-image: radial-gradient(120% 90% at 30% 0%, #000 30%, transparent 74%); mask-image: radial-gradient(120% 90% at 30% 0%, #000 30%, transparent 74%); }
     .lgn__vcard > * { position: relative; z-index: 1; }
@@ -49,7 +49,7 @@
 
     .lgn__head { padding: 32px 30px 14px; text-align: center; position: relative; overflow: hidden;
         background: linear-gradient(180deg, #FAFCFF 0%, #FFFFFF 60%); }
-    .lgn__head::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #2563EB 0%, #10B981 100%); z-index: 2; }
+    .lgn__head::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #2563EB 0%, #60A5FA 100%); z-index: 2; }
     /* Whisper-faint glow behind the brand — just enough to lift it off flat white. */
     .lgn__head::after { content: ""; position: absolute; top: -80px; left: 50%; transform: translateX(-50%);
         width: 320px; height: 200px; border-radius: 50%; z-index: 0; pointer-events: none;
@@ -127,7 +127,7 @@
         <p>Book event tickets and organise your matches — Haraan keeps tickets and play under a single account.</p>
         <ul class="lgn__feat">
             <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16M4 8a2 2 0 0 1 0-4h16a2 2 0 0 1 0 4M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M12 12v5"/></svg></span> Instant tickets for events near you</li>
-            <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg></span> Find turfs, courts &amp; players in GameHub</li>
+            <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg></span> Find turfs, courts &amp; players in Pulse</li>
             <li><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span> One account, secure &amp; free to join</li>
         </ul>
     </aside>
@@ -313,7 +313,7 @@
                 <div class="lgn__vrow">
                     <span class="lgn__vthumb">🏏</span>
                     <span class="lgn__vmeta"><b>Box Cricket Turf</b><span>Tonight · 4 slots left</span></span>
-                    <span class="lgn__vtag">GameHub</span>
+                    <span class="lgn__vtag">Pulse</span>
                 </div>
                 <div class="lgn__vrow">
                     <span class="lgn__vthumb">⚡</span>

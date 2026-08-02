@@ -25,7 +25,7 @@ use App\Models\Venue;
 final class PublicWebController extends Controller
 {
     /**
-     * The GameHub sport chips, in the app's order (MainScreen.kt `sports`). "All" is the
+     * The Pulse sport chips, in the app's order (MainScreen.kt `sports`). "All" is the
      * unfiltered lead chip, not a sport. Keep this list and the app's in step.
      */
     private const GAMEHUB_SPORTS = ['All', 'Cricket', 'Football', 'Badminton', 'Basketball'];
@@ -79,10 +79,12 @@ final class PublicWebController extends Controller
                     : ($seoCity
                         ? 'Events in ' . $seoCity . ' — book tickets'
                         : 'Events near you — book tickets'),
+                // Keep this under the partial's 158-char cap: at 164 it used to be
+                // cut mid-word, so results ended "...live gully-cricket s...".
                 'description' => $isHome
-                    ? 'Haraan is your app for booking concerts, comedy, workshops and sports '
-                        . 'events, reserving cricket turfs and badminton courts, and following '
-                        . 'live gully-cricket scores — all in one place.'
+                    ? 'Haraan — book concerts, comedy, workshops and sports events near you, '
+                        . 'reserve cricket turfs and badminton courts, and follow live '
+                        . 'gully-cricket scores.'
                     : 'Concerts, comedy nights, workshops, sports and festivals'
                         . ($seoCity ? ' in ' . $seoCity : '')
                         . '. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
@@ -93,6 +95,11 @@ final class PublicWebController extends Controller
                 'robots' => $category !== null
                     ? 'noindex,follow'
                     : 'index,follow,max-image-preview:large',
+                // The homepage is the root of the trail, so it gets no crumbs.
+                'breadcrumbs' => $isHome ? null : [
+                    ['name' => 'Haraan', 'url' => url('/')],
+                    ['name' => 'Events'],
+                ],
             ],
             'events' => $events,
             'forYou' => $this->railFeed('for_you', 20, $category),
@@ -106,13 +113,40 @@ final class PublicWebController extends Controller
 
     public function eventDetail(Request $request, string $id): View
     {
-        $event = Event::query()->with('partner.hostProfile')->findOrFail($id);
+        $viewer = $request->user();
+
+        $query = Event::query()->with('partner.hostProfile');
+
+        // Only a published event is public. This page used to be an unfiltered
+        // findOrFail, so a draft's title, poster, tiers and host leaked to anyone
+        // guessing an id (and to crawlers), even though booking and /api/events
+        // were already published-only. lower(): status casing is mixed in this DB.
+        //
+        // The exception is a preview: the organiser who owns the event (desk staff
+        // share the owner's partner account, hence effectivePartnerId) and internal
+        // staff can still open their own unpublished event to check it before it
+        // goes live. Everyone else gets a 404, not a 403 — a stranger shouldn't
+        // learn that the id exists at all.
+        if (! $this->mayPreviewAnyEvent($viewer)) {
+            $query->where(function ($q) use ($viewer): void {
+                $q->whereRaw('lower(status) = ?', ['published']);
+
+                if ($viewer !== null) {
+                    $q->orWhere('partner_id', $viewer->effectivePartnerId());
+                }
+            });
+        }
+
+        $event = $query->findOrFail($id);
+
+        $isPreview = strtolower((string) $event->status) !== 'published';
 
         // Record the web page view for the organiser's analytics funnel (the app
         // already records API opens via EventsController). Best-effort + swallowed
         // inside the recorder. Skip the organiser's own previews so their funnel
-        // reflects real visitors, not their own edits.
-        if ($request->user()?->id !== $event->partner_id) {
+        // reflects real visitors, not their own edits — and skip unpublished
+        // previews entirely, which have no real visitors by definition.
+        if (! $isPreview && $viewer?->id !== $event->partner_id) {
             \App\Support\EventViewRecorder::record($event, $request);
         }
 
@@ -125,6 +159,7 @@ final class PublicWebController extends Controller
         // so the rail is relevant without inventing data. Ordered soonest-first.
         $similar = Event::query()
             ->where('status', 'published')
+            ->notFinished()
             ->with('ticketTypes')
             ->whereKeyNot($event->getKey())
             ->orderByRaw('CASE WHEN category = ? THEN 0 ELSE 1 END', [$event->category])
@@ -140,8 +175,24 @@ final class PublicWebController extends Controller
             'id'    => $id,
             'hostProfile' => $hostProfile,
             'similar' => $similar,
-            'seo'   => $this->eventSeo($event),
+            // A draft preview must never be indexed, even though only its owner and
+            // internal staff can reach it: preview URLs get pasted into chats, and a
+            // draft must not end up outranking the real listing once it publishes.
+            'seo'   => $isPreview
+                ? [...$this->eventSeo($event), 'robots' => 'noindex,nofollow']
+                : $this->eventSeo($event),
         ]);
+    }
+
+    /**
+     * Internal staff who may open any event, published or not — super-admins and
+     * the OPS desk that runs the Events workspace. Deliberately NOT canManage(),
+     * which is also true for every event PARTNER: that would let one organiser read
+     * another's unreleased line-up.
+     */
+    private function mayPreviewAnyEvent(?User $viewer): bool
+    {
+        return $viewer !== null && ($viewer->isSuperAdmin() || $viewer->hasRoleEither(['OPS']));
     }
 
     /**
@@ -237,6 +288,11 @@ final class PublicWebController extends Controller
             'type' => 'event',
             'canonical' => url('/events/' . $event->id),
             'jsonld' => $schema,
+            'breadcrumbs' => [
+                ['name' => 'Haraan', 'url' => url('/')],
+                ['name' => 'Events', 'url' => url('/events')],
+                ['name' => $event->title],
+            ],
         ];
     }
 
@@ -266,6 +322,7 @@ final class PublicWebController extends Controller
 
         return view('site.host', [
             'title' => $profile->display_name . ' · Haraan',
+            'seo' => $this->hostSeo($profile, $isVenue),
             'profile' => $profile,
             'lane' => $isVenue ? 'venue' : 'event',
             'events' => $events,
@@ -276,6 +333,71 @@ final class PublicWebController extends Controller
             'isOwner' => $isOwner,
             'rating' => $profile->ratingSummary(),
         ]);
+    }
+
+    /**
+     * Search metadata for an organiser / venue-owner brand page.
+     *
+     * Lives here rather than in site/host.blade.php so every public page assembles
+     * its metadata the same way (see eventSeo/venueSeo) — the view's copy silently
+     * shadowed this one.
+     *
+     * @return array<string, mixed>
+     */
+    private function hostSeo(HostProfile $profile, bool $isVenue): array
+    {
+        $url = url('/host/' . $profile->slug);
+        $noun = $isVenue ? 'Sports venues' : 'Events';
+        $rating = $profile->ratingSummary();
+
+        // Tagline first: it's written as a one-line pitch, which is what a meta
+        // description wants. `about` is the fallback and gets truncated.
+        $desc = trim((string) ($profile->tagline ?: $profile->about));
+        if ($desc === '') {
+            $desc = $noun . ' by ' . $profile->display_name
+                . ($profile->city ? ' in ' . $profile->city : '')
+                . '. See what\'s on and book on Haraan.';
+        }
+
+        $schema = array_filter([
+            '@context' => 'https://schema.org',
+            // A venue owner is a physical place searchers can visit; an event
+            // organiser is not.
+            '@type' => $isVenue ? 'LocalBusiness' : 'Organization',
+            'name' => $profile->display_name,
+            'url' => $url,
+            'description' => \Illuminate\Support\Str::limit(strip_tags($desc), 300),
+            'logo' => $profile->logoUrl(),
+            'image' => $profile->coverUrl() ?: $profile->logoUrl(),
+            'address' => $profile->city ? [
+                '@type' => 'PostalAddress',
+                'addressLocality' => $profile->city,
+                'addressCountry' => 'IN',
+            ] : null,
+            'sameAs' => array_values(array_filter(
+                array_merge([$profile->website], array_values((array) ($profile->socials ?? []))),
+                static fn ($v) => is_string($v) && str_starts_with($v, 'http'),
+            )) ?: null,
+            'aggregateRating' => $rating['count'] > 0 && $rating['avg'] !== null ? [
+                '@type' => 'AggregateRating',
+                'ratingValue' => (string) $rating['avg'],
+                'reviewCount' => $rating['count'],
+            ] : null,
+        ], static fn ($v) => $v !== null && $v !== []);
+
+        return [
+            'title' => $profile->display_name . ' — ' . $noun . ' on Haraan',
+            'description' => $desc,
+            'image' => $profile->coverUrl() ?: $profile->logoUrl(),
+            'type' => 'profile',
+            'canonical' => $url,
+            'jsonld' => $schema,
+            'breadcrumbs' => [
+                ['name' => 'Haraan', 'url' => url('/')],
+                ['name' => $isVenue ? 'Pulse' : 'Events', 'url' => url($isVenue ? '/gamehub' : '/events')],
+                ['name' => $profile->display_name],
+            ],
+        ];
     }
 
     /** Toggle following an organiser (auth). Returns to the page. */
@@ -318,7 +440,7 @@ final class PublicWebController extends Controller
             ->map(fn (LiveMatch $m) => $this->decorateLiveStrip($m))
             ->all();
 
-        // The app's sport chips are a global filter over the whole GameHub screen
+        // The app's sport chips are a global filter over the whole Pulse screen
         // (MainScreen.kt `selectedSport`): they narrow the venues AND the ActionBoard.
         // Here they're ?sport= links, as the Events categories already are — a reload
         // costs a beat, but the popular/more split below is then recomputed over the
@@ -335,7 +457,7 @@ final class PublicWebController extends Controller
         $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
 
         return view('site.gamehub', [
-            'title'         => 'GameHub — book turfs, courts & play',
+            'title'         => 'Pulse — book turfs, courts & play',
             'seo'           => [
                 'title' => 'Book turfs, courts and sports venues'
                     . ($city ? ' in ' . $city : ' near you'),
@@ -344,6 +466,10 @@ final class PublicWebController extends Controller
                     . ' by the hour on Haraan — plus live gully-cricket scores and player rankings.',
                 'canonical' => url('/gamehub'),
                 'robots' => request()->query('sport') ? 'noindex,follow' : 'index,follow,max-image-preview:large',
+                'breadcrumbs' => [
+                    ['name' => 'Haraan', 'url' => url('/')],
+                    ['name' => 'Pulse'],
+                ],
             ],
             'venues'        => $venues,
             'sportCounts'   => $sportCounts,
@@ -357,7 +483,7 @@ final class PublicWebController extends Controller
     }
 
     /**
-     * Rank #1 for the GameHub "Top Player" widget — the app's LeaderboardHomeWidget,
+     * Rank #1 for the Pulse "Top Player" widget — the app's LeaderboardHomeWidget,
      * reading the same monthly ranked-XP board its API serves (LeaderboardService), so
      * the two can't drift.
      *
@@ -377,7 +503,7 @@ final class PublicWebController extends Controller
     }
 
     /**
-     * Flatten a LiveMatch into a clean two-row scorecard for the GameHub live
+     * Flatten a LiveMatch into a clean two-row scorecard for the Pulse live
      * strip. Wickets are counted from over_summary (a "W" ball), avoiding the
      * heavier inline parser the full ActionBoard page uses.
      */
@@ -507,6 +633,11 @@ final class PublicWebController extends Controller
             'image' => $image,
             'canonical' => url('/gamehub/' . $venue->id),
             'jsonld' => $schema,
+            'breadcrumbs' => [
+                ['name' => 'Haraan', 'url' => url('/')],
+                ['name' => 'Pulse', 'url' => url('/gamehub')],
+                ['name' => $venue->name],
+            ],
         ];
     }
 
@@ -1133,7 +1264,7 @@ final class PublicWebController extends Controller
     }
 
     /* ------------------------------------------------------------------ */
-    /*  GameHub venue view-model helpers                                   */
+    /*  Pulse venue view-model helpers                                   */
     /* ------------------------------------------------------------------ */
 
     /** Normalize a stored venue image path into a usable URL. */
@@ -1148,7 +1279,7 @@ final class PublicWebController extends Controller
         return asset('storage/' . ltrim($path, '/'));
     }
 
-    /** Compact venue shape for the GameHub browse grid. */
+    /** Compact venue shape for the Pulse browse grid. */
     private function decorateVenueCard(Venue $v): object
     {
         $images = is_array($v->images) ? $v->images : [];
@@ -1170,7 +1301,7 @@ final class PublicWebController extends Controller
         ];
     }
 
-    /** Full venue shape for the GameHub detail page. */
+    /** Full venue shape for the Pulse detail page. */
     private function decorateVenueDetail(Venue $v): object
     {
         $images  = is_array($v->images) ? $v->images : [];
@@ -1310,7 +1441,7 @@ final class PublicWebController extends Controller
     }
 
     /**
-     * The GameHub sport chip in play. Whitelisted against the app's own chip row
+     * The Pulse sport chip in play. Whitelisted against the app's own chip row
      * (MainScreen.kt `sports`) so ?sport= can only ever be one of those — an unknown
      * value falls back to "All" rather than rendering a chip row where nothing is lit
      * next to an empty venue list.
@@ -1430,6 +1561,9 @@ final class PublicWebController extends Controller
         // could never see them). Newest-first is the tiebreak inside each group.
         $events = $this->orderLocalFirst(
             Event::query()
+                // See eventFeed(): fromPrice() reads the relation, so eager-load it.
+                ->with('ticketTypes')
+                ->notFinished()
                 ->where('status', 'published')
                 ->when($category, fn ($q) => $q->where('category', $category)),
             $city
@@ -1461,6 +1595,10 @@ final class PublicWebController extends Controller
         // aren't the newest), then everything else by date.
         $events = $this->orderLocalFirst(
             Event::query()
+                // Cards price off the tiers via Event::fromPrice(); without this the
+                // rail is one query per card.
+                ->with('ticketTypes')
+                ->notFinished()
                 ->where('status', 'published')
                 ->when($category, fn ($q) => $q->where('category', $category)),
             $city

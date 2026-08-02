@@ -18,7 +18,7 @@
 }
 
 /* "Haraan special" lockup — fixed in the banner's top-left corner, above the
-   sliding track. Mirrors the mobile .mbrandmark: black wordmark + blue script. */
+   sliding track. Mirrors the feed band (.mband): wordmark + micro-caps tag. */
 .banner-brand {
     position: absolute;
     top: 26px;
@@ -34,16 +34,19 @@
     display: block;
     filter: brightness(0); /* the PNG is navy; force it to black like mobile */
 }
+/* Matches the .mband brand on the feed: letterspaced micro-caps, not the
+   old Great Vibes script at a -2deg tilt. Kept inline beside the wordmark here —
+   this one sits over a poster, where vertical room is tight. */
 .banner-brand span {
     position: relative;
-    top: 7px;
-    margin-left: -4px;
-    font-family: 'Great Vibes', 'Segoe Script', cursive;
-    font-size: 24px;
+    top: -1px;
+    margin-left: 8px;
+    font-size: 9px;
+    font-weight: 800;
     line-height: 1;
-    letter-spacing: 0.01em;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
     color: #2563EB;
-    transform: rotate(-2deg);
     white-space: nowrap;
 }
 

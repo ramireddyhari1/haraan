@@ -3,9 +3,9 @@
 
      Used in two places, so it lives here rather than in either of them:
        · the sticky topbar, on white ($onDark = false)
-       · the GameHub green hero, on dark ($onDark = true)
+       · the Pulse green hero, on dark ($onDark = true)
      The app passes the same `onDark` flag to the same composable for the same reason —
-     on the GameHub tab it renders no outer header at all, and this row sits on the
+     on the Pulse tab it renders no outer header at all, and this row sits on the
      green band instead.
 
      @param bool $onDark  Render the white-ink variant for a dark background. --}}

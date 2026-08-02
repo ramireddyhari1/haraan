@@ -334,6 +334,8 @@ class LiveMatchController extends Controller
             'inningsCards' => $cards,
             // Ball-by-ball commentary feed (newest first), replayed from the log.
             'commentary' => $this->buildCommentary($match),
+            // Impact ranking (MVP tab) derived from the same replayed cards.
+            'mvp' => $this->buildMvp($match, $cards),
             // Current partnership + last wicket, derived from the live innings — real
             // values (no "0(0)" / "N/A" placeholders) or null when there's nothing yet.
             'partnership' => $partnership,
@@ -695,6 +697,148 @@ class LiveMatchController extends Controller
 
         $finalize();
         return $cards;
+    }
+
+    /**
+     * Rank every player who actually did something by an "impact points" score, for the
+     * MVP tab. Built purely from the replayed innings cards ([buildInningsCards]) so it
+     * agrees with the scorecard to the ball — no separate source of truth, no estimates.
+     *
+     * Points (kept deliberately simple so the app can explain it in one line):
+     *   batting  = runs + 1/four + 2/six, plus a strike-rate bonus once they've faced
+     *              10 balls (below that a cameo SR is noise, not impact)
+     *   bowling  = 20/wicket + 8/maiden, plus an economy bonus once they've bowled a
+     *              full over
+     *
+     * Fielding is deliberately absent: the scorer never captures the fielder (see
+     * [dismissalText]), so catches/run-outs cannot be credited to anyone without
+     * inventing them.
+     *
+     * A player's team is unambiguous — batters belong to the innings' batting side,
+     * bowlers to the other one — so batting and bowling spells across both innings
+     * aggregate onto one row. Keyed by display name, exactly like the replay itself.
+     */
+    private function buildMvp(LiveMatch $match, array $cards): array
+    {
+        if (empty($cards)) {
+            return [];
+        }
+
+        $teamName = fn (int $team): string => $team === 2
+            ? (string) ($match->away_full ?: $match->away)
+            : (string) ($match->home_full ?: $match->home);
+
+        $rows = [];
+        $blank = static fn (string $name, int $team): array => [
+            'name' => $name, 'team' => $team,
+            'runs' => 0, 'ballsFaced' => 0, 'fours' => 0, 'sixes' => 0, 'out' => false,
+            'wickets' => 0, 'ballsBowled' => 0, 'runsConceded' => 0, 'maidens' => 0,
+        ];
+
+        foreach ($cards as $card) {
+            $battingTeam = (int) ($card['battingTeam'] ?? 1);
+            $bowlingTeam = $battingTeam === 2 ? 1 : 2;
+
+            foreach (($card['batters'] ?? []) as $b) {
+                $name = trim((string) ($b['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $rows[$name] ??= $blank($name, $battingTeam);
+                $rows[$name]['runs']       += (int) ($b['runs'] ?? 0);
+                $rows[$name]['ballsFaced'] += (int) ($b['balls'] ?? 0);
+                $rows[$name]['fours']      += (int) ($b['fours'] ?? 0);
+                $rows[$name]['sixes']      += (int) ($b['sixes'] ?? 0);
+                $rows[$name]['out']         = $rows[$name]['out'] || (bool) ($b['out'] ?? false);
+            }
+
+            foreach (($card['bowlers'] ?? []) as $bw) {
+                $name = trim((string) ($bw['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $rows[$name] ??= $blank($name, $bowlingTeam);
+                $rows[$name]['wickets']      += (int) ($bw['wickets'] ?? 0);
+                $rows[$name]['ballsBowled']  += (int) ($bw['balls'] ?? 0);
+                $rows[$name]['runsConceded'] += (int) ($bw['runs'] ?? 0);
+                $rows[$name]['maidens']      += (int) ($bw['maidens'] ?? 0);
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            // Someone who never faced or bowled a ball has no impact to rank.
+            if ($r['ballsFaced'] <= 0 && $r['ballsBowled'] <= 0) {
+                continue;
+            }
+
+            $batPoints = 0;
+            $sr = null;
+            if ($r['ballsFaced'] > 0) {
+                $batPoints = $r['runs'] + $r['fours'] + (2 * $r['sixes']);
+                $sr = $r['runs'] * 100.0 / $r['ballsFaced'];
+                if ($r['ballsFaced'] >= 10) {
+                    $batPoints += match (true) {
+                        $sr >= 150 => 8,
+                        $sr >= 120 => 4,
+                        $sr < 60   => -4,
+                        default    => 0,
+                    };
+                }
+            }
+
+            $bowlPoints = 0;
+            $econ = null;
+            if ($r['ballsBowled'] > 0) {
+                $bowlPoints = (20 * $r['wickets']) + (8 * $r['maidens']);
+                $econ = $r['runsConceded'] * 6.0 / $r['ballsBowled'];
+                if ($r['ballsBowled'] >= 6) {
+                    $bowlPoints += match (true) {
+                        $econ <= 4  => 8,
+                        $econ <= 6  => 4,
+                        $econ >= 12 => -4,
+                        default     => 0,
+                    };
+                }
+            }
+
+            $overs = intdiv($r['ballsBowled'], 6) . '.' . ($r['ballsBowled'] % 6);
+
+            $out[] = [
+                'name'         => $r['name'],
+                'team'         => $r['team'],
+                'teamName'     => $teamName($r['team']),
+                'points'       => max(0, $batPoints + $bowlPoints),
+                'batPoints'    => $batPoints,
+                'bowlPoints'   => $bowlPoints,
+                // Pre-formatted display lines; blank when they didn't bat / bowl.
+                'batLine'      => $r['ballsFaced'] > 0
+                    ? $r['runs'] . ($r['out'] ? '' : '*') . ' (' . $r['ballsFaced'] . ')'
+                    : '',
+                'bowlLine'     => $r['ballsBowled'] > 0
+                    ? $r['wickets'] . '-' . $r['runsConceded'] . ' (' . $overs . ')'
+                    : '',
+                'strikeRate'   => $sr === null ? '' : sprintf('%.1f', $sr),
+                'econ'         => $econ === null ? '' : sprintf('%.1f', $econ),
+                'runs'         => $r['runs'],
+                'ballsFaced'   => $r['ballsFaced'],
+                'fours'        => $r['fours'],
+                'sixes'        => $r['sixes'],
+                'wickets'      => $r['wickets'],
+                'ballsBowled'  => $r['ballsBowled'],
+                'runsConceded' => $r['runsConceded'],
+                'maidens'      => $r['maidens'],
+            ];
+        }
+
+        // Highest impact first; ties broken by wickets, then runs, so the ordering is
+        // stable across refreshes rather than shuffling on equal points.
+        usort($out, function (array $a, array $b): int {
+            return [$b['points'], $b['wickets'], $b['runs'], $a['name']]
+                <=> [$a['points'], $a['wickets'], $a['runs'], $b['name']];
+        });
+
+        return $out;
     }
 
     /** Resolve a player id (or guest name) to a display name via the match squads. */

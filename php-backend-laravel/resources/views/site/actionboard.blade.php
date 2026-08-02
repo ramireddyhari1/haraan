@@ -198,7 +198,7 @@
                  web bar; the one CTA left is "get the app". --}}
             <a class="mab__get" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="#00E3A5" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
+                    <path fill="#60A5FA" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
                     <path fill="#3DDCFF" d="M17.7 9.1 5.6 2l9 8.7z"/>
                     <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
                     <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
@@ -348,7 +348,7 @@
                             @endif
                         </div>
                         <div class="mab__dtiles">
-                            <div class="mab__dtile"><b style="color:#00C853">{{ $abSummary['liveMatches'] }}</b><span>Live</span></div>
+                            <div class="mab__dtile"><b style="color:#2563EB">{{ $abSummary['liveMatches'] }}</b><span>Live</span></div>
                             <div class="mab__dtile"><b>{{ $abSummary['players'] }}</b><span>Players</span></div>
                             <div class="mab__dtile"><b>{{ $abSummary['totalMatches'] }}</b><span>Matches</span></div>
                         </div>
@@ -1256,7 +1256,7 @@ main.container {
     border-radius: 4px;
 }
 .scrollbar-custom::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 210, 106, 0.5);
+    background: rgba(37, 99, 235, 0.5);
 }
 
 /* Desktop Header Navigation (DO NOT CHANGE - REMAINS DARK) */
@@ -1292,15 +1292,15 @@ main.container {
 .logo-pulse {
     width: 10px;
     height: 10px;
-    background: #00D26A;
+    background: #2563EB;
     border-radius: 50%;
-    box-shadow: 0 0 0 3px rgba(0, 210, 106, 0.25);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
     animation: livePulseDot 2s infinite ease-in-out;
 }
 @keyframes livePulseDot {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 210, 106, 0.5); }
-    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(0, 210, 106, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 210, 106, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.5); }
+    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
 
 .desktop-menu {
@@ -1321,7 +1321,7 @@ main.container {
     background: rgba(255, 255, 255, 0.05);
 }
 .menu-link.font-accent {
-    color: #00D26A;
+    color: #2563EB;
 }
 
 .header-actions {
@@ -1344,24 +1344,24 @@ main.container {
     background: rgba(255, 255, 255, 0.12);
 }
 .btn-create-match {
-    background: linear-gradient(135deg, #00D26A 0%, #22C55E 100%);
+    background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
     color: #000000;
     font-weight: 800;
     padding: 9px 18px;
     border-radius: 8px;
     font-size: 13px;
     text-decoration: none;
-    box-shadow: 0 4px 12px rgba(0, 210, 106, 0.2);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
     transition: all 0.25s ease;
 }
 .btn-create-match:hover {
     transform: translateY(-1.5px);
-    box-shadow: 0 6px 16px rgba(0, 210, 106, 0.35);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
 }
 .player-badge {
-    background: rgba(0, 210, 106, 0.08);
-    border: 1px solid rgba(0, 210, 106, 0.18);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    color: #2563EB;
     padding: 6px 12px;
     border-radius: 20px;
     font-size: 12px;
@@ -1400,7 +1400,7 @@ main.container {
     transition: all 0.2s ease;
 }
 .nav-tab.active {
-    color: #00D26A;
+    color: #1E3A8A;
 }
 .tab-icon {
     width: 22px;
@@ -1483,7 +1483,7 @@ main.container {
 }
 .status-tab.active {
     background: #FFFFFF;
-    color: #00D26A;
+    color: #1E3A8A;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 .badge-live-dot {
@@ -1517,12 +1517,12 @@ main.container {
 }
 .sidebar-match-card:hover {
     background: #F8FAFC;
-    border-color: rgba(0, 210, 106, 0.4);
+    border-color: rgba(37, 99, 235, 0.4);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 .sidebar-match-card.live {
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
 }
 .card-meta {
     display: flex;
@@ -1536,7 +1536,7 @@ main.container {
     text-transform: uppercase;
 }
 .live-tag {
-    color: #00D26A;
+    color: #2563EB;
     font-weight: 800;
     display: flex;
     align-items: center;
@@ -1545,7 +1545,7 @@ main.container {
 .live-pulse-dot {
     width: 6px;
     height: 6px;
-    background: #00D26A;
+    background: #2563EB;
     border-radius: 50%;
     animation: livePulseDot 1s infinite ease-in-out;
 }
@@ -1588,7 +1588,7 @@ main.container {
     font-weight: 800;
 }
 .batting-active .runs-wkts {
-    color: #00D26A !important; /* Active batting team score in emerald green */
+    color: #2563EB !important; /* Active batting team score in emerald green */
 }
 .overs-str {
     color: #64748B !important; /* Muted grey for overs */
@@ -1668,7 +1668,7 @@ main.container {
 }
 .carousel-match-card:hover {
     background: #F8FAFC;
-    border-color: #00D26A;
+    border-color: #2563EB;
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 .carousel-card-header {
@@ -1683,9 +1683,9 @@ main.container {
     text-transform: uppercase;
 }
 .live-pill {
-    background: rgba(0, 210, 106, 0.08);
-    color: #00D26A;
-    border: 1px solid rgba(0, 210, 106, 0.2);
+    background: rgba(37, 99, 235, 0.08);
+    color: #2563EB;
+    border: 1px solid rgba(37, 99, 235, 0.2);
     padding: 2px 6px;
     border-radius: 4px;
     font-weight: 800;
@@ -1760,7 +1760,7 @@ main.container {
 .hero-kicker {
     font-size: 11px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
     letter-spacing: 1px;
 }
 .live-indicator-glow {
@@ -1810,7 +1810,7 @@ main.container {
     color: #0F172A;
 }
 .hero-team-details.batting-active .score-display .runs-wkts {
-    color: #00D26A !important; /* Active batting team score in emerald green */
+    color: #2563EB !important; /* Active batting team score in emerald green */
 }
 .score-display .overs-str {
     font-size: 12px;
@@ -1855,7 +1855,7 @@ main.container {
 .equation-txt {
     font-size: 13px;
     font-weight: 700;
-    color: #00D26A;
+    color: #2563EB;
 }
 .btn-open-match {
     background: #F1F5F9;
@@ -1869,9 +1869,9 @@ main.container {
     transition: all 0.2s ease;
 }
 .btn-open-match:hover {
-    background: #00D26A;
+    background: #2563EB;
     color: #000000;
-    border-color: #00D26A;
+    border-color: #2563EB;
 }
 
 /* Unique Feature: District Cricket Module Dashboard */
@@ -1898,7 +1898,7 @@ main.container {
 .district-icon {
     width: 20px;
     height: 20px;
-    color: #00D26A;
+    color: #2563EB;
 }
 .district-header h3 {
     font-size: 15px;
@@ -1909,9 +1909,9 @@ main.container {
     letter-spacing: 0.5px;
 }
 .badge-district-accent {
-    background: rgba(0, 210, 106, 0.08);
-    border: 1px solid rgba(0, 210, 106, 0.18);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    color: #2563EB;
     font-size: 10px;
     font-weight: 800;
     padding: 3px 8px;
@@ -1942,7 +1942,7 @@ main.container {
 }
 .dist-tab-btn.active {
     background: #FFFFFF;
-    color: #00D26A;
+    color: #1E3A8A;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
@@ -1988,10 +1988,10 @@ main.container {
     background: #F1F5F9;
     color: #64748B;
 }
-.rank-pos.num-1 { background: rgba(0, 210, 106, 0.15); color: #00D26a; }
+.rank-pos.num-1 { background: rgba(37, 99, 235, 0.15); color: #2563EB; }
 .rank-pos.num-2 { background: rgba(59, 130, 246, 0.15); color: #2563EB; }
 .rank-pos.num-3 { background: rgba(245, 158, 11, 0.15); color: #D97706; }
-.text-green { color: #00D26A !important; font-weight: 750; }
+.text-green { color: #2563EB !important; font-weight: 750; }
 
 .local-tournaments-list {
     display: flex;
@@ -2014,7 +2014,7 @@ main.container {
     padding: 3px 6px;
     border-radius: 4px;
 }
-.t-badge.active { background: rgba(0, 210, 106, 0.08); color: #00D26A; }
+.t-badge.active { background: rgba(37, 99, 235, 0.08); color: #2563EB; }
 .t-badge.upcoming { background: #F1F5F9; color: #64748B; }
 .t-details h4 {
     font-size: 13px;
@@ -2052,7 +2052,7 @@ main.container {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    border: 1.5px solid rgba(0, 210, 106, 0.3);
+    border: 1.5px solid rgba(37, 99, 235, 0.3);
 }
 .talent-info h4 {
     font-size: 13px;
@@ -2094,7 +2094,7 @@ main.container {
 .stat-box .val {
     font-size: 18px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
 }
 
 /* Editorial Highlights News Section */
@@ -2112,7 +2112,7 @@ main.container {
     text-transform: uppercase;
     color: #0F172A;
     margin: 0 0 16px;
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
     padding-left: 8px;
 }
 .news-masonry {
@@ -2138,7 +2138,7 @@ main.container {
     position: absolute;
     top: 10px;
     left: 10px;
-    background: #00D26A;
+    background: #2563EB;
     color: #000000;
     font-size: 9px;
     font-weight: 900;
@@ -2188,7 +2188,7 @@ main.container {
     margin-bottom: 6px;
     display: block;
 }
-.text-accent { color: #00D26A; }
+.text-accent { color: #2563EB; }
 .stack-news-item h4 {
     font-size: 13px;
     font-weight: 800;
@@ -2278,7 +2278,7 @@ main.container {
 }
 .rank-tab-btn.active {
     background: #FFFFFF;
-    color: #00D26A;
+    color: #1E3A8A;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 .rank-sub-panel {
@@ -2301,8 +2301,8 @@ main.container {
     height: 18px;
     font-size: 10px;
     font-weight: 900;
-    color: #00D26A;
-    background: rgba(0, 210, 106, 0.08);
+    color: #2563EB;
+    background: rgba(37, 99, 235, 0.08);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2324,7 +2324,7 @@ main.container {
     margin-left: auto;
     font-size: 11px;
     font-weight: 800;
-    color: #00D26A;
+    color: #2563EB;
 }
 
 /* Sponsor ad banner */
@@ -2352,7 +2352,7 @@ main.container {
 .ad-content h4 {
     font-size: 13px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
     margin: 0 0 6px;
     letter-spacing: 0.5px;
 }
@@ -2374,7 +2374,7 @@ main.container {
     transition: all 0.2s ease;
 }
 .ad-mock-btn:hover {
-    background: #00D26A;
+    background: #2563EB;
     color: #000000;
 }
 
@@ -2393,7 +2393,7 @@ main.container {
     box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 .match-list-item.live {
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
     background: #FAFEFA;
 }
 .item-header {
@@ -2467,8 +2467,8 @@ main.container {
     margin: 0;
 }
 .active-badge {
-    background: rgba(0, 210, 106, 0.08);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    color: #2563EB;
     font-size: 9px;
     font-weight: 800;
     padding: 2px 6px;
@@ -2510,8 +2510,8 @@ main.container {
 }
 .btn-create-match-block {
     display: block;
-    background: #00D26A;
-    color: #000000;
+    background: #1E3A8A;
+    color: #FFFFFF;
     font-weight: 850;
     text-align: center;
     padding: 10px;
@@ -2864,7 +2864,7 @@ main.container {
     .mab__tyet { font-size: 13px; font-weight: 500; color: #B0BAC8; }
     .mab__vdiv { width: 1px; height: 60px; background: #F0F2F5; margin: 0 14px; flex: 0 0 auto; }
     .mab__mstat { width: 90px; flex: 0 0 auto; text-align: center; }
-    .mab__mstat b { display: block; font-size: 13px; font-weight: 800; color: #15803D; }
+    .mab__mstat b { display: block; font-size: 13px; font-weight: 800; color: #1D4ED8; }
     .mab__mstat span { display: block; margin-top: 3px; font-size: 11px; line-height: 15px; color: #94A3B8; }
 
     /* ── District Home card (DistrictHomeCard) ───────────────────────── */
@@ -2900,7 +2900,7 @@ main.container {
     .mab__phead { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 10px; }
     .mab__phead b { display: block; font-size: 13px; font-weight: 700; letter-spacing: -.2px; color: #0A0A0A; }
     .mab__pfresh { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 9.5px; font-weight: 500; color: #9A9AA8; }
-    .mab__pfresh i { width: 5px; height: 5px; border-radius: 50%; background: #12824A; }
+    .mab__pfresh i { width: 5px; height: 5px; border-radius: 50%; background: #2563EB; }
     .mab__pcount { font-size: 10.5px; font-weight: 500; color: #9A9AA8; }
     .mab__phair { height: 1px; background: #F2F2F5; }
     .mab__pslots { display: flex; align-items: flex-end; padding: 20px 8px 0; }

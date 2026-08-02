@@ -16,19 +16,21 @@
     <meta name="theme-color" content="#ffffff">
     @include('site.partials.seo', ['title' => $fullTitle])
     @stack('head')
-    {{-- Favicon: blue Haraan "H" mark on a white rounded tile. The ?v= busts the
-         old empty favicon.ico browsers may have cached.
-         The 192px PNG is for Google's search-result favicon, which prefers a
-         square that's a multiple of 48px. --}}
-    <link rel="icon" href="{{ asset('favicon.ico') }}?v=2" sizes="any">
-    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('favicon-192.png') }}?v=2">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32.png') }}?v=2">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16.png') }}?v=2">
-    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}?v=2">
-    <link rel="manifest" href="{{ asset('site.webmanifest') }}">
+    {{-- Favicon: the white Haraan "H" on the #2563EB launcher blue, so the tab,
+         the Google result and the phone home screen all show the same mark.
+         The ?v= busts the older white-tile icons browsers and Google cached.
+         48 and 192 are there because Google's favicon crawler wants a square
+         that's a multiple of 48px; a filled tile also stays legible at 16px. --}}
+    <link rel="icon" href="{{ asset('favicon.ico') }}?v=3" sizes="any">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('favicon-192.png') }}?v=3">
+    <link rel="icon" type="image/png" sizes="48x48" href="{{ asset('favicon-48.png') }}?v=3">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32.png') }}?v=3">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16.png') }}?v=3">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}?v=3">
+    <link rel="manifest" href="{{ asset('site.webmanifest') }}?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@300..800&family=Great+Vibes&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@300..800&display=swap" rel="stylesheet">
     @php
         // Cache-bust assets by file mtime: browsers can cache them, but a new
         // deploy (changed file) yields a new URL. Beats ?v=time() which never caches.
@@ -55,7 +57,7 @@
         /* Brand lockup and mobile footer are phone-only (styled in the mobile
            overrides ≤720px); never render elsewhere. */
         @media (min-width: 721px) {
-            .mbrandmark, .mfoot { display: none !important; }
+            .mband, .mfoot { display: none !important; }
         }
 
         /* Focused checkout: the booking review + payment pages hide the whole site
@@ -84,24 +86,31 @@
             box-shadow: 0 10px 20px rgba(13, 110, 253, 0.12) !important;
         }
 
-        /* GameHub section header accent, applied only on /gamehub pages.
+        /* Pulse section header accent, applied only on /gamehub pages.
            Location-pill label left neutral (see note above). */
         .topbar.topbar--gamehub .brand__text strong,
         .topbar.topbar--gamehub .topnav__link,
         .topbar.topbar--gamehub .topnav__link.is-active,
         .topbar.topbar--gamehub .topnav__link:hover {
-            color: #16a34a !important;
+            color: #1D4ED8 !important;
         }
 
         .topbar.topbar--gamehub .topnav__link.is-active::after,
         .topbar.topbar--gamehub .topnav__link:hover::after {
-            background: #16a34a !important;
+            background: #2563EB !important;
         }
 
+        /* Pulse CTAs take the DEEP blue — same brand family as Events, but the
+           button itself is visibly the other lane. */
         .topbar.topbar--gamehub .btn--solid {
-            background: #16a34a !important;
-            border-color: #16a34a !important;
-            box-shadow: 0 10px 20px rgba(22, 163, 74, 0.12) !important;
+            background: #1E3A8A !important;
+            border-color: #1E3A8A !important;
+            box-shadow: 0 10px 20px rgba(30, 58, 138, 0.18) !important;
+        }
+
+        .topbar.topbar--gamehub .btn--solid:hover {
+            background: #172554 !important;
+            border-color: #172554 !important;
         }
 
         /* ── Brand splash loader (BookMyShow-style) ───────────────────────────
@@ -235,7 +244,7 @@
             </a>
 
             {{-- Mobile header lockup (the app's GreetingHeader). Hidden ≥1025px, where the
-                 brand + location pill + nav row takes over. GameHub renders its own copy on
+                 brand + location pill + nav row takes over. Pulse renders its own copy on
                  the green hero and hides this whole topbar — see site/partials/app-greet. --}}
             @include('site.partials.app-greet')
 
@@ -257,7 +266,7 @@
             <form action="/search" method="GET" class="topbar__search" role="search">
                 <span class="search-icon">
                     {{-- Inline SVG (was a lord-icon with hardcoded black) so it inherits
-                         the section accent — blue on Events, green on GameHub — and drops
+                         the section accent — blue on Events, green on Pulse — and drops
                          the cdn.lordicon.com dependency. --}}
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="11" cy="11" r="7"></circle>
@@ -280,12 +289,12 @@
 
             <div class="mobile-action-buttons">
                 <a href="/events" class="mobile-action-btn mobile-action-btn--events">Events</a>
-                <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub">GameHub</a>
+                <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub">Pulse</a>
             </div>
 
             <nav class="topnav" aria-label="Primary">
                 <a href="/events" class="topnav__link {{ request()->is('/') || request()->is('events*') ? 'is-active' : '' }}">Events</a>
-                <a href="/gamehub" class="topnav__link {{ request()->is('gamehub*') && !request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">GameHub</a>
+                <a href="/gamehub" class="topnav__link {{ request()->is('gamehub*') && !request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">Pulse</a>
             </nav>
 
             <div class="topbar__actions">
@@ -366,7 +375,7 @@
         $footTag   = $footIsHub ? 'Play. Compete. Climb.' : 'Discover. Book. Play.';
     @endphp
     <footer class="mfoot">
-        {{-- Brand-gradient hairline: keeps the two-lane (Events blue · GameHub green)
+        {{-- Brand-gradient hairline: keeps the two-lane (Events blue · Pulse green)
              identity as a quiet accent instead of flooding the whole sheet. --}}
         <span class="mfoot__accent" aria-hidden="true"></span>
 
@@ -397,7 +406,7 @@
             <nav class="mfoot__col" aria-label="Explore">
                 <h4>Explore</h4>
                 <a href="/events">Events</a>
-                <a href="/gamehub">GameHub</a>
+                <a href="/gamehub">Pulse</a>
                 <a href="/gamehub/leaderboard">Leaderboard</a>
             </nav>
             <nav class="mfoot__col" aria-label="Your account">
