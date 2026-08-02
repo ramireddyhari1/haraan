@@ -109,7 +109,9 @@
                 <img src="{{ $event->heroImageUrl() ?? asset('events.png') }}" alt="">
                 <div>
                     <strong>{{ $event->title }}</strong>
-                    <small>{{ optional($event->date)->format('D, d M') }} • {{ optional($event->date)->format('g:i A') }}@if($event->venue) • {{ \Illuminate\Support\Str::before($event->venue, ',') }}@endif</small>
+                    {{-- Same "12:00 AM" trap as the booking review: `date` carries no
+                         clock, so print the host's real time (Event::timeRangeLabel). --}}
+                    <small>{{ optional($event->date)->format('D, d M') }}@if($event->timeRangeLabel()) • {{ $event->timeRangeLabel() }}@endif@if($event->venue) • {{ \Illuminate\Support\Str::before($event->venue, ',') }}@endif</small>
                 </div>
             </div>
             <div class="bp-perf"><span class="notch l"></span><span class="notch r"></span></div>

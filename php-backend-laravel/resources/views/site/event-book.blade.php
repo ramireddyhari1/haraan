@@ -62,7 +62,10 @@
             <img src="{{ $event->heroImageUrl() ?? asset('events.png') }}" alt="">
             <div>
                 <strong>{{ $event->title }}</strong>
-                <small>{{ optional($event->date)->format('D, d M') }} • {{ optional($event->date)->format('g:i A') }}@if($event->city) • {{ $event->city }}@endif</small>
+                {{-- `date` is date-only, so formatting its clock printed "12:00 AM"
+                     on every booking review. The real time lives in `time`/`end_time`
+                     (Event::timeRangeLabel), and is simply omitted when unset. --}}
+                <small>{{ optional($event->date)->format('D, d M') }}@if($event->timeRangeLabel()) • {{ $event->timeRangeLabel() }}@endif@if($event->city) • {{ $event->city }}@endif</small>
             </div>
         </div>
     </div>

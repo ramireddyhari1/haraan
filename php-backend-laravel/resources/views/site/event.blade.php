@@ -1249,7 +1249,9 @@
             {{-- Mobile-only: trust strip + metadata cards (mirrors the app detail) --}}
             @php
                 $mDay = optional($event->date)->format('j');
-                $mMonth = optional($event->date)->format('M');
+                // Month + year: "Aug" alone left people guessing which August, which
+                // matters most for the far-out dates hosts publish months ahead.
+                $mMonth = optional($event->date)->format('M Y');
                 $mTime = $evTime;
                 $mVenueShort = $event->venue ? \Illuminate\Support\Str::before($event->venue, ',') : 'Venue';
                 // The chip used to caption the venue with the word "Directions",
