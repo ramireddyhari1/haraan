@@ -31,7 +31,14 @@
         {{-- Phone OTP (Firebase). firebase-phone-auth.js wires this by [data-phone-auth]. --}}
         <div class="auth-phone" data-phone-auth
              data-post-url="{{ route('partner.auth.phone') }}"
-             data-precheck-url="{{ route('partner.auth.check-phone') }}">
+             data-precheck-url="{{ route('partner.auth.check-phone') }}"
+             {{-- WhatsApp first, Firebase SMS underneath. Runs AFTER the pre-check
+                  above, so a number with no partner account never gets a code from
+                  either channel. surface=partner makes the server resolve an
+                  existing partner and never create an account. --}}
+             data-otp-start-url="{{ route('whatsapp.otp.start') }}"
+             data-otp-verify-url="{{ route('whatsapp.otp.verify') }}"
+             data-otp-surface="partner">
             <div class="auth-phone__enter">
                 <label class="auth-phone__label">Mobile number</label>
                 <div class="auth-phone__inputwrap">

@@ -309,9 +309,14 @@ class PartnerController extends Controller
             'guestPhone' => ['nullable', 'string', 'max:30'],
         ]);
 
+        // Scope the venue to the acting partner before booking — a caller must not be
+        // able to create a booking on another tenant's venue by passing its id.
+        $partnerId = $request->user()->effectivePartnerId();
+        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+
         $booking = $this->bookings->createOfflineVenueBooking(
             $request->user(),
-            (int) $id,
+            (int) $venue->id,
             isset($data['slotId']) ? (int) $data['slotId'] : null,
             (string) $data['date'],
             $data['guestName'] ?? null,

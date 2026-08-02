@@ -11,6 +11,7 @@ use App\Filament\Resources\Partners\RelationManagers\VenuesRelationManager;
 use App\Filament\Support\AvatarColumn;
 use App\Models\User;
 use App\Support\ContactPrefill;
+use App\Support\PartnerAccountResolver;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
@@ -21,6 +22,7 @@ use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\TextSize;
 use Filament\Tables\Columns\TextColumn;
@@ -108,14 +110,66 @@ class PartnerResource extends Resource
                 ->helperText('Optional. Square photo works best.')
                 ->columnSpanFull(),
             TextInput::make('name')->required(),
-            TextInput::make('email')->email()->required()->unique(ignoreRecord: true),
+            // An email that already exists is usually NOT a mistake here — venue owners
+            // and event hosts are typically Haraan members long before they list anything.
+            // Only block what is genuinely unresolvable (an existing partner, an internal
+            // staff login, or re-pointing an edit at somebody else's row); everything else
+            // upgrades that member in place. See PartnerAccountResolver + CreatePartner.
+            TextInput::make('email')
+                ->email()
+                ->required()
+                ->live(onBlur: true)
+                ->rule(static fn (?User $record): \Closure => static function (string $attribute, mixed $value, \Closure $fail) use ($record): void {
+                    $existing = PartnerAccountResolver::findByEmail(is_string($value) ? $value : null);
+
+                    if (! $existing || ($record && $existing->is($record))) {
+                        return;
+                    }
+
+                    if ($record) {
+                        // Editing: there is nothing to merge into, so this is a real clash.
+                        $fail('That email already belongs to another Haraan account.');
+
+                        return;
+                    }
+
+                    if ($reason = PartnerAccountResolver::blockReason($existing)) {
+                        $fail($reason);
+                    }
+                })
+                ->helperText(static function (?string $state, string $operation): ?string {
+                    if ($operation !== 'create') {
+                        return null;
+                    }
+
+                    $existing = PartnerAccountResolver::findByEmail($state);
+
+                    if (! $existing || PartnerAccountResolver::blockReason($existing)) {
+                        return null;
+                    }
+
+                    return 'Already a Haraan member (' . PartnerAccountResolver::describe($existing)
+                        . '). Saving upgrades that account to a partner — their bookings and history carry over, '
+                        . 'and from then on they sign in at /partner/login instead of /login.';
+                }),
             TextInput::make('phone'),
             TextInput::make('password')
                 ->password()
                 ->revealable()
-                ->required(fn (string $operation): bool => $operation === 'create')
+                // Only a brand-new account needs a password typed here. Upgrading an
+                // existing member must default to keeping the password they already
+                // chose — silently replacing it would lock them out of their own account.
+                ->required(static fn (string $operation, Get $get): bool => $operation === 'create'
+                    && ! PartnerAccountResolver::isUpgrade((string) $get('email')))
                 ->dehydrated(fn (?string $state): bool => filled($state))
-                ->helperText('Password for the partner to sign in. When editing, leave blank to keep the current one.'),
+                ->helperText(static function (string $operation, Get $get): string {
+                    if ($operation === 'create' && PartnerAccountResolver::isUpgrade((string) $get('email'))) {
+                        return 'Leave blank to keep the password this member already signs in with. '
+                            . 'Typing one here replaces it.';
+                    }
+
+                    return 'Password for the partner to sign in. When editing, leave blank to keep the current one.';
+                }),
             Select::make('partner_type')
                 ->options(['venue' => 'Venue owner', 'event' => 'Event organiser'])
                 ->native(false),

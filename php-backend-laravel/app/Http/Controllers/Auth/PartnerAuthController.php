@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Auth;
 use App\Exceptions\GoogleAuthException;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\PartnerLookup;
 use App\Services\FirebasePhoneVerifier;
 use App\Services\GoogleIdTokenVerifier;
 use Illuminate\Http\JsonResponse;
@@ -79,30 +80,13 @@ final class PartnerAuthController extends Controller
 
     /**
      * Match a verified E.164 number against however the partner's phone happens to be
-     * stored. Firebase always hands us +91XXXXXXXXXX, but admin-entered numbers live in
-     * the DB in every shape — bare 10 digits, a leading 0, "91…", "+91…" — so an exact
-     * `where('phone', $e164)` silently misses. Compare on the last 10 digits across the
-     * common variants instead.
+     * stored. Delegated to {@see PartnerLookup} so the WhatsApp OTP path resolves a
+     * partner identically — two copies of this matching would mean a number that
+     * works on one sign-in path and not the other.
      */
     private function findByPhone(string $e164): ?User
     {
-        $digits = preg_replace('/\D/', '', $e164) ?? '';
-        $local  = substr($digits, -10);
-
-        $candidates = ($local !== '' && strlen($local) >= 10)
-            ? array_unique([$e164, $local, '+91'.$local, '91'.$local, '0'.$local])
-            : [$e164];
-
-        $matches = User::query()->whereIn('phone', $candidates)->get();
-
-        if ($matches->isEmpty()) {
-            return null;
-        }
-
-        // The same digits can sit on more than one account — e.g. a member signed up with
-        // the number AND a partner has it too. On the partner login the partner must win,
-        // so prefer a PARTNER-role match over any member that merely shares the digits.
-        return $matches->first(fn (User $u): bool => $u->hasRoleEither(['PARTNER'])) ?? $matches->first();
+        return PartnerLookup::byPhone($e164);
     }
 
     /** POST /partner/auth/google  { credential } — Google Identity Services token. */
