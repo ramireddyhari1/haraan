@@ -8,6 +8,7 @@
         'name'    => 'name',
         'address' => 'address',
         'mapLink' => 'map_link',
+        'placeId' => 'place_id',
     ],
     'height' => 320,
 ])

@@ -9,6 +9,7 @@
         'name'    => 'venue',
         'address' => 'location',
         'mapLink' => 'map_link',
+        'placeId' => 'place_id',
     ],
     'height' => 300,
 ])

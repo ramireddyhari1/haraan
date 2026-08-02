@@ -18,7 +18,8 @@
 
     Expected @include data:
       $fields  array{lat?:string, lng?:string, name?:string, address?:string,
-                     city?:string, mapLink?:string}  — bare form-field keys (data.*)
+                     city?:string, mapLink?:string, placeId?:string}
+                     — bare form-field keys (data.*)
       $height  int   map height in px (default 300)
 --}}
 @php
@@ -35,6 +36,7 @@
         map: null,
         marker: null,
         mapType: null, // 'google' | 'leaflet'
+        placeAnchor: null, // {lat,lng} of the Google listing picked this session
 
         init() {
             // With a key: Google map + Places search. On any Google failure, fall
@@ -157,6 +159,24 @@
             this.wSet('lat', rlat);
             this.wSet('lng', rlng);
             this.wSet('mapLink', 'https://www.google.com/maps/search/?api=1&query=' + rlat + ',' + rlng);
+
+            // A stored place_id must keep pointing at the listing the pin is on.
+            // Nudging the pin a few metres is fine-tuning the same place; dragging
+            // it down the road is a different spot, so the stale id has to go —
+            // otherwise we'd later show another business's photos on this event.
+            if (this.movedAwayFromPlace(rlat, rlng)) {
+                this.placeAnchor = null;
+                this.wSet('placeId', null);
+            }
+        },
+        movedAwayFromPlace(lat, lng) {
+            if (! this.fields.placeId) return false;
+            // Never picked a place this session: any manual move invalidates
+            // whatever id an earlier edit stored.
+            if (! this.placeAnchor) return true;
+            const dLat = (lat - this.placeAnchor.lat) * 111320;
+            const dLng = (lng - this.placeAnchor.lng) * 111320 * Math.cos(lat * Math.PI / 180);
+            return Math.sqrt(dLat * dLat + dLng * dLng) > 200; // metres
         },
         recenter(lat, lng) {
             if (! this.map) return;
@@ -175,7 +195,10 @@
             const input = this.$refs.search;
             if (! input) return;
             const ac = new google.maps.places.Autocomplete(input, {
-                fields: ['geometry', 'name', 'formatted_address', 'address_components', 'url'],
+                // place_id rides along free inside the same Autocomplete session and
+                // may be stored indefinitely — it's the permanent handle back to this
+                // listing (photos, hours, rating) long after the pin is set.
+                fields: ['geometry', 'name', 'formatted_address', 'address_components', 'url', 'place_id'],
                 componentRestrictions: { country: 'in' },
             });
             ac.addListener('place_changed', () => {
@@ -189,6 +212,11 @@
                 if (place.formatted_address) this.wSet('address', place.formatted_address);
                 const city = this.cityFrom(place.address_components || []);
                 if (city) this.wSet('city', city);
+
+                // Anchor first so setCoords() sees a zero-distance move and keeps
+                // the id it's about to be given.
+                this.placeAnchor = { lat, lng };
+                if (place.place_id) this.wSet('placeId', place.place_id);
 
                 this.setCoords(lat, lng);
                 if (place.url) this.wSet('mapLink', place.url); // real place page beats a bare coords search
