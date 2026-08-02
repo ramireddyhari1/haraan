@@ -58,9 +58,15 @@
     .bp-perf .notch.r { right: -11px; }
 
     .bp-body { padding: 6px 18px 20px; text-align: center; }
+    /* The chip and the QR frame were BOTH inline-block, so on anything wider than
+       a phone they flowed onto one line — chip pinned bottom-left, QR shoved off
+       to the right of the stub. The pill still has to be inline-block to hug its
+       text, so it gets a block-level line of its own to sit centred in. */
+    .bp-tierline { display: block; margin-bottom: 14px; }
     .bp-tier { display: inline-block; font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
-        color: #2563EB; background: rgba(37,99,235,.08); padding: 4px 12px; border-radius: 999px; margin-bottom: 14px; }
-    .bp-qrframe { display: inline-block; padding: 12px; background: #fff; border: 1px solid #EEF2F7; border-radius: 16px;
+        color: #2563EB; background: rgba(37,99,235,.08); padding: 4px 12px; border-radius: 999px; }
+    .bp-qrframe { display: block; width: fit-content; margin: 0 auto; padding: 12px;
+        background: #fff; border: 1px solid #EEF2F7; border-radius: 16px;
         box-shadow: 0 6px 18px rgba(15,23,42,.06); }
     .bp-qr { display: grid; place-items: center; }
     .bp-qr canvas, .bp-qr img { border-radius: 6px; display: block; }
@@ -116,7 +122,7 @@
             </div>
             <div class="bp-perf"><span class="notch l"></span><span class="notch r"></span></div>
             <div class="bp-body">
-                <div class="bp-tier">{{ $pass->ticketType->name ?? 'Standard' }}</div>
+                <div class="bp-tierline"><span class="bp-tier">{{ $pass->ticketType->name ?? 'Standard' }}</span></div>
                 <div class="bp-qrframe">
                     <div class="bp-qr" data-code="haraan:ticket:{{ $pass->ticket_code }}"></div>
                 </div>
