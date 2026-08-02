@@ -158,6 +158,32 @@ class MessageMeterTest extends TestCase
         );
     }
 
+    public function test_an_inbound_reply_extends_the_conversation_our_send_opened(): void
+    {
+        $this->fakeGraph();
+        $meter = app(MessageMeter::class);
+
+        // Outbound holds bare digits off a booking; the webhook hands the same
+        // person back in the provider's format. If the two are stored as written,
+        // one customer becomes two conversations — and two conversations is two
+        // charges for one exchange.
+        app(WhatsAppService::class)->sendMessage('9876543210', 'ticket', $this->partnerContext());
+        $meter->recordInbound('whatsapp', '919876543210', $this->partnerId, 'wamid.in', 'thanks');
+
+        $this->assertSame(
+            ['+919876543210'],
+            MessageConversation::query()->pluck('recipient')->unique()->values()->all(),
+        );
+    }
+
+    public function test_an_instagram_scoped_id_is_never_run_through_the_phone_rules(): void
+    {
+        // Not a number, and mangling it into one would address a stranger.
+        app(MessageMeter::class)->recordInbound('instagram', '17841400000000000', $this->partnerId);
+
+        $this->assertSame('17841400000000000', MessageConversation::first()->recipient);
+    }
+
     public function test_the_provider_id_is_captured_for_cost_backfill(): void
     {
         $this->fakeGraph();

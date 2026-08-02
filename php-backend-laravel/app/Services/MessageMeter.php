@@ -8,6 +8,7 @@ use App\Models\MessageConversation;
 use App\Models\MessageLog;
 use App\Models\MessagingUsage;
 use App\Support\MessageContext;
+use App\Support\PhoneNumber;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -40,6 +41,10 @@ final class MessageMeter
      * Record one send attempt.
      *
      * @param  string  $status  One of the MessageLog::STATUS_* constants.
+     * @param  string|null  $provider  Who carried it. Defaults to Meta, which owns
+     *                                 both WhatsApp and Instagram; SMS passes its
+     *                                 aggregator so the ledger can tell a MSG91
+     *                                 outage apart from a Meta one.
      */
     public function record(
         string $channel,
@@ -48,8 +53,10 @@ final class MessageMeter
         ?MessageContext $context = null,
         ?string $providerMessageId = null,
         ?string $error = null,
+        ?string $provider = null,
     ): ?MessageLog {
         $context ??= MessageContext::platform();
+        $recipient = $this->address($channel, $recipient);
 
         try {
             $sent = $status === MessageLog::STATUS_SENT;
@@ -66,7 +73,7 @@ final class MessageMeter
                 'template_key' => $context->templateKey,
                 'context_type' => $context->contextType,
                 'context_id' => $context->contextId,
-                'provider' => 'meta',
+                'provider' => $provider ?? 'meta',
                 'provider_message_id' => $providerMessageId,
                 'status' => $status,
                 // Truncated: provider errors can be long, and the useful part is the head.
@@ -101,6 +108,11 @@ final class MessageMeter
         ?string $body = null,
     ): ?MessageConversation {
         $context = new MessageContext($partnerId, MessageContext::SERVICE);
+        // The webhook hands back the number in the provider's own format
+        // ("919876543210"), which is not the format an outbound send is recorded
+        // under. Normalising here is what makes an inbound reply EXTEND the
+        // conversation we opened rather than open a second, separately-billed one.
+        $from = $this->address($channel, $from);
 
         try {
             $conversation = $this->touchConversation($channel, $from, $context);
@@ -128,6 +140,21 @@ final class MessageMeter
 
             return null;
         }
+    }
+
+    /**
+     * The single spelling of a recipient, so one person is one row.
+     *
+     * Every write and every lookup in this class goes through it. Phone channels
+     * normalise to E.164; Instagram's scoped ids pass through untouched.
+     */
+    private function address(string $channel, string $address): string
+    {
+        return PhoneNumber::forChannel(
+            $channel,
+            $address,
+            (string) config('services.whatsapp.default_country', '91'),
+        );
     }
 
     /**

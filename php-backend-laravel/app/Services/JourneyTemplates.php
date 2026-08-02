@@ -35,11 +35,27 @@ final class JourneyTemplates
                 "Starting soon: {$title}\n{$when}\n\nHave your QR ready: {$passUrl}"
             ),
             'review.request' => $this->sign(
-                "Hope you enjoyed {$title}!\n\nHow was it? Reply with a rating from 1 to 5 — "
-                . 'it helps the organiser and everyone booking next.'
+                "Hope you enjoyed {$title}.\n\nHow was it? Leave a quick rating here: "
+                . $this->reviewUrl($booking)
+                . "\n\nYour feedback helps the organiser and everyone booking next."
             ),
             default => null,
         };
+    }
+
+    /**
+     * Where "how was it?" goes.
+     *
+     * Code-addressed and sessionless, like the ticket pass: the person who attended
+     * often isn't the person who paid, and a login wall is how you get no ratings.
+     * A booking with no code has nothing to address, so it falls back to the site
+     * rather than linking to a guaranteed 404.
+     */
+    private function reviewUrl(Booking $booking): string
+    {
+        $code = trim((string) $booking->ticket_code);
+
+        return $code !== '' ? url('/r/' . $code) : url('/');
     }
 
     /**
@@ -60,7 +76,7 @@ final class JourneyTemplates
 
         return match ($key) {
             'event.reminder_24h', 'event.reminder_2h' => [$title, $when, $passUrl],
-            'review.request' => [$title],
+            'review.request' => [$title, $this->reviewUrl($booking)],
             default => [],
         };
     }

@@ -259,11 +259,15 @@ class MessageJourneyTest extends TestCase
         Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.1']]], 200));
         $this->booking();
         $this->journeys()->enqueue();
-        ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
 
-        // Freeze at 3am local, inside any sane quiet window.
+        // Freeze at 3am local, inside any sane quiet window. This has to happen
+        // BEFORE send_after is backdated: backdating against the real clock and
+        // then rewinding to 3am leaves everything scheduled in the future, so
+        // nothing is due, and the test passes or fails on the time of day it runs.
         config(['messaging.journeys.quiet_hours.start' => 21, 'messaging.journeys.quiet_hours.end' => 8]);
         Carbon::setTestNow(Carbon::parse('2026-08-01 03:00', 'Asia/Kolkata')->utc());
+
+        ScheduledMessage::query()->update(['send_after' => Carbon::now()->subMinute()]);
 
         $result = $this->journeys()->dispatch();
         Carbon::setTestNow();

@@ -80,9 +80,14 @@ class TemplateRoutingTest extends TestCase
         ]);
     }
 
-    private function openServiceWindow(string $recipient = '9876543210'): void
+    private function openServiceWindow(string $recipient = '+919876543210'): void
     {
         // Only an INBOUND message opens the free-text window.
+        //
+        // Stored in E.164, which is what MessageMeter writes for every phone
+        // channel in both directions — a row keyed on the bare digits a booking
+        // happens to carry is a state production never produces, and asserting
+        // against it would let a lookup that can never match keep passing.
         MessageConversation::create([
             'partner_id' => $this->partner->id, 'channel' => 'whatsapp',
             'recipient' => $recipient, 'category' => 'service',

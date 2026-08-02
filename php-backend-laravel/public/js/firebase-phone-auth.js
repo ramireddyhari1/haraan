@@ -68,6 +68,19 @@
         // be used to pump SMS to arbitrary numbers. The partner console sets this; the
         // member /login (which sends to anyone, then find-or-creates) leaves it off.
         var preCheckUrl = root.getAttribute('data-precheck-url');
+        // Optional WhatsApp-first pair. When present, the code is attempted over
+        // WhatsApp and Firebase becomes the fallback beneath it; when absent, this
+        // file behaves exactly as it always has. Leaving them off is how the partner
+        // console (or any surface that must stay on SMS) opts out.
+        var otpStartUrl = root.getAttribute('data-otp-start-url');
+        var otpVerifyUrl = root.getAttribute('data-otp-verify-url');
+        // "member" (default) or "partner". The server re-checks it and binds it to
+        // the code at send time, so this only tells it which page asked — it is not
+        // what grants partner access.
+        var otpSurface = root.getAttribute('data-otp-surface') || 'member';
+        // Set only while a WhatsApp code is outstanding — it also decides which
+        // verifier submitCode() uses, so it must be cleared whenever we fall back.
+        var waToken = null;
         var confirmation = null;
         var webOtpAbort = null;
         var verifier = null;
@@ -159,8 +172,53 @@
             else { busy(sendBtn, false); }
         }
 
-        // The actual Firebase send — reached only after the pre-check (if any) passes.
+        // Move to the code screen. Shared by both channels so they look identical —
+        // the user should never be able to tell which one carried the code.
+        function showCodeStep(isResend) {
+            if (!isResend) busy(sendBtn, false);
+            if (enterStep) enterStep.hidden = true;
+            if (codeStep) codeStep.hidden = false;
+            if (codeInput) { codeInput.value = ''; codeInput.focus(); }
+            startResendCountdown();
+            startWebOtp();
+        }
+
+        // Try WhatsApp first, fall back to Firebase SMS.
+        //
+        // The fallback is silent and covers EVERY failure — no approved template, no
+        // credentials, a number not on WhatsApp, a provider outage, or this endpoint
+        // itself being down. A login is the one message with nothing behind it: if it
+        // doesn't arrive the person cannot get in, so "couldn't send" must always
+        // become "send it the other way", never an error on screen.
         function sendNow(isResend, phone) {
+            if (!otpStartUrl) { sendViaFirebase(isResend, phone); return; }
+
+            fetch(otpStartUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ phone: phone, surface: otpSurface }),
+            }).then(function (res) {
+                return res.json().catch(function () { return {}; }).then(function (data) {
+                    if (res.ok && data.channel === 'whatsapp' && data.token) {
+                        waToken = data.token;
+                        showCodeStep(isResend);
+                        return;
+                    }
+                    sendViaFirebase(isResend, phone);
+                });
+            }).catch(function () {
+                sendViaFirebase(isResend, phone);
+            });
+        }
+
+        // The actual Firebase send — reached only after the pre-check (if any) passes.
+        function sendViaFirebase(isResend, phone) {
+            waToken = null;
             var v;
             try { v = ensureVerifier(); }
             catch (e) {
@@ -171,12 +229,7 @@
 
             auth.signInWithPhoneNumber(phone, v).then(function (result) {
                 confirmation = result;
-                if (!isResend) busy(sendBtn, false);
-                if (enterStep) enterStep.hidden = true;
-                if (codeStep) codeStep.hidden = false;
-                if (codeInput) { codeInput.value = ''; codeInput.focus(); }
-                startResendCountdown();
-                startWebOtp();
+                showCodeStep(isResend);
             }).catch(function (err) {
                 releaseSendBtns(isResend);
                 showError(mapErr(err));
@@ -224,12 +277,55 @@
         if (resendBtn) resendBtn.addEventListener('click', function () { requestCode(true); });
 
         var submitting = false;
+
+        // Codes we sent over WhatsApp are verified by us, not by Firebase — there is
+        // no confirmation object to confirm against.
+        function submitWhatsAppCode(code) {
+            submitting = true;
+            busy(verifyBtn, true, 'Verifying…');
+
+            fetch(otpVerifyUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ token: waToken, code: code }),
+            }).then(function (res) {
+                return res.json().catch(function () { return {}; }).then(function (data) {
+                    if (res.ok && data.redirect) {
+                        window.location.assign(data.redirect);
+                        return;
+                    }
+                    // 410 = expired, so send them back to the number step rather than
+                    // leaving them typing into a code that no longer exists.
+                    if (res.status === 410 || res.status === 429) {
+                        waToken = null;
+                        if (codeStep) codeStep.hidden = true;
+                        if (enterStep) enterStep.hidden = false;
+                    }
+                    showError(data.error || 'Sign-in failed. Please try again.');
+                    submitting = false;
+                    busy(verifyBtn, false);
+                });
+            }).catch(function () {
+                showError('Network error. Please try again.');
+                submitting = false;
+                busy(verifyBtn, false);
+            });
+        }
+
         function submitCode() {
             if (submitting) return;
             showError('');
-            if (!confirmation) { showError('Please request a code first.'); return; }
             var code = ((codeInput && codeInput.value) || '').replace(/\D/g, '');
             if (code.length < 6) { showError('Enter the 6-digit code.'); return; }
+
+            if (waToken) { submitWhatsAppCode(code); return; }
+
+            if (!confirmation) { showError('Please request a code first.'); return; }
             submitting = true;
             busy(verifyBtn, true, 'Verifying…');
 

@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\MessageConversation;
 use App\Models\MessageTemplate;
+use App\Support\PhoneNumber;
 use Illuminate\Support\Carbon;
 
 /**
@@ -79,6 +80,13 @@ final class TemplateResolver
      */
     public function hasOpenServiceWindow(string $channel, string $recipient): bool
     {
+        // Normalise the same way MessageMeter stores it. Callers here hold whatever
+        // they pulled off a booking — usually bare digits — while conversations are
+        // keyed on the E.164 form. Comparing the two raw means the lookup NEVER
+        // matches, every recipient looks cold, and free text is refused inside a
+        // live window.
+        $recipient = PhoneNumber::forChannel($channel, $recipient, (string) config('services.whatsapp.default_country', '91'));
+
         return MessageConversation::query()
             ->where('channel', $channel)
             ->where('recipient', $recipient)
