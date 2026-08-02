@@ -108,6 +108,39 @@ Route::get('/t/{code}/qr.png', function (string $code) {
     abort(404);
 })->where('code', '[A-Za-z0-9]+')->name('ticket.qr');
 
+// Public entry pass, addressed by ticket code — the link the confirmation SMS and
+// email carry. Sessionless on purpose (tickets get bought for other people, and a
+// desk walk-in's row belongs to the partner), with the code as the bearer secret
+// on the same reasoning as the QR route above. Throttled so the code space can't
+// be swept.
+Route::get('/t/{code}', [\App\Http\Controllers\Web\EventBookingController::class, 'passByCode'])
+    ->where('code', '[A-Za-z0-9]+')
+    ->middleware('throttle:30,1')
+    ->name('ticket.pass');
+
+// "How was it?" — where the post-event WhatsApp message lands. Sessionless and
+// code-addressed on the same reasoning as the pass above: the person who attended
+// often isn't the person who paid, and a login wall is how you get no ratings. The
+// code is the whole authorisation, so it's throttled like the pass, and one booking
+// can only ever leave one review.
+Route::get('/r/{code}', [\App\Http\Controllers\Web\ReviewController::class, 'show'])
+    ->where('code', '[A-Za-z0-9]+')
+    ->middleware('throttle:30,1')
+    ->name('review.show');
+Route::post('/r/{code}', [\App\Http\Controllers\Web\ReviewController::class, 'store'])
+    ->where('code', '[A-Za-z0-9]+')
+    ->middleware('throttle:10,1')
+    ->name('review.store');
+
+// One photo from the venue's Google listing, proxied so the Maps key never reaches
+// the browser and only venues we already list can be billed. Disk-cached, so the
+// throttle only ever bites a scraper walking event ids.
+Route::get('/events/{id}/venue-photo/{index}.jpg', [\App\Http\Controllers\Web\VenuePhotoController::class, 'show'])
+    ->whereNumber('id')
+    ->whereNumber('index')
+    ->middleware('throttle:120,1')
+    ->name('site.event.venuephoto');
+
 // Event ticket booking — the web twin of the app's checkout (same BookingService).
 Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingController::class)->group(function (): void {
     Route::get('/events/{id}/book', 'checkout')->whereNumber('id')->name('site.booking.checkout');
@@ -167,12 +200,34 @@ Route::middleware('auth')->controller(\App\Http\Controllers\Web\AccountControlle
 Route::get('/legal/{slug}', [\App\Http\Controllers\Web\AccountController::class, 'legal'])
     ->name('site.legal');
 
+// Account deletion — PUBLIC on purpose. Google Play requires this URL to work for
+// someone who has already uninstalled the app, so it must not sit behind 'auth'.
+// This exact URL is filed in the Play Console Data safety form; renaming it there
+// and not here (or the reverse) fails review.
+Route::controller(\App\Http\Controllers\Web\AccountDeletionController::class)->group(function (): void {
+    Route::get('/account/delete', 'show')->name('site.account.delete');
+    Route::post('/account/delete', 'submit')->middleware('throttle:6,60')->name('site.account.delete.submit');
+    Route::get('/account/delete/confirm/{token}', 'confirm')->name('site.account.delete.confirm');
+});
+
 // "Continue with Google" on the website — the login modal posts the GIS ID token here.
 Route::post('/auth/google', [\App\Http\Controllers\Auth\GoogleWebAuthController::class, 'login'])
     ->name('google.web.login');
 
 // Phone-number sign-in (Firebase SMS OTP) — the browser completes the OTP and posts
 // the resulting Firebase ID token here for verification + session login.
+// Phone sign-in over WhatsApp, with the Firebase SMS flow below as the fallback.
+// `start` answers {channel} — "whatsapp" when the code went out, "sms" for every
+// reason it couldn't — and the browser drives whichever it names. Deployable before
+// WhatsApp works: until login_otp is approved this always answers "sms" and the
+// login behaves exactly as it does today.
+Route::post('/auth/whatsapp-otp/start', [\App\Http\Controllers\Auth\WhatsAppOtpController::class, 'start'])
+    ->middleware('throttle:10,1')
+    ->name('whatsapp.otp.start');
+Route::post('/auth/whatsapp-otp/verify', [\App\Http\Controllers\Auth\WhatsAppOtpController::class, 'verify'])
+    ->middleware('throttle:20,1')
+    ->name('whatsapp.otp.verify');
+
 Route::post('/auth/firebase-phone', [\App\Http\Controllers\Auth\FirebasePhoneAuthController::class, 'login'])
     ->middleware('throttle:auth')
     ->name('firebase.phone.login');
