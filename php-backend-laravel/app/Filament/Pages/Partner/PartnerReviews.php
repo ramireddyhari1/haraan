@@ -125,11 +125,21 @@ class PartnerReviews extends Page
     /** Base review query: active reviews on this partner's venues, newest first. */
     private function reviewQuery(): \Illuminate\Database\Eloquent\Builder
     {
-        $venueIds = $this->venues()->pluck('id')->all();
+        // Lane-aware since customers started writing reviews themselves: an event
+        // review carries event_id and no venue, a venue review the reverse. Scoping
+        // by the wrong column doesn't error, it just shows an organiser an empty
+        // page while their feedback sits in the table.
+        if ($this->isEventLane()) {
+            return VenueReview::query()
+                ->with('event:id,title')
+                ->whereIn('event_id', array_column($this->events(), 'id'))
+                ->where('is_active', true)
+                ->latest('id');
+        }
 
         return VenueReview::query()
             ->with('venue:id,name')
-            ->whereIn('venue_id', $venueIds)
+            ->whereIn('venue_id', $this->venues()->pluck('id')->all())
             ->where('is_active', true)
             ->latest('id');
     }
@@ -141,12 +151,10 @@ class PartnerReviews extends Page
      */
     public function getReviews(): array
     {
-        if ($this->isEventLane()) {
-            return [];
-        }
+        $subject = $this->isEventLane() ? 'event_id' : 'venue_id';
 
         return $this->reviewQuery()
-            ->when($this->subjectId, fn ($q) => $q->where('venue_id', $this->subjectId))
+            ->when($this->subjectId, fn ($q) => $q->where($subject, $this->subjectId))
             ->when($this->stars, fn ($q) => $q->where('rating', $this->stars))
             ->limit(100)
             ->get()
@@ -157,7 +165,9 @@ class PartnerReviews extends Page
                 'avatar' => MediaUrl::resolve($r->avatar),
                 'rating' => (int) $r->rating,
                 'text' => (string) $r->text,
-                'venue' => $r->venue?->name,
+                // One label for both lanes, so the view doesn't need to know which
+                // it's rendering.
+                'venue' => $r->venue?->name ?? $r->event?->title,
                 // Prefer the admin-entered "2 weeks ago" label; fall back to the row's
                 // own age so a review without one still reads as dated.
                 'ago' => $r->ago ?: ($r->created_at ? Carbon::parse($r->created_at)->diffForHumans() : null),
