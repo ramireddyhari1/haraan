@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Haraan launcher icon background.
+  Royal-blue diagonal ramp (#4D8BFF -> #2563EB -> #0A2A93) with a soft
+  top-left light and a deep bottom-right falloff, so the plate reads with
+  depth instead of as a flat colour block.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0" android:color="#FF4D8BFF" />
+                <item android:offset="0.55" android:color="#FF2563EB" />
+                <item android:offset="1" android:color="#FF0A2A93" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- top-left light -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="30.2"
+                android:centerY="21.6"
+                android:gradientRadius="77.8">
+                <item android:offset="0" android:color="#38FFFFFF" />
+                <item android:offset="0.55" android:color="#0BFFFFFF" />
+                <item android:offset="1" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- bottom-right falloff -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="114.5"
+                android:centerY="114.5"
+                android:gradientRadius="99.4">
+                <item android:offset="0" android:color="#5704144B" />
+                <item android:offset="0.55" android:color="#1204144B" />
+                <item android:offset="1" android:color="#0004144B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
