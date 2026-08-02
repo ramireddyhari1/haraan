@@ -10,6 +10,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -209,12 +210,16 @@ class EventForm
                     ->maxLength(255)
                     ->placeholder('e.g. Karthik Live in Hyderabad')
                     ->columnSpanFull(),
+                // No default: it used to be MUSIC, so every event a host didn't
+                // re-pick shipped tagged MUSIC — a food brunch and a stand-up show
+                // both went live with a MUSIC chip contradicting their own poster.
+                // The field is required, so an empty start forces a real choice.
                 Select::make('category')
                     ->options(self::CATEGORIES)
                     ->required()
                     ->searchable()
                     ->native(false)
-                    ->default('MUSIC'),
+                    ->placeholder('Pick a category'),
                 OrganizationSelect::make(),
                 Textarea::make('description')
                     ->required()
@@ -279,7 +284,14 @@ class EventForm
                     ->label('Event date')
                     ->required()
                     ->native(false)
-                    ->minDate(now()->startOfDay())
+                    // Create-only. minDate() registers an `after_or_equal` validation
+                    // rule, and Edit shares this schema — so a blanket minDate made
+                    // every past event permanently unsavable: a host couldn't fix a
+                    // typo, flip the sold-out override or correct a venue without
+                    // first moving the date into the future. Stopping a new event
+                    // being scheduled in the past is still worth it, so keep the rule
+                    // where it belongs and let existing records keep their date.
+                    ->minDate(fn (?\App\Models\Event $record) => $record === null ? now()->startOfDay() : null)
                     ->displayFormat('D, d M Y'),
                 // Tap-to-select analog clock (like the phone time picker) instead of
                 // Filament's 24-hour spinner. Hosts tap the hour, then minutes, then
@@ -290,6 +302,13 @@ class EventForm
                     ->label('Start time')
                     ->required()
                     ->default('7:00 PM'),
+                // "When does it finish?" is the second thing every attendee asks,
+                // and the form had no answer for it. Optional on purpose — an
+                // open-ended meetup shouldn't be forced to invent an end, and the
+                // event page simply shows the start alone when this is blank.
+                ClockTimePicker::make('end_time')
+                    ->label('End time')
+                    ->helperText('Optional — shown on the event page as "5:00 PM – 8:00 PM".'),
                 // Google Places search + draggable pin. Auto-fills venue, area/address,
                 // the maps link and the lat/lng below. Falls back to a plain pin-picker
                 // when no API key is set. See filament/places-picker.blade.php.
@@ -298,6 +317,52 @@ class EventForm
                     ->view('filament.event-place-picker')
                     ->dehydrated(false)
                     ->columnSpanFull(),
+                // Which Google listing the venue was picked from. Written by the
+                // picker only — there's nothing a host could usefully type here,
+                // and a hand-typed id would point at the wrong business.
+                Hidden::make('place_id'),
+                // Kill switch for the "Venue ambiance" strip on the event page.
+                //
+                // Those photos come from the venue's public Google listing, so we
+                // don't control them — the set routinely mixes interiors with a
+                // stranger's lunch, and occasionally something a host objects to.
+                // This is the lever for that complaint.
+                //
+                // Admin-only (Haraan owns venues; see VenueResource::canCreate())
+                // and NOT dehydrated: it writes to hidden_place_photos on toggle,
+                // keyed by place_id, so switching it off covers every event at
+                // this venue — including ones created later.
+                Toggle::make('show_place_photos')
+                    ->label('Show venue photos from Google')
+                    ->visible(fn (): bool => Filament::getCurrentPanel()?->getId() === 'control')
+                    ->dehydrated(false)
+                    ->live()
+                    ->disabled(fn (Get $get): bool => trim((string) $get('place_id')) === '')
+                    ->helperText(fn (Get $get): string => trim((string) $get('place_id')) === ''
+                        ? 'No Google listing linked yet — pick the venue from the search box above, then save.'
+                        : 'Applies to this venue everywhere, including future events held here.')
+                    ->afterStateHydrated(function (Toggle $component, Get $get): void {
+                        $placeId = trim((string) $get('place_id'));
+                        $component->state($placeId === '' || ! \App\Support\PlacePhotos::blocked($placeId));
+                    })
+                    ->afterStateUpdated(function (bool $state, Get $get): void {
+                        $placeId = trim((string) $get('place_id'));
+                        if ($placeId === '') {
+                            return;
+                        }
+
+                        if ($state) {
+                            // Deleted through the models, not the query builder: a
+                            // builder delete fires no model events, so the cached
+                            // "is this venue blocked" answer would stay stale.
+                            \App\Models\HiddenPlacePhoto::query()->where('place_id', $placeId)->get()->each->delete();
+                        } else {
+                            \App\Models\HiddenPlacePhoto::query()->firstOrCreate(
+                                ['place_id' => $placeId],
+                                ['hidden_by' => auth()->id(), 'reason' => 'Hidden from the event form']
+                            );
+                        }
+                    }),
                 Select::make('city')
                     ->label('City')
                     ->options(self::cityOptions())
@@ -1102,7 +1167,7 @@ class EventForm
                     'price'       => $price,
                     'free'        => $price <= 0.0,
                     'seats'       => $t->capacity === null ? -1 : (int) $t->capacity,
-                    'visible'     => (bool) $t->visible,
+                    'visible'     => $t->isVisible(),
                     'bulk'        => (bool) $t->bulk_booking,
                     'minPer'      => (int) ($t->min_per_order ?? 1),
                     'maxPer'      => $t->max_per_order !== null ? (int) $t->max_per_order : null,

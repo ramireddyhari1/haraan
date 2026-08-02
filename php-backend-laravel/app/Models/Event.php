@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use App\Models\Concerns\BroadcastsContentChanges;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -58,12 +60,14 @@ final class Event extends Model
         'access_code',
         'location',
         'map_link',
+        'place_id',
         'latitude',
         'longitude',
         'city',
         'venue',
         'date',
         'time',
+        'end_time',
         'price',
         'convenience_fee_type',
         'convenience_fee_value',
@@ -269,6 +273,64 @@ final class Event extends Model
         return $bits === [] ? (string) ($this->city ?: 'India') : implode(' ', $bits);
     }
 
+    /**
+     * "5:00 PM – 8:00 PM", or just the start when the host left the end blank
+     * (and null when there's no time at all). Both halves are the same free-text
+     * "g:i A" strings the form writes, so this only ever joins — it never parses
+     * or reformats what a host typed.
+     */
+    public function timeRangeLabel(): ?string
+    {
+        $start = trim((string) ($this->time ?? ''));
+        $end   = trim((string) ($this->end_time ?? ''));
+
+        if ($start === '') {
+            return $end !== '' ? 'Ends ' . $end : null;
+        }
+
+        return $end !== '' && $end !== $start ? $start . ' – ' . $end : $start;
+    }
+
+    /**
+     * The neighbourhood the venue sits in — "Koramangala", not the whole postal
+     * address. `location` is a Google-formatted address ("28, 80 Feet Rd, S.T.
+     * Bed, 4th Block, Koramangala, Bengaluru, Karnataka 560034, India"), and the
+     * part that actually tells a local where this is sits immediately before the
+     * city. A venue name alone ("Big bean cafe") means nothing to someone
+     * deciding whether they can get there.
+     *
+     * Returns null when the address carries nothing more specific than the city,
+     * so callers can fall back rather than print a duplicate.
+     */
+    public function venueArea(): ?string
+    {
+        $city = mb_strtolower(trim((string) $this->city));
+        $venue = mb_strtolower(trim((string) $this->venue));
+
+        $parts = collect(explode(',', (string) $this->location))
+            ->map(fn ($p) => trim($p))
+            ->filter(function (string $p) use ($city, $venue): bool {
+                if ($p === '') {
+                    return false;
+                }
+                $low = mb_strtolower($p);
+
+                return $low !== $city
+                    && $low !== $venue
+                    && $low !== 'india'
+                    // "Karnataka 560034" / "560034" — state-with-pincode and bare pins.
+                    && ! preg_match('/\b\d{6}\b/', $p)
+                    // A bare house/plot number ("28") locates nobody.
+                    && ! preg_match('/^\d+[a-z]?$/i', $p);
+            })
+            ->values();
+
+        // The last surviving part is the one closest to the city — the locality.
+        $area = (string) $parts->last();
+
+        return $area !== '' ? $area : null;
+    }
+
     /** A "Directions" deep link — precise when coordinates exist, text search otherwise. */
     public function directionsUrl(): string
     {
@@ -296,6 +358,106 @@ final class Event extends Model
 
         return 'https://www.google.com/maps/embed/v1/place?' . http_build_query($params);
     }
+
+    /**
+     * Who is actually putting this event on.
+     *
+     * The detail page used to read `artist` here — that's the LINEUP performer
+     * relation, not the organiser — so every event without a booked artist
+     * introduced itself as "Event Host", even when a real, verified host profile
+     * existed on the partner. This resolves the organiser properly and hands the
+     * view only facts it can print.
+     *
+     * Falls back name-wise (host profile → partner account → generic), but never
+     * fakes the rest: `verified` is the profile's real flag rather than a label
+     * every event wore, and the counts are omitted by the view when zero.
+     *
+     * @return array{name:string, initial:string, logo:?string, verified:bool,
+     *               tagline:?string, url:?string, followers:int, events:int}
+     */
+    public function organiserCard(): array
+    {
+        if ($this->organiserCardMemo !== null) {
+            return $this->organiserCardMemo;
+        }
+
+        $profile = $this->partner?->hostProfile;
+        $profile = ($profile && $profile->isLive()) ? $profile : null;
+
+        $name = trim((string) ($profile?->display_name ?: $this->partner?->name ?: ''));
+        if ($name === '') {
+            $name = 'Event Host';
+        }
+
+        // Only count the organiser's OTHER live events, and only when we know who
+        // they are — "1 event" on the page you're already looking at says nothing.
+        $events = 0;
+        if ($this->partner_id !== null) {
+            $events = static::query()
+                ->where('partner_id', $this->partner_id)
+                ->whereKeyNot($this->getKey())
+                ->whereRaw('lower(status) = ?', ['published'])
+                ->count();
+        }
+
+        return $this->organiserCardMemo = [
+            'name'      => $name,
+            'initial'   => mb_strtoupper(mb_substr($name, 0, 1)),
+            'logo'      => $profile?->logoUrl(),
+            'verified'  => (bool) $profile?->isVerified(),
+            'tagline'   => trim((string) ($profile?->tagline ?? '')) ?: null,
+            'slug'      => $profile?->slug,
+            'url'       => $profile ? url('/host/' . $profile->slug) : null,
+            'followers' => $profile ? $profile->followersCount() : 0,
+            'events'    => $events,
+            // Drives the Follow button's state. The follow feature already existed
+            // on the organiser's own page; the event page — where people actually
+            // discover a host — never offered it.
+            'following' => (bool) $profile?->isFollowedBy(auth()->user()),
+        ];
+    }
+
+    /** @var array<string, mixed>|null */
+    private ?array $organiserCardMemo = null;
+
+    /**
+     * Photos of the venue itself, taken from its Google listing — the interior,
+     * the stage, the lighting. What "what's this place like" actually means, and
+     * the one thing a map and a poster can't answer.
+     *
+     * Empty is the normal quiet outcome (no key, no matchable listing, too few
+     * photos) and the page then draws no section. Each row carries the
+     * contributor credit Google requires to be displayed alongside the photo, so
+     * the view must render it — see PlacePhotos.
+     *
+     * Deliberately NOT merged into `gallery`: these are Google's images, served
+     * fresh through our proxy and never adopted as ours.
+     *
+     * @return list<array{url:string, credit:string, credit_uri:string}>
+     */
+    public function venuePhotos(): array
+    {
+        // The detail page renders a mobile and a desktop copy of this strip from
+        // the same model, so without a memo every lookup here runs twice.
+        if ($this->venuePhotosMemo !== null) {
+            return $this->venuePhotosMemo;
+        }
+
+        // The host's own curated photos are better than a stranger's and already
+        // have a Gallery section. Only fill the gap when there isn't one.
+        if (count($this->galleryUrls()) >= 3) {
+            return $this->venuePhotosMemo = [];
+        }
+
+        return $this->venuePhotosMemo = array_map(fn (array $p): array => [
+            'url'        => route('site.event.venuephoto', ['id' => $this->id, 'index' => $p['index']]),
+            'credit'     => $p['credit'],
+            'credit_uri' => $p['credit_uri'],
+        ], \App\Support\PlacePhotos::forEvent($this));
+    }
+
+    /** @var list<array{url:string, credit:string, credit_uri:string}>|null */
+    private ?array $venuePhotosMemo = null;
 
     /**
      * The showcase gallery — extra photos beyond the poster, managed from the
@@ -352,6 +514,43 @@ final class Event extends Model
                 'title' => trim((string) ($r['title'] ?? '')),
                 'note'  => trim((string) ($r['note'] ?? '')),
             ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Host-authored FAQs, normalized to {question, answer}. Rows missing either
+     * half are dropped.
+     *
+     * Hosts type these in a repeater and a lot of them paste "Q: ..." / "A: ..."
+     * straight out of a doc or an AI draft, so the stored copy is inconsistent —
+     * some rows carry the prefix, some don't, and a list where half the entries
+     * start with "Q:" is the single loudest "a machine wrote this" tell on the
+     * page. Strip the labels here (the UI already says these are questions) and
+     * add the missing question mark, so every client renders one clean voice.
+     *
+     * @return array<int, array{question: string, answer: string}>
+     */
+    public function faqRows(): array
+    {
+        $strip = static function (string $text, string $pattern): string {
+            return trim(preg_replace($pattern, '', trim($text)) ?? '');
+        };
+
+        return collect((array) ($this->faqs ?? []))
+            ->filter(fn ($f) => is_array($f))
+            ->map(function ($f) use ($strip): array {
+                $q = $strip((string) ($f['question'] ?? ''), '/^(?:q|question)\s*[:.\-–)]\s*/i');
+                $a = $strip((string) ($f['answer'] ?? ''), '/^(?:a|ans|answer)\s*[:.\-–)]\s*/i');
+
+                // A question that lost its "?" to a paste reads like a heading.
+                if ($q !== '' && ! preg_match('/[?!.]$/u', $q)) {
+                    $q .= '?';
+                }
+
+                return ['question' => $q, 'answer' => $a];
+            })
+            ->filter(fn (array $f): bool => $f['question'] !== '' && $f['answer'] !== '')
             ->values()
             ->all();
     }
@@ -423,6 +622,45 @@ final class Event extends Model
         return $rows;
     }
 
+    /**
+     * The "Important information" bullets, normalised.
+     *
+     * `info_notes` is a TagsInput, so hosts routinely paste an entire T&C block
+     * as ONE tag with the bullets still inside it ("• Carry ID. • No refunds."),
+     * which then renders as a single list item containing a wall of text with
+     * literal bullet glyphs. Split those apart on newlines and on any leading
+     * bullet/dash marker, and strip the marker so the list styles its own.
+     *
+     * @return array<int, string>
+     */
+    public function infoNoteRows(): array
+    {
+        $rows = [];
+
+        foreach ((array) ($this->info_notes ?? []) as $note) {
+            if (! is_string($note)) {
+                continue;
+            }
+
+            // Newlines first, then inline bullet glyphs (•, ●, ▪, ·) and the
+            // "- " / "– " dash forms that only count mid-sentence when spaced.
+            foreach (preg_split('/\R+|\s*[•●▪·]\s*|\s+[–—-]\s+/u', $note) ?: [] as $part) {
+                // NOT trim() with a charlist: trim strips BYTES, so a list holding
+                // multi-byte glyphs (•●▪·–—, all starting 0xE2) also strips the
+                // lead byte off any part that starts with another 0xE2 character —
+                // "₹200 of your ticket…" came out as invalid UTF-8, which made
+                // json_encode fail and 500'd the whole /api/events response.
+                $part = (string) preg_replace('/^[\s\x{00A0}•●▪·\-–—]+|[\s\x{00A0}•●▪·\-–—]+$/u', '', $part);
+
+                if ($part !== '') {
+                    $rows[] = $part;
+                }
+            }
+        }
+
+        return array_values(array_unique($rows));
+    }
+
     /** All bookings placed for this event. */
     public function bookings(): HasMany
     {
@@ -481,6 +719,61 @@ final class Event extends Model
         return true;
     }
 
+    /** The display name of a release phase, or null when the index isn't configured. */
+    public function phaseName(int $phaseIndex): ?string
+    {
+        $phase = ((array) ($this->release_phases ?? []))[$phaseIndex] ?? null;
+        $name  = is_array($phase) ? trim((string) ($phase['name'] ?? '')) : '';
+
+        return $name !== '' ? $name : null;
+    }
+
+    /**
+     * The tiers a buyer may actually put in their cart right now: visible, inside
+     * their sales window, and in a release phase that has opened. Every buy surface
+     * (website sheet, checkout, API) reads this one rule — a hidden tier or an
+     * unopened phase must never be purchasable.
+     *
+     * @return \Illuminate\Support\Collection<int, TicketType>
+     */
+    public function saleableTicketTypes(): \Illuminate\Support\Collection
+    {
+        return $this->ticketTypes
+            ->filter(fn (TicketType $t): bool => $t->isVisible()
+                && $t->isOnSale()
+                && $this->phaseReleased((int) $t->release_phase))
+            ->values();
+    }
+
+    /**
+     * Visible tiers still held back by an unopened release phase, so the buy UI can
+     * show them as "opens later" instead of pretending they don't exist — that
+     * anticipation is the whole point of releasing in phases.
+     *
+     * @return \Illuminate\Support\Collection<int, TicketType>
+     */
+    public function lockedTicketTypes(): \Illuminate\Support\Collection
+    {
+        return $this->ticketTypes
+            ->filter(fn (TicketType $t): bool => $t->isVisible()
+                && $t->isOnSale()
+                && ! $this->phaseReleased((int) $t->release_phase))
+            ->values();
+    }
+
+    /**
+     * Buyer-facing copy for a tier that hasn't been released yet, e.g.
+     * "Opens when Early Bird sells out".
+     */
+    public function phaseUnlockNote(int $phaseIndex): string
+    {
+        $previous = $this->phaseName($phaseIndex - 1);
+
+        return $previous !== null
+            ? 'Opens when ' . $previous . ' sells out'
+            : 'Opens in a later release';
+    }
+
     /**
      * Whether the event should read as sold out to buyers. True when the host has
      * manually flipped the "Sold out" override (`is_sold_out`) OR when the event
@@ -494,6 +787,113 @@ final class Event extends Model
         }
 
         return (int) $this->total_slots > 0 && (int) $this->available_slots <= 0;
+    }
+
+    /**
+     * The moment this event is genuinely over.
+     *
+     * A multi-session event carries its real span on the `slots` (an event running
+     * Aug 1–3 still has `date` = Aug 1), so the last session's end wins when
+     * sessions exist. A slot with no `ends_at` is treated as running to the end of
+     * its start day. Single-session events fall back to the end of `date`.
+     *
+     * End-of-day, not the start time, is deliberate: an event should stay listed and
+     * bookable for its whole day so walk-ups on the night still work.
+     */
+    public function endsAt(): ?Carbon
+    {
+        $slotEnd = $this->slots
+            ->map(fn (EventSlot $s): ?Carbon => $s->ends_at ?? $s->starts_at?->copy()->endOfDay())
+            ->filter()
+            ->max();
+
+        if ($slotEnd !== null) {
+            return $slotEnd;
+        }
+
+        return $this->date?->copy()->endOfDay();
+    }
+
+    /**
+     * Has this event already happened? Drives both the public feeds (finished events
+     * drop out of "what's on") and the booking guard — without it a buyer could pay
+     * for, and be emailed a ticket to, an event that ended days ago.
+     *
+     * An event with no date at all is never "finished" — better to keep showing
+     * something undated than to silently bury it.
+     */
+    public function hasFinished(): bool
+    {
+        $end = $this->endsAt();
+
+        return $end !== null && $end->isPast();
+    }
+
+    /**
+     * Query-side twin of {@see hasFinished()} — the events still worth showing on a
+     * "what's on" surface. Day-granular so it matches the PHP rule and stays index
+     * friendly; the slot subquery keeps multi-day events alive until their last
+     * session. `events.date` is NOT NULL, so there is no null branch to handle here.
+     *
+     * Deliberately NOT applied to the event detail page: a finished event keeps its
+     * own URL so shared links, SEO and the organiser's "past events" list still work.
+     * It just can't be booked (see EventBookingController::publishedEvent).
+     */
+    public function scopeNotFinished(Builder $query): Builder
+    {
+        $today = now()->toDateString();
+
+        return $query->where(function (Builder $w) use ($today): void {
+            $w->whereDate('date', '>=', $today)
+                ->orWhereHas('slots', fn (Builder $s): Builder => $s->whereRaw(
+                    'date(coalesce(ends_at, starts_at)) >= ?',
+                    [$today],
+                ));
+        });
+    }
+
+    /**
+     * The "from" price a buyer sees on any card, rail or bar — the cheapest tier
+     * they could actually buy right now.
+     *
+     * READ THIS BEFORE RENDERING A PRICE. The `price` column is NOT the event's
+     * price any more: CreateEvent hard-sets it to 0 for everything the wizard
+     * creates, because the tiers do the pricing (see CreateEvent::mutateFormData
+     * BeforeCreate). Reading `$event->price` raw is why tiered events announced
+     * "Free"/"₹0" across the site and the app. Only events with no tiers at all
+     * (the legacy flat shape) still carry a meaningful column value, which is the
+     * last fallback below.
+     *
+     * Falls back through: saleable tiers → every tier → the flat column. The middle
+     * step matters — a sold-out, sales-closed or fully phase-locked event still has
+     * a price, and must not read as free just because nothing is buyable this second.
+     *
+     * NB callers rendering lists should eager-load `ticketTypes`, or this is an
+     * N+1: it reads the relation, not the DB.
+     */
+    public function fromPrice(): float
+    {
+        $tiers = $this->saleableTicketTypes();
+
+        if ($tiers->isEmpty()) {
+            $tiers = $this->ticketTypes;
+        }
+
+        return $tiers->isNotEmpty()
+            ? (float) $tiers->min(fn (TicketType $t): float => $t->effectivePrice())
+            : (float) $this->price;
+    }
+
+    /**
+     * How many tiers a buyer could pick from — drives whether a price reads as
+     * "onwards" (a range) or "per ticket" (a single rate). Kept beside
+     * {@see fromPrice()} so the two never disagree about which tiers count.
+     */
+    public function priceTierCount(): int
+    {
+        $tiers = $this->saleableTicketTypes();
+
+        return ($tiers->isEmpty() ? $this->ticketTypes : $tiers)->count();
     }
 
     /**

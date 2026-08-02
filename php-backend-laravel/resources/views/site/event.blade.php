@@ -292,6 +292,33 @@
             border: 1px solid #E2E8F0; background: #F4F7FB;
         }
         .dr-mgal__item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        /* Venue ambiance — the venue's own photos off its Google listing, sitting
+           just above the map. Same swipeable rail as the Gallery so the page has
+           one scrolling idiom, but tiles are figures (not lightbox buttons): each
+           carries the contributor credit Google requires to be shown with it. */
+        .dr-amb { padding: 0 20px; margin-top: 26px; }
+        .dr-amb__src { font-size: 12px; font-weight: 700; color: #94A3B8; letter-spacing: 0; margin-left: 6px; }
+        .dr-amb__rail {
+            display: flex; gap: 10px; overflow-x: auto;
+            scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+            margin: 0 -20px; padding: 2px 20px; scrollbar-width: none;
+            -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+        }
+        .dr-amb__rail::-webkit-scrollbar { display: none; }
+        .dr-amb__item {
+            position: relative; margin: 0; padding: 0; cursor: pointer;
+            flex: 0 0 68vw; height: 190px; scroll-snap-align: start;
+            border-radius: 18px; overflow: hidden;
+            border: 1px solid #E2E8F0; background: #F4F7FB;
+        }
+        .dr-amb__item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .dr-amb__cap {
+            position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 12px 8px;
+            font-size: 10.5px; font-weight: 600; color: rgba(255,255,255,0.92);
+            background: linear-gradient(transparent, rgba(0,0,0,0.72));
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
         /* Full-bleed: both nested .containers carry 16px side MARGINS from the
            site stylesheet (not just padding) — zero them or the hero/sheet
            floats 32px off each edge. */
@@ -440,6 +467,9 @@
             background: none; border: 0; cursor: pointer; color: #2563EB;
             font: inherit; font-size: 14px; font-weight: 700; letter-spacing: -0.01em;
         }
+        /* The `display` above outranks the UA's `[hidden]{display:none}`, so short
+           descriptions were showing a "Read more" that toggled nothing. */
+        .district-event-page .dr-readmore[hidden] { display: none; }
         .district-event-page .dr-readmore:active { opacity: 0.65; }
         .district-event-page .dr-readmore svg { width: 16px; height: 16px; transition: transform 0.2s ease; }
         .district-event-page .dr-readmore.is-open svg { transform: rotate(180deg); }
@@ -477,7 +507,12 @@
             font-size: 13.5px; font-weight: 700; color: #0F172A;
             max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .dr-mcard small { font-size: 11px; color: #94A3B8; }
+        /* Same clamp as strong: a long locality must never wrap and make the
+           three cards different heights. */
+        .dr-mcard small {
+            font-size: 11px; color: #94A3B8;
+            max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
         .dr-mcard__link { color: #2563EB !important; font-weight: 600; }
 
         /* App parity: section titles are dark and tight (HaraanTypography.SectionTitle),
@@ -501,6 +536,53 @@
         /* App-style compact row cards: Organizer + Venue */
         .dr-mobrows { display: flex; flex-direction: column; gap: 22px; margin-top: 24px; }
         .dr-mobrows h3 { margin: 0 0 10px; }
+        /* Organizer: ONE row — identity left, Follow right. Deliberately flat and
+           tight. The previous version was a tall bordered card with a stacked
+           stat strip and a full-width tinted CTA, which is a lot of chrome around
+           a single link and reads as boilerplate. Meta collapses to one muted
+           line so the row stays two lines tall whatever the host has filled in. */
+        .dr-org { display: flex; align-items: center; gap: 12px; }
+        .dr-org__who {
+            display: flex; align-items: center; gap: 12px;
+            flex: 1; min-width: 0; text-decoration: none; color: inherit;
+        }
+        .dr-org__ava {
+            flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%;
+            display: grid; place-items: center; overflow: hidden;
+            font-size: 18px; font-weight: 800; color: #fff;
+            background: linear-gradient(140deg, #2563EB, #1E3FA8);
+        }
+        .dr-org__ava img { width: 100%; height: 100%; object-fit: cover; }
+        .dr-org__id { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+        .dr-org__id strong {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 15.5px; font-weight: 750; letter-spacing: -0.01em; color: #0F172A;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .dr-org__id strong svg { width: 15px; height: 15px; color: #2563EB; flex-shrink: 0; }
+        .dr-org__id small {
+            font-size: 12.5px; color: #6B7280;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        /* Outline until you're following, solid-tinted after — the state change is
+           the whole point of the control, so it has to be visible at a glance. */
+        .dr-org__follow {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            padding: 9px 18px; border-radius: 999px; cursor: pointer;
+            border: 1.5px solid #2563EB; background: transparent; color: #2563EB;
+            font-size: 13px; font-weight: 700; font-family: inherit; text-decoration: none;
+            white-space: nowrap;
+        }
+        .dr-org__follow.is-on { background: rgba(37, 99, 235, 0.10); border-color: transparent; color: #1E40AF; }
+        /* Shown instead of Follow when the host has no public page to follow —
+           quieter than the blue outline, because reaching support is a fallback,
+           not the thing we want people to do. */
+        .dr-org__contact {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            padding: 9px 18px; border-radius: 999px;
+            border: 1px solid #E2E8F0; background: #F4F7FB; color: #475569;
+            font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap;
+        }
         .dr-mrow {
             display: flex; align-items: center; gap: 12px;
             background: #F4F7FB; border: 1px solid #E2E8F0; border-radius: 16px; padding: 14px;
@@ -657,6 +739,12 @@
     .dr-tixrow__info { min-width: 0; }
     .dr-tixrow__info strong { display: block; font-size: 14.5px; font-weight: 700; color: #0F172A; }
     .dr-tixrow__info small { font-size: 13px; color: #64748B; font-weight: 600; }
+    /* Held back by a later release phase: shown so buyers know what's coming, greyed
+       and stepper-less so it reads as "not yet" rather than broken. */
+    .dr-tixrow--soon .dr-tixrow__info strong { color: #94A3B8; }
+    .dr-tixrow--soon .dr-tixrow__info small { color: #94A3B8; }
+    .dr-tixrow__phase { display: inline-block; margin-top: 5px; padding: 2px 8px; border-radius: 999px; background: #EEF2FF; color: #4F5BD5; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; }
+    .dr-tixlock { flex: none; max-width: 48%; text-align: right; font-size: 11.5px; font-weight: 700; color: #94A3B8; line-height: 1.35; }
     .dr-stepper { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
     .dr-stepper button {
         width: 32px; height: 32px; border-radius: 50%; border: 1px solid #E2E8F0;
@@ -753,7 +841,21 @@
     @media (min-width: 1025px) {
         .district-event-page .dr-hero-banner,
         .district-event-page .dr-sheet { display: none !important; }
-        .district-event-page .dr-card-body { background: #ffffff !important; padding: 0 !important; }
+        /* Light canvas, full-bleed. It used to be painted on .dr-card-body, which
+           sits inside main.container + .container — 16px of margin each — so the
+           tint stopped 32px short of both viewport edges and left white bands
+           down the sides of the card. Paint it once on the body instead and let
+           every wrapper in between go transparent. */
+        /* !important is required: site.css has
+           `.theme-minimal, .theme-minimal body … { background:#fff !important }`
+           and body carries .theme-minimal, so a normal declaration always loses
+           to it no matter how specific. */
+        body.event-detail-page { background: #f8fafc !important; }
+        body.event-detail-page main.container,
+        .district-event-page,
+        .district-event-page > .container,
+        .district-event-page .dr-card-body { background: transparent !important; }
+        .district-event-page .dr-card-body { padding: 0 !important; }
 
         .dr-desk {
             display: block;
@@ -761,52 +863,60 @@
             --dk-line: #edf0f6; --dk-soft: #f6f8fc;
         }
 
-        /* ---------- Cinematic hero (full-bleed via 100vw; html/body clip) ---------- */
+        /* ---------- Hero card (white plate on the light canvas) ----------
+           Replaced the full-bleed dark band whose backdrop was the poster blurred
+           behind a near-black scrim: on dark posters it collapsed to a flat slab,
+           and the white type over it was the loudest "generated page" read. Now a
+           bordered white card, which also means the hero looks identical whatever
+           the poster's colours are. */
         .dk-hero {
-            position: relative; width: 100vw; margin-left: calc(-50vw + 50%);
-            display: flex; align-items: flex-end; overflow: hidden; isolation: isolate;
+            position: relative; max-width: 1200px; margin: 22px auto 0;
+            background: #ffffff; border: 1px solid var(--dk-line); border-radius: 24px;
+            box-shadow: 0 24px 56px -36px rgba(15,22,38,0.3);
+            overflow: hidden; isolation: isolate;
         }
-        .dk-hero__bg {
-            position: absolute; inset: -50px; z-index: -2; background-size: cover;
-            background-position: center; filter: blur(34px) saturate(1.25) brightness(0.58);
-        }
-        .dk-hero::after {
-            content: ''; position: absolute; inset: 0; z-index: -1;
-            background:
-                linear-gradient(105deg, rgba(9,12,22,0.9) 0%, rgba(9,12,22,0.5) 44%, rgba(9,12,22,0.74) 100%),
-                linear-gradient(180deg, rgba(9,12,22,0) 42%, rgba(9,12,22,0.6) 100%);
-        }
+        /* The blurred poster backdrop and its dark scrim are gone with the dark hero. */
+        .dk-hero__bg { display: none; }
+        .dk-hero__deco { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+        .dk-hero__deco svg { width: 100%; height: 100%; display: block; }
+        /* Content rides above the texture. */
+        .dk-hero__inner { position: relative; z-index: 1; }
         .dk-hero__inner {
-            max-width: 1200px; margin: 0 auto; width: 100%;
-            padding: 48px 40px 52px; display: grid; grid-template-columns: 296px 1fr;
-            gap: 48px; align-items: end;
+            width: 100%; padding: 44px 48px;
+            display: grid; grid-template-columns: 300px 1fr;
+            gap: 48px; align-items: center;
         }
         .dk-poster {
-            aspect-ratio: 3 / 4; border-radius: 18px; overflow: hidden; background: #10141d;
-            box-shadow: 0 34px 70px -24px rgba(0,0,0,0.72), 0 0 0 1px rgba(255,255,255,0.09);
+            aspect-ratio: 3 / 4; border-radius: 16px; overflow: hidden; background: #f1f4f9;
+            box-shadow: 0 22px 48px -22px rgba(15,22,38,0.42);
         }
         .dk-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .dk-info { color: #fff; min-width: 0; padding-bottom: 4px; }
+        .dk-info { color: var(--dk-ink); min-width: 0; }
         .dk-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 20px; }
         .dk-chip {
             display: inline-flex; align-items: center; gap: 6px; height: 29px; padding: 0 13px;
-            border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff;
-            background: rgba(255,255,255,0.13); border: 1px solid rgba(255,255,255,0.18);
-            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+            border-radius: 999px; font-size: 12px; font-weight: 700; color: var(--dk-mut);
+            background: var(--dk-soft); border: 1px solid var(--dk-line);
         }
-        .dk-chip--cat { background: var(--dk-accent); border-color: transparent; text-transform: uppercase; letter-spacing: 0.06em; }
+        .dk-chip--cat { background: var(--dk-accent); border-color: transparent; color: #fff; text-transform: uppercase; letter-spacing: 0.06em; }
         .dk-chip--rate i { color: #ffca3a; font-style: normal; }
         .dk-title {
             margin: 0 0 22px; font-size: 46px; line-height: 1.05; font-weight: 800;
-            letter-spacing: -0.028em; color: #fff; text-shadow: 0 2px 40px rgba(0,0,0,0.35);
+            letter-spacing: -0.028em; color: var(--dk-ink);
+            /* Cap the measure so a long name breaks into even lines instead of
+               running the full 776px column. */
+            max-width: 26ch;
         }
-        .dk-facts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-bottom: 30px; }
-        .dk-fact { display: inline-flex; align-items: center; gap: 9px; font-size: 14.5px; font-weight: 500; color: rgba(255,255,255,0.92); }
-        .dk-fact svg { width: 17px; height: 17px; flex: none; opacity: 0.82; }
-        .dk-hero__actions { display: flex; align-items: center; gap: 14px; }
-        .dk-price { display: flex; flex-direction: column; line-height: 1.12; margin-right: 6px; }
-        .dk-price small { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(255,255,255,0.6); }
-        .dk-price strong { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+        /* Long names step down rather than stacking three lines of 46px type. */
+        .dk-title--long { font-size: 36px; letter-spacing: -0.022em; max-width: 28ch; }
+        /* Last row in .dk-info now that the price/CTA are gone — no trailing gap,
+           or the block sits optically high against the poster. */
+        .dk-facts { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+        .dk-fact { display: inline-flex; align-items: center; gap: 9px; font-size: 14.5px; font-weight: 550; color: #3b4453; }
+        .dk-fact svg { width: 17px; height: 17px; flex: none; color: var(--dk-mut); opacity: 0.9; }
+        /* Scoped to .dk-hero so it outranks the later .dk-iconbtn sizing. */
+        .dk-hero .dk-share { position: absolute; top: 20px; right: 20px; z-index: 2; width: 44px; height: 44px; border-radius: 12px; }
+        .dk-hero .dk-share svg { width: 18px; height: 18px; }
 
         .dk-btn {
             display: inline-flex; align-items: center; justify-content: center; gap: 9px;
@@ -821,24 +931,17 @@
         .dk-btn:disabled { background: #94a3b8; box-shadow: none; cursor: default; transform: none; filter: none; }
         .dk-iconbtn {
             width: 52px; height: 52px; border-radius: 14px; cursor: pointer;
-            background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff;
-            display: inline-flex; align-items: center; justify-content: center; transition: background 0.18s ease;
+            background: #fff; border: 1px solid var(--dk-line); color: var(--dk-ink);
+            display: inline-flex; align-items: center; justify-content: center;
+            transition: background 0.18s ease, border-color 0.18s ease;
         }
-        .dk-iconbtn:hover { background: rgba(255,255,255,0.22); }
+        .dk-iconbtn:hover { background: var(--dk-soft); border-color: #dfe5f0; }
         .dk-iconbtn svg { width: 20px; height: 20px; }
-        .dk-trust { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 24px; }
-        .dk-trust span { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.72); }
-        .dk-trust svg { width: 15px; height: 15px; color: #5ee0a0; flex: none; }
-
-        /* ---------- Breadcrumb ---------- */
-        .dk-crumbs { max-width: 1200px; margin: 0 auto; padding: 18px 40px 0; }
-        .dk-crumbs a { display: inline-flex; align-items: center; gap: 7px; color: var(--dk-mut); font-size: 13px; font-weight: 600; text-decoration: none; transition: color 0.15s ease; }
-        .dk-crumbs a:hover { color: var(--dk-ink); }
-        .dk-crumbs svg { width: 15px; height: 15px; }
-
         /* ---------- Two-column body ---------- */
         .dk-body {
-            max-width: 1200px; margin: 0 auto; padding: 36px 40px 96px;
+            /* 40px top now that the "All events" breadcrumb is gone — it used to
+               contribute its own 18px + line box between the card and this. */
+            max-width: 1200px; margin: 0 auto; padding: 40px 40px 96px;
             display: grid; grid-template-columns: minmax(0, 1fr) 358px; gap: 60px; align-items: start;
         }
         .dk-main { min-width: 0; }
@@ -854,13 +957,15 @@
         .dk-about-wrap.is-clamped .dk-about { position: relative; overflow: hidden; }
         .dk-about-wrap.is-clamped .dk-about::after {
             content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 74px;
-            background: linear-gradient(rgba(255,255,255,0), #fff 92%); pointer-events: none;
+            /* Fades to the light canvas, not white — the body sits on #f8fafc now. */
+            background: linear-gradient(rgba(248,250,252,0), #f8fafc 92%); pointer-events: none;
         }
         .dk-readmore {
             display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; padding: 0;
             background: none; border: none; cursor: pointer; color: var(--dk-accent);
             font: inherit; font-size: 14px; font-weight: 750;
         }
+        .dk-readmore[hidden] { display: none; }
         .dk-readmore:hover { text-decoration: underline; text-underline-offset: 3px; }
         .dk-readmore svg { width: 16px; height: 16px; transition: transform 0.2s ease; }
         .dk-readmore.is-open svg { transform: rotate(180deg); }
@@ -889,8 +994,47 @@
         .dk-gallery button:first-child { grid-column: span 2; grid-row: span 2; }
 
         /* Venue / location */
-        .dk-venue { border: 1px solid var(--dk-line); border-radius: 20px; overflow: hidden; box-shadow: 0 20px 46px -30px rgba(15,22,38,0.3); }
+        .dk-venue { background: #fff; border: 1px solid var(--dk-line); border-radius: 20px; overflow: hidden; box-shadow: 0 20px 46px -30px rgba(15,22,38,0.3); }
         .dk-venue iframe { display: block; width: 100%; height: 264px; border: 0; }
+        /* Venue ambiance: a scrolling strip of the listing's own photos, BELOW the
+           location card. First tile is wide — these sets almost always lead with
+           the establishing shot. */
+        .dk-amb__wrap { margin-top: 18px; }
+        .dk-amb__hd { margin: 0 0 10px; font-size: 16px; font-weight: 750; color: var(--dk-ink); }
+        .dk-amb__hd span { margin-left: 8px; font-size: 11.5px; font-weight: 600; color: var(--dk-mut); }
+        .dk-amb__vp { position: relative; }
+        .dk-amb {
+            display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+            scroll-behavior: smooth;
+            /* The native horizontal scrollbar sat under the strip looking like a
+               stray OS widget. Hidden here; the arrows below drive the scroll. */
+            scrollbar-width: none; -ms-overflow-style: none;
+        }
+        .dk-amb::-webkit-scrollbar { width: 0; height: 0; display: none; }
+        .dk-amb > button { position: relative; margin: 0; padding: 0; cursor: pointer; flex: 0 0 auto; width: 210px; height: 190px; scroll-snap-align: start; border-radius: 16px; overflow: hidden; border: 1px solid var(--dk-line); background: var(--dk-soft); }
+        .dk-amb > button:first-child { width: 320px; }
+        .dk-amb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.45s cubic-bezier(0.2,0.7,0.3,1); }
+        .dk-amb > button:hover img { transform: scale(1.05); }
+        /* Arrows: hidden until the strip is hovered (or an arrow is focused), and
+           removed entirely at whichever end you've reached. */
+        .dk-amb__nav {
+            position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+            width: 40px; height: 40px; padding: 0; border-radius: 50%; cursor: pointer;
+            background: #fff; border: 1px solid var(--dk-line); color: var(--dk-ink);
+            display: grid; place-items: center;
+            box-shadow: 0 8px 22px -8px rgba(15,22,38,0.45);
+            opacity: 0; transition: opacity 0.18s ease, background 0.18s ease;
+        }
+        .dk-amb__nav svg { width: 19px; height: 19px; }
+        .dk-amb__nav:hover { background: var(--dk-soft); }
+        .dk-amb__nav[hidden] { display: none; }
+        .dk-amb__vp:hover .dk-amb__nav, .dk-amb__nav:focus-visible { opacity: 1; }
+        .dk-amb__nav--prev { left: 10px; }
+        .dk-amb__nav--next { right: 10px; }
+        @media (prefers-reduced-motion: reduce) {
+            .dk-amb { scroll-behavior: auto; }
+            .dk-amb__nav { transition: none; }
+        }
         .dk-venue__ft { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px; }
         .dk-venue__ft h4 { margin: 0 0 3px; font-size: 16px; font-weight: 750; color: var(--dk-ink); }
         .dk-venue__ft p { margin: 0; font-size: 13.5px; color: var(--dk-mut); }
@@ -901,8 +1045,9 @@
         .dk-dir:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -12px rgba(15,22,38,0.5); }
         .dk-dir svg { width: 15px; height: 15px; }
 
-        /* Good to know — reuse the shared card, softened for the editorial column */
-        .dk-gtk .dr-gtk__card { background: var(--dk-soft); border-color: var(--dk-line); border-radius: 18px; }
+        /* Good to know — white, not --dk-soft: that tint is a hair off the new
+           #f8fafc canvas, so the card vanished into the page. */
+        .dk-gtk .dr-gtk__card { background: #fff; border-color: var(--dk-line); border-radius: 18px; }
 
         /* Important information */
         .dk-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
@@ -911,73 +1056,62 @@
 
         /* ---------- Sticky booking rail ---------- */
         .dk-rail { align-self: start; position: sticky; top: 92px; display: flex; flex-direction: column; gap: 18px; }
-        .dk-book { background: #fff; border: 1px solid var(--dk-line); border-radius: 22px; padding: 24px; box-shadow: 0 28px 64px -34px rgba(15,22,38,0.42); }
-        .dk-book__price { display: flex; align-items: baseline; gap: 8px; margin-bottom: 18px; }
-        .dk-book__price b { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--dk-ink); }
-        .dk-book__price small { font-size: 13px; color: var(--dk-mut); font-weight: 600; }
-        .dk-book__rows { display: flex; flex-direction: column; margin-bottom: 20px; }
-        .dk-brow { display: flex; align-items: center; gap: 13px; padding: 12px 0; border-bottom: 1px solid var(--dk-line); }
-        .dk-brow:last-child { border-bottom: none; }
-        .dk-brow__ic { flex: none; width: 38px; height: 38px; border-radius: 11px; background: var(--dk-soft); display: grid; place-items: center; color: var(--dk-accent); }
-        .dk-brow__ic svg { width: 18px; height: 18px; }
-        .dk-brow__tx { min-width: 0; }
-        .dk-brow__tx small { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #98a1b0; }
-        .dk-brow__tx strong { font-size: 14px; font-weight: 650; color: var(--dk-ink); }
-        .dk-book .dk-btn { width: 100%; }
-        .dk-book__sec { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; font-size: 12px; font-weight: 600; color: var(--dk-mut); }
-        .dk-book__sec svg { width: 14px; height: 14px; color: #22a565; }
-        .dk-book__closed { text-align: center; font-size: 14px; font-weight: 650; color: var(--dk-mut); padding: 8px 0 2px; }
 
-        .dk-org { background: #fff; border: 1px solid var(--dk-line); border-radius: 20px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 20px 48px -34px rgba(15,22,38,0.32); }
-        .dk-org__ava { flex: none; width: 54px; height: 54px; border-radius: 50%; overflow: hidden; background: #10141d; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 19px; }
+        /* Organizer card — a real identity block (logo, verified name, bio, track
+           record) instead of the old one-liner that printed a placeholder name. */
+        .dk-org { background: #fff; border: 1px solid var(--dk-line); border-radius: 20px; padding: 18px 20px; box-shadow: 0 20px 48px -34px rgba(15,22,38,0.32); }
+        .dk-org__hd { display: flex; align-items: center; gap: 15px; }
+        .dk-org__ava { flex: none; width: 54px; height: 54px; border-radius: 50%; overflow: hidden; background: linear-gradient(140deg, #2563eb, #1e3fa8); display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 19px; }
         .dk-org__ava img { width: 100%; height: 100%; object-fit: cover; }
         .dk-org__tx { min-width: 0; flex: 1; }
         .dk-org__tx small { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #98a1b0; }
-        .dk-org__tx strong { display: block; font-size: 15.5px; font-weight: 750; color: var(--dk-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .dk-org__tx a { font-size: 12.5px; font-weight: 700; color: var(--dk-accent); text-decoration: none; }
-        .dk-org__tx a:hover { text-decoration: underline; }
+        .dk-org__tx strong { display: flex; align-items: center; gap: 5px; font-size: 15.5px; font-weight: 750; color: var(--dk-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dk-org__tx strong svg { width: 15px; height: 15px; color: var(--dk-accent); flex: none; }
+        .dk-org__bio { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--dk-mut); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .dk-org__stats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--dk-line); font-size: 12.5px; color: var(--dk-mut); }
+        .dk-org__stats b { font-weight: 800; color: var(--dk-ink); }
+        .dk-org__act { display: flex; align-items: center; gap: 14px; margin-top: 15px; }
+        .dk-org__follow { display: inline-flex; align-items: center; justify-content: center; padding: 9px 20px; border-radius: 999px; cursor: pointer; border: 1.5px solid var(--dk-accent); background: transparent; color: var(--dk-accent); font-size: 13px; font-weight: 700; font-family: inherit; text-decoration: none; transition: background 0.2s; }
+        .dk-org__follow:hover { background: rgba(37,99,235,0.08); }
+        .dk-org__follow.is-on { background: rgba(37,99,235,0.10); border-color: transparent; color: #1e40af; }
+        .dk-org__link { font-size: 13px; font-weight: 700; color: var(--dk-mut); text-decoration: none; }
+        .dk-org__link:hover { color: var(--dk-ink); }
 
-        /* Hero depth: ambient blue glow around the floating poster */
-        .dk-poster { box-shadow: 0 34px 70px -24px rgba(0,0,0,0.72), 0 0 70px -12px rgba(47,107,255,0.4), 0 0 0 1px rgba(255,255,255,0.09); }
+        /* The ambient blue glow that lifted the poster off the old dark hero would
+           read as a smudge on the white card — a plain drop shadow does the job. */
 
-        /* ---------- Inline luxury ticket panel (sticky rail) ---------- */
-        .dk-tix { background: #fff; border: 1px solid var(--dk-line); border-radius: 22px; padding: 22px 22px 24px; box-shadow: 0 28px 64px -34px rgba(15,22,38,0.42); transition: box-shadow 0.3s ease; }
-        .dk-tix.dk-pulse { box-shadow: 0 0 0 4px rgba(47,107,255,0.25), 0 28px 64px -30px rgba(15,22,38,0.5); }
-        .dk-tix__top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
-        .dk-tix__top h3 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.01em; color: var(--dk-ink); }
-        .dk-tix__top span { font-size: 12px; font-weight: 700; color: #c9720a; white-space: nowrap; }
-        .dk-tix__sub { margin: 0 0 14px; font-size: 12.5px; color: var(--dk-mut); }
-        .dk-trow { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--dk-line); }
-        .dk-trow:last-of-type { border-bottom: none; }
-        .dk-trow__i { min-width: 0; flex: 1; }
-        .dk-trow__i strong { display: block; font-size: 14.5px; font-weight: 700; color: var(--dk-ink); }
-        .dk-trow__i > small { font-size: 13.5px; font-weight: 800; color: var(--dk-ink); letter-spacing: -0.01em; }
-        .dk-av { display: inline-block; margin-top: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px; }
-        .dk-av--ok  { background: #eafaf0; color: #1f9d57; }
-        .dk-av--low { background: #fff4e6; color: #c9720a; }
-        .dk-av--out { background: #f3f4f6; color: #9aa1ac; }
-        .dk-step { display: flex; align-items: center; gap: 5px; flex: none; }
-        .dk-step button { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--dk-line); background: var(--dk-soft); color: var(--dk-ink); font-size: 18px; font-weight: 700; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease; }
-        .dk-step button:hover:not(:disabled) { border-color: var(--dk-accent); color: var(--dk-accent); background: #fff; }
-        .dk-step button:disabled { opacity: 0.38; cursor: default; }
-        .dk-step input { width: 28px; text-align: center; border: none; background: none; font: inherit; font-size: 15px; font-weight: 800; color: var(--dk-ink); pointer-events: none; -moz-appearance: textfield; padding: 0; }
-        .dk-step input::-webkit-outer-spin-button, .dk-step input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        .dk-tix__total { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 0 16px; padding-top: 16px; border-top: 1px dashed var(--dk-line); }
-        .dk-tix__total small { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #98a1b0; }
-        .dk-tix__total b { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--dk-ink); font-variant-numeric: tabular-nums; }
-        .dk-tix .dk-btn { width: 100%; }
-        .dk-tix__sec { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 13px; font-size: 12px; font-weight: 600; color: var(--dk-mut); }
-        .dk-tix__sec svg { width: 14px; height: 14px; color: #22a565; }
-        .dk-tix__closed { text-align: center; font-size: 14px; font-weight: 650; color: var(--dk-mut); padding: 14px 0 4px; }
+        /* ---------- Buy card + info rows (sticky rail) ----------
+           Replaced the inline stepper/total panel: it duplicated the .dr-tix modal
+           the hero CTA already opens, so the page offered two different ways to
+           pick the same tickets. Now one price, one CTA. */
+        .dk-buy {
+            background: #fff; border: 1px solid var(--dk-line); border-radius: 20px;
+            padding: 20px 22px 18px; box-shadow: 0 18px 44px -30px rgba(15,22,38,0.36);
+        }
+        .dk-buy__urgent { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 700; color: #c9720a; }
+        .dk-buy__row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+        .dk-buy__price { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+        .dk-buy__price b { font-size: 26px; font-weight: 800; letter-spacing: -0.025em; color: var(--dk-ink); }
+        .dk-buy__price small { font-size: 12.5px; font-weight: 600; color: var(--dk-mut); }
+        .dk-buy__cta { flex: none; height: 46px; padding: 0 24px; font-size: 14.5px; border-radius: 12px; }
+        .dk-buy__off { flex: none; font-size: 14px; font-weight: 700; color: var(--dk-mut); }
+        .dk-buy__sec { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--dk-line); font-size: 12px; font-weight: 600; color: var(--dk-mut); }
+        .dk-buy__sec svg { width: 14px; height: 14px; flex: none; color: #22a565; }
 
-        /* ---------- Reviews summary (honest aggregate — no fabricated text) ---------- */
-        .dk-rev { display: flex; align-items: center; gap: 30px; padding: 24px 26px; border: 1px solid var(--dk-line); border-radius: 20px; background: linear-gradient(135deg, #fbfcff, #f4f7fc); }
-        .dk-rev__score { flex: none; text-align: center; }
-        .dk-rev__score b { display: block; font-size: 46px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--dk-ink); }
-        .dk-rev__stars { margin-top: 7px; color: #f5a623; font-size: 15px; letter-spacing: 3px; }
-        .dk-rev__score small { display: block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--dk-mut); }
-        .dk-rev__txt strong { font-size: 17px; font-weight: 750; color: var(--dk-ink); letter-spacing: -0.01em; }
-        .dk-rev__txt p { margin: 7px 0 0; font-size: 14px; line-height: 1.65; color: var(--dk-mut); }
+        .dk-rows { background: #fff; border: 1px solid var(--dk-line); border-radius: 20px; box-shadow: 0 18px 44px -30px rgba(15,22,38,0.36); overflow: hidden; }
+        .dk-row {
+            display: flex; align-items: center; gap: 14px; padding: 16px 18px;
+            border-bottom: 1px solid var(--dk-line); text-decoration: none; color: inherit;
+            transition: background 0.15s ease;
+        }
+        .dk-row:last-child { border-bottom: none; }
+        a.dk-row:hover { background: var(--dk-soft); }
+        .dk-row__ic { flex: none; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--dk-line); display: grid; place-items: center; color: var(--dk-ink); }
+        .dk-row__ic svg { width: 18px; height: 18px; }
+        .dk-row__tx { min-width: 0; flex: 1; }
+        .dk-row__tx strong { display: block; font-size: 14.5px; font-weight: 700; line-height: 1.35; color: var(--dk-ink); }
+        .dk-row__tx small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--dk-mut); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+        .dk-row__ch { flex: none; width: 18px; height: 18px; color: #b3bbc7; }
 
         /* ---------- Similar events (full-width discovery rail) ---------- */
         .dk-more { max-width: 1200px; margin: 0 auto; padding: 4px 40px 100px; }
@@ -1012,7 +1146,7 @@
     @media (min-width: 1025px) and (max-width: 1180px) {
         .dr-desk .dk-body { grid-template-columns: 1fr; gap: 8px; }
         .dr-desk .dk-rail { position: static; top: auto; flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
-        .dr-desk .dk-tix { flex: 2 1 340px; }
+        .dr-desk .dk-buy { flex: 2 1 340px; }
         .dr-desk .dk-org { flex: 1 1 260px; }
     }
 </style>
@@ -1073,6 +1207,10 @@
                 // the time (→ "Time TBA" where a slot needs filling) when it's unset.
                 $evTime  = trim((string) ($event->time ?? ''));
                 $hasTime = $evTime !== '';
+                // "5:00 PM – 8:00 PM" when the host set an end time. The date line
+                // has room for the full range; the narrow meta chip splits it.
+                $evEnd   = trim((string) ($event->end_time ?? ''));
+                $evRange = $event->timeRangeLabel();
             @endphp
             {{-- Info Header --}}
             <div class="dr-info-row" style="margin-bottom: 16px; padding-bottom: 12px;">
@@ -1085,8 +1223,8 @@
                         @endif
                     </div>
                     <h1 class="dr-main-title" style="margin-bottom: 8px;">{{ $event->title }}</h1>
-                    <p class="dr-date-line">{{ optional($event->date)->format('D, d M') }}@if($hasTime) • {{ $evTime }}@endif@if($event->city) • {{ $event->city }}@endif</p>
-                    <p class="dr-meta-text">{{ optional($event->date)->format('D, d M Y') }}@if($hasTime) • {{ $evTime }}@endif</p>
+                    <p class="dr-date-line">{{ optional($event->date)->format('D, d M') }}@if($evRange) • {{ $evRange }}@endif@if($event->city) • {{ $event->city }}@endif</p>
+                    <p class="dr-meta-text">{{ optional($event->date)->format('D, d M Y') }}@if($evRange) • {{ $evRange }}@endif</p>
                     {{-- Mobile-only glass meta chips overlaid on the hero --}}
                     <div class="dr-meta-chips">
                         @if($event->date)
@@ -1114,6 +1252,10 @@
                 $mMonth = optional($event->date)->format('M');
                 $mTime = $evTime;
                 $mVenueShort = $event->venue ? \Illuminate\Support\Str::before($event->venue, ',') : 'Venue';
+                // The chip used to caption the venue with the word "Directions",
+                // which the pin icon already says. The locality ("Koramangala")
+                // is the bit that tells someone whether they can get there.
+                $mVenueArea = $event->venueArea();
                 $mSchedule = $event->scheduleRows();
                 // Precise "Directions" deep link — uses the exact lat/lng pin when the
                 // event has one, else a venue+city text search (Event::directionsUrl()).
@@ -1134,20 +1276,23 @@
                     <a class="dr-mcard" href="{{ $mMapsUrl }}" target="_blank" rel="noopener">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
                         <strong>{{ $mVenueShort }}</strong>
-                        <small class="dr-mcard__link">Directions</small>
+                        <small class="dr-mcard__link">{{ $mVenueArea ?: 'Directions' }}</small>
                     </a>
                     @if(count($mSchedule))
                     {{-- Tapping opens the run-of-show sheet, like the app's Doors Open card. --}}
                     <button type="button" class="dr-mcard" onclick="drSchedToggle(true)">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
                         <strong>{{ $hasTime ? $mTime : 'TBA' }}</strong>
-                        <small class="dr-mcard__link">Schedule</small>
+                        {{-- The end time earns the caption slot when there is one:
+                             "till 8:00 PM" answers a question, "Schedule" only
+                             labels the tap the whole card already invites. --}}
+                        <small class="dr-mcard__link">{{ $evEnd !== '' ? 'till ' . $evEnd : 'Schedule' }}</small>
                     </button>
                     @else
                     <div class="dr-mcard">
                         <span class="dr-mcard__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
                         <strong>{{ $hasTime ? $mTime : 'TBA' }}</strong>
-                        <small>{{ $hasTime ? 'Doors Open' : 'Time' }}</small>
+                        <small>{{ $evEnd !== '' ? 'till ' . $evEnd : ($hasTime ? 'Doors Open' : 'Time') }}</small>
                     </div>
                     @endif
                 </div>
@@ -1192,6 +1337,9 @@
                                 $mapQuery = urlencode(trim(trim($mapBase).', '.($event->city ?: 'India'), ', '));
                                 $mapEmbed = $event->mapEmbedUrl();
                                 $directions = $event->directionsUrl();
+                                // The venue's own photos off its Google listing. Empty
+                                // is normal — the section then just isn't drawn.
+                                $ambiance = $event->venuePhotos();
                             @endphp
                             @if($mapEmbed && $event->hasCoordinates())
                             {{-- Live embedded Google map (exact pin) --}}
@@ -1248,10 +1396,36 @@
                             </a>
                             @endif
 
+                            @if(count($ambiance))
+                            {{-- Venue ambiance — what the room actually looks like.
+                                 Sits BELOW the map card: the map places the venue,
+                                 then the photos show it. Google requires the
+                                 contributor credit to travel with each photo, hence
+                                 the caption on every tile. --}}
+                            <section class="dr-amb">
+                                <h3 class="dr-section-title" style="margin-bottom: 12px;">Venue ambiance <span class="dr-amb__src">Photos from Google</span></h3>
+                                <div class="dr-amb__rail">
+                                    @foreach($ambiance as $photo)
+                                        {{-- A button, not a figure: these open the shared
+                                             photo lightbox, so they must be reachable by
+                                             keyboard and announced as controls. --}}
+                                        <button type="button" class="dr-amb__item" onclick="drLbx(this)" aria-label="View venue photo full screen">
+                                            <img src="{{ $photo['url'] }}" alt="Inside {{ $event->venue ?: 'the venue' }}" loading="lazy" decoding="async">
+                                            @if($photo['credit'] !== '')
+                                                <span class="dr-amb__cap">{{ $photo['credit'] }}</span>
+                                            @endif
+                                        </button>
+                                    @endforeach
+                                </div>
+                            </section>
+                            @endif
+
                             {{-- Mobile-only app-parity rows: Organizer + Venue
                                  (EventOrganizerSection / EventVenueSection order). --}}
                             @php
-                                $mOrganizer = $event->artist->name ?? 'Event Host';
+                                // The real organiser (host profile → partner account),
+                                // NOT the lineup artist this used to read.
+                                $org = $event->organiserCard();
                                 $mVenueName = $event->venue ? trim(\Illuminate\Support\Str::before($event->venue, ',')) : '';
                                 $mVenueAddr = $event->venue ? trim(\Illuminate\Support\Str::after($event->venue, ',')) : '';
                                 if ($mVenueAddr === $event->venue) { $mVenueAddr = ''; }
@@ -1264,19 +1438,65 @@
                             <div class="dr-mobrows">
                                 <section>
                                     <h3 class="dr-section-title">Organizer</h3>
-                                    <div class="dr-mrow">
-                                        <span class="dr-mrow__ava">
-                                            @if($event->artist && $event->artist->image)
-                                                <img src="{{ $event->artist->image }}" alt="{{ $mOrganizer }}">
+                                    {{-- One row, the way a ticketing app does it: identity on
+                                         the left (tap → organiser page), the action on the
+                                         right. The previous version was a tall card whose
+                                         only action was a full-width "View organiser page"
+                                         button — a lot of furniture around one link. Follow
+                                         is the affordance people actually want here, and it
+                                         already existed on the organiser's own page. --}}
+                                    @php $orgMeta = array_values(array_filter([
+                                        $org['tagline'],
+                                        $org['events'] > 0 ? $org['events'] . ' ' . \Illuminate\Support\Str::plural('event', $org['events']) : null,
+                                        $org['followers'] > 0 ? $org['followers'] . ' ' . \Illuminate\Support\Str::plural('follower', $org['followers']) : null,
+                                    ])); @endphp
+                                    {{-- Hosts without a live public profile have no page to
+                                         open and nothing to follow, so this row used to be an
+                                         avatar, a name, and a dead javascript:void(0) anchor
+                                         under an "Organizer" heading — it read as a section
+                                         that failed to load. In that case the identity is
+                                         plain text (no fake link) and the row carries the one
+                                         action that does exist: reaching a human. --}}
+                                    <div class="dr-org">
+                                        <{{ $org['url'] ? 'a' : 'span' }} class="dr-org__who" @if($org['url']) href="{{ $org['url'] }}" @endif>
+                                            <span class="dr-org__ava">
+                                                @if($org['logo'])
+                                                    <img src="{{ $org['logo'] }}" alt="{{ $org['name'] }}" loading="lazy" decoding="async">
+                                                @else
+                                                    {{ $org['initial'] }}
+                                                @endif
+                                            </span>
+                                            <span class="dr-org__id">
+                                                <strong>
+                                                    {{ $org['name'] }}
+                                                    {{-- The tick is the profile's real verification flag, not
+                                                         decoration every host used to get for free. --}}
+                                                    @if($org['verified'])
+                                                        <svg viewBox="0 0 24 24" fill="currentColor" aria-label="Verified organiser"><path d="M23 12l-2.44-2.79.34-3.69-3.61-.82-1.89-3.2L12 2.96 8.6 1.5 6.71 4.69 3.1 5.5l.34 3.7L1 12l2.44 2.79-.34 3.7 3.61.82L8.6 22.5l3.4-1.47 3.4 1.46 1.89-3.19 3.61-.82-.34-3.69L23 12zm-12.91 4.72l-3.8-3.81 1.48-1.48 2.32 2.33 5.85-5.87 1.48 1.48-7.33 7.35z"/></svg>
+                                                    @endif
+                                                </strong>
+                                                @if(count($orgMeta))
+                                                    <small>{{ implode(' · ', $orgMeta) }}</small>
+                                                @endif
+                                            </span>
+                                        </{{ $org['url'] ? 'a' : 'span' }}>
+
+                                        @if(! $org['slug'])
+                                            <a class="dr-org__contact" href="{{ url('/support') }}">Contact</a>
+                                        @endif
+                                        @if($org['slug'])
+                                            @auth
+                                                <form method="POST" action="{{ route('site.host.follow', ['slug' => $org['slug']]) }}">
+                                                    @csrf
+                                                    <button type="submit" class="dr-org__follow {{ $org['following'] ? 'is-on' : '' }}">
+                                                        {{ $org['following'] ? 'Following' : 'Follow' }}
+                                                    </button>
+                                                </form>
                                             @else
-                                                {{ strtoupper(mb_substr(trim($mOrganizer), 0, 1)) }}
-                                            @endif
-                                        </span>
-                                        <span class="dr-mrow__txt">
-                                            <strong>{{ $mOrganizer }}<svg viewBox="0 0 24 24" fill="currentColor"><path d="M23 12l-2.44-2.79.34-3.69-3.61-.82-1.89-3.2L12 2.96 8.6 1.5 6.71 4.69 3.1 5.5l.34 3.7L1 12l2.44 2.79-.34 3.7 3.61.82L8.6 22.5l3.4-1.47 3.4 1.46 1.89-3.19 3.61-.82-.34-3.69L23 12zm-12.91 4.72l-3.8-3.81 1.48-1.48 2.32 2.33 5.85-5.87 1.48 1.48-7.33 7.35z"/></svg></strong>
-                                            @if($event->category)<small>{{ $event->category }} · Verified organizer</small>@endif
-                                            @if($hostProfile ?? null)<a href="{{ route('site.host', ['slug' => $hostProfile->slug]) }}" style="display:inline-block;margin-top:4px;font-size:12px;font-weight:700;color:#1e50e6;text-decoration:none;">View organiser page →</a>@endif
-                                        </span>
+                                                {{-- Guests get the same button; it just asks them in first. --}}
+                                                <a class="dr-org__follow" href="{{ url('/login') }}">Follow</a>
+                                            @endauth
+                                        @endif
                                     </div>
                                 </section>
                                 @php $lineupRows = $event->lineupRows(); @endphp
@@ -1309,17 +1529,18 @@
                             <div class="dr-organizer-card" style="background: #ffffff; border: 1px solid var(--dr-border); border-radius: 24px; padding: 24px; display: flex; align-items: center; gap: 24px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.02); min-height: 180px;">
                                 {{-- Left column: Avatar and Name --}}
                                     <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; width: 45%;">
-                                    <div style="width: 84px; height: 84px; border-radius: 50%; overflow: hidden; border: 2px solid #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); background: #22252a; display: flex; align-items: center; justify-content: center;">
-                                        @if($event->artist && $event->artist->image)
-                                            <img src="{{ $event->artist->image }}" alt="{{ $event->artist->name }}" style="width: 100%; height: 100%; object-fit: cover;">
+                                    @php $orgDesk = $event->organiserCard(); @endphp
+                                    <div style="width: 84px; height: 84px; border-radius: 50%; overflow: hidden; border: 2px solid #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); background: linear-gradient(140deg,#2563eb,#1e3fa8); display: flex; align-items: center; justify-content: center; color:#fff; font-size:30px; font-weight:800;">
+                                        @if($orgDesk['logo'])
+                                            <img src="{{ $orgDesk['logo'] }}" alt="{{ $orgDesk['name'] }}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" decoding="async">
                                         @else
-                                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                                            {{ $orgDesk['initial'] }}
                                         @endif
                                     </div>
                                     <div class="dr-organizer-name" style="font-size: 12px; font-weight: 900; color: #121620; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2;">
-                                        {{ Str::limit($event->artist->name ?? 'Event Host', 14, '...') }}
+                                        {{ Str::limit($orgDesk['name'], 14, '...') }}
                                     </div>
-                                    @if($hostProfile ?? null)<a href="{{ route('site.host', ['slug' => $hostProfile->slug]) }}" style="font-size:11px;font-weight:700;color:#1e50e6;text-decoration:none;">View page →</a>@endif
+                                    @if($orgDesk['url'])<a href="{{ $orgDesk['url'] }}" style="font-size:11px;font-weight:700;color:#1e50e6;text-decoration:none;">View page →</a>@endif
                                 </div>
 
                                 {{-- Right column: real event facts (no fabricated stats) --}}
@@ -1363,7 +1584,7 @@
                      this was hardcoded boilerplate ("world-class bowling…") shown on
                      every event plus a fake carousel — removed to stay honest.
                      Real highlights live in the "Know Before You Go" tab. --}}
-                @php $highlights = is_array($event->info_notes) ? array_values(array_filter($event->info_notes)) : []; @endphp
+                @php $highlights = $event->infoNoteRows(); @endphp
                 @if(!empty($highlights))
                 <section class="dr-highlights" style="margin-top: 8px; margin-bottom: 8px;">
                     <h3 class="dr-section-title" style="margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; text-transform: none;">Highlights</h3>
@@ -1398,10 +1619,7 @@
             {{-- Content Pane: Know Before You Go --}}
             @php
                 $gtkRows = $event->goodToKnowRows();
-                $infoNotes = array_values(array_filter(
-                    (array) ($event->info_notes ?? []),
-                    fn ($n) => is_string($n) && trim($n) !== ''
-                ));
+                $infoNotes = $event->infoNoteRows();
                 $hasAdminKnow = count($gtkRows) > 0 || count($infoNotes) > 0;
                 // Line icons keyed to the same taxonomy the app uses (EventGoodToKnowCard).
                 $gtkIcon = function (string $key): string {
@@ -1515,28 +1733,53 @@
             @endif
 
             {{-- FAQs — always the last section on the mobile sheet. --}}
-            @php $faqs = collect($event->faqs ?? [])->filter(fn ($f) => is_array($f) && trim((string) ($f['question'] ?? '')) !== '' && trim((string) ($f['answer'] ?? '')) !== '')->values(); @endphp
+            @php $faqs = collect($event->faqRows()); @endphp
             @if($faqs->isNotEmpty())
             <style>
-                .dr-faq__list{display:flex;flex-direction:column;gap:10px;}
-                .dr-faq__item{border:1px solid var(--dr-border,#e6e6e6);border-radius:14px;background:#fff;overflow:hidden;}
-                .dr-faq__q{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px;
-                    padding:15px 16px;font-size:14.5px;font-weight:700;letter-spacing:-.01em;color:#121620;}
+                /* Mobile: this is the last block on the sheet, so it has to sit on
+                   the same 20px gutter as every section above it — full-bleed rows
+                   under padded copy is what made the page look like it fell off a
+                   ledge at the bottom. */
+                .dr-faq{padding:0 20px;}
+                /* One hairline-divided stack, not a column of floating boxes — the
+                   app's Important Information card reads the same way. */
+                .dr-faq__list{border:1px solid #E2E8F0;border-radius:16px;background:#fff;overflow:hidden;}
+                .dr-faq__item + .dr-faq__item{border-top:1px solid #EEF2F7;}
+                .dr-faq__q{list-style:none;cursor:pointer;display:flex;align-items:flex-start;gap:12px;
+                    padding:15px 16px;font-size:14.5px;font-weight:700;line-height:1.45;
+                    letter-spacing:-.01em;color:#121620;-webkit-tap-highlight-color:transparent;}
                 .dr-faq__q::-webkit-details-marker{display:none;}
-                .dr-faq__chev{margin-left:auto;flex:none;transition:transform .2s;color:#8a94a6;font-size:12px;}
-                .dr-faq__item[open] .dr-faq__chev{transform:rotate(180deg);}
-                .dr-faq__a{padding:0 16px 15px;font-size:13.5px;line-height:1.6;color:#4b5563;}
+                .dr-faq__item[open] .dr-faq__q{padding-bottom:9px;}
+                .dr-faq__chev{margin-left:auto;flex:none;width:18px;height:18px;margin-top:1px;
+                    color:#94A3B8;transition:transform .2s ease;}
+                .dr-faq__chev svg{width:100%;height:100%;display:block;}
+                .dr-faq__item[open] .dr-faq__chev{transform:rotate(180deg);color:#2563EB;}
+                .dr-faq__a{padding:0 44px 16px 16px;font-size:13.5px;line-height:1.65;color:#64748B;}
+                /* The sheet used to stop dead here and hand the reader ~96px of
+                   blank white (the reserve for the book bar, which hides on
+                   scroll-down). One quiet line closes the page and routes the
+                   questions the host didn't answer. Flat link, not a boxed CTA. */
+                .dr-faq__end{margin:14px 0 0;text-align:center;font-size:12.5px;color:#94A3B8;}
+                .dr-faq__end a{color:#2563EB;font-weight:700;text-decoration:none;}
             </style>
-            <section class="dr-faq" style="margin-top:22px;">
+            <section class="dr-faq" style="margin-top:26px;">
                 <h3 class="dr-section-title" style="margin-bottom:12px;">Frequently asked questions</h3>
                 <div class="dr-faq__list">
                     @foreach($faqs as $f)
                     <details class="dr-faq__item">
-                        <summary class="dr-faq__q">{{ $f['question'] }}<span class="dr-faq__chev">▼</span></summary>
-                        <div class="dr-faq__a">{!! nl2br(e(trim((string) $f['answer']))) !!}</div>
+                        <summary class="dr-faq__q">{{ $f['question'] }}<span class="dr-faq__chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></summary>
+                        <div class="dr-faq__a">{!! nl2br(e($f['answer'])) !!}</div>
                     </details>
                     @endforeach
                 </div>
+                @php $faqOrg = $event->organiserCard(); @endphp
+                <p class="dr-faq__end">Still have a question?
+                    @if($faqOrg['url'])
+                        <a href="{{ $faqOrg['url'] }}">Ask {{ $faqOrg['name'] }}</a>
+                    @else
+                        <a href="{{ url('/support') }}">Contact support</a>
+                    @endif
+                </p>
             </section>
             @endif
 
@@ -1549,39 +1792,134 @@
                  open the shared .dr-tix ticket modal (drTixToggle).
                  ===================================================================== --}}
             @php
-                $dkTiers        = $event->ticketTypes->filter->isOnSale()->values();
+                // Buyable now (visible + in its sales window + release phase opened) and
+                // the tiers a later phase still holds back — shown, but locked.
+                $dkTiers        = $event->saleableTicketTypes();
+                $dkLocked       = $event->lockedTicketTypes();
                 $dkFrom         = $dkTiers->count() ? (float) $dkTiers->min(fn ($t) => $t->effectivePrice()) : (float) $event->price;
                 $dkSoldOut      = $event->soldOut();
-                $dkSalesClosed  = $event->ticketTypes->isNotEmpty() && $dkTiers->isEmpty();
+                $dkSalesClosed  = $event->ticketTypes->isNotEmpty() && $dkTiers->isEmpty() && $dkLocked->isEmpty();
                 $dkPriceLabel   = $dkFrom > 0 ? '₹' . number_format($dkFrom) : 'Free';
                 $dkPriceSuffix  = $dkTiers->count() > 1 ? 'onwards' : ($dkFrom > 0 ? 'per ticket' : 'entry');
                 $dkLineup       = $event->lineupRows();
                 $dkGallery      = $event->galleryUrls();
                 $dkGtk          = $event->goodToKnowRows();
-                $dkNotes        = array_values(array_filter((array) ($event->info_notes ?? []), fn ($n) => is_string($n) && trim($n) !== ''));
+                $dkNotes        = $event->infoNoteRows();
                 $dkMapEmbed     = $event->mapEmbedUrl();
                 // Always show a real Google map on desktop: prefer the keyed Embed API
                 // when configured, else the keyless embed (works with no API key and no
                 // stored coordinates — searches the venue/address text).
                 $dkMapSrc       = $dkMapEmbed ?: 'https://maps.google.com/maps?q=' . rawurlencode($event->mapsQuery()) . '&z=15&output=embed';
                 $dkDirections   = $event->directionsUrl();
+                $dkAmbiance     = $event->venuePhotos();
                 $dkVenueName    = $event->venue ?: ($event->city ?: 'Venue');
                 $dkVenueAddr    = $event->location ?: ($event->city ? $event->city . ', India' : 'India');
-                $dkOrg          = $event->artist->name ?? 'Event Host';
+                // The real organiser (host profile → partner account), NOT the
+                // lineup artist this used to read. See Event::organiserCard().
+                $dkOrg          = $event->organiserCard();
                 $dkHeroImg      = $event->heroImageUrl() ?? asset('events.png');
+                // Hosts append the venue to the title for search ("… | Jollygunj,
+                // Whitefield"), so the H1 printed the location the fact row prints
+                // again 20px below it — and the extra words pushed the display type
+                // to three lines. Drop a trailing pipe segment ONLY when every word
+                // in it already appears in the venue/city line, so a title whose
+                // tail carries real information is never touched.
+                $dkTitle = trim((string) $event->title);
+                if (str_contains($dkTitle, '|')) {
+                    $dkHead = trim(\Illuminate\Support\Str::beforeLast($dkTitle, '|'));
+                    $dkTail = trim(\Illuminate\Support\Str::afterLast($dkTitle, '|'));
+                    $dkPlace = \Illuminate\Support\Str::lower(($event->venue ?: '') . ' ' . ($event->city ?: ''));
+                    $dkTailWords = preg_split('/[^\p{L}\p{N}]+/u', \Illuminate\Support\Str::lower($dkTail), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $dkDupe = $dkTailWords !== [] && collect($dkTailWords)
+                        ->every(fn ($w) => mb_strlen($w) < 3 || str_contains($dkPlace, $w));
+                    if ($dkHead !== '' && $dkDupe) {
+                        $dkTitle = $dkHead;
+                    }
+                }
                 $dkDateLong     = optional($event->date)->format('l, d M Y');
                 $dkDateShort    = optional($event->date)->format('D, d M');
                 $dkTime         = trim((string) ($event->time ?? ''));
+                // Desktop fact row / "Starts at" card show the full range too.
+                $dkRange        = $event->timeRangeLabel();
                 $dkDesc         = trim(strip_tags((string) $event->description));
-                $dkBookDisabled = $dkSoldOut || $dkSalesClosed;
-                $dkBookLabel    = $dkSoldOut ? 'Sold out' : ($dkSalesClosed ? 'Sales closed' : 'Book tickets');
+                // Hosts paste plain text with bare line breaks, which rendered as one
+                // unspaced run. Wrap those lines in real paragraphs; descriptions that
+                // already carry block HTML are passed through untouched.
+                $dkAboutHtml    = preg_match('/<(p|ul|ol|h[1-6]|div|br)\b/i', (string) $event->description)
+                    ? (string) $event->description
+                    : collect(preg_split('/\R+/u', (string) $event->description) ?: [])
+                        ->map(fn ($line) => trim((string) $line))
+                        ->filter()
+                        ->map(fn ($line) => '<p>' . e($line) . '</p>')
+                        ->implode('');
+                // A finished event can't be sold (the booking route 404s it), so the
+                // CTA must say so rather than sending the buyer into a dead end.
+                $dkEnded        = $event->hasFinished();
+                $dkBookDisabled = $dkEnded || $dkSoldOut || $dkSalesClosed;
+                $dkBookLabel    = $dkEnded
+                    ? 'Event ended'
+                    : ($dkSoldOut ? 'Sold out' : ($dkSalesClosed ? 'Sales closed' : 'Book tickets'));
                 // Honest urgency: only when the real remaining slot count is genuinely low.
                 $dkUrgent       = ! $dkBookDisabled && (int) $event->available_slots > 0 && (int) $event->available_slots <= 20;
             @endphp
             <div class="dr-desk">
-                {{-- Cinematic hero --}}
                 <header class="dk-hero">
                     <div class="dk-hero__bg" style="background-image:url('{{ $dkHeroImg }}')"></div>
+                    {{-- Background texture for the card's open right side: a soft brand
+                         glow plus flowing contour lines. Anchored right (xMaxYMid slice)
+                         so it fills the empty area and stays clear of the copy; every
+                         stroke fades out at both ends so nothing reads as a hard shape.
+                         Purely decorative — aria-hidden, pointer-events off, behind
+                         .dk-hero__inner. --}}
+                    <div class="dk-hero__deco" aria-hidden="true">
+                        {{-- viewBox matches the card's own 1200×490 so the curves can be
+                             placed against measured copy: the text block occupies
+                             x 397–1151, y 153–337, so the lines run only in the empty
+                             bands above (y<145) and below it (y>360). --}}
+                        <svg viewBox="0 0 1200 490" preserveAspectRatio="xMaxYMid slice" fill="none">
+                            <defs>
+                                <radialGradient id="dkHeroGlow" cx="80%" cy="32%" r="58%">
+                                    <stop offset="0" stop-color="#2563EB" stop-opacity="0.11"/>
+                                    <stop offset="1" stop-color="#2563EB" stop-opacity="0"/>
+                                </radialGradient>
+                                <linearGradient id="dkHeroLine" x1="0" y1="0" x2="1" y2="0">
+                                    <stop offset="0" stop-color="#2563EB" stop-opacity="0"/>
+                                    <stop offset="0.40" stop-color="#2563EB" stop-opacity="0.8"/>
+                                    <stop offset="0.76" stop-color="#60A5FA" stop-opacity="0.6"/>
+                                    <stop offset="1" stop-color="#60A5FA" stop-opacity="0"/>
+                                </linearGradient>
+                                {{-- One curve each for the lower and upper band; the bands
+                                     below are that same curve stepped down 13px at a time,
+                                     so the lines stay exactly parallel. Even repetition is
+                                     what makes it read as a pattern rather than as a few
+                                     stray strokes. --}}
+                                <path id="dkWaveLow" d="M260 452C500 452 590 392 810 392S1030 356 1260 352"/>
+                                <path id="dkWaveTop" d="M310 -10C540 -10 630 52 850 52S1060 88 1260 92"/>
+                            </defs>
+                            <rect width="1200" height="490" fill="url(#dkHeroGlow)"/>
+                            {{-- Opacity swells toward the middle of each bundle so it
+                                 reads with depth instead of as a flat comb. --}}
+                            <g stroke="url(#dkHeroLine)" stroke-width="1.1">
+                                <use href="#dkWaveLow" y="0" opacity="0.30"/>
+                                <use href="#dkWaveLow" y="13" opacity="0.55"/>
+                                <use href="#dkWaveLow" y="26" opacity="0.85"/>
+                                <use href="#dkWaveLow" y="39" opacity="1"/>
+                                <use href="#dkWaveLow" y="52" opacity="0.85"/>
+                                <use href="#dkWaveLow" y="65" opacity="0.55"/>
+                                <use href="#dkWaveLow" y="78" opacity="0.30"/>
+                                <use href="#dkWaveTop" y="0" opacity="0.28"/>
+                                <use href="#dkWaveTop" y="13" opacity="0.5"/>
+                                <use href="#dkWaveTop" y="26" opacity="0.8"/>
+                                <use href="#dkWaveTop" y="39" opacity="0.6"/>
+                                <use href="#dkWaveTop" y="52" opacity="0.32"/>
+                            </g>
+                        </svg>
+                    </div>
+                    {{-- Share sits in the card's top-right corner, out of the reading
+                         order of chip → title → facts. --}}
+                    <button type="button" class="dk-iconbtn dk-share" aria-label="Share" onclick="drShare()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
+                    </button>
                     <div class="dk-hero__inner">
                         <div class="dk-poster">
                             <img src="{{ $dkHeroImg }}" alt="{{ $event->title }}" fetchpriority="high" decoding="async">
@@ -1592,9 +1930,8 @@
                                 @if(!empty($event->rating) && $event->rating > 0)
                                     <span class="dk-chip dk-chip--rate"><i>★</i>{{ number_format($event->rating, 1) }}@if($event->ratings_count) · {{ $event->ratings_count }} rating{{ $event->ratings_count == 1 ? '' : 's' }}@endif</span>
                                 @endif
-                                @if($countdown)<span class="dk-chip">{{ $countdown }}</span>@endif
                             </div>
-                            <h1 class="dk-title">{{ $event->title }}</h1>
+                            <h1 class="dk-title @if(mb_strlen($dkTitle) > 52) dk-title--long @endif">{{ $dkTitle }}</h1>
                             <div class="dk-facts">
                                 @if($dkDateLong)
                                 <span class="dk-fact">
@@ -1605,7 +1942,7 @@
                                 @if($dkTime)
                                 <span class="dk-fact">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
-                                    {{ $dkTime }}
+                                    {{ $dkRange ?: $dkTime }}
                                 </span>
                                 @endif
                                 @if($event->venue || $event->city)
@@ -1615,45 +1952,18 @@
                                 </span>
                                 @endif
                             </div>
-                            <div class="dk-hero__actions">
-                                <div class="dk-price">
-                                    <small>{{ $dkFrom > 0 ? 'Tickets from' : 'Entry' }}</small>
-                                    <strong>{{ $dkPriceLabel }}</strong>
-                                </div>
-                                <button type="button" class="dk-btn" onclick="dkScrollToTix()" @if($dkBookDisabled) disabled @endif>
-                                    @unless($dkBookDisabled)
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><line x1="13" y1="5" x2="13" y2="19" stroke-dasharray="2 3"/></svg>
-                                    @endunless
-                                    {{ $dkBookLabel }}
-                                </button>
-                                <button type="button" class="dk-iconbtn" aria-label="Share" onclick="drShare()">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>
-                                </button>
-                            </div>
-                            <div class="dk-trust">
-                                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verified event</span>
-                                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secure checkout</span>
-                                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Instant e-tickets</span>
-                            </div>
                         </div>
                     </div>
                 </header>
-
-                <nav class="dk-crumbs">
-                    <a href="/events" onclick="if(window.history.length>1){event.preventDefault();history.back();}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                        All events
-                    </a>
-                </nav>
 
                 <div class="dk-body">
                     {{-- Left: editorial content column --}}
                     <div class="dk-main">
                         @if($dkDesc !== '')
                         <section class="dk-sec">
-                            <div class="dk-h"><h2>About the event</h2></div>
+                            <div class="dk-h"><h2>About</h2></div>
                             <div class="dk-about-wrap" id="dkAboutWrap">
-                                <div class="dk-about">{!! $event->description !!}</div>
+                                <div class="dk-about">{!! $dkAboutHtml !!}</div>
                                 <button type="button" class="dk-readmore" id="dkAboutToggle" onclick="dkToggleAbout()" hidden>
                                     <span class="lbl">Read more</span>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -1664,7 +1974,9 @@
 
                         @if(count($dkLineup))
                         <section class="dk-sec">
-                            <div class="dk-h"><h2>Who takes the stage</h2><span>{{ count($dkLineup) }} {{ \Illuminate\Support\Str::plural('artist', count($dkLineup)) }}</span></div>
+                            {{-- No count beside the heading: with one artist it just
+                                 advertised how thin the lineup is. --}}
+                            <div class="dk-h"><h2>Lineup</h2></div>
                             <div class="dk-artists">
                                 @foreach($dkLineup as $artist)
                                     <div class="dk-artist">
@@ -1683,7 +1995,7 @@
 
                         @if(count($dkGallery) >= 1)
                         <section class="dk-sec">
-                            <div class="dk-h"><h2>Gallery</h2><span>{{ count($dkGallery) }} {{ \Illuminate\Support\Str::plural('photo', count($dkGallery)) }}</span></div>
+                            <div class="dk-h"><h2>Gallery</h2></div>
                             <div class="dk-gallery">
                                 @foreach(array_slice($dkGallery, 0, 5) as $img)
                                     <button type="button" onclick="drLbx(this)" aria-label="View photo full screen">
@@ -1710,6 +2022,31 @@
                                     </a>
                                 </div>
                             </div>
+                            @if(count($dkAmbiance))
+                            {{-- Venue photos sit BELOW the location card: the map places
+                                 the venue, then the photos show it. Contributor names
+                                 are carried as tooltips, not printed over each tile —
+                                 strangers' names captioning the photos read scraped. --}}
+                            <div class="dk-amb__wrap">
+                                <div class="dk-amb__hd">At the venue <span>Photos from Google</span></div>
+                                <div class="dk-amb__vp">
+                                    <div class="dk-amb">
+                                        @foreach($dkAmbiance as $photo)
+                                            <button type="button" onclick="drLbx(this)" aria-label="View venue photo full screen"
+                                                @if($photo['credit'] !== '') title="Photo by {{ $photo['credit'] }}" @endif>
+                                                <img src="{{ $photo['url'] }}" alt="Inside {{ $dkVenueName }}" loading="lazy" decoding="async">
+                                            </button>
+                                        @endforeach
+                                    </div>
+                                    <button type="button" class="dk-amb__nav dk-amb__nav--prev" onclick="dkAmbNudge(this,-1)" aria-label="Previous photos" hidden>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                                    </button>
+                                    <button type="button" class="dk-amb__nav dk-amb__nav--next" onclick="dkAmbNudge(this,1)" aria-label="Next photos" hidden>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            @endif
                         </section>
                         @endif
 
@@ -1734,30 +2071,17 @@
 
                         @if(count($dkNotes))
                         <section class="dk-sec">
-                            <div class="dk-h"><h2>Important information</h2></div>
+                            <div class="dk-h"><h2>Terms &amp; entry rules</h2></div>
                             <ul class="dk-notes">
                                 @foreach($dkNotes as $note)<li>{{ $note }}</li>@endforeach
                             </ul>
                         </section>
                         @endif
 
-                        @if(($event->ratings_count ?? 0) > 0)
-                        @php $dkStars = (int) round((float) $event->rating); @endphp
-                        <section class="dk-sec">
-                            <div class="dk-h"><h2>Ratings</h2></div>
-                            <div class="dk-rev">
-                                <div class="dk-rev__score">
-                                    <b>{{ number_format((float) $event->rating, 1) }}</b>
-                                    <div class="dk-rev__stars">{{ str_repeat('★', max(0, min(5, $dkStars))) }}{{ str_repeat('☆', max(0, 5 - $dkStars)) }}</div>
-                                    <small>{{ number_format($event->ratings_count) }} {{ \Illuminate\Support\Str::plural('rating', $event->ratings_count) }}</small>
-                                </div>
-                                <div class="dk-rev__txt">
-                                    <strong>Loved by attendees</strong>
-                                    <p>Rated {{ number_format((float) $event->rating, 1) }} out of 5 by {{ number_format($event->ratings_count) }} verified {{ \Illuminate\Support\Str::plural('attendee', $event->ratings_count) }} who booked this experience on Haraan.</p>
-                                </div>
-                            </div>
-                        </section>
-                        @endif
+                        {{-- No "Ratings" section: with no review text to show, it was a
+                             whole band of page restating the ★4.8 · 173 ratings chip
+                             already in the hero, wrapped in invented praise copy. The
+                             chip carries the fact until real reviews land here. --}}
                         {{-- FAQs — last section in the desktop main column (reuses the
                              .dr-faq styles emitted with the mobile sheet). --}}
                         @if($faqs->isNotEmpty())
@@ -1766,8 +2090,8 @@
                             <div class="dr-faq__list">
                                 @foreach($faqs as $f)
                                 <details class="dr-faq__item">
-                                    <summary class="dr-faq__q">{{ $f['question'] }}<span class="dr-faq__chev">▼</span></summary>
-                                    <div class="dr-faq__a">{!! nl2br(e(trim((string) $f['answer']))) !!}</div>
+                                    <summary class="dr-faq__q">{{ $f['question'] }}<span class="dr-faq__chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></summary>
+                                    <div class="dr-faq__a">{!! nl2br(e($f['answer'])) !!}</div>
                                 </details>
                                 @endforeach
                             </div>
@@ -1778,78 +2102,108 @@
                     {{-- Right: sticky booking rail — an inline ticket selector that
                          posts to the same auth-gated checkout the mobile modal uses. --}}
                     <aside class="dk-rail">
-                        <form class="dk-tix" method="GET" action="/events/{{ $event->id }}/book">
-                            <div class="dk-tix__top">
-                                <h3>Select tickets</h3>
-                                @if($dkUrgent)<span>● Selling fast</span>@endif
+                        {{-- Buy card: price + one CTA. The inline stepper/total that used
+                             to live here is gone — tier selection happens in the shared
+                             .dr-tix modal the hero CTA already opens, so there is one
+                             place to pick tickets instead of two competing ones. --}}
+                        <div class="dk-buy">
+                            @if($dkUrgent)<span class="dk-buy__urgent">● Selling fast</span>@endif
+                            <div class="dk-buy__row">
+                                <span class="dk-buy__price">
+                                    <b>{{ $dkPriceLabel }}</b>
+                                    @if($dkFrom > 0)<small>{{ $dkPriceSuffix }}</small>@endif
+                                </span>
+                                @if($dkBookDisabled)
+                                    <span class="dk-buy__off">{{ $dkBookLabel }}</span>
+                                @else
+                                    <button type="button" class="dk-btn dk-buy__cta" onclick="drTixToggle(true)">Book tickets</button>
+                                @endif
                             </div>
-                            <p class="dk-tix__sub">Pick your tickets — secure payment on the next step.</p>
-
-                            @if($dkSoldOut)
-                                <p class="dk-tix__closed">This event is sold out.</p>
-                            @elseif($dkSalesClosed)
-                                <p class="dk-tix__closed">Ticket sales are closed right now.</p>
-                            @elseif($dkTiers->count())
-                                @foreach($dkTiers as $tier)
-                                    @php
-                                        $rem = $tier->remaining();
-                                        $out = $rem !== null && $rem <= 0;
-                                        $max = $out ? 0 : min(10, $rem ?? 10);
-                                    @endphp
-                                    <div class="dk-trow" data-price="{{ $out ? 0 : $tier->effectivePrice() }}">
-                                        <div class="dk-trow__i">
-                                            <strong>{{ $tier->name }}</strong>
-                                            <small>{{ $tier->effectivePrice() > 0 ? '₹'.number_format($tier->effectivePrice()) : 'Free' }}</small>
-                                            @if($out)
-                                                <span class="dk-av dk-av--out">Sold out</span>
-                                            @elseif($rem !== null && $rem <= 10)
-                                                <span class="dk-av dk-av--low">Only {{ $rem }} left</span>
-                                            @endif
-                                        </div>
-                                        <div class="dk-step">
-                                            <button type="button" onclick="dkStep(this,-1)" aria-label="Fewer" @if($out) disabled @endif>−</button>
-                                            <input type="number" name="qty[{{ $tier->id }}]" value="0" min="0" max="{{ $max }}" readonly>
-                                            <button type="button" onclick="dkStep(this,1)" aria-label="More" @if($out) disabled @endif>+</button>
-                                        </div>
-                                    </div>
-                                @endforeach
-                            @else
-                                <div class="dk-trow" data-price="{{ (float) $event->price }}">
-                                    <div class="dk-trow__i">
-                                        <strong>Standard entry</strong>
-                                        <small>{{ $event->price ? '₹'.number_format($event->price) : 'Free' }}</small>
-                                    </div>
-                                    <div class="dk-step">
-                                        <button type="button" onclick="dkStep(this,-1)" aria-label="Fewer">−</button>
-                                        <input type="number" name="qty[0]" value="0" min="0" max="10" readonly>
-                                        <button type="button" onclick="dkStep(this,1)" aria-label="More">+</button>
-                                    </div>
-                                </div>
-                            @endif
-
-                            @unless($dkSoldOut || $dkSalesClosed)
-                                <div class="dk-tix__total"><small>Total</small><b id="dkTotal">—</b></div>
-                                <button type="submit" class="dk-btn" id="dkCta" disabled><span class="lbl">Select tickets</span></button>
-                                <div class="dk-tix__sec">
+                            @unless($dkBookDisabled)
+                                <div class="dk-buy__sec">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                                     Secure checkout · Instant confirmation
                                 </div>
                             @endunless
-                        </form>
+                        </div>
+
+                        {{-- Where and when, as rows. Only the venue row carries a chevron:
+                             it opens directions. The time row has nowhere to go, and a
+                             chevron that leads nowhere is worse than none. --}}
+                        <div class="dk-rows">
+                            <a class="dk-row" href="{{ $dkDirections }}" target="_blank" rel="noopener">
+                                <span class="dk-row__ic">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                </span>
+                                <span class="dk-row__tx">
+                                    <strong>{{ trim($dkVenueName . ($event->city ? ', ' . $event->city : ''), ', ') }}</strong>
+                                    <small>{{ $dkVenueAddr }}</small>
+                                </span>
+                                <svg class="dk-row__ch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                            </a>
+                            @if($dkTime || $dkDateLong)
+                            <div class="dk-row dk-row--static">
+                                <span class="dk-row__ic">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                </span>
+                                <span class="dk-row__tx">
+                                    <strong>{{ $dkTime ? ($dkRange !== $dkTime ? $dkRange : 'Starts at ' . $dkTime) : $dkDateLong }}</strong>
+                                    @if($dkTime && $dkDateLong)<small>{{ $dkDateLong }}</small>@endif
+                                </span>
+                            </div>
+                            @endif
+                        </div>
+
 
                         <div class="dk-org">
-                            <span class="dk-org__ava">
-                                @if($event->artist && $event->artist->image)
-                                    <img src="{{ $event->artist->image }}" alt="{{ $dkOrg }}">
-                                @else
-                                    {{ strtoupper(mb_substr(trim($dkOrg), 0, 1)) }}
+                            <div class="dk-org__hd">
+                                <span class="dk-org__ava">
+                                    @if($dkOrg['logo'])
+                                        <img src="{{ $dkOrg['logo'] }}" alt="{{ $dkOrg['name'] }}" loading="lazy" decoding="async">
+                                    @else
+                                        {{ $dkOrg['initial'] }}
+                                    @endif
+                                </span>
+                                <span class="dk-org__tx">
+                                    <small>Organised by</small>
+                                    <strong>
+                                        {{ $dkOrg['name'] }}
+                                        @if($dkOrg['verified'])
+                                            <svg viewBox="0 0 24 24" fill="currentColor" aria-label="Verified organiser"><path d="M23 12l-2.44-2.79.34-3.69-3.61-.82-1.89-3.2L12 2.96 8.6 1.5 6.71 4.69 3.1 5.5l.34 3.7L1 12l2.44 2.79-.34 3.7 3.61.82L8.6 22.5l3.4-1.47 3.4 1.46 1.89-3.19 3.61-.82-.34-3.69L23 12zm-12.91 4.72l-3.8-3.81 1.48-1.48 2.32 2.33 5.85-5.87 1.48 1.48-7.33 7.35z"/></svg>
+                                        @endif
+                                    </strong>
+                                </span>
+                            </div>
+                            @if($dkOrg['tagline'])
+                                <p class="dk-org__bio">{{ $dkOrg['tagline'] }}</p>
+                            @endif
+                            @if($dkOrg['events'] > 0 || $dkOrg['followers'] > 0)
+                            <div class="dk-org__stats">
+                                @if($dkOrg['events'] > 0)
+                                    <span><b>{{ $dkOrg['events'] }}</b> other {{ \Illuminate\Support\Str::plural('event', $dkOrg['events']) }}</span>
                                 @endif
-                            </span>
-                            <span class="dk-org__tx">
-                                <small>Organised by</small>
-                                <strong>{{ $dkOrg }}</strong>
-                                @if($hostProfile ?? null)<a href="{{ route('site.host', ['slug' => $hostProfile->slug]) }}">View organiser page →</a>@endif
-                            </span>
+                                @if($dkOrg['followers'] > 0)
+                                    <span><b>{{ $dkOrg['followers'] }}</b> {{ \Illuminate\Support\Str::plural('follower', $dkOrg['followers']) }}</span>
+                                @endif
+                            </div>
+                            @endif
+                            {{-- Follow is the primary action; the profile link rides
+                                 beside it as plain text rather than a second button. --}}
+                            @if($dkOrg['slug'])
+                            <div class="dk-org__act">
+                                @auth
+                                    <form method="POST" action="{{ route('site.host.follow', ['slug' => $dkOrg['slug']]) }}">
+                                        @csrf
+                                        <button type="submit" class="dk-org__follow {{ $dkOrg['following'] ? 'is-on' : '' }}">
+                                            {{ $dkOrg['following'] ? 'Following' : 'Follow' }}
+                                        </button>
+                                    </form>
+                                @else
+                                    <a class="dk-org__follow" href="{{ url('/login') }}">Follow</a>
+                                @endauth
+                                <a class="dk-org__link" href="{{ $dkOrg['url'] }}">View profile</a>
+                            </div>
+                            @endif
                         </div>
                     </aside>
                 </div>
@@ -1857,11 +2211,11 @@
                 {{-- Similar events — real published events from the controller ($similar). --}}
                 @if(($similar ?? null) && count($similar))
                 <section class="dk-more">
-                    <h2 class="dk-more__h">More events you may like</h2>
+                    <h2 class="dk-more__h">Similar events</h2>
                     <div class="dk-cards">
                         @foreach($similar as $s)
                             @php
-                                $sTiers = $s->relationLoaded('ticketTypes') ? $s->ticketTypes->filter->isOnSale() : collect();
+                                $sTiers = $s->relationLoaded('ticketTypes') ? $s->saleableTicketTypes() : collect();
                                 $sFrom  = $sTiers->count() ? (float) $sTiers->min(fn ($t) => $t->effectivePrice()) : (float) $s->price;
                             @endphp
                             <a class="dk-card" href="/events/{{ $s->id }}">
@@ -1884,44 +2238,25 @@
                 @endif
             </div>{{-- /.dr-desk --}}
 
-            {{-- Desktop-only behaviour: inline ticket total/steppers, hero→panel
-                 scroll, and gentle scroll-reveals. No effect on the mobile sheet. --}}
+            {{-- Desktop-only behaviour: the About clamp and gentle scroll-reveals.
+                 Both Book CTAs open the shared .dr-tix modal. No effect on mobile. --}}
             <script>
-                function dkStep(btn, delta) {
-                    var row = btn.closest('.dk-trow');
-                    var input = row.querySelector('input');
-                    var max = parseInt(input.getAttribute('max') || '10', 10);
-                    input.value = Math.min(max, Math.max(0, parseInt(input.value || '0', 10) + delta));
-                    // Reflect min/max on the stepper buttons.
-                    var v = parseInt(input.value, 10);
-                    var btns = row.querySelectorAll('.dk-step button');
-                    if (btns[0]) btns[0].disabled = v <= 0;
-                    if (btns[1]) btns[1].disabled = v >= max;
-                    dkTotal();
+                // Venue strip arrows. Scrolls by ~80% of the visible width so a tile
+                // is never left half-cut, and hides whichever arrow points at an end
+                // you've already reached.
+                function dkAmbNudge(btn, dir) {
+                    var strip = btn.parentElement.querySelector('.dk-amb');
+                    if (!strip) return;
+                    strip.scrollBy({ left: dir * Math.round(strip.clientWidth * 0.8), behavior: 'smooth' });
                 }
-                function dkTotal() {
-                    var total = 0, count = 0;
-                    document.querySelectorAll('.dk-tix .dk-trow[data-price]').forEach(function (r) {
-                        var q = parseInt(r.querySelector('input').value || '0', 10);
-                        total += q * parseFloat(r.dataset.price || '0');
-                        count += q;
-                    });
-                    var t = document.getElementById('dkTotal');
-                    if (t) t.textContent = count === 0 ? '—' : (total > 0 ? '₹' + total.toLocaleString('en-IN') : 'Free');
-                    var cta = document.getElementById('dkCta');
-                    if (cta) {
-                        cta.disabled = count === 0;
-                        cta.querySelector('.lbl').textContent = count === 0
-                            ? 'Select tickets'
-                            : 'Proceed · ' + count + (count === 1 ? ' ticket' : ' tickets');
-                    }
-                }
-                function dkScrollToTix() {
-                    var t = document.querySelector('.dk-tix') || document.querySelector('.dk-rail');
-                    if (!t) return;
-                    t.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    t.classList.add('dk-pulse');
-                    setTimeout(function () { t.classList.remove('dk-pulse'); }, 1300);
+                function dkAmbSync(strip) {
+                    var vp = strip.parentElement;
+                    var prev = vp.querySelector('.dk-amb__nav--prev');
+                    var next = vp.querySelector('.dk-amb__nav--next');
+                    // 2px of slack: fractional scroll widths never land exactly on the end.
+                    var max = strip.scrollWidth - strip.clientWidth;
+                    if (prev) prev.hidden = strip.scrollLeft <= 2;
+                    if (next) next.hidden = max <= 2 || strip.scrollLeft >= max - 2;
                 }
                 function dkToggleAbout() {
                     var w = document.getElementById('dkAboutWrap');
@@ -1992,10 +2327,18 @@
                             if (tog) tog.hidden = false;
                         }
                     }
-                    // Disable the leading "−" on load (all rows start at 0).
-                    document.querySelectorAll('.dk-tix .dk-step button[aria-label="Fewer"]').forEach(function (b) {
-                        if (!b.disabled) b.disabled = true;
+                    // Venue strip: show the arrows only once we know it actually
+                    // overflows, and keep them in sync as it scrolls or resizes.
+                    document.querySelectorAll('.dr-desk .dk-amb').forEach(function (strip) {
+                        dkAmbSync(strip);
+                        strip.addEventListener('scroll', function () { dkAmbSync(strip); }, { passive: true });
+                        window.addEventListener('resize', function () { dkAmbSync(strip); });
+                        // Lazy tiles change scrollWidth as they decode.
+                        strip.querySelectorAll('img').forEach(function (im) {
+                            if (!im.complete) im.addEventListener('load', function () { dkAmbSync(strip); }, { once: true });
+                        });
                     });
+
                     var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                     if (!reduce && 'IntersectionObserver' in window) {
                         var io = new IntersectionObserver(function (entries) {
@@ -2048,30 +2391,47 @@
     {{-- Ticket selection sheet (both breakpoints) — GET to the auth-gated
          checkout review, so guests bounce through /login and resume. --}}
     @php
-        $tixTiers = $event->ticketTypes->filter->isOnSale()->values();
-        $tixSalesClosed = $event->ticketTypes->isNotEmpty() && $tixTiers->isEmpty();
+        $tixTiers = $event->saleableTicketTypes();
+        // Tiers a later release phase still holds back — listed, but not selectable.
+        $tixLocked = $event->lockedTicketTypes();
+        $tixSalesClosed = $event->ticketTypes->isNotEmpty() && $tixTiers->isEmpty() && $tixLocked->isEmpty();
         $tixSoldOut = $event->soldOut();
+        // Already happened — nothing here is buyable, whatever the tiers say.
+        $tixEnded = $event->hasFinished();
     @endphp
     <div class="dr-tix__backdrop" onclick="drTixToggle(false)"></div>
     <form class="dr-tix" method="GET" action="/events/{{ $event->id }}/book" role="dialog" aria-modal="true" aria-label="Select tickets">
         <div class="dr-tix__grab"></div>
         <h3>Select tickets</h3>
-        @if($tixSoldOut)
+        @if($tixEnded)
+            <p class="dr-tix__closed">This event has ended.</p>
+        @elseif($tixSoldOut)
             <p class="dr-tix__closed">This event is sold out.</p>
         @elseif($tixSalesClosed)
             <p class="dr-tix__closed">Ticket sales are closed right now.</p>
-        @elseif($tixTiers->count())
+        @elseif($tixTiers->count() || $tixLocked->count())
             @foreach($tixTiers as $tier)
                 <div class="dr-tixrow" data-price="{{ $tier->effectivePrice() }}">
                     <div class="dr-tixrow__info">
                         <strong>{{ $tier->name }}</strong>
-                        <small>₹{{ number_format($tier->effectivePrice()) }}</small>
+                        <small>{{ $tier->effectivePrice() > 0 ? '₹'.number_format($tier->effectivePrice()) : 'Free' }}</small>
                     </div>
                     <div class="dr-stepper">
                         <button type="button" onclick="drStep(this, -1)" aria-label="Fewer">−</button>
                         <input type="number" name="qty[{{ $tier->id }}]" value="0" min="0" max="10" readonly>
                         <button type="button" onclick="drStep(this, 1)" aria-label="More">+</button>
                     </div>
+                </div>
+            @endforeach
+            @foreach($tixLocked as $tier)
+                {{-- No qty input: a locked tier can't be added, so it can't reach checkout. --}}
+                <div class="dr-tixrow dr-tixrow--soon">
+                    <div class="dr-tixrow__info">
+                        <strong>{{ $tier->name }}</strong>
+                        <small>{{ $tier->effectivePrice() > 0 ? '₹'.number_format($tier->effectivePrice()) : 'Free' }}</small>
+                        <span class="dr-tixrow__phase">{{ $event->phaseName((int) $tier->release_phase) ?? 'Next phase' }}</span>
+                    </div>
+                    <span class="dr-tixlock">🔒 {{ $event->phaseUnlockNote((int) $tier->release_phase) }}</span>
                 </div>
             @endforeach
         @else
@@ -2087,7 +2447,7 @@
                 </div>
             </div>
         @endif
-        @unless($tixSoldOut || $tixSalesClosed)
+        @unless($tixEnded || $tixSoldOut || $tixSalesClosed)
             <button type="submit" class="dr-tix__cta" disabled>Continue</button>
         @endunless
     </form>
@@ -2141,12 +2501,27 @@
     </div>
 
     {{-- Sticky booking bar (mobile only) --}}
+    @php
+        // Price the bar off the tiers, never off events.price. An event authored in
+        // Ticket Studio leaves that column at 0 and carries its real prices on the
+        // ticket types, so reading it raw made every tiered event announce
+        // "Free · entry" next to a live Book Tickets button while the sheet right
+        // above it listed ₹ prices. Same rule $dkFrom already applies on desktop.
+        //
+        // Fall back to every tier (not just the saleable ones) so an event that is
+        // sold out, sales-closed or still fully phase-locked shows what it costs
+        // instead of reverting to "Free".
+        $barTiers = $tixTiers->count() ? $tixTiers : $event->ticketTypes;
+        $barFrom  = $barTiers->count()
+            ? (float) $barTiers->min(fn ($t) => $t->effectivePrice())
+            : (float) $event->price;
+    @endphp
     <div class="dr-book-bar">
         <div class="dr-book-bar__price">
-            <span class="dr-book-bar__amount">{{ $event->price ? '₹'.number_format($event->price) : 'Free' }}</span>
-            <span class="dr-book-bar__label">{{ $event->price ? 'onwards' : 'entry' }}</span>
+            <span class="dr-book-bar__amount">{{ $barFrom > 0 ? '₹'.number_format($barFrom) : 'Free' }}</span>
+            <span class="dr-book-bar__label">{{ $barTiers->count() > 1 ? 'onwards' : ($barFrom > 0 ? 'per ticket' : 'entry') }}</span>
         </div>
-        <button class="dr-book-bar__btn" type="button" onclick="drTixToggle(true)" @if($tixSoldOut) disabled style="background:#CBD5E1;box-shadow:none;" @endif>{{ $tixSoldOut ? 'Sold out' : 'Book Tickets' }}</button>
+        <button class="dr-book-bar__btn" type="button" onclick="drTixToggle(true)" @if($tixEnded || $tixSoldOut) disabled style="background:#CBD5E1;box-shadow:none;" @endif>{{ $tixEnded ? 'Event ended' : ($tixSoldOut ? 'Sold out' : 'Book Tickets') }}</button>
     </div>
 </div>
 

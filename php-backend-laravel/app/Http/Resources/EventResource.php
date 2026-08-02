@@ -13,6 +13,23 @@ use Illuminate\Http\Resources\Json\JsonResource;
 final class EventResource extends JsonResource
 {
     /**
+     * Whether this is the single-event response rather than a row in the list.
+     *
+     * Gates the fields that cost real work to build: the venue's Google photos
+     * (up to a Places call) and the organiser card (a couple of counts). On the
+     * paginated list that would be twenty lookups apiece to render a screen that
+     * shows neither.
+     */
+    private bool $asDetail = false;
+
+    public function asDetail(bool $on = true): self
+    {
+        $this->asDetail = $on;
+
+        return $this;
+    }
+
+    /**
      * Transform the resource into an array.
      *
      * @return array<string, mixed>
@@ -35,7 +52,18 @@ final class EventResource extends JsonResource
             'venue'          => $this->venue,
             'date'           => $this->date,
             'time'           => $this->time,
-            'price'          => $this->price,
+            // Optional end time + the ready-made "5:00 PM – 8:00 PM" label, so
+            // clients don't each re-implement the joining rules.
+            'endTime'        => $this->end_time,
+            'timeRange'      => $this->resource->timeRangeLabel(),
+            // The "from" price the app prints on cards and the detail header. NOT the
+            // `price` column — CreateEvent pins that to 0 for every wizard-created
+            // event because the tiers do the pricing, so reading it raw made the app
+            // label real events "Free". fromPrice() falls back to the column for
+            // legacy tier-less events, so older builds see no change there.
+            'price'          => $this->fromPrice(),
+            // The raw column, kept for any client that still wants the flat rate.
+            'basePrice'      => (float) $this->price,
             // Host-set order fees (Convenience fee, Gateway fee, …) — the app previews
             // them, the server charges them. Each is { label, type, value }.
             'fees' => collect((array) ($this->fees ?? []))->map(fn (array $f): array => [
@@ -76,6 +104,24 @@ final class EventResource extends JsonResource
             ])->values()),
             'images'         => \App\Support\MediaUrl::resolveMany($this->images),
             'gallery'        => $this->galleryUrls(),
+            // Who is actually running this event: live host profile, else the
+            // partner account. The app used to hardcode "Haraan Events /
+            // Verified ticketing partner" for every event — a caption, not a fact.
+            'organiser'      => $this->when(
+                $this->asDetail,
+                fn (): array => $this->resource->organiserCard(),
+            ),
+            // The venue's own photos off its Google listing — the app's "Venue
+            // ambiance" rail. Absent (not empty) on list responses; empty when
+            // there's nothing worth showing or an admin hid this venue. Each row
+            // carries the contributor credit Google requires to be displayed.
+            'venuePhotos'    => $this->when(
+                $this->asDetail,
+                fn (): array => array_map(static fn (array $p): array => [
+                    'url'    => $p['url'],
+                    'credit' => $p['credit'],
+                ], $this->resource->venuePhotos()),
+            ),
             'status'         => $this->status,
             // Curated app rails this event appears in (e.g. ["for_you","trending"]).
             'placements'     => array_values(array_filter(
@@ -89,28 +135,16 @@ final class EventResource extends JsonResource
             // The organiser's public page, when they have a live one (Phase 2).
             'host'           => $this->hostPayload($request),
             'createdAt'      => $this->created_at,
-            'infoNotes'      => array_values(array_filter(
-                (array) ($this->info_notes ?? []),
-                static fn ($n): bool => is_string($n) && trim($n) !== '',
-            )),
+            'infoNotes'      => $this->resource->infoNoteRows(),
             'goodToKnow'     => $this->resource->goodToKnowRows(),
             'schedule'       => $this->resource->scheduleRows(),
             'lineup'         => $this->resource->lineupRows(),
             // Per-event FAQs — clean {question, answer} rows for the app's detail page.
-            'faqs'           => collect($this->resource->faqs ?? [])
-                ->filter(fn ($f): bool => is_array($f)
-                    && trim((string) ($f['question'] ?? '')) !== ''
-                    && trim((string) ($f['answer'] ?? '')) !== '')
-                ->map(fn ($f): array => [
-                    'question' => trim((string) $f['question']),
-                    'answer'   => trim((string) $f['answer']),
-                ])
-                ->values()
-                ->all(),
+            'faqs'           => $this->resource->faqRows(),
             // Buyer-facing tiers only — a host can hide a tier (visible = false)
             // without deleting it, and hidden tiers must never reach checkout.
             'ticketTypes'    => $this->whenLoaded('ticketTypes', fn () => $this->ticketTypes
-                ->filter(fn ($t) => (bool) $t->visible)
+                ->filter(fn ($t) => $t->isVisible())
                 ->map(fn ($t) => [
                     'id'          => $t->id,
                     'name'        => $t->name,
