@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Observers\BookingObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
@@ -14,6 +17,8 @@ use Illuminate\Support\Str;
  * @property int         $id
  * @property int         $quantity
  * @property float       $total_amount
+ * @property float       $amount_paid    derived from booking_payments — never set directly
+ * @property string      $payment_status unpaid|partial|paid|refunded|part_refunded
  * @property string      $status
  * @property array|null  $seat_numbers
  * @property string|null $coupon_code
@@ -26,6 +31,7 @@ use Illuminate\Support\Str;
  * @property-read User  $user
  * @property-read Event $event
  */
+#[ObservedBy(BookingObserver::class)]
 final class Booking extends Model
 {
     use HasFactory;
@@ -47,6 +53,16 @@ final class Booking extends Model
             }
         });
     }
+
+    /**
+     * Money state defaults live on the model as well as the column, so a freshly
+     * created Booking reads 'unpaid' / 0.00 without needing a refresh() first —
+     * otherwise every caller sees null and has to know to reload.
+     */
+    protected $attributes = [
+        'amount_paid' => 0,
+        'payment_status' => 'unpaid',
+    ];
 
     protected $fillable = [
         'quantity',
@@ -92,6 +108,7 @@ final class Booking extends Model
         return [
             'quantity'        => 'integer',
             'total_amount'    => 'float',
+            'amount_paid'     => 'float',
             'convenience_fee' => 'float',
             'discount'        => 'float',
             'seat_numbers' => 'array',
@@ -103,6 +120,34 @@ final class Booking extends Model
     // -------------------------------------------------------------------------
     //  Relationships
     // -------------------------------------------------------------------------
+
+    /**
+     * Every movement of money against this booking — advances, the balance
+     * collected at the desk, refunds (negative rows).
+     *
+     * NB `amount_paid` and `payment_status` are DERIVED from these rows and are
+     * written only by {@see \App\Services\BookingLedger}. Never set them directly.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(BookingPayment::class);
+    }
+
+    /** What the customer still owes. Zero once settled, never negative. */
+    public function balanceDue(): float
+    {
+        return max(0.0, round((float) $this->total_amount - (float) $this->amount_paid, 2));
+    }
+
+    /** Took an advance but hasn't settled — the chase list on the dashboard. */
+    public function hasBalanceDue(): bool
+    {
+        return $this->balanceDue() > 0 && ! in_array(
+            strtolower((string) $this->payment_status),
+            ['refunded', 'part_refunded'],
+            true,
+        );
+    }
 
     /** The user who placed this booking. */
     public function user(): BelongsTo

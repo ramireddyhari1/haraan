@@ -84,20 +84,21 @@ class WebEventBookingTest extends TestCase
             ->assertSee('498.00');
     }
 
+    /** A free event skips payment: the booking confirms on the spot and lands on the pass. */
     public function test_confirm_creates_booking_and_shows_pass(): void
     {
-        $event = $this->event();
+        $event = $this->event(['price' => 0]);
         $user  = $this->user();
 
         $response = $this->actingAs($user)
-            ->post("/events/{$event->id}/book", ['qty' => [0 => 2]]);
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2]] + $this->contact());
 
         $booking = Booking::query()->firstOrFail();
         $response->assertRedirect(route('site.booking.pass', ['id' => $booking->id]));
 
         $this->assertSame(2, $booking->quantity);
         $this->assertSame('CONFIRMED', $booking->status);
-        $this->assertSame(498.0, (float) $booking->total_amount);
+        $this->assertSame(0.0, (float) $booking->total_amount);
         $this->assertSame(98, $event->fresh()->available_slots);
         $this->assertNotEmpty($booking->ticket_code);
 
@@ -108,6 +109,10 @@ class WebEventBookingTest extends TestCase
             ->assertSee('haraan:ticket:'.$booking->ticket_code, false);
     }
 
+    /**
+     * A paid order reserves each tier at its own price and stops on the payment page
+     * (status PENDING until Razorpay confirms) — seats are held, not yet ticketed.
+     */
     public function test_tiered_order_books_each_tier_at_its_own_price(): void
     {
         $event = $this->event();
@@ -115,10 +120,11 @@ class WebEventBookingTest extends TestCase
         $silver = TicketType::create(['event_id' => $event->id, 'name' => 'Silver', 'kind' => 'paid', 'price' => 300, 'quota' => 10, 'sold' => 0, 'sort' => 2]);
 
         $this->actingAs($this->user())
-            ->post("/events/{$event->id}/book", ['qty' => [$gold->id => 1, $silver->id => 2]])
-            ->assertRedirect();
+            ->post("/events/{$event->id}/book", ['qty' => [$gold->id => 1, $silver->id => 2]] + $this->contact())
+            ->assertOk();
 
         $this->assertSame(2, Booking::query()->count());
+        $this->assertSame(['PENDING'], Booking::query()->pluck('status')->unique()->all());
         $this->assertSame(500.0, (float) Booking::query()->where('ticket_type_id', $gold->id)->value('total_amount'));
         $this->assertSame(600.0, (float) Booking::query()->where('ticket_type_id', $silver->id)->value('total_amount'));
         $this->assertSame(1, $gold->fresh()->sold);
@@ -160,6 +166,59 @@ class WebEventBookingTest extends TestCase
         // Only the foreign tier is requested → the cart is effectively empty.
         $this->actingAs($this->user())
             ->post("/events/{$event->id}/book", ['qty' => [$foreignTier->id => 2]])
+            ->assertRedirect("/events/{$event->id}");
+
+        $this->assertSame(0, Booking::query()->count());
+    }
+
+    /**
+     * Release phases must reach the buyer: a phase-2 tier is listed as locked (no
+     * quantity input, so it can't be selected) and refuses a hand-typed order until
+     * the earlier phase sells out.
+     */
+    public function test_unreleased_phase_tier_is_locked_on_the_site_and_at_checkout(): void
+    {
+        // Free tiers so the order confirms in one step — the phase gate is what's under test.
+        $event = $this->event(['price' => 0, 'release_phases' => [['name' => 'Early Bird'], ['name' => 'Phase 2']]]);
+        $early = TicketType::create(['event_id' => $event->id, 'name' => 'Early Bird Pass', 'kind' => 'standard', 'price' => 0, 'capacity' => 2, 'sold' => 0, 'sort' => 1, 'release_phase' => 0]);
+        $late  = TicketType::create(['event_id' => $event->id, 'name' => 'Phase Two Pass', 'kind' => 'standard', 'price' => 0, 'capacity' => 5, 'sold' => 0, 'sort' => 2, 'release_phase' => 1]);
+
+        $this->get("/events/{$event->id}")
+            ->assertOk()
+            ->assertSee('Phase Two Pass')
+            ->assertSee('Opens when Early Bird sells out')
+            ->assertSee('qty['.$early->id.']', false)
+            ->assertDontSee('qty['.$late->id.']', false);
+
+        $buyer = $this->user();
+
+        $this->actingAs($buyer)
+            ->post("/events/{$event->id}/book", ['qty' => [$late->id => 1]] + $this->contact())
+            ->assertRedirect("/events/{$event->id}");
+        $this->assertSame(0, Booking::query()->count());
+
+        // Early Bird sells out → Phase 2 opens for real.
+        $early->update(['sold' => 2]);
+
+        $this->get("/events/{$event->id}")
+            ->assertOk()
+            ->assertDontSee('Opens when Early Bird sells out')
+            ->assertSee('qty['.$late->id.']', false);
+
+        $this->actingAs($buyer)
+            ->post("/events/{$event->id}/book", ['qty' => [$late->id => 1]] + $this->contact())
+            ->assertRedirect();
+        $this->assertSame(1, Booking::query()->where('ticket_type_id', $late->id)->count());
+    }
+
+    /** A hidden tier is not buyable from the website, the same rule the API applies. */
+    public function test_hidden_tier_never_reaches_web_checkout(): void
+    {
+        $event  = $this->event();
+        $hidden = TicketType::create(['event_id' => $event->id, 'name' => 'Staff Comp', 'kind' => 'paid', 'price' => 1, 'capacity' => 5, 'sold' => 0, 'sort' => 1, 'visible' => false]);
+
+        $this->actingAs($this->user())
+            ->post("/events/{$event->id}/book", ['qty' => [$hidden->id => 1]] + $this->contact())
             ->assertRedirect("/events/{$event->id}");
 
         $this->assertSame(0, Booking::query()->count());

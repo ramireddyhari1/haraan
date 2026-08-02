@@ -91,6 +91,20 @@ final class TicketType extends Model
         return ['min' => $min, 'max' => $max];
     }
 
+    /**
+     * Whether the host shows this tier to buyers.
+     *
+     * Always read visibility through this — never `$tier->visible` — from inside
+     * another Eloquent model. `visible` is also Eloquent's own protected property
+     * (the serialization whitelist), and PHP resolves a protected member declared
+     * on a shared ancestor directly, so code in Event/Booking/etc. silently reads
+     * that empty array instead of the column and every tier looks hidden.
+     */
+    public function isVisible(): bool
+    {
+        return (bool) $this->getAttribute('visible');
+    }
+
     /** Remaining tickets for this tier, or null when capacity is unlimited. */
     public function remaining(): ?int
     {

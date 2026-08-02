@@ -243,6 +243,12 @@
                             </template>
                         </select>
                     </div>
+                    {{-- A later phase only opens once the earlier phase sells out, so an
+                         earlier phase with no seat limit (or no tickets) opens this one
+                         immediately — which reads to the host as "phases don't work". --}}
+                    <div class="tk-err" x-show="state.phases.length>0 && phaseNote(t)" style="margin-top:0">
+                        <span>⚠</span> <span x-text="phaseNote(t)"></span>
+                    </div>
                 </div>
             </div>
         </template>
@@ -303,6 +309,29 @@
             addPhase() {
                 if (this.state.phases.length === 0) this.state.phases.push({ name: 'Early Bird' });
                 this.state.phases.push({ name: 'Phase ' + (this.state.phases.length + 1) });
+            },
+            /**
+             * Why a ticket's release phase won't behave the way the host expects, or ''
+             * when it's fine. Mirrors Event::phaseReleased(): a phase opens once every
+             * capacity-bearing ticket in the earlier phases has sold out, and an
+             * unlimited ticket never sells out (so it's skipped, not treated as a block).
+             */
+            phaseNote(t) {
+                const pi = Number(t.phase) || 0;
+                if (pi <= 0 || !this.state.phases.length) return '';
+
+                const earlier = this.state.tickets.filter(x => (Number(x.phase) || 0) < pi && String(x.name || '').trim() !== '');
+                const prev = (this.state.phases[pi - 1] || {}).name || 'the earlier phase';
+
+                if (!earlier.length) {
+                    return 'No ticket sells in ' + prev + ' yet, so this one goes on sale straight away. Move a ticket into ' + prev + '.';
+                }
+                const noCap = earlier.every(x => x.seats === '' || x.seats === null || Number(x.seats) < 0);
+                if (noCap) {
+                    return prev + ' has unlimited seats, so it never sells out and this ticket opens immediately. Give those tickets a seat limit.';
+                }
+
+                return '';
             },
             removePhase(i) {
                 this.state.phases.splice(i, 1);

@@ -11,10 +11,12 @@ use App\Models\EventSlot;
 use App\Models\TicketType;
 use App\Models\User;
 use App\Models\Venue;
+use App\Models\VenueBlock;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
 use App\Support\ContactPrefill;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -667,7 +669,7 @@ final class BookingService
             $startHm = $startMin !== null ? $this->minutesToHm($startMin) : null;
             $endHm = $endMin !== null ? $this->minutesToHm($endMin) : null;
 
-            $this->assertWindowFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
+            $this->assertCourtHourFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
 
             return Booking::query()->create([
                 'quantity'       => 1,
@@ -703,7 +705,65 @@ final class BookingService
      *
      * @throws ConflictHttpException  When the window (or slot) is already taken.
      */
-    private function assertWindowFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    private function assertCourtHourFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    {
+        $this->assertNoBookingOverlap($venueId, $courtId, $slotId, $date, $startMin, $endMin);
+        $this->assertNoBlockOverlap($venueId, $courtId, $date, $startMin, $endMin);
+    }
+
+    /**
+     * Reject the reservation if a non-booking block already owns this court-hour —
+     * maintenance, a holiday, an academy batch, a tournament hold, a private hire.
+     *
+     * Three rules, kept in PHP because they read better than the SQL would:
+     * a block with no court covers every court; a block with no time window covers
+     * the whole day; a block with a weekday applies only on that weekday inside its
+     * date range (the range + weekday narrowing happens in scopeApplyingOn).
+     *
+     * @throws ConflictHttpException  When a block covers the requested window.
+     */
+    private function assertNoBlockOverlap(int $venueId, ?int $courtId, string $date, ?int $startMin, ?int $endMin): void
+    {
+        $day = Carbon::parse($date);
+
+        $blocks = VenueBlock::query()->applyingOn($venueId, $day)->get();
+
+        foreach ($blocks as $block) {
+            if (! $block->coversCourt($courtId)) {
+                continue;
+            }
+
+            // Whole-day block, or a booking with no window we can reason about:
+            // refuse rather than risk a clash we can't see.
+            if ($block->isAllDay() || $startMin === null || $endMin === null) {
+                throw new ConflictHttpException(
+                    sprintf('That court is unavailable on this date (%s)', $block->label()),
+                );
+            }
+
+            $bs = $this->timeToMinutes($block->start_time);
+            $be = $this->timeToMinutes($block->end_time);
+
+            if ($bs === null || $be === null) {
+                throw new ConflictHttpException(
+                    sprintf('That court is unavailable on this date (%s)', $block->label()),
+                );
+            }
+
+            if ($startMin < $be && $endMin > $bs) {
+                throw new ConflictHttpException(
+                    sprintf('That court is unavailable at this time (%s)', $block->label()),
+                );
+            }
+        }
+    }
+
+    /**
+     * Reject the reservation if it clashes with another booking on the same court.
+     *
+     * @throws ConflictHttpException  When the window (or slot) is already taken.
+     */
+    private function assertNoBookingOverlap(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
     {
         if ($courtId !== null) {
             $existing = Booking::query()
@@ -711,8 +771,7 @@ final class BookingService
                 ->where('venue_id', $venueId)
                 ->where('venue_court_id', $courtId)
                 ->whereDate('slot_date', $date)
-                // Filament-created bookings store lowercase 'confirmed'; match case-insensitively.
-                ->whereRaw('lower(status) = ?', ['confirmed'])
+                ->where(fn ($q) => $this->occupyingStatuses($q))
                 ->get(['start_time', 'end_time']);
 
             foreach ($existing as $b) {
@@ -739,13 +798,34 @@ final class BookingService
                 ->where('venue_id', $venueId)
                 ->where('venue_slot_id', $slotId)
                 ->whereDate('slot_date', $date)
-                ->whereRaw('lower(status) = ?', ['confirmed'])
+                ->where(fn ($q) => $this->occupyingStatuses($q))
                 ->exists();
 
             if ($taken) {
                 throw new ConflictHttpException('That slot is already booked for this date');
             }
         }
+    }
+
+    /**
+     * Bookings that physically hold their court-hour.
+     *
+     * Occupancy is a question about LIFECYCLE, never about money — an unpaid
+     * booking and one with a ₹500 advance both still own the slot. `payment_status`
+     * must never appear in this predicate; that is the mistake that would let a
+     * venue sell the same 7pm Saturday twice. Live holds (a PENDING row inside its
+     * `reserved_until` window) count too; expired ones release the slot.
+     *
+     * Filament-created bookings store lowercase 'confirmed', so match case-insensitively.
+     */
+    private function occupyingStatuses(Builder $query): Builder
+    {
+        return $query
+            ->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed', 'checked_in'])
+            ->orWhere(fn (Builder $hold) => $hold
+                ->whereRaw('lower(status) = ?', ['pending'])
+                ->whereNotNull('reserved_until')
+                ->where('reserved_until', '>', now()));
     }
 
     /** Human-readable booking label, e.g. "Court 1 · Today · 7:00 PM – 8:00 PM". */
