@@ -34,9 +34,32 @@ class VenueResource extends Resource
         return auth()->user()?->canManage('gamehub') ?? false;
     }
 
-    /** Creating/editing/deleting a venue needs the 'pricing' (listings & pricing) capability. */
+    /** True while the request is being served by the partner console. */
+    protected static function isPartnerPanel(): bool
+    {
+        return \Filament\Facades\Filament::getCurrentPanel()?->getId() === 'partner';
+    }
+
+    /**
+     * Venues come into existence on the admin side only.
+     *
+     * A listing carries decisions that are not the tenant's to make — which partner
+     * owns it, which organisation unit it rolls up to, whether it is featured, where
+     * it sorts. Haraan creates the venue in /control and assigns the owner there
+     * (Venue → Visibility & ownership → Owner / partner); the partner then manages
+     * everything about the venue they were given. Deleting is admin-only for the
+     * same reason, and because a venue with bookings against it must never vanish
+     * from under them.
+     *
+     * Elsewhere (the /control panel) this still needs the 'pricing' capability, so
+     * a limited desk person cannot create or remove listings either.
+     */
     public static function canCreate(): bool
     {
+        if (static::isPartnerPanel()) {
+            return false;
+        }
+
         return static::canAccess() && (auth()->user()?->hasPartnerPermission('pricing') ?? false);
     }
 
@@ -47,7 +70,18 @@ class VenueResource extends Resource
 
     public static function canDelete(\Illuminate\Database\Eloquent\Model $record): bool
     {
+        if (static::isPartnerPanel()) {
+            return false;
+        }
+
         return static::canAccess() && (auth()->user()?->hasPartnerPermission('pricing') ?? false);
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return ! static::isPartnerPanel()
+            && static::canAccess()
+            && (auth()->user()?->hasPartnerPermission('pricing') ?? false);
     }
 
     protected static ?string $recordTitleAttribute = 'name';

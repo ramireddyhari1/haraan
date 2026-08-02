@@ -3,8 +3,11 @@
 namespace App\Filament\Resources\Venues\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
+use App\Models\User;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -16,10 +19,17 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ViewField;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\HtmlString;
 
 class VenueForm
 {
+    /** True while the request is being served by the partner console. */
+    private static function isPartnerPanel(): bool
+    {
+        return Filament::getCurrentPanel()?->getId() === 'partner';
+    }
+
     /** The sports the app knows how to icon + filter. Category and courts draw from this too. */
     private const SPORTS = [
         'Cricket' => 'Cricket',
@@ -141,6 +151,10 @@ class VenueForm
                             ->view('filament.venue-place-picker')
                             ->dehydrated(false)
                             ->columnSpanFull(),
+                        // Which Google listing this venue was picked from. Written by
+                        // the picker only — a hand-typed id would point at the wrong
+                        // business, so it never gets a visible input.
+                        Hidden::make('place_id'),
                         TextInput::make('latitude')
                             ->numeric()
                             ->step('0.0000001')
@@ -281,6 +295,11 @@ class VenueForm
                             ->columnSpanFull(),
                     ]),
 
+                // Ownership, merchandising and org placement are Haraan's calls, not the
+                // tenant's — a partner must never be able to reassign their venue to
+                // somebody else or feature themselves. They keep the two switches that
+                // are genuinely operational: whether the listing is live, and whether it
+                // is currently taking bookings. See VenueResource::canCreate().
                 Section::make('Visibility & ownership')
                     ->columns(2)
                     ->schema([
@@ -292,19 +311,37 @@ class VenueForm
                             ->default(true),
                         Toggle::make('is_featured')
                             ->label('Featured')
-                            ->default(false),
+                            ->default(false)
+                            ->visible(fn (): bool => ! self::isPartnerPanel()),
                         TextInput::make('sort_order')
                             ->numeric()
                             ->default(0)
-                            ->helperText('Lower numbers show first.'),
+                            ->helperText('Lower numbers show first.')
+                            ->visible(fn (): bool => ! self::isPartnerPanel()),
                         Select::make('partner_id')
                             ->label('Owner / partner')
-                            ->relationship('partner', 'name')
-                            ->searchable()
+                            ->relationship(
+                                'partner',
+                                'name',
+                                // Only real partner accounts on the venue lane — assigning a
+                                // venue to a consumer member would put a listing behind a
+                                // login that cannot open the partner console.
+                                modifyQueryUsing: fn (Builder $query): Builder => $query
+                                    ->where('role', 'PARTNER')
+                                    ->where(fn (Builder $q) => $q
+                                        ->whereRaw("lower(coalesce(partner_type, 'venue')) = 'venue'"))
+                                    ->orderBy('name'),
+                            )
+                            ->getOptionLabelFromRecordUsing(
+                                fn (User $record): string => trim($record->name . ' · ' . ($record->email ?? '')),
+                            )
+                            ->searchable(['name', 'email'])
                             ->preload()
                             ->placeholder('Platform-owned (no partner)')
-                            ->helperText('The venue owner who manages this in the partner console. Leave blank for platform-owned.'),
-                        OrganizationSelect::make(),
+                            ->helperText('The venue owner who manages this in the partner console. Only venue-lane partner accounts are listed. Leave blank for platform-owned.')
+                            ->visible(fn (): bool => ! self::isPartnerPanel()),
+                        OrganizationSelect::make()
+                            ->visible(fn (): bool => ! self::isPartnerPanel()),
                     ]),
 
                 Section::make('Ratings (starter values)')
