@@ -26,6 +26,7 @@ import com.haraan.app.ui.components.AutoRefresh
 import com.haraan.app.ui.matches.tabs.InfoTab
 import com.haraan.app.ui.matches.tabs.CommentaryTab
 import com.haraan.app.ui.matches.tabs.LiveTab
+import com.haraan.app.ui.matches.tabs.MvpTab
 import com.haraan.app.ui.matches.tabs.ScorecardTab
 import kotlinx.coroutines.launch
 
@@ -141,6 +142,7 @@ fun MatchDetailsScreen(
                                 1 -> CommentaryTab(state = state.data)
                                 2 -> LiveTab(state = state.data, ads = liveAds)
                                 3 -> ScorecardTab(state = state.data)
+                                4 -> MvpTab(state = state.data)
                             }
                         }
                     }

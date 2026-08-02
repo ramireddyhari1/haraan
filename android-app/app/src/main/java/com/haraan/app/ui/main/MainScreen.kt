@@ -252,7 +252,7 @@ private val MidnightAlt = Color(0xFFF1F5F9)     // Slate 100 card backgrounds
 private val CardTint = Color(0xFFFFFFFF)        // Card container color
 private val CardStroke = Color(0xFFE2E8F0)      // Slate 200 borders
 private val MIBlue = Color(0xFF0F62FE)
-private val MIGreen = Color(0xFF00C853)
+private val MIGreen = Color(0xFF2563EB)
 private val AccentWhite = Color(0xFFFFFFFF)
 private val BorderGray = Color(0xFFE2E8F0)
 private val TextMuted = Color(0xFF64748B)       // Slate 500 secondary text
@@ -2796,7 +2796,7 @@ private fun GameHubSegmentedSwitch(
   // the translucent-white-on-green treatment used on the old dark hero band.
   onLight: Boolean = false,
 ) {
-  val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
+  val tabs = listOf("Events" to "Events", "GameHub" to "Pulse")
   val containerBg = if (onLight) Color(0xFFEDEFF3) else Color.White.copy(alpha = 0.15f)
   val activeBg = Color.White
 
@@ -2846,7 +2846,7 @@ private fun GameHubSegmentedSwitch(
             Text(
               text = label,
               color = when {
-                isSelected -> Color(0xFF1B5E20)
+                isSelected -> Color(0xFF1E3A8A)
                 onLight -> HaraanColors.TextSecondary
                 else -> Color.White.copy(alpha = 0.75f)
               },
@@ -4851,7 +4851,7 @@ private fun DistrictHomeCard(summary: com.haraan.app.data.DistrictSummary) {
 
       // Snapshot tiles.
       Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        DistrictStatTile(Modifier.weight(1f), summary.liveMatches.toString(), "Live", Color(0xFF00C853))
+        DistrictStatTile(Modifier.weight(1f), summary.liveMatches.toString(), "Live", Color(0xFF2563EB))
         DistrictStatTile(Modifier.weight(1f), summary.players.toString(), "Players", T.Text1)
         DistrictStatTile(Modifier.weight(1f), summary.totalMatches.toString(), "Matches", T.Text1)
       }
@@ -7732,7 +7732,7 @@ fun PremiumSegmentedSwitch(
     onTabSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
+    val tabs = listOf("Events" to "Events", "GameHub" to "Pulse")
     
     // --- COLOR PALETTE ALIGNED WITH YOUR SCREENSHOT ---
     val containerBg = Color(0xFFF1F5F9)       // Clean, soft capsule background

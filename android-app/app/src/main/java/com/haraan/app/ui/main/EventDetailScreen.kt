@@ -193,13 +193,37 @@ fun EventDetailScreen(
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
+                // Venue ambiance — photos of the place itself, from its Google
+                // listing. Below the map on purpose (map places it, photos show
+                // it), matching the website. Hides itself when empty.
+                if (detail.venuePhotos.isNotEmpty()) {
+                    EventVenueAmbianceSection(
+                        photos = detail.venuePhotos,
+                        venueName = event.venue
+                    )
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                }
+
                 // Organizer — who's running / selling the event (hides if unknown)
+                // Prefer the organiser the SERVER resolved (live host profile, else
+                // the partner account). The nav-key values are a hardcoded caption
+                // ("Haraan Events / Verified ticketing partner") and only stand in
+                // for sample/offline events the API never answered for.
+                val organiserName = detail.organiserName.ifBlank { event.organizer }
                 EventOrganizerSection(
-                    organizer = event.organizer,
-                    subtitle = event.organizerSubtitle
+                    organizer = organiserName,
+                    subtitle = if (detail.organiserName.isNotBlank()) {
+                        detail.organiserTagline
+                    } else {
+                        event.organizerSubtitle
+                    },
+                    logoUrl = detail.organiserLogo,
+                    verified = detail.organiserVerified,
+                    otherEvents = detail.organiserEvents,
+                    followers = detail.organiserFollowers
                 )
 
-                if (event.organizer.isNotBlank()) {
+                if (organiserName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(HaraanSpacing.Large))
                 }
 

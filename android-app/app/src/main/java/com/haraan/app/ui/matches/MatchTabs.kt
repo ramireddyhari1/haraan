@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.haraan.app.R
 
 // Kept for sizing/indexing (e.g. pager page count); the visible labels are localized.
-val tabsList = listOf("Info", "Commentary", "Live", "Scorecard")
+val tabsList = listOf("Info", "Commentary", "Live", "Scorecard", "MVP")
 
 @Composable
 private fun tabLabel(index: Int): String = stringResource(
@@ -35,7 +35,8 @@ private fun tabLabel(index: Int): String = stringResource(
         0 -> R.string.tab_info
         1 -> R.string.tab_commentary
         2 -> R.string.tab_live
-        else -> R.string.tab_scorecard
+        3 -> R.string.tab_scorecard
+        else -> R.string.tab_mvp
     }
 )
 

@@ -117,7 +117,36 @@ class MatchDetailsViewModel : ViewModel() {
             awaySquad = squad(o.optJSONArray("awaySquad")),
             inningsCards = inningsCards(o.optJSONArray("inningsCards")),
             commentary = commentary(o.optJSONArray("commentary")),
+            mvp = mvp(o.optJSONArray("mvp")),
         )
+    }
+
+    /** Parse the backend's impact ranking for the MVP tab (already sorted, best first). */
+    private fun mvp(arr: JSONArray?): List<MvpPlayer> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            MvpPlayer(
+                name = o.optName("name"),
+                team = o.optInt("team", 1),
+                teamName = o.optName("teamName"),
+                points = o.optInt("points"),
+                batPoints = o.optInt("batPoints"),
+                bowlPoints = o.optInt("bowlPoints"),
+                batLine = o.optName("batLine"),
+                bowlLine = o.optName("bowlLine"),
+                strikeRate = o.optName("strikeRate"),
+                econ = o.optName("econ"),
+                runs = o.optInt("runs"),
+                ballsFaced = o.optInt("ballsFaced"),
+                fours = o.optInt("fours"),
+                sixes = o.optInt("sixes"),
+                wickets = o.optInt("wickets"),
+                ballsBowled = o.optInt("ballsBowled"),
+                runsConceded = o.optInt("runsConceded"),
+                maidens = o.optInt("maidens"),
+            )
+        }.filter { it.name.isNotBlank() }
     }
 
     /** Parse the ball-by-ball commentary feed. */

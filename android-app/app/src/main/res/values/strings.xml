@@ -12,6 +12,7 @@
     <string name="tab_commentary">Commentary</string>
     <string name="tab_live">Live</string>
     <string name="tab_scorecard">Scorecard</string>
+    <string name="tab_mvp">MVP</string>
 
     <!-- Scorer -->
     <string name="out">OUT</string>

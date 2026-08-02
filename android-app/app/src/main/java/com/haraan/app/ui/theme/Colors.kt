@@ -12,8 +12,9 @@ object HaraanColors {
     
     // Dynamic Mode Branding
     val EventsBlue = Color(0xFF2563EB)        // Brand blue for Events
-    val GameHubGreen = Color(0xFF00C853)      // Haraan Green for GameHub & CTAs
-    val GameHubDeep = Color(0xFF1B5E20)       // Deep forest green — hero band, headers, selected chips
+    val GameHubGreen = Color(0xFF2563EB)      // Pulse blue — SAME as EventsBlue by product decision (was #00C853 green).
+    //                                        Name kept because it is referenced widely; it is no longer green.
+    val GameHubDeep = Color(0xFF1E3A8A)       // Deep blue (was #1B5E20 forest) — hero band, headers, selected chips
     val LiveRed = Color(0xFFD32F2F)           // Single canonical "live" red (was split EF4444/D32F2F)
     val RatingGold = Color(0xFFF5A623)        // Single canonical rating-star gold — stars are gold everywhere, green is for actions only
 }

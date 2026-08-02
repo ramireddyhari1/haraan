@@ -28,7 +28,7 @@ fun HaraanSegmentedControl(
     onTabSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val tabs = listOf("Events", "GameHub")
+    val tabs = listOf("Events", "Pulse")
     val selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0)
 
     val activeColor by animateColorAsState(
