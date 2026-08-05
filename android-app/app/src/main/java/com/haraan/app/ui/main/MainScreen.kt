@@ -172,6 +172,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1128,39 +1129,7 @@ private fun EventsTabScreen(
     }
   }
 
-  // Sponsored ad from the Filament admin (GET /api/ads?placement=events);
-  // falls back to the bundled sample creative if unset/unreachable.
-  val liveAd by produceState(initialValue = sampleChatGptAd) {
-    val ads = runCatching { com.haraan.app.data.ContentRepository().getAds("events") }.getOrNull()
-    ads?.firstOrNull()?.let { a ->
-      // Build from the real ad rather than .copy()ing the sample: an admin ad with an
-      // empty field must not inherit the sample advertiser's copy or, worse, its
-      // click-through URL. Absent fields stay empty and the UI omits them.
-      value = AdCreative(
-        advertiser = a.sponsor ?: a.title,
-        tagline = a.subtitle.orEmpty(),
-        headline = a.title,
-        ctaLabel = a.ctaText ?: "Learn more",
-        clickUrl = a.ctaUrl.orEmpty(),
-        logoRes = sampleChatGptAd.logoRes,
-        imageUrl = a.image.orEmpty(),
-        promptText = a.title,
-      )
-    }
-  }
-
   val feedListState = rememberLazyListState()
-  // How far the ad (list item 0) has scrolled toward the top edge, 0f..1f.
-  // While item 0 is still visible we map its scroll offset over its own height;
-  // once it's scrolled past, the fold stays fully committed at 1f.
-  var adHeightPx by remember { mutableStateOf(0) }
-  val foldProgress by remember {
-    derivedStateOf {
-      if (feedListState.firstVisibleItemIndex > 0) 1f
-      else if (adHeightPx <= 0) 0f
-      else (feedListState.firstVisibleItemScrollOffset.toFloat() / adHeightPx).coerceIn(0f, 1f)
-    }
-  }
 
   androidx.compose.foundation.lazy.LazyColumn(
     state = feedListState,
@@ -1169,16 +1138,11 @@ private fun EventsTabScreen(
       .background(HaraanColors.Background),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // 1. Sponsored ad slot (replaces the greeting header).
+    // 1. "Haraan special" band — the feed's opening slab, in the slot the
+    //    sponsored ad used to hold. The most valuable space on the feed now
+    //    carries our own brand rather than someone else's.
     item {
-      AdSpaceBanner(
-        creative = liveAd,
-        modifier = Modifier
-          .padding(horizontal = 16.dp, vertical = 12.dp)
-          .onGloballyPositioned { adHeightPx = it.size.height },
-        foldProgress = foldProgress,
-        onImpression = { android.util.Log.d("Ad", "impression: ${it.advertiser}") }
-      )
+      HaraanSpecialBand(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
     }
 
     // Per-rail placement: an event shows in a rail when its admin-set `placements`
@@ -6888,6 +6852,154 @@ private data class TalentRow(val name: String, val role: String, val stars: Int,
 private data class StatCardRow(val label: String, val value: String, val accentColor: Color)
 
 
+// "Haraan special" band — a 1:1 port of the website's mobile feed band
+// (`.mband` in site-mobile-overrides.css), so the app and the mobile site open
+// their feed with the same object. Values track the web band; change both together.
+//
+// FLAT fill, deliberately: the colour is the exact Events-tab blue and it must
+// never become a colour gradient — that drifts off-brand. All the depth comes
+// from the four overlays below (hairline, masked line grid, diagonal sheen,
+// glow), which is also why the whole thing is one Canvas rather than a stack of
+// Boxes. It carries the lockup alone — no strapline, no CTA.
+@Composable
+private fun HaraanSpecialBand(modifier: Modifier = Modifier) {
+  val fill = Color(0xFF2563EB)
+  val shape = RoundedCornerShape(20.dp)
+  val glowTint = Color(0xFFDBEAFE)
+
+  Box(
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(shape)
+      .background(fill)
+      // A defined edge — premium surfaces have one; a borderless slab floats.
+      .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
+  ) {
+    Canvas(modifier = Modifier.matchParentSize()) {
+      val w = size.width
+      val h = size.height
+
+      // Line grid, 26dp cells — the same device as the venue-map texture card on
+      // the event page, so the pattern belongs to the existing language.
+      val cell = 26.dp.toPx()
+      val grid = Color.White.copy(alpha = 0.16f)
+      var x = 0f
+      while (x <= w) {
+        drawLine(grid, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
+        x += cell
+      }
+      var y = 0f
+      while (y <= h) {
+        drawLine(grid, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        y += cell
+      }
+      // …masked away from the centre so it never fights the wordmark. The web
+      // hides it with a radial mask-image; on an opaque surface painting the fill
+      // back over the middle is the same result, and Compose has no mask.
+      val maskRadius = kotlin.math.hypot(w / 2f, h / 2f)
+      drawRect(
+        brush = Brush.radialGradient(
+          colorStops = arrayOf(0f to fill, 0.06f to fill, 0.58f to Color.Transparent),
+          center = Offset(w / 2f, h / 2f),
+          radius = maskRadius
+        )
+      )
+
+      // Soft light source above the lockup so the fill isn't one dead plane. A
+      // pale blue — white overlays lift #2563EB without shifting its hue.
+      //
+      // Weaker than the web's 0.30: on the page the band is one of several blue
+      // surfaces, but here it sits 20dp under the Events pill in the SAME blue, and
+      // at 0.30 the lifted centre read as a second, lighter colour beside it. Keep
+      // it low enough that the fill and the pill stay one blue.
+      val glowRadius = 170.dp.toPx()
+      drawRect(
+        brush = Brush.radialGradient(
+          colorStops = arrayOf(
+            0f to glowTint.copy(alpha = 0.10f),
+            0.44f to glowTint.copy(alpha = 0.04f),
+            0.72f to Color.Transparent
+          ),
+          center = Offset(w / 2f, -10.dp.toPx()),
+          radius = glowRadius
+        )
+      )
+
+      // One diagonal sheen off the top-left, the way a real surface catches
+      // light. Kept faint — on ink it only has to suggest a plane.
+      drawRect(
+        brush = Brush.linearGradient(
+          colorStops = arrayOf(
+            0f to Color.White.copy(alpha = 0.07f),
+            0.30f to Color.White.copy(alpha = 0.02f),
+            0.56f to Color.Transparent
+          ),
+          start = Offset.Zero,
+          end = Offset(w * 0.62f, h)
+        )
+      )
+
+      // Hairline along the top edge — the same device as the mobile footer. Light
+      // on the blue fill: a blue rule on a blue surface is invisible.
+      drawRect(
+        brush = Brush.horizontalGradient(
+          colorStops = arrayOf(
+            0f to Color.Transparent,
+            0.24f to Color.White.copy(alpha = 0.30f),
+            0.52f to Color.White.copy(alpha = 0.62f),
+            0.78f to Color.White.copy(alpha = 0.30f),
+            1f to Color.Transparent
+          ),
+          startX = 0f,
+          endX = w
+        ),
+        size = Size(w, 2.dp.toPx())
+      )
+    }
+
+    Row(
+      modifier = Modifier
+        .align(Alignment.Center)
+        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 21.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      // Ships white, so no colour filter — a tinted PNG loses its edge quality at
+      // this size and the white asset already exists.
+      Image(
+        painter = painterResource(id = com.haraan.app.R.drawable.haraan_logo_white),
+        contentDescription = "Haraan",
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.height(21.dp)
+      )
+      Spacer(modifier = Modifier.width(11.dp))
+      // Hairline rule between wordmark and tag: the lockup convention that makes a
+      // qualifier read as part of the mark instead of a sticker beside it.
+      Box(
+        modifier = Modifier
+          .width(1.dp)
+          .height(15.dp)
+          .background(
+            Brush.verticalGradient(
+              listOf(Color.Transparent, Color.White.copy(alpha = 0.28f), Color.Transparent)
+            )
+          )
+      )
+      Spacer(modifier = Modifier.width(11.dp))
+      // Sized and weighted to sit as the wordmark's qualifier. Tracking is the
+      // web's 0.16em resolved against 9.5sp — wide-spaced micro-caps read cheap.
+      Text(
+        text = "SPECIAL",
+        color = Color.White.copy(alpha = 0.86f),
+        fontSize = 9.5.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.52.sp,
+        lineHeight = 9.5.sp,
+        modifier = Modifier.padding(top = 1.dp)
+      )
+    }
+  }
+}
+
 // One ad creative — drives the native slot. Swap these fields (or rotate a list of
 // them) to serve different campaigns through the same layout. An empty [imageUrl]
 // (or a failed load) gracefully falls back to the compact banner.
@@ -7740,13 +7852,11 @@ fun PremiumSegmentedSwitch(
     val activeText = Color.White               // Crisp white text for readability on the blue gradient
     val inactiveText = Color(0xFF64748B)       // Muted slate gray for unselected states
 
-    // The beautiful onwards blue gradient
-    val activeGradient = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFF3B82F6), // Slightly lighter onwards blue
-            LightAccentBlue    // Onwards blue color (Color(0xFF2563EB))
-        )
-    )
+    // Flat brand blue — the exact fill of the "Haraan special" band directly below
+    // it. This used to be a #3B82F6 → #2563EB vertical gradient, which put two
+    // different blues within 20dp of each other and read as a mismatch. One value,
+    // one blue: never reintroduce a gradient here without changing the band too.
+    val activeGradient = SolidColor(LightAccentBlue) // Color(0xFF2563EB)
 
     BoxWithConstraints(
         modifier = modifier
@@ -7779,10 +7889,14 @@ fun PremiumSegmentedSwitch(
                     .offset(x = indicatorOffset)
                     .width(tabWidth)
                     .fillMaxHeight()
+                    // Soft drop shadow makes the active choice pop forward visually.
+                    // MUST come before the fill: chained after `background()` its
+                    // layer painted the ambient shadow OVER the pill, multiplying the
+                    // blue down to #1D4EB9 — which is why this no longer matched the
+                    // band. Shadow first, then clip, then fill.
+                    .shadow(1.dp, RoundedCornerShape(22.dp))
                     .clip(RoundedCornerShape(22.dp))
                     .background(activeGradient)
-                    // Soft drop shadow makes the active choice pop forward visually
-                    .shadow(1.dp, RoundedCornerShape(22.dp)) 
             )
 
             // --- INTERACTIVE LABELS LAYER ---
