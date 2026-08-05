@@ -46,8 +46,13 @@ use Illuminate\Support\Str;
  * Verification is local — the code is generated here, HMAC'd into the cache and
  * compared here — so a WhatsApp outage can never strand a half-finished login.
  *
- * Members only. Partners sign in through the partner console's own door, which
- * deliberately stays on its existing path.
+ * A PARTNER's number signs in here as a normal app user, and that is deliberate —
+ * it matches every other app endpoint (Google, email, firebase-phone), none of which
+ * gate on role. This is where the app DIVERGES from the website, whose controller
+ * bounces partners to /partner/login: the website has two front doors for one users
+ * table, the app has one. Adding a partner block here would make phone the only app
+ * login that refuses partners, and would lock a partner out of their own member
+ * account. Verified live: a PARTNER row signed in and got a normal app JWT.
  */
 final class PhoneOtpController extends Controller
 {
