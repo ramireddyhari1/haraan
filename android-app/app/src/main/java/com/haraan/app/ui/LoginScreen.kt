@@ -35,8 +35,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -485,30 +492,16 @@ fun LoginScreen(
                                 // Two steps in one card: number → 6-digit code. The step is
                                 // driven by whether Firebase has handed back a verificationId.
                                 if (!uiState.phoneCodeSent) {
-                                    OutlinedTextField(
+                                    // A real number field, not a labelled box: the country code
+                                    // is a fixed affordance and the digits group as you type.
+                                    // The old version was a stock Material field whose helper
+                                    // text ("Add +country code for non-India numbers") was doing
+                                    // the job of a control that hadn't been built.
+                                    PhoneNumberField(
                                         value = uiState.phone,
                                         onValueChange = onPhoneChange,
-                                        label = { Text("Phone number") },
-                                        leadingIcon = {
-                                            Icon(Icons.Outlined.Phone, contentDescription = null, tint = Text3)
-                                        },
-                                        supportingText = {
-                                            Text(
-                                                "We'll text you a code. Add +country code for non-India numbers.",
-                                                fontSize = CaptionSize
-                                            )
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Phone,
-                                            imeAction = ImeAction.Done
-                                        ),
-                                        keyboardActions = KeyboardActions(onDone = {
-                                            if (uiState.isPhoneValid) onSendPhoneCode()
-                                        }),
-                                        singleLine = true,
-                                        colors = fieldColors
+                                        isError = !uiState.errorMessage.isNullOrEmpty(),
+                                        onDone = { if (uiState.isPhoneValid) onSendPhoneCode() }
                                     )
 
                                     if (!uiState.errorMessage.isNullOrEmpty()) {
@@ -536,27 +529,30 @@ fun LoginScreen(
                                         )
                                     }
                                 } else {
+                                    // Name the channel. We KNOW whether the code went over
+                                    // WhatsApp or SMS (the backend says so), and saying which
+                                    // is the one thing here no generic login screen can say —
+                                    // it also tells the user which app to go look in.
                                     Text(
-                                        text = "Code sent to ${uiState.phoneE164 ?: uiState.phone}",
+                                        text = buildAnnotatedString {
+                                            append(if (uiState.phoneWaToken != null) "Sent on WhatsApp to " else "Sent by SMS to ")
+                                            withStyle(SpanStyle(color = Text1, fontWeight = FontWeight.SemiBold)) {
+                                                append(prettyPhone(uiState.phoneE164 ?: uiState.phone))
+                                            }
+                                        },
                                         fontSize = CaptionSize, color = Text2, textAlign = TextAlign.Center,
                                         modifier = Modifier.fillMaxWidth()
                                     )
-                                    Spacer(Modifier.height(GapM))
-                                    OutlinedTextField(
+                                    Spacer(Modifier.height(GapL))
+                                    // Six cells, not one labelled box. A single "Verification
+                                    // code" field is the stock Material default and reads as
+                                    // unfinished; every app people already use for OTP shows
+                                    // the digits landing one at a time.
+                                    OtpCells(
                                         value = uiState.otp,
                                         onValueChange = onOtpChange,
-                                        label = { Text("Verification code") },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.NumberPassword,
-                                            imeAction = ImeAction.Done
-                                        ),
-                                        keyboardActions = KeyboardActions(onDone = {
-                                            if (uiState.isOtpValid) onVerifyPhoneCode()
-                                        }),
-                                        singleLine = true,
-                                        colors = fieldColors
+                                        isError = !uiState.errorMessage.isNullOrEmpty(),
+                                        onDone = { if (uiState.isOtpValid) onVerifyPhoneCode() }
                                     )
 
                                     // Auto-submit the moment the 6-digit code is complete — the user
@@ -590,7 +586,9 @@ fun LoginScreen(
                                         enabled = uiState.isOtpValid && !uiState.isLoading
                                     ) {
                                         Text(
-                                            if (uiState.isLoading) "Verifying…" else "Verify & continue",
+                                            // "Verify" — the "& continue" was filler. The button
+                                            // is already the only thing to press.
+                                            if (uiState.isLoading) "Verifying…" else "Verify",
                                             fontSize = BodySize, fontWeight = FontWeight.Bold,
                                             color = if (uiState.isOtpValid) Color.White else Text3
                                         )
@@ -979,6 +977,215 @@ private fun LoginSuccessPanel(name: String) {
             fontWeight = FontWeight.Normal,
             color = Text2,
             textAlign = TextAlign.Center
+        )
+    }
+}
+
+// ── Phone + OTP input ───────────────────────────────────────────────────────
+// Both of these replaced stock Material fields. The stock versions were not ugly,
+// they were *generic*: a floating-label box for a phone number and a second one
+// for a 6-digit code is what a framework gives you before anyone has designed the
+// screen, and that is exactly what reads as unfinished. What follows is what the
+// apps these users already open every day do — a fixed country code, digits that
+// group as you type, and a code that lands one cell at a time.
+
+/** "98765 43210" — the grouping Indian numbers are read and spoken in. */
+private fun groupIndianDigits(digits: String): String =
+    if (digits.length <= 5) digits else digits.take(5) + " " + digits.drop(5)
+
+/** For the "Sent on WhatsApp to …" line: "+91 97013 77681". */
+private fun prettyPhone(raw: String): String {
+    val d = raw.filter { it.isDigit() }
+    return if (raw.startsWith("+91") && d.length == 12) "+91 " + groupIndianDigits(d.drop(2)) else raw
+}
+
+/**
+ * Groups the local part as it is typed without touching the stored value, so the
+ * ViewModel keeps raw digits and the cursor still lands where the user expects.
+ * [OffsetMapping] is what keeps the caret maths honest — dropping it is how these
+ * fields end up putting the cursor in the wrong place after an edit.
+ */
+private val IndianGroupingTransformation = VisualTransformation { text ->
+    val digits = text.text
+    if (digits.startsWith("+")) {
+        TransformedText(text, OffsetMapping.Identity)
+    } else {
+        TransformedText(
+            androidx.compose.ui.text.AnnotatedString(groupIndianDigits(digits)),
+            object : OffsetMapping {
+                override fun originalToTransformed(offset: Int) = if (offset <= 5) offset else offset + 1
+                override fun transformedToOriginal(offset: Int) = if (offset <= 5) offset else offset - 1
+            }
+        )
+    }
+}
+
+/**
+ * Number entry with the country code as a real part of the control.
+ *
+ * The `+91` is a fixed segment behind a hairline, not prose telling the user to
+ * type one — but it steps out of the way the moment the value starts with `+`, so
+ * an international number still works exactly as it did.
+ */
+@Composable
+private fun PhoneNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    onDone: () -> Unit,
+) {
+    val international = value.startsWith("+")
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(
+                width = if (isError) 1.5.dp else 1.dp,
+                color = if (isError) Danger else Stroke,
+                shape = RoundedCornerShape(16.dp)
+            ),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!international) {
+            Text(
+                text = "+91",
+                color = Text1,
+                fontSize = BodySize,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 18.dp, end = 12.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(24.dp)
+                    .background(Stroke)
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (value.isEmpty()) {
+                Text("98765 43210", color = Text3, fontSize = BodySize)
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = Text1,
+                    fontSize = BodySize,
+                    fontWeight = FontWeight.SemiBold,
+                    // Wider than body text: a phone number is read in chunks, and the
+                    // extra tracking is what makes the grouping legible at a glance.
+                    letterSpacing = 0.8.sp
+                ),
+                cursorBrush = SolidColor(Accent),
+                visualTransformation = IndianGroupingTransformation,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Phone,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { onDone() }),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/**
+ * Six cells for a six-digit code.
+ *
+ * One transparent [BasicTextField] stretched across the row owns the text, and the
+ * cells are drawn from its value. That is deliberate: it keeps the real keyboard,
+ * paste, and the SMS/WhatsApp autofill the platform already gives us — hand-rolling
+ * six separate fields is how you lose all three and gain a focus-management bug.
+ */
+@Composable
+private fun OtpCells(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    onDone: () -> Unit,
+    count: Int = 6,
+) {
+    val focus = remember { FocusRequester() }
+    // The code screen exists to be typed into; opening it focused saves a tap.
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            repeat(count) { i ->
+                val char = value.getOrNull(i)
+                val filled = char != null
+                // The caret cell is the next empty one, and stays put once the code is
+                // complete so the row never looks unfocused mid-verify.
+                val isCaret = i == value.length.coerceAtMost(count - 1) && value.length < count
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (filled) Color.White else Color(0xFFF8FAFC))
+                        .border(
+                            width = if (isError || isCaret) 1.5.dp else 1.dp,
+                            color = when {
+                                isError -> Danger
+                                isCaret -> Accent
+                                filled -> Text3.copy(alpha = 0.55f)
+                                else -> Stroke
+                            },
+                            shape = RoundedCornerShape(14.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (filled) {
+                        Text(
+                            text = char.toString(),
+                            color = Text1,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else if (isCaret) {
+                        // A resting caret in the active cell — the cue that typing goes
+                        // here, without a blinking cursor to chase.
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(22.dp)
+                                .background(Accent.copy(alpha = 0.55f))
+                        )
+                    }
+                }
+            }
+        }
+
+        // The real input: invisible, full-bleed over the cells, so a tap anywhere on
+        // the row opens the keyboard and the platform autofill still targets it.
+        BasicTextField(
+            value = value,
+            onValueChange = { onValueChange(it.filter(Char::isDigit).take(count)) },
+            singleLine = true,
+            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+            cursorBrush = SolidColor(Color.Transparent),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            modifier = Modifier
+                .matchParentSize()
+                .focusRequester(focus)
         )
     }
 }
