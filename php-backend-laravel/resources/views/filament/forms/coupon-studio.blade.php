@@ -224,8 +224,16 @@
                                 <div class="cp-money"><span class="cur">₹</span><input class="cp-in" type="number" min="0" x-model.number="draft.maxCap" placeholder="—"></div>
                             </div>
                             <div>
-                                <label class="cp-lbl">Min Order Value</label>
+                                {{-- Spelled out as an amount: hosts read "Min Order Value: 2"
+                                     as "2 tickets" and shipped a coupon that applied to one. --}}
+                                <label class="cp-lbl">Min Order Value (₹)</label>
                                 <div class="cp-money"><span class="cur">₹</span><input class="cp-in" type="number" min="0" x-model.number="draft.minOrder" placeholder="0"></div>
+                                <div class="cp-hint">Total spend, not ticket count</div>
+                            </div>
+                            <div>
+                                <label class="cp-lbl">Min Tickets</label>
+                                <input class="cp-in" type="number" min="0" x-model.number="draft.minTickets" placeholder="Any">
+                                <div class="cp-hint">e.g. 2 = only on 2+ tickets</div>
                             </div>
                         </div>
                         <div class="cp-preview">
@@ -322,6 +330,7 @@
                                 <div class="cp-rev-cell"><div class="cp-rev-k">Expires</div><div class="cp-rev-v" x-text="draft.expiresAt ? fmtDate(draft.expiresAt) : 'Never'"></div></div>
                                 <div class="cp-rev-cell"><div class="cp-rev-k">Usage Limit</div><div class="cp-rev-v" x-text="draft.perCustomer ? (draft.perCustomer + ' / customer') : 'Unlimited'"></div></div>
                                 <div class="cp-rev-cell"><div class="cp-rev-k">Min Order</div><div class="cp-rev-v" x-text="draft.minOrder>0 ? ('₹'+draft.minOrder) : 'None'"></div></div>
+                                <div class="cp-rev-cell"><div class="cp-rev-k">Min Tickets</div><div class="cp-rev-v" x-text="draft.minTickets>1 ? (draft.minTickets + ' tickets') : 'Any'"></div></div>
                             </div>
                         </div>
                     </div>
@@ -355,7 +364,7 @@
             uid() { return (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Math.random().toString(16).slice(2)).slice(0, 12); },
             blank() {
                 return { key: this.uid(), id: null, active: true, code: '', type: 'percent', discount: 10, maxCap: null,
-                    minOrder: 0, eligibility: 'all', phones: [], perCustomer: '', expiresAt: '', multiEvent: false,
+                    minOrder: 0, minTickets: null, eligibility: 'all', phones: [], perCustomer: '', expiresAt: '', multiEvent: false,
                     restrictDates: false, dates: [], restrictTimes: false, times: [] };
             },
             openNew() { this.draft = this.blank(); this.editing = -1; this.step = 1; this.step1Tried = false; },
@@ -381,7 +390,12 @@
                 if (!c) return '';
                 const cap = (c.type === 'percent' && c.maxCap) ? (' (max ₹' + c.maxCap + ')') : '';
                 const base = c.type === 'percent' ? ((Number(c.discount) || 0) + '% off') : ('₹' + (Number(c.discount) || 0) + ' off');
-                return base + cap;
+                // Say when it applies, not just how much: a preview reading "₹100 off" next to
+                // a minimum is how a coupon ends up looking like it fires on every order.
+                const when = [];
+                if (Number(c.minOrder) > 0) when.push('over ₹' + Number(c.minOrder));
+                if (Number(c.minTickets) > 1) when.push('on ' + Number(c.minTickets) + '+ tickets');
+                return base + cap + (when.length ? ' · ' + when.join(', ') : '');
             },
             fmtDate(s) {
                 if (!s) return '';

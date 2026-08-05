@@ -266,7 +266,7 @@ final class BookingService
             // Coupon: a redeemable code takes an amount off the payable total (never below
             // zero). Same resolution the checkout preview ran, re-done here on the prices
             // this transaction actually wrote — the preview is a quote, this is the charge.
-            $applied  = $this->resolveCoupon($user, $event->id, $couponCode, $subtotal, $fee);
+            $applied  = $this->resolveCoupon($user, $event->id, $couponCode, $subtotal, $fee, $totalTickets);
             $discount = $applied['discount'];
 
             // A reserved (unpaid) order must not yet burn a coupon use — that's counted
@@ -303,7 +303,7 @@ final class BookingService
      *
      * @return array{coupon: Coupon|null, discount: float, message: string}
      */
-    public function resolveCoupon(User $user, int $eventId, ?string $code, float $subtotal, float $fee = 0.0): array
+    public function resolveCoupon(User $user, int $eventId, ?string $code, float $subtotal, float $fee = 0.0, ?int $tickets = null): array
     {
         $reject = static fn (string $message): array => ['coupon' => null, 'discount' => 0.0, 'message' => $message];
 
@@ -319,6 +319,10 @@ final class BookingService
 
         if (! $coupon->meetsMinOrder($subtotal)) {
             return $reject('Applies on orders over ₹' . number_format((float) $coupon->min_order) . '.');
+        }
+
+        if (! $coupon->meetsMinTickets($tickets)) {
+            return $reject('Applies on ' . (int) $coupon->min_tickets . ' tickets or more.');
         }
 
         if (! $this->couponWithinPerCustomerLimit($coupon, (int) $user->id)) {

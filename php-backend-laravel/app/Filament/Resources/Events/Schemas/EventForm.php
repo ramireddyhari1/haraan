@@ -949,6 +949,8 @@ class EventForm
             'discount'           => max(0, (float) ($c['discount'] ?? 0)),
             'max_discount'       => ($type === 'percent' && $cap !== null && $cap !== '' && (float) $cap > 0) ? (float) $cap : null,
             'min_order'          => max(0, (float) ($c['minOrder'] ?? 0)),
+            // Blank / 0 / 1 all mean "no ticket minimum" — store null so the rule is off.
+            'min_tickets'        => ((int) ($c['minTickets'] ?? 0)) > 1 ? (int) $c['minTickets'] : null,
             'per_customer_limit' => $per !== '' ? max(1, (int) $per) : null,
             'expires_at'         => $exp !== '' ? $exp : null,
             'active'             => (bool) ($c['active'] ?? true),
@@ -1004,6 +1006,7 @@ class EventForm
                 'discount'      => (float) $c->discount,
                 'maxCap'        => $c->max_discount !== null ? (float) $c->max_discount : null,
                 'minOrder'      => (float) ($c->min_order ?? 0),
+                'minTickets'    => $c->min_tickets !== null ? (int) $c->min_tickets : null,
                 'eligibility'   => $c->eligibility === 'phones' ? 'phones' : 'all',
                 'phones'        => is_array($c->phone_numbers) ? array_values($c->phone_numbers) : [],
                 'perCustomer'   => $c->per_customer_limit !== null ? (string) $c->per_customer_limit : '',

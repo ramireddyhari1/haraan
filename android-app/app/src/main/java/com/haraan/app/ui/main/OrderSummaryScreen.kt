@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -38,6 +39,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -196,6 +198,7 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                 ) {
                     CouponField(
                         appliedCode = appliedCode,
+                        appliedDiscount = discount,
                         input = couponInput,
                         error = couponError,
                         validating = validating,
@@ -211,7 +214,16 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                             validating = true
                             couponError = null
                             scope.launch {
-                                val res = BookingRepository().validateCoupon(token, code, order.eventId)
+                                // The cart goes with the code: a percentage coupon can only be
+                                // priced against a subtotal, and a minimum-order coupon can only
+                                // be judged against one.
+                                val res = BookingRepository().validateCoupon(
+                                    token = token,
+                                    code = code,
+                                    eventId = order.eventId,
+                                    subtotal = subtotal,
+                                    tickets = totalTickets,
+                                )
                                 validating = false
                                 if (res.valid) {
                                     appliedCode = res.code ?: code
@@ -823,6 +835,7 @@ private fun BillRow(label: String, value: String, valueColor: Color = HaraanColo
 @Composable
 private fun CouponField(
     appliedCode: String?,
+    appliedDiscount: Double,
     input: String,
     error: String?,
     validating: Boolean,
@@ -848,8 +861,11 @@ private fun CouponField(
                     modifier = Modifier.size(16.dp),
                 )
                 Spacer(Modifier.width(6.dp))
+                // Name the saving on the chip itself — the bill row above states it too,
+                // but the confirmation people read is the one next to the tick.
                 Text(
-                    "Coupon “$appliedCode” applied",
+                    if (appliedDiscount > 0.0) "Coupon “$appliedCode” · ₹${appliedDiscount.toInt()} off"
+                    else "Coupon “$appliedCode” applied",
                     style = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                 )
             }
@@ -877,6 +893,13 @@ private fun CouponField(
                 singleLine = true,
                 textStyle = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextPrimary, fontSize = 14.sp),
                 cursorBrush = SolidColor(HaraanColors.EventsBlue),
+                // Codes are printed in caps and read as caps; Done applies rather than
+                // dismissing the keyboard onto an untouched Apply button.
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { onApply() }),
                 modifier = Modifier.weight(1f).padding(vertical = 14.dp),
                 decorationBox = { inner ->
                     if (input.isEmpty()) {

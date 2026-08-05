@@ -162,7 +162,8 @@ final class EventBookingController extends Controller
         }
 
         $priced   = $this->priceLines($event, $lines);
-        $resolved = $this->bookings->resolveCoupon($request->user(), $event->id, $code, $priced['subtotal'], $priced['fee']);
+        $tickets  = array_sum(array_column($lines, 'quantity'));
+        $resolved = $this->bookings->resolveCoupon($request->user(), $event->id, $code, $priced['subtotal'], $priced['fee'], $tickets);
 
         if ($resolved['coupon'] === null) {
             return response()->json(['applied' => false, 'message' => $resolved['message']]);

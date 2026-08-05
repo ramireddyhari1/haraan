@@ -265,6 +265,49 @@ class WebEventBookingTest extends TestCase
         $this->assertSame(200.0, (float) Booking::query()->max('discount'));
     }
 
+    /**
+     * A minimum-TICKETS coupon must count tickets, not rupees.
+     *
+     * A host setting up "₹100 off on 2 tickets" had only "Min Order Value" to reach for,
+     * typed 2 into it, and got a coupon that fired on a single ₹699 ticket (₹699 ≥ ₹2).
+     * min_tickets is the real rule, and it has to hold on the quote AND on the charge.
+     */
+    public function test_minimum_tickets_coupon_needs_the_ticket_count_not_the_amount(): void
+    {
+        $event = $this->event(['price' => 699]);
+        $user  = $this->user();
+
+        \App\Models\Coupon::create([
+            'event_id' => $event->id, 'code' => 'PAIR100', 'type' => 'fixed',
+            'discount' => 100, 'min_tickets' => 2, 'active' => true,
+        ]);
+
+        // One ticket: refused, with a reason that names the actual rule.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 1], 'couponCode' => 'PAIR100'])
+            ->assertOk()
+            ->assertJson(['applied' => false, 'message' => 'Applies on 2 tickets or more.']);
+
+        // Two tickets: applied.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 2], 'couponCode' => 'PAIR100'])
+            ->assertOk()
+            ->assertJson(['applied' => true, 'discount' => 100]);
+
+        // And the charge agrees with the quote in both directions.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 1], 'couponCode' => 'PAIR100'] + $this->contact())
+            ->assertOk();
+        $this->assertSame(0.0, (float) Booking::query()->max('discount'));
+
+        Booking::query()->delete();
+
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2], 'couponCode' => 'PAIR100'] + $this->contact())
+            ->assertOk();
+        $this->assertSame(100.0, (float) Booking::query()->max('discount'));
+    }
+
     public function test_pass_page_is_owner_only(): void
     {
         $event = $this->event();

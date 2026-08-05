@@ -13,7 +13,7 @@ final class Coupon extends Model
     use HasFactory;
 
     protected $fillable = [
-        'event_id', 'code', 'type', 'discount', 'max_discount', 'min_order',
+        'event_id', 'code', 'type', 'discount', 'max_discount', 'min_order', 'min_tickets',
         'max_uses', 'per_customer_limit', 'uses', 'active', 'expires_at', 'multi_event',
         'eligibility', 'phone_numbers', 'restrict_dates', 'valid_dates', 'restrict_times', 'valid_times',
     ];
@@ -23,6 +23,7 @@ final class Coupon extends Model
         'discount'           => 'float',
         'max_discount'       => 'float',
         'min_order'          => 'float',
+        'min_tickets'        => 'integer',
         'max_uses'           => 'integer',
         'per_customer_limit' => 'integer',
         'uses'               => 'integer',
@@ -46,6 +47,21 @@ final class Coupon extends Model
     public function meetsMinOrder(float $subtotal): bool
     {
         return $subtotal >= (float) ($this->min_order ?? 0);
+    }
+
+    /**
+     * The order must carry at least this many tickets (0 / null = no minimum).
+     *
+     * Separate from {@see meetsMinOrder()} on purpose: "spend ₹500" and "buy 2 tickets"
+     * are different offers, and a host who wants the second one gets no help from the
+     * first. A null ticket count means the caller can't say — treat it as satisfied
+     * rather than block a coupon on a number nobody supplied.
+     */
+    public function meetsMinTickets(?int $tickets): bool
+    {
+        $required = (int) ($this->min_tickets ?? 0);
+
+        return $required <= 1 || $tickets === null || $tickets >= $required;
     }
 
     /**
