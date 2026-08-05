@@ -456,6 +456,8 @@ internal fun MainAppContainer(
   // Common account profile (shared by Events + GameHub) + linked cricket profile.
   var showAccountProfile by remember { mutableStateOf(false) }
   var showCricketProfile by remember { mutableStateOf(false) }
+  // A ranked player opened from GameHub's "Top players near you" rail (null = none).
+  var gameHubPlayerId by remember { mutableStateOf<String?>(null) }
   // Header utility icons: bell → notifications, calendar → the account's bookings.
   // Shared by both the Events and GameHub headers so the icons work wherever they appear.
   var showNotifications by remember { mutableStateOf(false) }
@@ -942,6 +944,7 @@ internal fun MainAppContainer(
                     )
                   )
                 },
+                onPlayerClick = { id -> gameHubPlayerId = id },
                 userName = accountName,
                 avatarUrl = accountAvatar
               )
@@ -959,6 +962,7 @@ internal fun MainAppContainer(
     com.haraan.app.ui.DismissOnBack(ticketPass != null) { ticketPass = null }
     com.haraan.app.ui.DismissOnBack(showNotifications && ticketPass == null) { showNotifications = false }
     com.haraan.app.ui.DismissOnBack(showCricketProfile && ticketPass == null) { showCricketProfile = false }
+    com.haraan.app.ui.DismissOnBack(gameHubPlayerId != null && ticketPass == null) { gameHubPlayerId = null }
 
     if (showAccountProfile) {
       com.haraan.app.ui.profile.AccountProfileScreen(
@@ -983,6 +987,16 @@ internal fun MainAppContainer(
       com.haraan.app.ui.profile.PlayerProfileScreen(
         onBack = { showCricketProfile = false },
         fetchProfile = { playerProfileRepository.fetchMe(token) },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // A player tapped in GameHub's "Top players near you" rail opens the SAME real
+    // profile screen as the leaderboard — loaded by their Player ID, never a mock.
+    gameHubPlayerId?.let { playerId ->
+      com.haraan.app.ui.profile.PlayerProfileScreen(
+        onBack = { gameHubPlayerId = null },
+        fetchProfile = { playerProfileRepository.fetchPlayer(token, playerId) },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -1599,6 +1613,9 @@ private fun GameHubTabScreen(
   onSupportClick: () -> Unit = {},
   onNotificationsClick: () -> Unit = {},
   onCalendarClick: () -> Unit = {},
+  // Opens a ranked player's profile by their Player ID (HRN…) — used by the
+  // "Top players near you" rail.
+  onPlayerClick: (String) -> Unit = {},
   userName: String = "",
   avatarUrl: String = ""
 ) {
@@ -1627,10 +1644,10 @@ private fun GameHubTabScreen(
   // Phase 0 — server-driven home layout (GET /api/home/layout). Empty/failed fetch keeps the
   // built-in order, so the screen is unchanged offline or against an old backend.
   var remoteBlocks by remember { mutableStateOf<List<com.haraan.app.data.HomeBlock>>(emptyList()) }
-  // Curated feed (For You / Trending) + home ad strip — only rendered when the remote layout
-  // includes a feed_section / ad_strip block, so they cost nothing when those blocks are absent.
+  // Curated feed (Trending) — only rendered when the remote layout includes a feed_section
+  // block, so it costs nothing when that block is absent. (The home ad strip that used to
+  // load alongside it is gone: GameHub's sponsored slot is now the ranked-players rail.)
   var feedSections by remember { mutableStateOf<Map<String, List<com.haraan.app.data.FeedCard>>>(emptyMap()) }
-  var homeAds by remember { mutableStateOf<List<com.haraan.app.data.AdItem>>(emptyList()) }
   // Loaders hoisted so three refresh triggers can share them: the initial load, the
   // Reverb push (admin/content edits), and AutoRefresh (screen re-focus / app foreground
   // / periodic tick). remember{} keeps one instance each; they capture the MutableState
@@ -1669,21 +1686,17 @@ private fun GameHubTabScreen(
   val loadFeed: suspend () -> Unit = remember {
     { feedSections = runCatching { contentRepo.getFeed() }.getOrDefault(emptyMap()) }
   }
-  val loadAds: suspend () -> Unit = remember {
-    { homeAds = runCatching { contentRepo.getAds("home") }.getOrDefault(emptyList()) }
-  }
   LaunchedEffect(Unit) {
     loadVenues()
     loadLayout()
     loadFeed()
-    loadAds()
     loadLive()
     // Live: re-pull when /control pushes a change over Reverb. `config` (incl. the
     // server_driven_home flag) is refreshed globally by RealtimeClient, which recomposes us.
-    // Feed/ads don't broadcast their own domain, so we refresh them alongside the layout.
+    // The feed doesn't broadcast its own domain, so we refresh it alongside the layout.
     com.haraan.app.data.RealtimeBus.updates.collect { domain ->
       when (domain) {
-        "home" -> { loadLayout(); loadFeed(); loadAds() }
+        "home" -> { loadLayout(); loadFeed() }
         "venues" -> loadVenues()
         // Keep the ActionBoard live score fresh when a match/score is broadcast.
         "matches", "live" -> loadLive()
@@ -1869,12 +1882,23 @@ private fun GameHubTabScreen(
       remoteBlocks.isNotEmpty()
     val orderedBlocks: List<com.haraan.app.data.HomeBlock> =
       (if (useRemoteLayout) remoteBlocks
-      else listOf("actionboard", "leaderboard", "sports_chips", "venues")
+      else listOf("actionboard", "leaderboard", "sports_chips", "venues", "top_players")
         .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) })
         // The "For You" curated rail was cut — it duplicated the Events "For You" and added
         // clutter without pulling its weight on GameHub. Drop any for_you feed_section from
         // either the remote or built-in layout so it never renders here.
         .filterNot { it.type == "feed_section" && (it.config["section"] ?: "for_you") == "for_you" }
+        // The sponsored ad strip is retired on GameHub — the slot carries real ranked
+        // players from the viewer's own district instead. Swapped IN PLACE rather than
+        // dropped, so the section keeps whatever position /control gave the ad strip.
+        .map { if (it.type == "ad_strip") it.copy(type = "top_players", title = null) else it }
+        // A remote layout that never had an ad_strip would otherwise lose the section
+        // entirely. Append it — it self-hides when there's no ranked player to show,
+        // so an appended block costs nothing when the board is empty.
+        .let { blocks ->
+          if (blocks.any { it.type == "top_players" }) blocks
+          else blocks + com.haraan.app.data.HomeBlock(id = "top_players", type = "top_players", title = null)
+        }
     // ActionBoard matches are cricket today (LiveMatchRow has no sport field yet), so the sport
     // filter treats them as Cricket: a non-cricket selection shows the honest empty state. Swap
     // for a real per-match sport filter once the backend tags matches with a sport.
@@ -2163,18 +2187,11 @@ private fun GameHubTabScreen(
             }
           }
         }
-        "ad_strip" -> {
-          val ads = homeAds.filter { it.placement == (block.config["placement"] ?: "home") }
-          if (ads.isNotEmpty()) {
-            item {
-              androidx.compose.foundation.lazy.LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-              ) {
-                items(ads.size) { i -> AdStripCard(ad = ads[i]) }
-              }
-            }
+        "top_players" -> {
+          item {
+            val boardDistrict = (locationState as? com.haraan.app.data.LocationState.Resolved)
+              ?.let { it.district.ifBlank { it.city } }
+            TopPlayersNearYouSection(district = boardDistrict, onPlayerClick = onPlayerClick)
           }
         }
         else -> homeBlocks[block.type]?.invoke(this)
@@ -7710,6 +7727,169 @@ private fun LeaderboardHomeWidget(district: String?) {
           modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
         )
       }
+    }
+  }
+}
+
+// "Top players near you" — the real ranked board for the viewer's own district,
+// standing in the slot the sponsored ad strip used to hold on GameHub.
+//
+// Two rules this section must keep:
+//  1. It never invents a player. The board is GET /api/leaderboards/{scope}; when
+//     nothing comes back the section removes itself rather than render placeholders.
+//  2. It never claims "near you" about data that isn't. A district with no ranked
+//     players falls back to the all-India board AND retitles itself to say so.
+@Composable
+private fun TopPlayersNearYouSection(
+  district: String?,
+  onPlayerClick: (String) -> Unit,
+) {
+  // `null` while in flight: the section renders nothing until it knows, so the
+  // feed never flashes an empty rail that then fills in.
+  // second = true when these rows really are the viewer's district.
+  val board by androidx.compose.runtime.produceState<Pair<List<com.haraan.app.data.LeaderboardRow>, Boolean>?>(
+    initialValue = null, key1 = district
+  ) {
+    val repo = com.haraan.app.data.LeaderboardRepository()
+    val local = if (district.isNullOrBlank()) emptyList()
+    else runCatching { repo.fetchBoard("district", district, limit = 10) }.getOrDefault(emptyList())
+    value = if (local.isNotEmpty()) local to true
+    else runCatching { repo.fetchBoard("india", null, limit = 10) }.getOrDefault(emptyList()) to false
+  }
+
+  val rows = board?.first.orEmpty()
+  val isNearby = board?.second == true
+  if (rows.isEmpty()) return
+
+  Column(modifier = Modifier.fillMaxWidth()) {
+    GameHubSectionHeader(
+      title = if (isNearby) "Top players near you" else "Top ranked players",
+      subtitle = if (isNearby) "$district • ranked this month" else "Across India • ranked this month",
+    )
+    androidx.compose.foundation.lazy.LazyRow(
+      contentPadding = PaddingValues(horizontal = 16.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp)
+    ) {
+      items(rows.size) { i ->
+        val row = rows[i]
+        TopPlayerCard(
+          row = row,
+          // Seed rows without a Player ID can't open a profile; the card stays
+          // inert rather than pushing a screen that would fail to load.
+          onClick = { row.playerId.takeIf { it.isNotBlank() }?.let(onPlayerClick) }
+        )
+      }
+    }
+  }
+}
+
+// One player in the "Top players near you" rail.
+@Composable
+private fun TopPlayerCard(
+  row: com.haraan.app.data.LeaderboardRow,
+  onClick: () -> Unit,
+) {
+  val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+  val pressed by interaction.collectIsPressedAsState()
+  val scale by animateFloatAsState(
+    targetValue = if (pressed) 0.96f else 1f,
+    animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+    label = "topPlayerPress"
+  )
+  // Medals for the podium, one neutral blue chip for everyone else — the top three
+  // read at a glance without inventing a hierarchy among ranks 4-10.
+  val (chipBg, chipFg) = when (row.rank) {
+    1 -> Color(0xFFFEF3C7) to Color(0xFF92400E)
+    2 -> Color(0xFFF1F5F9) to Color(0xFF475569)
+    3 -> Color(0xFFFDE8D7) to Color(0xFF9A3412)
+    else -> Color(0xFFEFF6FF) to HaraanColors.GameHubDeep
+  }
+
+  Card(
+    modifier = Modifier
+      .width(148.dp)
+      .graphicsLayer { scaleX = scale; scaleY = scale }
+      .premiumCardShadow(radius = UnifiedCornerRadius)
+      .clickable(interactionSource = interaction, indication = null) { onClick() },
+    shape = RoundedCornerShape(UnifiedCornerRadius),
+    colors = CardDefaults.cardColors(containerColor = HaraanColors.Surface),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+      Row(modifier = Modifier.fillMaxWidth()) {
+        Surface(color = chipBg, shape = RoundedCornerShape(999.dp)) {
+          Text(
+            text = "#${row.rank}",
+            color = chipFg,
+            style = HaraanTypography.LabelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      Box(
+        modifier = Modifier
+          .size(56.dp)
+          .clip(CircleShape)
+          .background(Color(0xFFEFF6FF)),
+        contentAlignment = Alignment.Center
+      ) {
+        val avatar = com.haraan.app.data.ApiConfig.mediaUrl(row.avatar)
+        // A URL is not a picture: rows carry avatar paths whose file is missing, and
+        // AsyncImage draws NOTHING on failure — an empty circle, seen on device.
+        // Track the error and fall through to the initial.
+        var avatarFailed by remember(avatar) { mutableStateOf(false) }
+        if (!avatar.isNullOrBlank() && !avatarFailed) {
+          AsyncImage(
+            model = avatar,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onError = { avatarFailed = true },
+            modifier = Modifier.fillMaxSize().clip(CircleShape)
+          )
+        } else {
+          // Initial, not a stock silhouette — a real name is better identification
+          // than a generic avatar, and it can't be mistaken for a photo we have.
+          Text(
+            text = row.name.trim().take(1).uppercase().ifBlank { "?" },
+            color = HaraanColors.GameHubDeep,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      Text(
+        text = row.name.ifBlank { "Unnamed player" },
+        color = HaraanColors.TextPrimary,
+        style = HaraanTypography.TitleMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+      )
+      Spacer(modifier = Modifier.height(3.dp))
+      Text(
+        text = "%,d XP".format(row.xp),
+        color = HaraanColors.GameHubDeep,
+        style = HaraanTypography.LabelSmall.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold)
+      )
+      Text(
+        text = if (row.matches == 1) "1 match" else "${row.matches} matches",
+        color = HaraanColors.TextSecondary,
+        style = HaraanTypography.BodyMedium.copy(fontSize = 11.sp),
+        maxLines = 1
+      )
     }
   }
 }
