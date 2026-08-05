@@ -11,7 +11,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.haraan.app.data.LanguageManager
 import com.haraan.app.data.PaymentBridge
@@ -46,6 +54,12 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Stage 1 of the launch experience. MUST run before super.onCreate() — that's
+    // what swaps the launch theme (Theme.Haraan.Splash) for postSplashScreenTheme,
+    // and it's what makes the system splash brand-plated instead of the bare
+    // launcher icon on a blank window. It dismisses on the first frame; the
+    // branded animation continues in-app as BrandSplash.
+    installSplashScreen()
     super.onCreate(savedInstanceState)
 
     // Warm up the checkout SDK so the first payment sheet opens without a cold-start lag.
@@ -71,7 +85,16 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
     enableEdgeToEdge()
     setContent {
       ThannaTheme {
-        MainNavigation()
+        // The app composes BEHIND the brand splash and is fully interactive the
+        // moment it lifts — the splash is a time-boxed brand moment, never a gate
+        // on loading. A slow network can't strand the user here.
+        var splashDone by rememberSaveable { mutableStateOf(false) }
+        Box(modifier = Modifier.fillMaxSize()) {
+          MainNavigation()
+          if (!splashDone) {
+            com.haraan.app.ui.BrandSplash(onFinished = { splashDone = true })
+          }
+        }
       }
     }
   }

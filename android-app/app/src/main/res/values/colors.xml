@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Shared by the launch theme and the in-app BrandSplash. `splash_background`
+      is the seam between the two stages: the system splash paints it as a flat
+      window colour and BrandSplash uses it as its base, so the handoff has no
+      visible colour step. Change one and you MUST change the other
+      (BrandSplash.kt, SplashBase).
+    -->
+    <color name="splash_background">#F5F8FC</color>
+    <color name="brand_blue">#2563EB</color>
+</resources>

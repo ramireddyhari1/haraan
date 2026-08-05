@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      API 31+ draws the splash itself, and it reads the PLATFORM attributes
+      (android:windowSplashScreen*) — not the AndroidX compat ones in
+      values/themes.xml. Without this file the icon background is dropped, so the
+      white monogram renders on the light wash and is effectively invisible
+      (observed on the API 36 emulator). The compat attrs still cover < 31.
+    -->
+    <style name="Theme.Haraan.Splash" parent="Theme.SplashScreen">
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/brand_blue</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Thanna</item>
+    </style>
+
+</resources>

@@ -15,7 +15,7 @@
         android:supportsRtl="true"
         android:windowSoftInputMode="adjustResize"
         android:usesCleartextTraffic="false"
-        android:theme="@style/Theme.Thanna">
+        android:theme="@style/Theme.Haraan.Splash">
         <activity
             android:name=".MainActivity"
             android:launchMode="singleTop"

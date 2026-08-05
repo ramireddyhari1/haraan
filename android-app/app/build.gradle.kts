@@ -89,6 +89,9 @@ dependencies {
 
   // Core Android dependencies
   implementation(libs.androidx.core.ktx)
+  // Backports the Android 12 splash-screen API to minSdk, so the branded launch
+  // moment is identical on every device instead of only on 12+.
+  implementation(libs.androidx.core.splashscreen)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.activity.compose)
 

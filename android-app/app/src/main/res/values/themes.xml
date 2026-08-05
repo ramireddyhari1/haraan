@@ -2,4 +2,27 @@
 <resources>
 
     <style name="Theme.Thanna" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      Launch theme — stage 1 of the brand splash.
+
+      Android 12+ ALWAYS draws a system splash on cold start; before this theme
+      existed it fell back to the launcher icon on the plain window background,
+      which is what made the first-open moment look unbranded. Now the platform
+      draws the monogram on its own circular brand plate over the same wash the
+      in-app splash uses, so stage 2 (BrandSplash's wordmark) continues on an
+      identical canvas with no flash between them.
+
+      windowSplashScreenBackground MUST stay equal to BrandSplash's base colour —
+      that shared value is the whole reason the handoff is seamless.
+    -->
+    <style name="Theme.Haraan.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- The platform supplies the circular plate, so the icon is the bare
+             white monogram rather than a drawable carrying its own circle
+             (which would render as a small circle inset inside the plate). -->
+        <item name="windowSplashScreenIconBackgroundColor">@color/brand_blue</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Thanna</item>
+    </style>
 </resources>
