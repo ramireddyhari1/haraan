@@ -68,9 +68,18 @@ Route::prefix('auth/email')->controller(EmailAuthController::class)->group(funct
 // "Continue with Google" — the app posts a Google ID token; we verify it and log in.
 Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login'])->middleware('throttle:auth');
 
-// "Continue with phone" — the app posts a Firebase phone-auth ID token; we verify it
-// and log in (creating the account on first sign-in). Token-based twin of the website's
-// session-based /auth/firebase-phone.
+// "Continue with phone" — WhatsApp (MSG91) first. `start` answers {channel} and the
+// app drives whichever it names; `verify` checks the code locally and returns a JWT.
+// Token-based twin of the website's /auth/whatsapp-otp/*. NOT the older
+// /api/auth/whatsapp/* — that one keys accounts differently; see PhoneOtpController.
+Route::prefix('auth/phone-otp')->controller(\App\Http\Controllers\Api\PhoneOtpController::class)->group(function (): void {
+    Route::post('/start', 'start')->middleware('throttle:otp');
+    Route::post('/verify', 'verify')->middleware('throttle:auth');
+});
+
+// The SMS fallback beneath it — the app posts a Firebase phone-auth ID token; we verify
+// it and log in (creating the account on first sign-in). Token-based twin of the
+// website's session-based /auth/firebase-phone.
 Route::post('/auth/firebase-phone', [\App\Http\Controllers\Api\FirebasePhoneAuthController::class, 'login'])->middleware('throttle:auth');
 
 // -------------------------------------------------------------------------

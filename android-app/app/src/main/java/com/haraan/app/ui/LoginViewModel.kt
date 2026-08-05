@@ -37,6 +37,12 @@ data class LoginUiState(
     val otp: String = "",
     /** Set once Firebase has sent a code — the screen swaps to the code-entry step. */
     val phoneVerificationId: String? = null,
+    /**
+     * Set instead when the code went out over WhatsApp (MSG91). Exactly one of this
+     * and [phoneVerificationId] is ever non-null: they are the two channels behind
+     * the same code-entry step, and [phoneCodeSent] is what the screen reads.
+     */
+    val phoneWaToken: String? = null,
     /** Non-zero while a resend is on cooldown (seconds remaining). */
     val phoneResendSeconds: Int = 0,
 ) {
@@ -71,7 +77,7 @@ data class LoginUiState(
 
     val isOtpValid: Boolean get() = otp.length in 6..8
 
-    val phoneCodeSent: Boolean get() = phoneVerificationId != null
+    val phoneCodeSent: Boolean get() = phoneVerificationId != null || phoneWaToken != null
 }
 
 class LoginViewModel : ViewModel() {
@@ -214,14 +220,31 @@ class LoginViewModel : ViewModel() {
     /** Leaving the phone flow (Back / switching method): drop the in-flight verification. */
     fun resetPhone() {
         _uiState.update {
-            it.copy(otp = "", phoneVerificationId = null, phoneResendSeconds = 0, errorMessage = null)
+            it.copy(
+                otp = "",
+                phoneVerificationId = null,
+                phoneWaToken = null,
+                phoneResendSeconds = 0,
+                errorMessage = null,
+            )
         }
     }
 
     /**
-     * Step 1 of phone sign-in: ask Firebase to SMS a code. On devices that instantly verify
-     * (auto-retrieval / test numbers) this skips straight to logging in via [onSuccess].
-     * Needs an [Activity] for the Firebase app-check (reCAPTCHA / Play Integrity).
+     * Step 1 of phone sign-in: **WhatsApp (MSG91) first, Firebase SMS beneath it** —
+     * the same order the website uses.
+     *
+     * WhatsApp leads because it costs a fraction of an SMS, lands where these users
+     * already are, and — unlike Firebase — needs no Play Integrity / SHA registration,
+     * which is exactly what was keeping phone sign-in from working in the app at all.
+     *
+     * The fallback is deliberately silent. `phoneOtpStart` answers "use SMS" for every
+     * reason WhatsApp couldn't be used and never throws, so the user just sees a code
+     * arrive and never learns which pipe carried it. A login is the one message with
+     * nothing behind it: no email copy, so non-delivery means they cannot get in.
+     *
+     * Needs an [Activity] for the Firebase app-check (reCAPTCHA / Play Integrity) on
+     * the fallback path only.
      */
     fun sendPhoneCode(activity: Activity, onSuccess: (String) -> Unit) {
         val state = _uiState.value
@@ -233,9 +256,19 @@ class LoginViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
+
+            val waToken = authRepository.phoneOtpStart(e164)
+            if (waToken != null) {
+                _uiState.update { it.copy(isLoading = false, phoneWaToken = waToken, phoneVerificationId = null) }
+                startResendCooldown()
+                return@launch
+            }
+
             when (val result = PhoneAuthHelper.sendCode(activity, e164)) {
                 is PhoneSendResult.CodeSent -> {
-                    _uiState.update { it.copy(isLoading = false, phoneVerificationId = result.verificationId) }
+                    _uiState.update {
+                        it.copy(isLoading = false, phoneVerificationId = result.verificationId, phoneWaToken = null)
+                    }
                     startResendCooldown()
                 }
                 is PhoneSendResult.AutoVerified -> exchangePhoneToken(result.idToken, onSuccess)
@@ -245,12 +278,24 @@ class LoginViewModel : ViewModel() {
         }
     }
 
-    /** Step 2: confirm the typed code, then exchange the Firebase token for an app JWT. */
+    /**
+     * Step 2: confirm the typed code. Branches on which channel actually sent it —
+     * the WhatsApp code is verified by our own backend, the SMS code by Firebase.
+     */
     fun verifyPhoneCode(onSuccess: (String) -> Unit) {
         val state = _uiState.value
-        val verificationId = state.phoneVerificationId ?: return
         if (!state.isOtpValid || state.isLoading) return
 
+        val waToken = state.phoneWaToken
+        if (waToken != null) {
+            viewModelScope.launch {
+                _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+                finishPhoneLogin(onSuccess) { authRepository.phoneOtpVerify(waToken, state.otp) }
+            }
+            return
+        }
+
+        val verificationId = state.phoneVerificationId ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             when (val result = PhoneAuthHelper.verifyCode(verificationId, state.otp)) {
@@ -262,8 +307,18 @@ class LoginViewModel : ViewModel() {
     }
 
     /** Backend hand-off shared by the manual-code and instant-verification paths. */
-    private suspend fun exchangePhoneToken(idToken: String, onSuccess: (String) -> Unit) {
-        runCatching { authRepository.firebasePhoneLogin(idToken) }
+    private suspend fun exchangePhoneToken(idToken: String, onSuccess: (String) -> Unit) =
+        finishPhoneLogin(onSuccess) { authRepository.firebasePhoneLogin(idToken) }
+
+    /**
+     * The tail both channels share: whichever call proves the number, the success and
+     * failure handling is identical, so it lives in one place.
+     */
+    private suspend fun finishPhoneLogin(
+        onSuccess: (String) -> Unit,
+        login: suspend () -> com.haraan.app.data.VerifyOtpResult,
+    ) {
+        runCatching { login() }
             .onSuccess { result ->
                 _uiState.update {
                     it.copy(

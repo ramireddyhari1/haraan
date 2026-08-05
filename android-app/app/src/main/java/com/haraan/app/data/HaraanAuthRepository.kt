@@ -187,6 +187,56 @@ class HaraanAuthRepository(
     }
 
   /**
+   * Step 1 of "Continue with phone": ask the backend to send the code over WhatsApp
+   * (MSG91). Returns the WhatsApp session token when it went out, or `null` meaning
+   * "use the SMS path" — the caller then runs the Firebase flow.
+   *
+   * This never throws for a routing answer. The backend deliberately reports `sms`
+   * for EVERY reason WhatsApp couldn't be used (unapproved template, no credentials,
+   * number not on WhatsApp, provider outage), because a login is the one message
+   * with nothing behind it: if it doesn't arrive, the person cannot get in. A
+   * transport failure reaching the backend at all is treated the same way — fall
+   * back rather than strand the user.
+   */
+  suspend fun phoneOtpStart(e164: String): String? = withContext(Dispatchers.IO) {
+    val response = runCatching {
+      postJson(path = "/api/auth/phone-otp/start", jsonBody = JSONObject().put("phone", e164))
+    }.getOrNull() ?: return@withContext null
+
+    if (response.code !in 200..299) return@withContext null
+
+    val json = runCatching { JSONObject(response.body) }.getOrNull() ?: return@withContext null
+    if (json.optString("channel") != "whatsapp") return@withContext null
+    json.optString("token").takeIf { it.isNotBlank() }
+  }
+
+  /**
+   * Step 2 of the WhatsApp path: confirm the typed code against the session from
+   * [phoneOtpStart] and exchange it for an app JWT. Errors here ARE surfaced — by
+   * this point the user has a code in hand, so "that code is not right" is real
+   * feedback, not a routing decision.
+   */
+  suspend fun phoneOtpVerify(token: String, code: String, name: String? = null): VerifyOtpResult =
+    withContext(Dispatchers.IO) {
+      val body = JSONObject().put("token", token).put("code", code)
+      if (!name.isNullOrBlank()) body.put("name", name.trim())
+
+      val response = postJson(path = "/api/auth/phone-otp/verify", jsonBody = body)
+
+      if (response.code !in 200..299) {
+        throw IllegalStateException(parseErrorMessage(response.body, "Phone sign-in failed. Please try again."))
+      }
+
+      val json = JSONObject(response.body)
+      val user = json.getJSONObject("user")
+      VerifyOtpResult(
+        token = json.getString("token"),
+        userName = user.optString("name", "Haraan user"),
+        message = json.optString("message", "Welcome to Haraan!"),
+      )
+    }
+
+  /**
    * "Continue with phone": exchange a Firebase phone-auth ID token (from [PhoneAuthHelper])
    * for an app JWT. The backend verifies the token with Firebase and finds-or-creates the
    * account by the verified E.164 number, matching the website's phone login. [name] is only
