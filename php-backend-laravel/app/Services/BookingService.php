@@ -264,21 +264,15 @@ final class BookingService
             $fee      = $event->convenienceFeeFor($subtotal);
 
             // Coupon: a redeemable code takes an amount off the payable total (never below
-            // zero). Honours the coupon's type (flat / percentage-with-cap), its minimum
-            // order value, and its per-customer usage cap. Applied once for the order.
-            $discount = 0.0;
-            $coupon   = Coupon::findByCode($couponCode);
-            if ($coupon !== null
-                && $coupon->isRedeemable()
-                && $coupon->appliesToEvent($event->id)
-                && $coupon->meetsMinOrder($subtotal)
-                && $this->couponWithinPerCustomerLimit($coupon, (int) $user->id)) {
-                $discount = min($coupon->discountFor($subtotal), $subtotal + $fee);
-                // A reserved (unpaid) order must not yet burn a coupon use — that's counted
-                // on confirmation, so an abandoned checkout doesn't consume the code.
-                if (! $reserve) {
-                    $coupon->increment('uses');
-                }
+            // zero). Same resolution the checkout preview ran, re-done here on the prices
+            // this transaction actually wrote — the preview is a quote, this is the charge.
+            $applied  = $this->resolveCoupon($user, $event->id, $couponCode, $subtotal, $fee);
+            $discount = $applied['discount'];
+
+            // A reserved (unpaid) order must not yet burn a coupon use — that's counted
+            // on confirmation, so an abandoned checkout doesn't consume the code.
+            if ($applied['coupon'] !== null && ! $reserve) {
+                $applied['coupon']->increment('uses');
             }
 
             if ($fee > 0 || $discount > 0) {
@@ -293,6 +287,49 @@ final class BookingService
 
             return $bookings;
         });
+    }
+
+    /**
+     * Decide whether a code applies to an order, and for how much.
+     *
+     * The single place that answers that question: checkout calls it to preview a
+     * discount the moment the buyer hits Apply, and {@see createOrder()} calls it
+     * again to apply the discount for real. Sharing it is the point — a preview that
+     * disagreed with the charge would be worse than no preview at all.
+     *
+     * `coupon` is non-null only when the code is genuinely usable (that's the caller's
+     * cue to count a use); otherwise `message` says why not, in words meant for the buyer.
+     * The discount never exceeds the payable total, so an order can't go below ₹0.
+     *
+     * @return array{coupon: Coupon|null, discount: float, message: string}
+     */
+    public function resolveCoupon(User $user, int $eventId, ?string $code, float $subtotal, float $fee = 0.0): array
+    {
+        $reject = static fn (string $message): array => ['coupon' => null, 'discount' => 0.0, 'message' => $message];
+
+        $coupon = Coupon::findByCode($code);
+
+        if ($coupon === null || ! $coupon->isRedeemable()) {
+            return $reject('This code isn’t valid.');
+        }
+
+        if (! $coupon->appliesToEvent($eventId)) {
+            return $reject('This code isn’t valid for this event.');
+        }
+
+        if (! $coupon->meetsMinOrder($subtotal)) {
+            return $reject('Applies on orders over ₹' . number_format((float) $coupon->min_order) . '.');
+        }
+
+        if (! $this->couponWithinPerCustomerLimit($coupon, (int) $user->id)) {
+            return $reject('You’ve already used this code.');
+        }
+
+        return [
+            'coupon'   => $coupon,
+            'discount' => round(min($coupon->discountFor($subtotal), $subtotal + $fee), 2),
+            'message'  => 'Coupon applied.',
+        ];
     }
 
     /**

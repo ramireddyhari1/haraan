@@ -144,6 +144,43 @@ final class EventBookingController extends Controller
     }
 
     /**
+     * POST /events/{id}/book/coupon — quote a coupon against the cart on screen (AJAX from
+     * the review page's Apply button), so the buyer sees the discount before committing.
+     *
+     * A quote only: it counts no use and holds nothing. The cart is re-priced here from the
+     * same `qty[...]` the form carries rather than trusting a posted total, and confirm
+     * re-resolves the code anyway — so a tampered subtotal buys nothing but a wrong preview.
+     */
+    public function previewCoupon(Request $request, string $id): JsonResponse
+    {
+        $event = $this->publishedEvent($id);
+        $lines = $this->linesFrom($request, $event);
+        $code  = trim((string) $request->input('couponCode', ''));
+
+        if ($lines === [] || $code === '') {
+            return response()->json(['applied' => false, 'message' => 'Enter a coupon code.']);
+        }
+
+        $priced   = $this->priceLines($event, $lines);
+        $resolved = $this->bookings->resolveCoupon($request->user(), $event->id, $code, $priced['subtotal'], $priced['fee']);
+
+        if ($resolved['coupon'] === null) {
+            return response()->json(['applied' => false, 'message' => $resolved['message']]);
+        }
+
+        $discount = $resolved['discount'];
+
+        return response()->json([
+            'applied'       => true,
+            'code'          => $resolved['coupon']->code,
+            'message'       => $resolved['message'],
+            'discount'      => $discount,
+            'discountLabel' => number_format($discount, 2),
+            'totalLabel'    => number_format(max(0, round($priced['total'] - $discount, 2)), 2),
+        ]);
+    }
+
+    /**
      * POST /events/{id}/book/confirm — finalise after checkout (AJAX from the payment page).
      * Verifies the signature server-side and returns the pass URL to redirect to.
      */

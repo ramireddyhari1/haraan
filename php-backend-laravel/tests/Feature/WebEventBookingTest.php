@@ -224,6 +224,47 @@ class WebEventBookingTest extends TestCase
         $this->assertSame(0, Booking::query()->count());
     }
 
+    /**
+     * The review page's Apply button quotes a coupon against the cart on screen, and the
+     * quote has to match what confirming actually charges — same resolver, both sides.
+     */
+    public function test_coupon_preview_quotes_the_discount_it_will_charge(): void
+    {
+        $event = $this->event(['price' => 500]);
+        $user  = $this->user();
+
+        \App\Models\Coupon::create([
+            'event_id' => $event->id, 'code' => 'BLOOM20', 'type' => 'percent',
+            'discount' => 20, 'min_order' => 800, 'active' => true,
+        ]);
+
+        // ₹1000 cart, 20% off → ₹200 off, ₹800 payable.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 2], 'couponCode' => 'bloom20'])
+            ->assertOk()
+            ->assertJson(['applied' => true, 'code' => 'BLOOM20', 'discount' => 200, 'totalLabel' => '800.00']);
+
+        // Same code on a cart below its minimum, and a code that doesn't exist.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 1], 'couponCode' => 'BLOOM20'])
+            ->assertOk()
+            ->assertJson(['applied' => false]);
+
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 2], 'couponCode' => 'NOPE'])
+            ->assertOk()
+            ->assertJson(['applied' => false, 'message' => 'This code isn’t valid.']);
+
+        // Previewing must not consume the code, and confirming must charge the quote.
+        $this->assertSame(0, (int) \App\Models\Coupon::query()->value('uses'));
+
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2], 'couponCode' => 'BLOOM20'] + $this->contact())
+            ->assertOk();
+
+        $this->assertSame(200.0, (float) Booking::query()->max('discount'));
+    }
+
     public function test_pass_page_is_owner_only(): void
     {
         $event = $this->event();

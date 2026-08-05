@@ -145,6 +145,12 @@ Route::get('/events/{id}/venue-photo/{index}.jpg', [\App\Http\Controllers\Web\Ve
 Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingController::class)->group(function (): void {
     Route::get('/events/{id}/book', 'checkout')->whereNumber('id')->name('site.booking.checkout');
     Route::post('/events/{id}/book', 'store')->whereNumber('id')->name('site.booking.store');
+    // Live coupon quote for the review page. Throttled: it answers "is this a real code?"
+    // one guess at a time, which is exactly what a code-harvesting script wants.
+    Route::post('/events/{id}/book/coupon', 'previewCoupon')
+        ->whereNumber('id')
+        ->middleware('throttle:20,1')
+        ->name('site.booking.coupon');
     // Razorpay payment on the reserved order (AJAX from the payment page).
     Route::post('/events/{id}/book/confirm', 'confirmWeb')->whereNumber('id')->name('site.booking.confirm');
     Route::post('/events/{id}/book/release', 'releaseWeb')->whereNumber('id')->name('site.booking.release');
