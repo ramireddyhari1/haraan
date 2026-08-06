@@ -410,6 +410,16 @@ fun LoginScreen(
                         // Insets live INSIDE the white card, so the region reserved for the
                         // keyboard / nav bar is white — never a strip of background image.
                         // Union (not sum) avoids double-counting the nav bar.
+                        //
+                        // TRIED AND REVERTED 2026-08-06: moving the ime inset out to the
+                        // anchor column so the card wraps its content. It does remove the
+                        // white tail, but the card then floats a gap ABOVE the keyboard and
+                        // the hero image shows through — worse. navigationBars.exclude(ime)
+                        // did not close that gap either, so the cause is not nav-bar
+                        // double-counting. The empty space under the code fields is a
+                        // COMPOSITION problem (content is top-aligned in a tall card), not
+                        // an inset one; fixing it means laying the step out properly, not
+                        // moving this line.
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                         .padding(start = GapL, end = GapL, top = GapM, bottom = GapL),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -1116,10 +1126,38 @@ private fun OtpCells(
     count: Int = 6,
 ) {
     val focus = remember { FocusRequester() }
+    val view = LocalView.current
     // The code screen exists to be typed into; opening it focused saves a tap.
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    // A tick per digit. The screen was silent in the hand — digits appeared and
+    // nothing else happened, which is most of what "no feel" actually means.
+    LaunchedEffect(value.length) {
+        if (value.isNotEmpty()) {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+        }
+    }
+
+    // Wrong code: shake the row and buzz once, so the failure is felt where it
+    // happened rather than only announced in red text below.
+    val shake = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(isError) {
+        if (isError) {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            // Decaying left-right, not a single lurch — a lurch reads as a layout bug.
+            listOf(14f, -11f, 8f, -5f, 0f).forEach {
+                shake.animateTo(it, tween(durationMillis = 48, easing = LinearEasing))
+            }
+        } else {
+            shake.snapTo(0f)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationX = shake.value }
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1131,10 +1169,20 @@ private fun OtpCells(
                 // complete so the row never looks unfocused mid-verify.
                 val isCaret = i == value.length.coerceAtMost(count - 1) && value.length < count
 
+                // The digit lands with a small spring instead of appearing. This is the
+                // per-keystroke feedback the row was missing — keep the overshoot low,
+                // a bouncy cell reads as a toy.
+                val pop by animateFloatAsState(
+                    targetValue = if (filled) 1f else 0.94f,
+                    animationSpec = spring(dampingRatio = 0.55f, stiffness = 900f),
+                    label = "otpCellPop"
+                )
+
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp)
+                        .graphicsLayer { scaleX = pop; scaleY = pop }
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (filled) Color.White else Color(0xFFF8FAFC))
                         .border(
