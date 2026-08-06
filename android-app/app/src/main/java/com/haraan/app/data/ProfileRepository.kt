@@ -62,6 +62,35 @@ data class PlayerProfile(
 )
 
 /**
+ * Thrown when the profile API answers with a non-2xx status. Carries the HTTP
+ * [code] so callers can tell "your session is gone" (401/403) apart from "the
+ * server is unhappy" — a distinction the ranked-access gate depends on. Still an
+ * IllegalStateException so existing catch sites keep working unchanged.
+ */
+class ProfileHttpException(val code: Int, message: String) : IllegalStateException(message)
+
+/**
+ * Answer to "can this user do a ranked action?" — deliberately four-valued.
+ *
+ * The important one is [Unavailable]: a timeout or a 500 is NOT the same thing as
+ * "this player has no profile", and must never route a fully set-up player into
+ * the profile-setup wizard.
+ */
+sealed class ProfileStatus {
+  /** Signed in and the ActionBoard profile is complete — let them through. */
+  object Complete : ProfileStatus()
+
+  /** Signed in, but the profile still needs setting up. */
+  object Incomplete : ProfileStatus()
+
+  /** No real session (signed out, or browsing as a guest) — needs login first. */
+  object NeedsLogin : ProfileStatus()
+
+  /** We could not find out. Show [message]; change nothing. */
+  data class Unavailable(val message: String) : ProfileStatus()
+}
+
+/**
  * Fetches the logged-in player's ActionBoard profile. Same HttpURLConnection +
  * JWT style as [MatchRepository] / [PlayerRepository].
  */
@@ -82,7 +111,7 @@ class ProfileRepository(
       val stream = if (code >= 400) connection.errorStream else connection.inputStream
       val body = stream?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } } ?: ""
       if (code !in 200..299) {
-        throw IllegalStateException(parseError(body))
+        throw ProfileHttpException(code, parseError(body))
       }
       parseProfile(JSONObject(body))
     } finally {
@@ -111,7 +140,7 @@ class ProfileRepository(
       val stream = if (code >= 400) connection.errorStream else connection.inputStream
       val body = stream?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } } ?: ""
       if (code !in 200..299) {
-        throw IllegalStateException(parseError(body))
+        throw ProfileHttpException(code, parseError(body))
       }
       parseProfile(JSONObject(body))
     } finally {
@@ -189,12 +218,33 @@ class ProfileRepository(
   }
 
   /**
-   * Lightweight gate check: is the player's ActionBoard profile complete?
-   * Returns false on any error (treated as "not ready").
+   * Gate check for ranked actions (create a match, open your player profile…).
+   *
+   * Never collapses to a bare boolean: the old `isProfileComplete` returned false
+   * on ANY failure, so a guest token, an expired session or a five-second timeout
+   * all looked exactly like "this player has no profile" — and dumped a fully
+   * set-up player into the setup wizard every time they tapped Create.
    */
-  suspend fun isProfileComplete(token: String): Boolean = withContext(Dispatchers.IO) {
-    runCatching { fetchMe(token).profileComplete }.getOrDefault(false)
+  suspend fun profileStatus(token: String?): ProfileStatus = withContext(Dispatchers.IO) {
+    if (!TokenStore.isSignedIn(token)) return@withContext ProfileStatus.NeedsLogin
+    try {
+      if (fetchMe(token!!).profileComplete) ProfileStatus.Complete else ProfileStatus.Incomplete
+    } catch (e: ProfileHttpException) {
+      // The session is gone (or was never real) → send them to login, not setup.
+      if (e.code == 401 || e.code == 403) ProfileStatus.NeedsLogin
+      else ProfileStatus.Unavailable(e.message ?: "Couldn't check your player profile.")
+    } catch (_: Exception) {
+      ProfileStatus.Unavailable("Couldn't reach Haraan. Check your connection and try again.")
+    }
   }
+
+  /**
+   * Lightweight boolean view of [profileStatus] for callers that only care whether
+   * the player is good to go. Anything other than a confirmed complete profile is
+   * false, so do NOT use this to decide whether to show the setup wizard.
+   */
+  suspend fun isProfileComplete(token: String): Boolean =
+    profileStatus(token) is ProfileStatus.Complete
 
   /**
    * Create / complete the ActionBoard player profile. Returns true on success.

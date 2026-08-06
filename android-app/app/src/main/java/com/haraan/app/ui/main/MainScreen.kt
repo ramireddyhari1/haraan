@@ -3558,14 +3558,24 @@ private fun CrexMatchesScreen(
   // Ranked-access gate: 0 = none, 1 = needs login, 2 = needs profile.
   var gateStep by remember { mutableStateOf(0) }
   var pendingRankedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-  val requireRankedAccess: (() -> Unit) -> Unit = remember {
-    { action ->
+  // Once we've confirmed this session has a complete player profile, remember it:
+  // a player who already has a profile goes straight to Create Match on every later
+  // tap, with no network round-trip and no chance of a blip re-showing the wizard.
+  var profileReady by remember { mutableStateOf(false) }
+  val requireRankedAccess: (() -> Unit) -> Unit = { action ->
+    if (profileReady) {
+      action()
+    } else {
       scope.launch {
         val token = com.haraan.app.data.TokenStore.getToken(context)
-        when {
-          token.isNullOrBlank() -> { pendingRankedAction = action; gateStep = 1 }
-          !profileRepository.isProfileComplete(token) -> { pendingRankedAction = action; gateStep = 2 }
-          else -> action()
+        when (val status = profileRepository.profileStatus(token)) {
+          is com.haraan.app.data.ProfileStatus.Complete -> { profileReady = true; action() }
+          is com.haraan.app.data.ProfileStatus.Incomplete -> { pendingRankedAction = action; gateStep = 2 }
+          is com.haraan.app.data.ProfileStatus.NeedsLogin -> { pendingRankedAction = action; gateStep = 1 }
+          // Couldn't check — say so and leave them where they are. Never assume
+          // "no profile" from a network failure.
+          is com.haraan.app.data.ProfileStatus.Unavailable ->
+            Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
         }
       }
     }
@@ -3810,6 +3820,9 @@ private fun CrexMatchesScreen(
         onSettings = { showMenu = false; showSettings = true },
         onSignOut = {
           com.haraan.app.data.TokenStore.clearToken(context)
+          // Drop the cached gate result with the session, or the next Create tap
+          // would sail past a login that is no longer there.
+          profileReady = false
           showMenu = false
           Toast.makeText(context, "Signed out.", Toast.LENGTH_SHORT).show()
         },
@@ -3863,11 +3876,21 @@ private fun CrexMatchesScreen(
           com.haraan.app.data.TokenStore.saveToken(context, token)
           com.haraan.app.push.PushRegistrar.syncToken(context)
           scope.launch {
-            if (profileRepository.isProfileComplete(token)) {
-              gateStep = 0
-              val a = pendingRankedAction; pendingRankedAction = null; a?.invoke()
-            } else {
-              gateStep = 2
+            // A returning player who already has a profile must land on the action
+            // they asked for, not on the setup wizard.
+            when (val status = profileRepository.profileStatus(token)) {
+              is com.haraan.app.data.ProfileStatus.Complete -> {
+                profileReady = true
+                gateStep = 0
+                val a = pendingRankedAction; pendingRankedAction = null; a?.invoke()
+              }
+              is com.haraan.app.data.ProfileStatus.Incomplete -> gateStep = 2
+              is com.haraan.app.data.ProfileStatus.NeedsLogin -> gateStep = 1
+              is com.haraan.app.data.ProfileStatus.Unavailable -> {
+                gateStep = 0
+                pendingRankedAction = null
+                Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
+              }
             }
           }
         },
@@ -3888,6 +3911,8 @@ private fun CrexMatchesScreen(
           uploadAvatarIfPresent(context, profileRepository, token, photoUri)
         },
         onDone = {
+          // They just created the profile — from here on Create goes straight through.
+          profileReady = true
           gateStep = 0
           val a = pendingRankedAction; pendingRankedAction = null; a?.invoke()
         },
