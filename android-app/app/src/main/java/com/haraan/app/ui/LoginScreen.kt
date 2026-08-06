@@ -366,10 +366,22 @@ fun LoginScreen(
         //    Insets live on THIS column so the card sits just above the keyboard/nav
         //    bar with no internal gap (applying imePadding inside the card reserves
         //    keyboard-height padding inside it → a white void + clipped header).
+        // Bound the phone/OTP step ONLY while the keyboard is up. With it down there is
+        // no surplus to distribute, and filling then swallowed the hero entirely — the
+        // landing must keep its short sheet over the image.
+        val stepIsBounded = isPhoneInputVisible &&
+            WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                // The phone/OTP step needs a BOUNDED height. While the card wraps its
+                // content there is no distributable space, so every attempt to move the
+                // dead area just slid content toward the keyboard (see the note on the
+                // card's insets). Filling here, plus weight() on the card, gives the step
+                // a real height for its layout to work inside.
+                .then(if (stepIsBounded) Modifier.fillMaxHeight() else Modifier),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
@@ -395,7 +407,10 @@ fun LoginScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .wrapContentHeight()
+                    // Bounded in the phone/OTP step (see the anchor above); wraps its
+                    // content everywhere else so the landing keeps its short sheet over
+                    // the hero.
+                    .then(if (stepIsBounded) Modifier.weight(1f) else Modifier.wrapContentHeight())
                     .graphicsLayer {
                         alpha = cardAlpha
                         translationY = cardShiftPx
@@ -407,6 +422,7 @@ fun LoginScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(if (stepIsBounded) Modifier.fillMaxHeight() else Modifier)
                         // Insets live INSIDE the white card, so the region reserved for the
                         // keyboard / nav bar is white — never a strip of background image.
                         // Union (not sum) avoids double-counting the nav bar.
@@ -429,7 +445,10 @@ fun LoginScreen(
                         // rather than to keep tuning insets.
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                         .padding(start = GapL, end = GapL, top = GapM, bottom = GapL),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    // Centred only where the height is bounded. Anywhere else this is a
+                    // no-op, and Top keeps the landing sheet exactly as it was.
+                    verticalArrangement = if (stepIsBounded) Arrangement.Center else Arrangement.Top
                 ) {
                     // Authenticated: hold a short confirmation instead of cutting straight
                     // to the app. The VM delays its success callback by the same beat.
