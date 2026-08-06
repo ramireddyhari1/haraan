@@ -3703,8 +3703,11 @@ private fun CrexMatchesScreen(
             isCreatingMatch = true
             scope.launch {
               try {
-                val token = com.haraan.app.data.TokenStore.getToken(context)
-                if (token.isNullOrBlank()) {
+                // getSignedInToken, not getToken: a guest's "skipped_guest" token is
+                // non-blank. The ranked-access gate should already have caught this;
+                // this is the backstop.
+                val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                if (token == null) {
                   Toast.makeText(context, "Please sign in to create a match.", Toast.LENGTH_LONG).show()
                 } else {
                   val emblems = com.haraan.app.ui.matches.create.teamEmblems
@@ -3759,13 +3762,16 @@ private fun CrexMatchesScreen(
             }
           }
         },
+        // Both use getSignedInToken rather than a null/blank check: a guest's
+        // "skipped_guest" token is non-blank, so the old checks sent a doomed
+        // authenticated request instead of degrading quietly.
         lookupPlayer = { playerId ->
-          val token = com.haraan.app.data.TokenStore.getToken(context)
-          if (token.isNullOrBlank()) null else playerRepository.lookup(token, playerId)
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.lookup(token, playerId)
         },
         loadBookings = {
-          val token = com.haraan.app.data.TokenStore.getToken(context)
-          if (token.isNullOrBlank()) emptyList() else accountRepository.fetchBookings(token)
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else accountRepository.fetchBookings(token)
         },
         modifier = Modifier.statusBarsPadding(),
       )

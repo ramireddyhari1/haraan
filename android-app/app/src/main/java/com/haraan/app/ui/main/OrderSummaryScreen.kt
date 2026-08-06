@@ -206,8 +206,10 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                         onApply = {
                             val code = couponInput.trim()
                             if (code.isEmpty() || validating) return@CouponField
-                            val token = TokenStore.getToken(context)
-                            if (token.isNullOrBlank()) {
+                            // getSignedInToken, not getToken: a guest's "skipped_guest"
+                            // token is non-blank and would pass a null/blank check.
+                            val token = TokenStore.getSignedInToken(context)
+                            if (token == null) {
                                 couponError = "Please sign in to use a coupon."
                                 return@CouponField
                             }
@@ -283,8 +285,11 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                             if (booking) return@Surface
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                            val token = TokenStore.getToken(context)
-                            if (token.isNullOrBlank()) {
+                            // getSignedInToken — see the coupon check above. Navigation's
+                            // checkout wall should already have caught this; this is the
+                            // backstop if that wall is ever bypassed.
+                            val token = TokenStore.getSignedInToken(context)
+                            if (token == null) {
                                 Toast.makeText(context, "Please sign in to book tickets.", Toast.LENGTH_LONG).show()
                                 return@Surface
                             }

@@ -170,8 +170,10 @@ fun TossScreen(
     fun start(striker: SquadMember?, nonStriker: SquadMember?, bowler: SquadMember?) {
         phase = TossPhase.STARTING
         scope.launch {
-            val token = TokenStore.getToken(ctx)
-            if (token.isNullOrBlank()) {
+            // getSignedInToken, not getToken: a guest's "skipped_guest" token is
+            // non-blank, so a null/blank check would let them through to a 401.
+            val token = TokenStore.getSignedInToken(ctx)
+            if (token == null) {
                 Toast.makeText(ctx, "Please sign in to start the match.", Toast.LENGTH_SHORT).show()
                 phase = TossPhase.LINEUP
                 return@launch

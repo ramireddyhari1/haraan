@@ -121,6 +121,17 @@ fun ScoringScreen(
             ?: data.opponentScore.substringBefore("/").trim().toIntOrNull()
     } else null
 
+    // Every scoring action needs a REAL session. A guest holds the non-blank
+    // "skipped_guest" token, so the old `getToken(ctx) ?: return@launch` let them
+    // through to a 401 that surfaced as "check connection". Fail loudly instead.
+    val scoringToken: () -> String? = {
+        TokenStore.getSignedInToken(ctx).also {
+            if (it == null) {
+                Toast.makeText(ctx, "Please sign in to score this match.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     ScorerLoaded(
         seed = remember(matchId) { seedFrom(data) },
         onBack = onBack,
@@ -133,7 +144,7 @@ fun ScoringScreen(
         secondBowlingSquad = secondBowlingSquad,
         onStartSecondInnings = { strikerName, nonStrikerName, bowlerName ->
             scope.launch {
-                val token = TokenStore.getToken(ctx) ?: return@launch
+                val token = scoringToken() ?: return@launch
                 persistLock.withLock {
                     val payload = JSONObject()
                         .put("type", "start")
@@ -150,7 +161,7 @@ fun ScoringScreen(
         },
         onEvent = { event, after ->
             scope.launch {
-                val token = TokenStore.getToken(ctx) ?: return@launch
+                val token = scoringToken() ?: return@launch
                 persistLock.withLock {
                     // Lazily start the innings before the first ball.
                     if (!started.value && event != "UNDO") {
@@ -184,7 +195,7 @@ fun ScoringScreen(
         onBowlerChange = { member ->
             // End of over → a new bowler must come on; this also rolls the over server-side.
             scope.launch {
-                val token = TokenStore.getToken(ctx) ?: return@launch
+                val token = scoringToken() ?: return@launch
                 persistLock.withLock {
                     val payload = JSONObject()
                         .put("type", "change_bowler")
@@ -200,7 +211,7 @@ fun ScoringScreen(
             // is carried into the lazily-sent 'start' payload, so nothing to persist yet.
             if (started.value) {
                 scope.launch {
-                    val token = TokenStore.getToken(ctx) ?: return@launch
+                    val token = scoringToken() ?: return@launch
                     persistLock.withLock {
                         val payload = JSONObject()
                             .put("type", "change_batsman")
@@ -216,7 +227,7 @@ fun ScoringScreen(
         onWicket = { newBatsman, dismissal ->
             // Wicket → persist with the chosen incoming batsman + how the batter was out.
             scope.launch {
-                val token = TokenStore.getToken(ctx) ?: return@launch
+                val token = scoringToken() ?: return@launch
                 persistLock.withLock {
                     val payload = JSONObject()
                         .put("type", "wicket")
