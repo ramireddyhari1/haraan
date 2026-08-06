@@ -411,15 +411,22 @@ fun LoginScreen(
                         // keyboard / nav bar is white — never a strip of background image.
                         // Union (not sum) avoids double-counting the nav bar.
                         //
-                        // TRIED AND REVERTED 2026-08-06: moving the ime inset out to the
-                        // anchor column so the card wraps its content. It does remove the
-                        // white tail, but the card then floats a gap ABOVE the keyboard and
-                        // the hero image shows through — worse. navigationBars.exclude(ime)
-                        // did not close that gap either, so the cause is not nav-bar
-                        // double-counting. The empty space under the code fields is a
-                        // COMPOSITION problem (content is top-aligned in a tall card), not
-                        // an inset one; fixing it means laying the step out properly, not
-                        // moving this line.
+                        // THE EMPTY SPACE UNDER THE CODE STEP IS NOT AN INSET BUG. Three
+                        // attempts on 2026-08-06, all measured on a Pixel_9, all reverted:
+                        //   1. ime inset moved out to the anchor column so the card wraps
+                        //      content -> card floats above the keyboard and the hero image
+                        //      shows through the same surplus. Worse.
+                        //   2. navigationBars.exclude(ime) -> gap unchanged, so it is not
+                        //      nav-bar double-counting.
+                        //   3. Splitting the surplus above/below the content -> the dead
+                        //      white "shrank" 327px to 198px only because the content was
+                        //      pushed DOWN under the keyboard; lifting all of it (226px)
+                        //      hid the Verify button outright.
+                        // The card is bottom-anchored AND wraps its content, so padding
+                        // moves never remove space, they only slide content toward the
+                        // keyboard. The real fix is to give this step a BOUNDED height and
+                        // lay it out — header / content / action pinned to the bottom —
+                        // rather than to keep tuning insets.
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                         .padding(start = GapL, end = GapL, top = GapM, bottom = GapL),
                     horizontalAlignment = Alignment.CenterHorizontally
