@@ -1108,18 +1108,31 @@ final class PublicWebController extends Controller
             return response()->json([]);
         }
 
+        $handle = User::normalizeUsername(ltrim($q, '@'));
+
         $players = User::query()
             ->where('is_guest', false)
-            ->where(function ($w) use ($q) {
+            // Same rule as the app's /players/find: a player who switched discovery off
+            // must not surface in a directory search. Null means "predates the toggle",
+            // which is treated as discoverable.
+            ->where(function ($w) {
+                $w->whereNull('privacy_discoverable')->orWhere('privacy_discoverable', true);
+            })
+            ->where(function ($w) use ($q, $handle) {
                 $w->where('name', 'like', "%{$q}%")
                     ->orWhere('player_id', 'like', "%{$q}%");
+                if ($handle !== '') {
+                    $w->orWhere('username', 'like', "%{$handle}%");
+                }
             })
             ->orderBy('name')
             ->limit(10)
             ->get();
 
+        // 'username' is additive — existing website callers keep reading the same keys.
         return response()->json($players->map(fn (User $u) => [
             'id'       => $u->player_id,
+            'username' => $u->username,
             'name'     => $u->name,
             'role'     => $u->player_role ?: 'Player',
             'style'    => $u->batting_style ?: ($u->playing_style ?: ''),

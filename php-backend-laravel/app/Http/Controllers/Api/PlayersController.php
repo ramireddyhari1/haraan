@@ -94,6 +94,7 @@ final class PlayersController extends Controller
         return [
             'id'               => $user->id,
             'player_id'        => $pid,
+            'username'         => $user->username,
             'name'             => $user->name,
             'avatar'           => $user->avatar,
             'district'         => $user->district,
@@ -188,6 +189,9 @@ final class PlayersController extends Controller
 
         $validated = $request->validate([
             'name'             => ['required', 'string', 'max:255'],
+            // Nullable so older clients (and existing accounts) keep saving fine — the
+            // app asks for one, but a profile without a handle is still valid.
+            'username'         => ['nullable', 'string', 'max:30'],
             'state'            => ['required', 'string', 'max:255'],
             'district'         => ['required', 'string', 'max:255'],
             // Multi-sport: the chosen sport drives which attributes are required (below).
@@ -200,6 +204,21 @@ final class PlayersController extends Controller
             'height'        => ['nullable', 'string', 'max:50'],
             'nationality'   => ['nullable', 'string', 'max:100'],
         ]);
+
+        // Handle: validated here rather than via a `unique:` rule so the shape complaint
+        // and the taken complaint come back as distinct, specific messages. Re-checked on
+        // save even though the app checks availability live — the live check is a
+        // courtesy, this is the guarantee (two people can claim the same handle between
+        // one keystroke and the next).
+        $username = User::normalizeUsername($validated['username'] ?? null);
+        if ($username !== '') {
+            if ($reason = User::usernameRejection($username)) {
+                throw ValidationException::withMessages(['username' => $reason]);
+            }
+            if (!User::usernameIsFree($username, (int) $user->id)) {
+                throw ValidationException::withMessages(['username' => 'That username is already taken.']);
+            }
+        }
 
         $sport = $validated['primary_sport'];
         $attrsIn = $validated['sport_attributes'];
@@ -222,6 +241,8 @@ final class PlayersController extends Controller
 
         $user->update([
             'name'             => $validated['name'],
+            // Never clear an existing handle just because a client omitted the field.
+            'username'         => $username !== '' ? $username : $user->username,
             'state'            => $validated['state'],
             'district'         => $validated['district'],
             'organization_id'  => $orgId,
@@ -248,6 +269,7 @@ final class PlayersController extends Controller
         return response()->json([
             'message'          => 'Player profile saved',
             'player_id'        => $user->player_id,
+            'username'         => $user->username,
             'profile_complete' => $user->isActionboardProfileComplete(),
             'name'             => $user->name,
             'state'            => $user->state,
@@ -317,21 +339,115 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'playerId is required'], 422);
         }
 
+        // Accepts EITHER a Player ID or a username, so the old exact-ID flow keeps
+        // working while a handle (with or without a leading @) resolves the same way.
+        $handle = User::normalizeUsername(ltrim($playerId, '@'));
+
         $user = User::query()
-            ->where('player_id', $playerId)
             ->where('is_guest', false)
+            ->where(function ($q) use ($playerId, $handle): void {
+                $q->where('player_id', $playerId);
+                if ($handle !== '') {
+                    $q->orWhere('username', $handle);
+                }
+            })
             ->first();
 
         if ($user === null) {
             return response()->json(['error' => 'No player with that ID'], 404);
         }
 
+        return response()->json($this->playerCard($user));
+    }
+
+    /**
+     * Is this handle free? GET /api/players/username-available?username=…
+     *
+     * Answers shape and availability separately so the app can say WHY, rather than
+     * greying out a button. Never reveals anything about the holder of a taken handle.
+     */
+    public function usernameAvailable(Request $request): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        $raw = (string) $request->query('username', '');
+        $normalized = User::normalizeUsername(ltrim(trim($raw), '@'));
+
+        if ($normalized === '') {
+            return response()->json(['available' => false, 'reason' => 'Enter a username.'], 200);
+        }
+        if ($reason = User::usernameRejection($normalized)) {
+            return response()->json(['available' => false, 'username' => $normalized, 'reason' => $reason], 200);
+        }
+
+        $free = User::usernameIsFree($normalized, $user instanceof User ? (int) $user->id : null);
+
         return response()->json([
+            'available' => $free,
+            'username'  => $normalized,
+            'reason'    => $free ? null : 'That username is already taken.',
+        ]);
+    }
+
+    /**
+     * Find players to add to a squad. GET /api/players/search?q=…
+     *
+     * This is the reason usernames exist: before it, building a side meant typing each
+     * teammate's Player ID (HRN-000123) from memory. Matches username first (prefix,
+     * then contains), then name, then an exact Player ID.
+     *
+     * Honours `privacy_discoverable`: a player who has opted out never appears here.
+     * They can still be added by their exact Player ID, which only someone they gave it
+     * to would know.
+     */
+    public function search(Request $request): JsonResponse
+    {
+        $q = trim((string) $request->query('q', ''));
+        if (mb_strlen($q) < 2) {
+            return response()->json(['results' => []]);
+        }
+
+        $handle = User::normalizeUsername(ltrim($q, '@'));
+        $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $handle) . '%';
+        $prefix = str_replace(['%', '_'], ['\%', '\_'], $handle) . '%';
+
+        $me = $request->attributes->get('auth_user');
+
+        $rows = User::query()
+            ->where('is_guest', false)
+            ->where(function ($sub) use ($q): void {
+                // Opted-out players are excluded, but the column is nullable on every
+                // account created before the privacy toggles shipped — treat null as
+                // discoverable so the directory isn't empty.
+                $sub->whereNull('privacy_discoverable')->orWhere('privacy_discoverable', true);
+            })
+            ->where(function ($sub) use ($like, $q): void {
+                $sub->where('username', 'like', $like)
+                    ->orWhere('name', 'like', $like)
+                    ->orWhere('player_id', $q);
+            })
+            ->when($me instanceof User, fn ($query) => $query->where('id', '!=', $me->id))
+            // Prefix matches on the handle first — typing "vir" should surface @virat
+            // before someone whose surname merely contains those letters.
+            ->orderByRaw('CASE WHEN username LIKE ? THEN 0 WHEN username IS NOT NULL THEN 1 ELSE 2 END', [$prefix])
+            ->orderByDesc('ranked_xp')
+            ->limit(20)
+            ->get();
+
+        return response()->json([
+            'results' => $rows->map(fn (User $u) => $this->playerCard($u))->all(),
+        ]);
+    }
+
+    /** The one shape every player-picker in the app reads. */
+    private function playerCard(User $user): array
+    {
+        return [
             'player_id' => $user->player_id,
+            'username'  => $user->username,
             'name'      => $user->name,
             'district'  => $user->district,
             'state'     => $user->state,
             'avatar'    => $user->avatar,
-        ]);
+        ];
     }
 }

@@ -207,7 +207,7 @@ class CreateMatchDraft {
 fun CreateMatchWizard(
     onDismiss: () -> Unit,
     onCreate: (CreateMatchDraft) -> Unit,
-    lookupPlayer: suspend (playerId: String) -> PlayerLite?,
+    searchPlayers: suspend (query: String) -> List<PlayerLite> = { emptyList() },
     loadBookings: suspend () -> List<com.haraan.app.data.BookingLite> = { emptyList() },
     // The sport the creator picked on the ActionBoard tab. Only Cricket has a full
     // create/toss/scorer flow today; any other sport is shown an honest "coming soon"
@@ -259,7 +259,7 @@ fun CreateMatchWizard(
             when (s) {
                 0 -> StepType(draft)
                 1 -> StepRules(draft, loadBookings)
-                2 -> StepTeams(draft, lookupPlayer)
+                2 -> StepTeams(draft, searchPlayers)
                 else -> StepReview(draft)
             }
         }
@@ -1103,10 +1103,10 @@ private fun resolveCurrentLocality(context: Context): String? = try {
 
 // ─────────────────────────────────────────────────────── Step 3 · Teams ────────
 @Composable
-private fun StepTeams(draft: CreateMatchDraft, lookupPlayer: suspend (String) -> PlayerLite?) {
+private fun StepTeams(draft: CreateMatchDraft, searchPlayers: suspend (String) -> List<PlayerLite>) {
     StepScaffold(
         title = "Teams & squads",
-        subtitle = "Name both sides. Add players by their Player ID.",
+        subtitle = "Name both sides. Search players by @username or name.",
     ) {
         TeamBlock(
             heading = "Team A",
@@ -1118,7 +1118,7 @@ private fun StepTeams(draft: CreateMatchDraft, lookupPlayer: suspend (String) ->
             onPhoto = { draft.teamAPhoto = it },
             squad = draft.squadA,
             limit = draft.playersPerSide,
-            lookupPlayer = lookupPlayer,
+            searchPlayers = searchPlayers,
         )
         Spacer(Modifier.height(20.dp))
         TeamBlock(
@@ -1131,24 +1131,69 @@ private fun StepTeams(draft: CreateMatchDraft, lookupPlayer: suspend (String) ->
             onPhoto = { draft.teamBPhoto = it },
             squad = draft.squadB,
             limit = draft.playersPerSide,
-            lookupPlayer = lookupPlayer,
+            searchPlayers = searchPlayers,
         )
         Spacer(Modifier.height(16.dp))
         ImpactNote(
             "Registered players earn XP",
-            "Add players by their Haraan Player ID. A match only counts for Ranked XP " +
+            "Search a teammate by their @username. A match only counts for Ranked XP " +
                 "with enough distinct registered players on each side.",
         )
     }
 }
 
-/** Lookup state for the add-player field. */
-private sealed interface LookupState {
-    data object Idle : LookupState
-    data object Searching : LookupState
-    data class Found(val player: PlayerLite) : LookupState
-    data object NotFound : LookupState
-    data object AlreadyAdded : LookupState
+/**
+ * One search hit. Shows the @handle prominently — that's the thing a player shares with
+ * a teammate, and the thing that makes two people with the same name distinguishable.
+ * Accounts created before usernames existed fall back to their district.
+ */
+@Composable
+private fun PlayerResultRow(
+    player: PlayerLite,
+    alreadyAdded: Boolean,
+    onAdd: () -> Unit,
+) {
+    val subtitle = player.username?.let { "@$it" }
+        ?: player.district?.takeIf { it.isNotBlank() }
+        ?: player.playerId
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (alreadyAdded) Color(0xFFF3F5F8) else Color(0xFFF7F9FC))
+            .clickable(enabled = !alreadyAdded, onClick = onAdd)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(Color(0xFFE3EAF6)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                player.name.trim().take(1).uppercase().ifBlank { "?" },
+                color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                player.name.ifBlank { player.playerId },
+                color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            )
+            Text(subtitle, color = Text3, fontSize = 12.sp, maxLines = 1)
+        }
+        if (alreadyAdded) {
+            Text("Added", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        } else {
+            Box(
+                Modifier.size(28.dp).clip(CircleShape).background(Green),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Add, "Add ${player.name}", tint = Color.White, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
 }
 
 @Composable
@@ -1162,32 +1207,33 @@ private fun TeamBlock(
     onPhoto: (android.net.Uri?) -> Unit,
     squad: androidx.compose.runtime.snapshots.SnapshotStateList<SquadMember>,
     limit: Int,
-    lookupPlayer: suspend (String) -> PlayerLite?,
+    searchPlayers: suspend (String) -> List<PlayerLite>,
 ) {
     var entry by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf<LookupState>(LookupState.Idle) }
+    var results by remember { mutableStateOf<List<PlayerLite>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
     var guestName by remember { mutableStateOf("") }
     var showGuest by remember { mutableStateOf(false) }
 
-    // Debounced live lookup as the user types a Player ID.
+    // Debounced search by @username or name. Was an exact-match lookup on a Player ID
+    // (HRN-000123), which nobody knows by heart — in practice you could only build a
+    // squad with people standing next to you. An exact Player ID still resolves, because
+    // the search endpoint matches on it too.
     LaunchedEffect(entry) {
-        val id = entry.trim()
-        if (id.isEmpty()) {
-            status = LookupState.Idle
+        val q = entry.trim()
+        if (q.length < 2) {
+            results = emptyList(); searching = false; searched = false
             return@LaunchedEffect
         }
-        status = LookupState.Searching
-        delay(400)
-        val player = lookupPlayer(id)
-        status = when {
-            player == null -> LookupState.NotFound
-            squad.any { it.id == player.playerId } -> LookupState.AlreadyAdded
-            else -> LookupState.Found(player)
-        }
+        searching = true
+        delay(350)
+        results = searchPlayers(q)
+        searching = false
+        searched = true
     }
 
-    val found = status as? LookupState.Found
-    val canAdd = found != null && squad.size < limit
+    val atLimit = squad.size >= limit
 
     Column(
         Modifier
@@ -1210,31 +1256,50 @@ private fun TeamBlock(
         )
         Spacer(Modifier.height(12.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
-                WizardTextField(
-                    value = entry,
-                    onChange = { entry = it },
-                    placeholder = "Enter Player ID (${squad.size}/$limit)",
-                )
+        WizardTextField(
+            value = entry,
+            onChange = { entry = it },
+            placeholder = "Search @username or name (${squad.size}/$limit)",
+        )
+
+        // Results are the control surface: tap a row to add. No separate "+" button to
+        // aim at, and no guessing whether the thing you typed resolved to the right person.
+        when {
+            searching -> {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Text3)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Searching…", color = Text3, fontSize = 13.sp)
+                }
             }
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (canAdd) Green else Stroke)
-                    .clickable(enabled = canAdd) {
-                        found?.let { squad.add(SquadMember(it.player.playerId, it.player.name)) }
-                        entry = ""
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.Add, "Add player", tint = Color.White, modifier = Modifier.size(20.dp))
+            atLimit && entry.isNotBlank() -> {
+                Spacer(Modifier.height(10.dp))
+                Text("Squad full — remove a player first", color = Text3, fontSize = 13.sp)
+            }
+            searched && results.isEmpty() -> {
+                Spacer(Modifier.height(10.dp))
+                Text("No players found for \"${entry.trim()}\"", color = Text2, fontSize = 13.sp)
+            }
+            results.isNotEmpty() -> {
+                Spacer(Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    results.take(6).forEach { player ->
+                        val already = squad.any { it.id == player.playerId }
+                        PlayerResultRow(
+                            player = player,
+                            alreadyAdded = already,
+                            onAdd = {
+                                squad.add(SquadMember(player.playerId, player.name))
+                                entry = ""
+                                results = emptyList()
+                                searched = false
+                            },
+                        )
+                    }
+                }
             }
         }
-
-        LookupStatusRow(status, atLimit = squad.size >= limit)
 
         // Guest add — casual players without a Haraan account (no XP, just fill the side).
         val canAddGuest = guestName.trim().length >= 2 && squad.size < limit
@@ -1390,39 +1455,6 @@ private fun LeaderBadge(label: String, active: Boolean, activeColor: Color, onCl
     }
 }
 
-@Composable
-private fun LookupStatusRow(status: LookupState, atLimit: Boolean) {
-    val content: (@Composable () -> Unit)? = when (status) {
-        is LookupState.Idle -> null
-        is LookupState.Searching -> ({
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Text3)
-                Spacer(Modifier.width(8.dp))
-                Text("Checking…", color = Text3, fontSize = 13.sp)
-            }
-        })
-        is LookupState.Found -> ({
-            val p = status.player
-            val sub = if (p.district.isNullOrBlank()) p.name else "${p.name} · ${p.district}"
-            Text(
-                if (atLimit) "Squad full — remove a player first" else "✓ $sub",
-                color = if (atLimit) Text3 else Green,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        })
-        is LookupState.NotFound -> ({
-            Text("No player with that ID", color = Text2, fontSize = 13.sp)
-        })
-        is LookupState.AlreadyAdded -> ({
-            Text("Already added to this team", color = Text3, fontSize = 13.sp)
-        })
-    }
-    if (content != null) {
-        Spacer(Modifier.height(8.dp))
-        content()
-    }
-}
 
 // Team icon chooser — a live preview, a scrollable row of default emblems, and an
 // "upload" tile that opens the system photo picker for a custom image. A chosen photo

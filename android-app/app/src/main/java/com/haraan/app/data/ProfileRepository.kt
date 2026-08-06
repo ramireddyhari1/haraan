@@ -29,9 +29,19 @@ data class AchievementDto(
   val progress: String?,
 )
 
+/** Outcome of a live username availability check. */
+sealed class UsernameCheck {
+  object Available : UsernameCheck()
+  /** Unusable, with the server's specific reason (too short, reserved, taken…). */
+  data class Rejected(val reason: String) : UsernameCheck()
+  /** Couldn't reach the server — say nothing rather than claim it's taken. */
+  object Unknown : UsernameCheck()
+}
+
 data class PlayerProfile(
   val id: Int,
   val playerId: String,
+  val username: String?,
   val name: String,
   val avatar: String?,
   val district: String?,
@@ -188,6 +198,7 @@ class ProfileRepository(
     return PlayerProfile(
       id = json.optInt("id", 0),
       playerId = json.optString("player_id", ""),
+      username = json.optString("username", null).cleanNull(),
       name = json.optString("name", ""),
       avatar = json.optString("avatar", null).cleanNull(),
       district = json.optString("district", null).cleanNull(),
@@ -247,6 +258,47 @@ class ProfileRepository(
     profileStatus(token) is ProfileStatus.Complete
 
   /**
+   * Is this handle free? Called as the player types, so failures are quiet: a dropped
+   * request returns [UsernameCheck.Unknown] and the field says nothing, rather than
+   * accusing a perfectly good handle of being taken. The save endpoint re-checks and is
+   * the real guarantee — two people can claim the same handle between keystrokes.
+   */
+  suspend fun checkUsername(token: String, username: String): UsernameCheck = withContext(Dispatchers.IO) {
+    val candidate = username.trim()
+    if (candidate.isEmpty()) return@withContext UsernameCheck.Unknown
+
+    val encoded = java.net.URLEncoder.encode(candidate, "UTF-8")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/username-available?username=$encoded")
+      .openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+
+    try {
+      val code = connection.responseCode
+      if (code !in 200..299) return@withContext UsernameCheck.Unknown
+      val body = connection.inputStream?.let {
+        BufferedReader(InputStreamReader(it)).use { r -> r.readText() }
+      } ?: return@withContext UsernameCheck.Unknown
+      val json = JSONObject(body)
+      if (json.optBoolean("available", false)) {
+        UsernameCheck.Available
+      } else {
+        UsernameCheck.Rejected(
+          json.optString("reason", null).cleanNull() ?: "That username can't be used.",
+        )
+      }
+    } catch (_: Exception) {
+      UsernameCheck.Unknown
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
    * Create / complete the ActionBoard player profile. Returns true on success.
    */
   suspend fun saveProfile(
@@ -261,6 +313,7 @@ class ProfileRepository(
     birthPlace: String? = null,
     height: String? = null,
     nationality: String? = null,
+    username: String? = null,
   ): Boolean = withContext(Dispatchers.IO) {
     val body = JSONObject()
       .put("name", name)
@@ -268,6 +321,7 @@ class ProfileRepository(
       .put("district", district)
       .put("primary_sport", primarySport)
       .put("sport_attributes", JSONObject(sportAttributes as Map<*, *>))
+    if (!username.isNullOrBlank()) body.put("username", username.trim())
     if (!gender.isNullOrBlank()) body.put("gender", gender)
     if (!dateOfBirth.isNullOrBlank()) body.put("date_of_birth", dateOfBirth)
     if (!birthPlace.isNullOrBlank()) body.put("birth_place", birthPlace)

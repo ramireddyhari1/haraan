@@ -3765,9 +3765,9 @@ private fun CrexMatchesScreen(
         // Both use getSignedInToken rather than a null/blank check: a guest's
         // "skipped_guest" token is non-blank, so the old checks sent a doomed
         // authenticated request instead of degrading quietly.
-        lookupPlayer = { playerId ->
+        searchPlayers = { query ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token == null) null else playerRepository.lookup(token, playerId)
+          if (token == null) emptyList() else playerRepository.search(token, query)
         },
         loadBookings = {
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
@@ -3907,14 +3907,19 @@ private fun CrexMatchesScreen(
     if (gateStep == 2) {
       com.haraan.app.ui.profile.PlayerProfileSetupScreen(
         onClose = { gateStep = 0; pendingRankedAction = null },
-        onSave = { name, st, district, primarySport, sportAttributes, gender, dob, birthPlace, height, nationality, photoUri ->
+        onSave = { name, st, district, primarySport, sportAttributes, gender, dob, birthPlace, height, nationality, photoUri, username ->
           val token = com.haraan.app.data.TokenStore.getToken(context)
             ?: throw IllegalStateException("Please sign in again.")
           profileRepository.saveProfile(
             token, name, st, district, primarySport, sportAttributes,
-            gender, dob, birthPlace, height, nationality,
+            gender, dob, birthPlace, height, nationality, username,
           )
           uploadAvatarIfPresent(context, profileRepository, token, photoUri)
+        },
+        checkUsername = { candidate ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.UsernameCheck.Unknown
+          else profileRepository.checkUsername(token, candidate)
         },
         onDone = {
           // They just created the profile — from here on Create goes straight through.

@@ -54,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -73,7 +74,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.haraan.app.data.UsernameCheck
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // The canvas is WHITE and the inputs are filled — not the other way round. Previously
@@ -327,12 +330,20 @@ fun PlayerProfileSetupScreen(
         name: String, state: String, district: String,
         primarySport: String, sportAttributes: Map<String, String>,
         gender: String, dateOfBirth: String, birthPlace: String, height: String, nationality: String,
-        photoUri: Uri?,
+        photoUri: Uri?, username: String,
     ) -> Unit,
     onDone: () -> Unit,
+    // Live handle availability. Defaults to "can't tell", so any caller that doesn't wire
+    // it up still lets the player through — the server re-checks on save regardless.
+    checkUsername: suspend (String) -> UsernameCheck = { UsernameCheck.Unknown },
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    // Once they edit the handle themselves we stop auto-filling it from their name.
+    var usernameEdited by remember { mutableStateOf(false) }
+    var usernameState by remember { mutableStateOf<UsernameCheck?>(null) }
+    var checkingUsername by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf("") }
     var district by remember { mutableStateOf("") }
     // Cricket-first platform: preselect Cricket so its fields show immediately. Players can
@@ -358,7 +369,36 @@ fun PlayerProfileSetupScreen(
     // fold, which turned that invented rule into a dead end.
     // Date of birth and gender stay required: they're two taps and they drive the
     // player card and age-group features, unlike height and nationality.
-    val step1Valid = name.isNotBlank() && gender.isNotBlank() && dobIso.isNotBlank()
+    // Offer a handle built from their name until they take over. Saves most players from
+    // inventing one — the whole field is friction they didn't ask for.
+    LaunchedEffect(name) {
+        if (!usernameEdited) username = suggestUsername(name)
+    }
+
+    // Debounced availability check. Deliberately NOT on every keystroke: the server call
+    // is a courtesy, and the save path re-checks.
+    LaunchedEffect(username) {
+        val candidate = username.trim()
+        if (candidate.isEmpty()) {
+            usernameState = null
+            checkingUsername = false
+            return@LaunchedEffect
+        }
+        usernameState = null
+        checkingUsername = true
+        delay(450)
+        usernameState = checkUsername(candidate)
+        checkingUsername = false
+    }
+
+    // A handle the server actively refused blocks Continue. "Unknown" (offline, timeout)
+    // does NOT: the player shouldn't be stranded by a flaky network, and the save call
+    // validates for real and reports back.
+    val usernameOk = username.isNotBlank() &&
+        !checkingUsername &&
+        usernameState !is UsernameCheck.Rejected
+
+    val step1Valid = name.isNotBlank() && gender.isNotBlank() && dobIso.isNotBlank() && usernameOk
     val step2Valid = state.isNotBlank() && district.isNotBlank()
     val step3Valid = primarySport.isNotBlank() &&
         SPORT_REQUIRED[primarySport].orEmpty().all { !sportAttrs[it].isNullOrBlank() }
@@ -379,6 +419,8 @@ fun PlayerProfileSetupScreen(
     val missingField: String? = when (step) {
         0 -> when {
             name.isBlank() -> "your name"
+            username.isBlank() -> "a username"
+            usernameState is UsernameCheck.Rejected -> "an available username"
             dobIso.isBlank() -> "your date of birth"
             gender.isBlank() -> "your gender"
             else -> null
@@ -492,6 +534,15 @@ fun PlayerProfileSetupScreen(
 
                         FieldLabel("Full name")
                         Field(name, { name = it }, "Your name")
+                        Spacer(Modifier.height(16.dp))
+
+                        FieldLabel("Username")
+                        UsernameField(
+                            value = username,
+                            onChange = { usernameEdited = true; username = it },
+                            checking = checkingUsername,
+                            status = usernameState,
+                        )
                         Spacer(Modifier.height(16.dp))
 
                         FieldLabel("Date of birth")
@@ -657,6 +708,7 @@ fun PlayerProfileSetupScreen(
                                     name.trim(), state, district.trim(),
                                     primarySport, sportAttrs.toMap(),
                                     gender, dobIso, birthPlace.trim(), height, nationality, photoUri,
+                                    username.trim(),
                                 )
                                 onDone()
                             } catch (e: Exception) {
@@ -860,6 +912,83 @@ private fun SportPicker(selected: String, onSelect: (String) -> Unit) {
 
 // Labels sit a level BELOW the page title now (13sp, Text2). At 14sp/SemiBold/Text1 they
 // were the same visual weight as "Let's start with you", so the screen had no clear lead.
+/**
+ * Build a starting handle from the player's name: "Virat Kohli" -> "viratkohli".
+ * Mirrors the server's shape rules (lowercase, starts with a letter, <=20) so the
+ * suggestion is never something the server will immediately reject.
+ */
+private fun suggestUsername(name: String): String {
+    val cleaned = name.lowercase()
+        .filter { it.isLetterOrDigit() }
+        .dropWhile { !it.isLetter() }   // must start with a letter
+        .take(20)
+    return if (cleaned.length >= 3) cleaned else ""
+}
+
+/**
+ * Handle field with a fixed "@" and a live verdict underneath. The verdict is the point:
+ * a username that is silently rejected on submit is far worse than one checked as you
+ * type. Filters input to the server's alphabet so an invalid character can't be typed at
+ * all, rather than being scolded for it afterwards.
+ */
+@Composable
+private fun UsernameField(
+    value: String,
+    onChange: (String) -> Unit,
+    checking: Boolean,
+    status: UsernameCheck?,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(FieldFill)
+            .padding(start = 16.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("@", color = Text3, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        androidx.compose.foundation.text.BasicTextField(
+            value = value,
+            onValueChange = { raw ->
+                onChange(raw.lowercase().filter { it.isLetterOrDigit() || it == '.' || it == '_' }.take(20))
+            },
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            ),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Blue),
+            modifier = Modifier.weight(1f).padding(vertical = 17.dp, horizontal = 2.dp),
+            decorationBox = { inner ->
+                if (value.isEmpty()) {
+                    Text("yourname", color = Text3, fontSize = 15.sp)
+                }
+                inner()
+            },
+        )
+        when {
+            checking -> CircularProgressIndicator(
+                color = Text3, strokeWidth = 2.dp, modifier = Modifier.size(16.dp),
+            )
+            status is UsernameCheck.Available -> Icon(
+                Icons.Default.Check, "Available", tint = Green, modifier = Modifier.size(18.dp),
+            )
+            else -> Spacer(Modifier.size(18.dp))
+        }
+    }
+
+    val note: Pair<String, Color>? = when {
+        value.isBlank() -> "Players find you by this when adding you to a match" to Text3
+        checking -> null
+        status is UsernameCheck.Available -> "@$value is available" to Green
+        status is UsernameCheck.Rejected -> status.reason to Color(0xFFDC2626)
+        else -> null
+    }
+    if (note != null) {
+        Spacer(Modifier.height(6.dp))
+        Text(note.first, color = note.second, fontSize = 12.sp)
+    }
+}
+
 @Composable
 private fun FieldLabel(text: String) {
     Text(text, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)

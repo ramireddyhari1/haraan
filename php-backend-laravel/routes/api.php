@@ -221,6 +221,13 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::post('/profile', [PlayersController::class, 'saveProfile']);
     Route::post('/avatar', [PlayersController::class, 'uploadAvatar']); // profile photo
     Route::get('/lookup', [PlayersController::class, 'lookup']);
+    // Squad building: find a teammate by handle or name instead of their Player ID.
+    // NB: '/find', not '/search' — `api/players/search` is already taken by the public
+    // website endpoint (PublicWebController@searchPlayers, registered earlier in this
+    // file), which has a different shape and no auth. Registering a second /search here
+    // silently loses: Laravel matches the first route, so this controller never ran.
+    Route::get('/find', [PlayersController::class, 'search']);
+    Route::get('/username-available', [PlayersController::class, 'usernameAvailable']);
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
