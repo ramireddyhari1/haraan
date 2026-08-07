@@ -18,6 +18,18 @@ data class CreateMatchResult(
   val joinCode: String = "",
 )
 
+/**
+ * The scoreline as the SERVER settled it after an event.
+ *
+ * Football and badminton never send a score — they post what happened and read
+ * this back, so the phone's tally can't drift from the match's own timeline.
+ */
+data class MatchScoreState(
+  val home: Int,
+  val away: Int,
+  val scoreText: String?,
+)
+
 /** One row for the GameHub live-scores list (from GET /api/live-matches). */
 data class LiveMatchRow(
   val id: String,
@@ -31,6 +43,12 @@ data class LiveMatchRow(
   val venue: String,
   val competition: String,
   val isLive: Boolean,
+  /**
+   * cricket | football | badminton — what the Cricket/Badminton/Football boards
+   * filter on. Defaults to cricket so a match created before the column existed
+   * never vanishes from the one board that works.
+   */
+  val sport: String = "cricket",
   val visibility: String = "LOCAL",
   val district: String = "",
   val locality: String = "",
@@ -77,6 +95,12 @@ class MatchRepository(
     matchType: String,
     overs: Int,
     ball: String,
+    /**
+     * The sport's own format from the create wizard — `{kind, overs|halves+halfLengthMin|
+     * bestOf+pointsTo+doubles}`. Stored in `sport_state.format` so a football or badminton
+     * scorer reopens on the numbers the creator chose rather than a hardcoded default.
+     */
+    format: Map<String, Any> = emptyMap(),
     playersPerSide: Int,
     venue: String,
     locality: String = "",
@@ -99,8 +123,6 @@ class MatchRepository(
       .put("sport", sport.lowercase())
       .put("matchType", matchType)
       .put("isPrivate", isPrivate)
-      .put("overs", overs)
-      .put("ball", ball)
       .put("playersPerSide", playersPerSide)
       .put("venue", venue)
       .put("onHaraanTurf", onHaraanTurf)
@@ -108,6 +130,13 @@ class MatchRepository(
       .put("teamB", teamB)
       .put("squadA", squadJson(squadA))
       .put("squadB", squadJson(squadB))
+    // Overs and ball are cricket's. Sending them on a football match is what made every
+    // non-cricket match carry "20 overs · tennis ball" and title itself "20 Over Match".
+    if (overs > 0) {
+      body.put("overs", overs)
+      body.put("ball", ball)
+    }
+    if (format.isNotEmpty()) body.put("format", JSONObject(format))
     // Optional area/village — omitted for private matches (they're hidden from feeds).
     if (locality.isNotBlank()) body.put("locality", locality)
     // The GPS fix. The server requires it on public matches; a private match may
@@ -248,6 +277,7 @@ class MatchRepository(
           venue = o.optString("venue"),
           competition = o.optString("competition"),
           isLive = o.optBoolean("isLive", false),
+          sport = o.optString("sport", "cricket").ifBlank { "cricket" },
           visibility = o.optString("visibility", "LOCAL"),
           district = o.optString("district", ""),
           locality = o.optString("locality", ""),
@@ -303,6 +333,98 @@ class MatchRepository(
     } catch (_: Exception) {
       null
     }
+  }
+
+  /**
+   * Record a football / badminton event.
+   *
+   * Note what this does NOT do: send a score. The server derives the scoreline by
+   * counting events, so a dropped call or a double-tap can never leave a scoreboard
+   * that disagrees with its own timeline. Returns the server's settled score, or
+   * null when the call failed — the caller should re-read rather than assume.
+   */
+  suspend fun recordMatchEvent(
+    token: String,
+    matchId: String,
+    kind: String,
+    side: String? = null,
+    minute: Int? = null,
+    playerName: String? = null,
+    relatedName: String? = null,
+    detail: String? = null,
+  ): MatchScoreState? = withContext(Dispatchers.IO) {
+    val body = JSONObject().put("kind", kind)
+    side?.let { body.put("side", it) }
+    minute?.let { body.put("minute", it) }
+    playerName?.takeIf { it.isNotBlank() }?.let { body.put("player_name", it) }
+    relatedName?.takeIf { it.isNotBlank() }?.let { body.put("related_name", it) }
+    detail?.let { body.put("detail", it) }
+
+    try {
+      val response = postJson("/api/matches/$matchId/events", body, token)
+      if (response.code in 200..299) parseScoreState(response.body) else null
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  /**
+   * Undo the last event. With a [side], undoes that team's last goal — the "−"
+   * beside its tally must not delete the other team's goal just because it was
+   * recorded most recently.
+   */
+  suspend fun undoMatchEvent(
+    token: String,
+    matchId: String,
+    side: String? = null,
+  ): MatchScoreState? = withContext(Dispatchers.IO) {
+    val body = JSONObject()
+    side?.let { body.put("side", it) }
+
+    try {
+      val response = postJson("/api/matches/$matchId/events/undo", body, token)
+      if (response.code in 200..299) parseScoreState(response.body) else null
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  /**
+   * Full time. Freezes stats and opens the verification window — the same endpoint
+   * cricket completes through, so a football match earns XP and verification on the
+   * identical path rather than a parallel one.
+   */
+  suspend fun completeMatch(token: String, matchId: String): Boolean = withContext(Dispatchers.IO) {
+    try {
+      postJson("/api/matches/$matchId/complete", JSONObject(), token).code in 200..299
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  /** Merge into the per-sport score shape (football clock/half, badminton games). */
+  suspend fun updateSportState(
+    token: String,
+    matchId: String,
+    state: JSONObject,
+  ): Boolean = withContext(Dispatchers.IO) {
+    try {
+      postJson("/api/matches/$matchId/sport-state", JSONObject().put("state", state), token)
+        .code in 200..299
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun parseScoreState(body: String): MatchScoreState? = try {
+    val json = JSONObject(body)
+    MatchScoreState(
+      home = json.optInt("home_score", 0),
+      away = json.optInt("away_score", 0),
+      scoreText = json.optString("score_text", null)?.takeIf { it.isNotBlank() && it != "null" },
+    )
+  } catch (_: Exception) {
+    null
   }
 
   private fun squadJson(squad: List<SquadMember>): JSONArray {

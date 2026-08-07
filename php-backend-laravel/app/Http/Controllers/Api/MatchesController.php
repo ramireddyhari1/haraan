@@ -7,7 +7,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Match\StoreMatchRequest;
 use App\Models\LiveMatch;
+use App\Models\MatchEvent;
 use App\Models\User;
+use App\Services\MatchEventRecorder;
 use App\Services\MatchVerificationService;
 use App\Services\PlayerStatsService;
 use App\Services\ReputationService;
@@ -63,6 +65,10 @@ final class MatchesController extends Controller
             // Stamp the sport so the feed/detail can branch and the match is never
             // mislabelled as cricket. Defaults to cricket when the client omits it.
             'sport'        => $v['sport'] ?? 'cricket',
+            // What ends the match, in that sport's own terms — overs, halves × length,
+            // or games × points. Lives alongside the live score under `sport_state`
+            // (the scorer's own writes array_merge over this, so it survives).
+            'sport_state'  => isset($v['format']) ? ['format' => $v['format']] : null,
             // Short code for compact displays (hero monogram, live list); full name kept for headers.
             'home'         => self::shortName($v['teamA']),
             'away'         => self::shortName($v['teamB']),
@@ -70,7 +76,9 @@ final class MatchesController extends Controller
             'away_full'    => $v['teamB'],
             'home_emblem'  => $v['teamAEmblem'] ?? null,
             'away_emblem'  => $v['teamBEmblem'] ?? null,
-            'competition'  => $v['overs'] . ' Over Match',
+            // Reads in the sport's own terms. This was unconditionally
+            // "{overs} Over Match", so a football match announced itself as a 20-over game.
+            'competition'  => self::competitionLabel($v),
             'venue'        => $v['venue'] ?? 'Custom Match',
             'status'       => 'Scheduled',
             'time'         => 'Scheduled',
@@ -327,6 +335,39 @@ final class MatchesController extends Controller
      * Normalize wizard squad input (plain names or {id,name}) into the stored
      * {id, name} shape. Names that match a registered player_id are resolved.
      */
+    /**
+     * The competition line shown on the card and in headers, phrased in the sport's own
+     * terms: "20 Over Match", "2 x 25 min", "Doubles - best of 3 to 21". Falls back to
+     * the sport name when a client sends no format (older app builds).
+     *
+     * @param  array<string, mixed>  $v  Validated create payload.
+     */
+    private static function competitionLabel(array $v): string
+    {
+        $format = is_array($v['format'] ?? null) ? $v['format'] : [];
+
+        switch ($format['kind'] ?? ($v['sport'] ?? 'cricket')) {
+            case 'football':
+                $halves = (int) ($format['halves'] ?? 2);
+                $length = (int) ($format['halfLengthMin'] ?? 45);
+
+                return $halves . ' x ' . $length . ' min';
+
+            case 'badminton':
+                $bestOf = (int) ($format['bestOf'] ?? 3);
+                $points = (int) ($format['pointsTo'] ?? 21);
+                $side = ($format['doubles'] ?? false) ? 'Doubles' : 'Singles';
+                $games = $bestOf === 1 ? 'one game' : 'best of ' . $bestOf;
+
+                return $side . ' - ' . $games . ' to ' . $points;
+
+            default:
+                $overs = (int) ($format['overs'] ?? $v['overs'] ?? 0);
+
+                return $overs > 0 ? $overs . ' Over Match' : 'Custom Match';
+        }
+    }
+
     /**
      * Derive a short, neat team code from a full name. Multi-word names become initials
      * ("Royal Challengers" → "RC"); single words take their first 3 letters
@@ -869,5 +910,148 @@ final class MatchesController extends Controller
             return (int) $m[1];
         }
         return 0;
+    }
+
+    /**
+     * Record a football / badminton event (goal, card, sub, point).
+     *
+     * The client never sends a score — it says what happened, and
+     * {@see MatchEventRecorder} re-derives the scoreline from the events. That is
+     * what stops a dropped request or a double-tap leaving a scoreboard that
+     * disagrees with its own timeline.
+     *
+     * Cricket keeps its own per-ball pipeline (scoreAction) and is refused here, so
+     * there is never a second, competing way to move a cricket score.
+     */
+    public function recordEvent(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
+    {
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
+        }
+
+        /** @var LiveMatch $match */
+        $match = $gate;
+
+        if (strtolower((string) $match->sport) === 'cricket') {
+            return response()->json([
+                'error' => 'Cricket matches are scored through /score-action.',
+            ], 422);
+        }
+
+        $data = $request->validate([
+            'kind' => ['required', 'string', 'max:20'],
+            'side' => ['nullable', 'in:home,away'],
+            'minute' => ['nullable', 'integer', 'min:0', 'max:200'],
+            'player_name' => ['nullable', 'string', 'max:120'],
+            'player_id' => ['nullable', 'integer', 'exists:users,id'],
+            'related_name' => ['nullable', 'string', 'max:120'],
+            'detail' => ['nullable', 'string', 'max:30'],
+            'note' => ['nullable', 'string', 'max:200'],
+        ]);
+
+        $recorder->record($match, $data, $request->attributes->get('auth_user'));
+
+        return response()->json($this->eventState($match->fresh(), $recorder), 201);
+    }
+
+    /** Undo the last event — the scorer's mis-tap button. */
+    public function undoEvent(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
+    {
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
+        }
+
+        /** @var LiveMatch $match */
+        $match = $gate;
+
+        // With a side, undoes that team's last goal — the "−" beside its tally.
+        $side = $request->input('side');
+        $side = in_array($side, ['home', 'away'], true) ? $side : null;
+
+        if ($recorder->undoLast($match, $side) === null) {
+            return response()->json(['error' => 'Nothing to undo'], 422);
+        }
+
+        return response()->json($this->eventState($match->fresh(), $recorder));
+    }
+
+    /**
+     * Update the per-sport score shape — the clock and half for football, the
+     * games/serve for badminton. Merged, not replaced, so a client that only knows
+     * about the clock cannot wipe the rest.
+     */
+    public function updateSportState(Request $request, string $id): JsonResponse
+    {
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
+        }
+
+        /** @var LiveMatch $match */
+        $match = $gate;
+
+        $incoming = $request->input('state');
+        if (! is_array($incoming)) {
+            return response()->json(['error' => 'state must be an object'], 422);
+        }
+
+        $current = is_array($match->sport_state) ? $match->sport_state : [];
+        $match->forceFill(['sport_state' => array_merge($current, $incoming)])->save();
+
+        return response()->json(['sport_state' => $match->sport_state]);
+    }
+
+    /** Read the timeline. Same visibility rules as the match itself. */
+    public function events(string $id, MatchEventRecorder $recorder): JsonResponse
+    {
+        $match = LiveMatch::query()->find($id);
+
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+
+        return response()->json($this->eventState($match, $recorder));
+    }
+
+    /**
+     * Creator-only scoring gate, shared by every event route.
+     *
+     * @return LiveMatch|JsonResponse  the match, or the refusal to return
+     */
+    private function gateScorer(Request $request, string $id): LiveMatch|JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $match = LiveMatch::query()->find($id);
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+
+        if ((int) $match->user_id !== (int) $authUser->id) {
+            return response()->json(['error' => 'Unauthorized: Only the creator can score this match.'], 403);
+        }
+
+        if (strtolower((string) $match->status) === 'completed') {
+            return response()->json(['error' => 'Match is completed and locked.'], 422);
+        }
+
+        return $match;
+    }
+
+    /** @return array<string, mixed> */
+    private function eventState(LiveMatch $match, MatchEventRecorder $recorder): array
+    {
+        return [
+            'home_score' => (int) $match->home_score,
+            'away_score' => (int) $match->away_score,
+            'score_text' => $match->score_text,
+            'sport_state' => is_array($match->sport_state) ? $match->sport_state : null,
+            'football' => $recorder->footballPayload($match),
+        ];
     }
 }

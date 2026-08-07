@@ -86,6 +86,11 @@ class LiveMatchController extends Controller
                 'overs2'      => $battingTeam === 2 ? $overs : '',
                 'battingTeam' => $battingTeam,
                 'status'      => (string) ($m->status ?? ''),
+                // Which sport this is, so the app's Cricket/Badminton/Football boards
+                // can filter for real. Defaults to cricket: every match created before
+                // the column existed is one, and an untagged match must not vanish
+                // from the only board that currently works.
+                'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
                 'venue'       => (string) ($m->venue ?? ''),
                 'competition' => (string) ($m->competition ?? ''),
                 'isLive'      => strtolower((string) $m->status) === 'live',
@@ -308,6 +313,15 @@ class LiveMatchController extends Controller
             'crr' => (string) ($match->crr ?? ''),
             'status' => $match->score_text ?: (string) ($match->status ?? ''),
             'isLive' => strtolower((string) $match->status) === 'live',
+            // Which detail screen to open. MatchUiState.sport existed with the comment
+            // "drives which scorer/view opens" but was never populated — so every match,
+            // football included, rendered the cricket scorecard.
+            'sport' => strtolower((string) ($match->sport ?: 'cricket')),
+            // Football/badminton scoreline + timeline. Null for cricket, which keeps
+            // its own per-ball payload below.
+            'football' => strtolower((string) $match->sport) === 'football'
+                ? app(\App\Services\MatchEventRecorder::class)->footballPayload($match)
+                : null,
             'formatLabel' => (string) ($match->competition ?? ''),
             'venue' => (string) ($match->venue ?? ''),
             'inningsLabel' => (string) ($match->status ?? ''),

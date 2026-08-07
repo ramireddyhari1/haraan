@@ -11,7 +11,17 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -53,6 +63,8 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsCricket
+import androidx.compose.material.icons.filled.SportsSoccer
+import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -106,6 +118,79 @@ private val Green = Color(0xFF16A34A)
 private val GreenTint = Color(0xFFE9F7EF)
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Feel — haptics + press response.
+//
+// The wizard had neither: every card was a bare `clickable` over an opaque
+// background, so the ripple landed *under* the fill and nothing moved, dimmed or
+// ticked. A selection simply appeared once your finger left. On a screen built for
+// fast tapping that is what makes it read as a web form rather than an app.
+// ─────────────────────────────────────────────────────────────────────────────
+private object Feel {
+    /** Discrete increments — one per step of a counter. */
+    const val TICK = android.view.HapticFeedbackConstants.CLOCK_TICK
+
+    /** Picking one thing out of several: a chip, a card, a toggle. */
+    const val SELECT = android.view.HapticFeedbackConstants.KEYBOARD_TAP
+
+    /**
+     * The match is created. Heavier and distinct from every other tap in the flow —
+     * CONFIRM is API 30+, so older devices get the closest thing they have.
+     */
+    val COMMIT: Int
+        get() = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.view.HapticFeedbackConstants.CONFIRM
+        } else {
+            android.view.HapticFeedbackConstants.LONG_PRESS
+        }
+
+    /**
+     * Taking something away — dropping a player off a squad. Deliberately NOT [COMMIT]:
+     * CONFIRM reads as "that worked", which is the wrong note for a removal.
+     */
+    val REMOVE: Int
+        get() = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.view.HapticFeedbackConstants.REJECT
+        } else {
+            android.view.HapticFeedbackConstants.LONG_PRESS
+        }
+}
+
+/**
+ * A tappable surface that acknowledges the press *while the finger is down* —
+ * scaling back a touch and firing a haptic — instead of only after it lifts.
+ *
+ * MUST be first in the modifier chain: the `graphicsLayer` only scales what is drawn
+ * after it, so a `clip`/`background` placed ahead of it would stay put while the
+ * content shrank inside it. Ripple is off because these surfaces are opaque and
+ * painted over it anyway; the scale is the affordance.
+ */
+@Composable
+private fun Modifier.pressable(
+    enabled: Boolean = true,
+    haptic: Int? = Feel.SELECT,
+    onClick: () -> Unit,
+): Modifier {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.97f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 900f),
+        label = "pressScale",
+    )
+    val view = LocalView.current
+    return this
+        .graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(
+            interactionSource = interaction,
+            indication = null,
+            enabled = enabled,
+        ) {
+            haptic?.let { view.performHapticFeedback(it) }
+            onClick()
+        }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Domain — Sprint 1 keeps this local. Match type sets the XP CEILING only;
 // trust (and the multiplier that unlocks real XP) is decided AFTER the match,
 // so it is intentionally NOT chosen here.
@@ -132,6 +217,186 @@ enum class BallType(val label: String, val serverValue: String) {
     SEASON("Season", "season"),
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Format — the one question every sport has to answer: what makes the match end?
+//
+// Cricket answers it with overs, football with halves × length, badminton with
+// games × points. Until this existed the wizard only ever asked cricket, and the
+// football/badminton scorers opened on hardcoded defaults (45-minute halves,
+// best-of-3) that no gully match actually plays.
+// ─────────────────────────────────────────────────────────────────────────────
+sealed interface MatchFormat {
+    /** What the review card and the scorer header read. */
+    val summaryLine: String
+
+    /** Serialised into `sport_state.format` on the match — no schema per sport. */
+    fun toServerMap(): Map<String, Any>
+
+    data class Cricket(val overs: Int, val ball: BallType) : MatchFormat {
+        override val summaryLine: String get() = "$overs overs · ${ball.label} ball"
+        override fun toServerMap(): Map<String, Any> =
+            mapOf("kind" to "cricket", "overs" to overs, "ball" to ball.serverValue)
+    }
+
+    data class Football(val halves: Int, val halfLengthMin: Int) : MatchFormat {
+        override val summaryLine: String get() = "$halves × $halfLengthMin min"
+        override fun toServerMap(): Map<String, Any> =
+            mapOf("kind" to "football", "halves" to halves, "halfLengthMin" to halfLengthMin)
+    }
+
+    data class Badminton(val bestOf: Int, val pointsTo: Int, val doubles: Boolean) : MatchFormat {
+        override val summaryLine: String get() = buildString {
+            append(if (doubles) "Doubles" else "Singles")
+            append(" · ")
+            append(if (bestOf == 1) "one game" else "best of $bestOf")
+            append(" to $pointsTo")
+        }
+        override fun toServerMap(): Map<String, Any> = mapOf(
+            "kind" to "badminton",
+            "bestOf" to bestOf,
+            "pointsTo" to pointsTo,
+            "doubles" to doubles,
+        )
+    }
+}
+
+/**
+ * A one-tap format. Presets are the primary control on the Rules step — a column of
+ * bare steppers is both slower and reads like a form, not a sport. [playersPerSide]
+ * is set only where the preset genuinely implies it (a "7-a-side" football game is
+ * seven a side by definition); cricket leaves it to the stepper.
+ */
+data class FormatPreset(
+    val label: String,
+    val sub: String,
+    val format: MatchFormat,
+    val playersPerSide: Int? = null,
+) {
+    /**
+     * Whether [draft] currently sits on this preset. Cricket compares overs only —
+     * ball type is a separate axis, so changing the ball must not knock "T20" off.
+     */
+    fun matches(draft: CreateMatchDraft): Boolean {
+        val current = draft.format
+        val preset = format
+        val sameFormat = if (preset is MatchFormat.Cricket && current is MatchFormat.Cricket) {
+            current.overs == preset.overs
+        } else {
+            current == preset
+        }
+        return sameFormat && (playersPerSide == null || draft.playersPerSide == playersPerSide)
+    }
+
+    /** Applies the preset, preserving the ball the creator already chose. */
+    fun apply(draft: CreateMatchDraft) {
+        val preset = format
+        val current = draft.format
+        draft.format = if (preset is MatchFormat.Cricket && current is MatchFormat.Cricket) {
+            preset.copy(ball = current.ball)
+        } else {
+            preset
+        }
+        playersPerSide?.let { draft.playersPerSide = it }
+    }
+}
+
+/**
+ * Everything that differs between sports, in one place. Before this, the wizard's
+ * entire sport-awareness was an `if (isCricket)` that *hid* two cricket fields —
+ * so football and badminton were literally "cricket, minus overs".
+ */
+data class SportSpec(
+    val key: String,
+    val displayName: String,
+    val icon: ImageVector,
+    /** The casual tier reads differently per sport — "Gully" means nothing in badminton. */
+    val casualLabel: String,
+    val casualTagline: String,
+    /** How the casual tier reads mid-sentence: "…rank higher than gully games". */
+    val casualPlural: String,
+    val rulesSubtitle: String,
+    /** Badminton is played by people, not clubs — the Teams step has to say so. */
+    val teamsTitle: String,
+    val teamsSubtitle: String,
+    val presets: List<FormatPreset>,
+    val defaultFormat: MatchFormat,
+    val defaultPlayersPerSide: Int,
+    val playersRange: IntRange,
+    /** Hidden when the presets already fix it (badminton singles/doubles). */
+    val showPlayersStepper: Boolean = true,
+) {
+    companion object {
+        val Cricket = SportSpec(
+            key = "cricket",
+            displayName = "Cricket",
+            icon = Icons.Filled.SportsCricket,
+            casualLabel = "Casual / Gully",
+            casualTagline = "Friendly, self-scored",
+            casualPlural = "gully games",
+            rulesSubtitle = "How long, what ball, how many a side.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("T20", "20 overs", MatchFormat.Cricket(20, BallType.TENNIS)),
+                FormatPreset("T10", "10 overs", MatchFormat.Cricket(10, BallType.TENNIS)),
+                FormatPreset("Gully", "6 overs", MatchFormat.Cricket(6, BallType.TENNIS)),
+            ),
+            defaultFormat = MatchFormat.Cricket(20, BallType.TENNIS),
+            defaultPlayersPerSide = 11,
+            playersRange = 2..15,
+        )
+
+        val Football = SportSpec(
+            key = "football",
+            displayName = "Football",
+            icon = Icons.Filled.SportsSoccer,
+            casualLabel = "Casual kickabout",
+            casualTagline = "Friendly, self-scored",
+            casualPlural = "kickabouts",
+            rulesSubtitle = "How long the halves run, and how many a side.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("5-a-side", "2 × 20 min", MatchFormat.Football(2, 20), playersPerSide = 5),
+                FormatPreset("7-a-side", "2 × 25 min", MatchFormat.Football(2, 25), playersPerSide = 7),
+                FormatPreset("11-a-side", "2 × 45 min", MatchFormat.Football(2, 45), playersPerSide = 11),
+            ),
+            defaultFormat = MatchFormat.Football(2, 25),
+            defaultPlayersPerSide = 7,
+            playersRange = 3..11,
+        )
+
+        val Badminton = SportSpec(
+            key = "badminton",
+            displayName = "Badminton",
+            icon = Icons.Filled.SportsTennis,
+            casualLabel = "Friendly / Club",
+            casualTagline = "Knock-about, self-scored",
+            casualPlural = "friendlies",
+            rulesSubtitle = "Singles or doubles, and how many games it takes.",
+            teamsTitle = "Players",
+            teamsSubtitle = "Who's playing? Search by @username or name.",
+            presets = listOf(
+                FormatPreset("Singles", "Best of 3 to 21", MatchFormat.Badminton(3, 21, doubles = false), playersPerSide = 1),
+                FormatPreset("Doubles", "Best of 3 to 21", MatchFormat.Badminton(3, 21, doubles = true), playersPerSide = 2),
+                FormatPreset("One game", "Single game to 21", MatchFormat.Badminton(1, 21, doubles = false), playersPerSide = 1),
+            ),
+            defaultFormat = MatchFormat.Badminton(3, 21, doubles = false),
+            defaultPlayersPerSide = 1,
+            // Singles is one a side. The old floor of 2 (stepper *and* server) meant a
+            // singles match simply could not be expressed.
+            playersRange = 1..2,
+            showPlayersStepper = false,
+        )
+
+        fun forKey(sport: String): SportSpec = when (sport.lowercase()) {
+            "football" -> Football
+            "badminton" -> Badminton
+            else -> Cricket
+        }
+    }
+}
+
 /**
  * Default team icons offered at create time. A creator can pick one of these bundled
  * action images or upload their own photo; [teamEmblems] indices are stored on the draft
@@ -154,18 +419,32 @@ val teamEmblems = listOf(
 fun emblemDrawableFor(key: String): Int? =
     teamEmblems.firstOrNull { it.key == key }?.resId
 
-class CreateMatchDraft {
-    // Which sport this match is. Cricket is the only sport with a full create/toss/scorer
-    // flow today; other sports are gated at the wizard entry (see [CreateMatchWizard]).
-    // Persisted so the feed/detail can branch and the match is never mislabelled as cricket.
-    var sport by mutableStateOf("cricket")
+class CreateMatchDraft(sport: String = "cricket") {
+    /** Everything that differs by sport — presets, ranges, copy, icon. */
+    val spec: SportSpec = SportSpec.forKey(sport)
+
+    // Which sport this match is. Persisted so the feed/detail can branch and the match
+    // is never mislabelled as cricket.
+    var sport by mutableStateOf(spec.key)
     // Public = ranked/feed-visible (earns XP after verification). Private = a closed
     // scoreboard reachable only by share code: no XP, never ranked, hidden from feeds.
     var isPrivate by mutableStateOf(false)
     var type by mutableStateOf(MatchType.CASUAL)
-    var overs by mutableStateOf(20)
-    var ball by mutableStateOf(BallType.TENNIS)
-    var playersPerSide by mutableStateOf(11)
+    // What ends the match, in that sport's own terms. Replaces the old always-cricket
+    // overs+ball pair, which football and badminton carried as meaningless data.
+    var format by mutableStateOf(spec.defaultFormat)
+    var playersPerSide by mutableStateOf(spec.defaultPlayersPerSide)
+
+    // Cricket's fields, read off [format]. The server still takes `overs` for cricket,
+    // and sends a harmless placeholder for the other sports (see the payload builder).
+    val overs: Int get() = (format as? MatchFormat.Cricket)?.overs ?: 0
+    val ball: BallType get() = (format as? MatchFormat.Cricket)?.ball ?: BallType.TENNIS
+    /** Football's half length — what the scorer clock actually runs on. */
+    val halfLengthMin: Int get() = (format as? MatchFormat.Football)?.halfLengthMin ?: 45
+    /** Badminton's games-to-win-the-match. */
+    val bestOf: Int get() = (format as? MatchFormat.Badminton)?.bestOf ?: 3
+    /** "Football · 2 × 25 min" — the header line every scorer shows. */
+    val formatLabel: String get() = "${spec.displayName} · ${format.summaryLine}"
     var venue by mutableStateOf("")
     // Village / town / area — finer than the profile district. Auto-filled from the
     // GPS fix below, then editable: the reverse geocoder often returns the nearest
@@ -199,6 +478,25 @@ class CreateMatchDraft {
 }
 
 /**
+ * What one side is called: "Team A"/"Team B" for cricket and football, "Player 1"/
+ * "Player 2" for badminton singles, "Pair 1"/"Pair 2" for doubles. Badminton is
+ * played by people, not clubs — calling a singles opponent "Team B" is the tell that
+ * a screen was built for one sport and handed to another.
+ */
+private fun CreateMatchDraft.sideLabel(index: Int): String {
+    val f = format
+    return when {
+        f is MatchFormat.Badminton && f.doubles -> "Pair ${index + 1}"
+        f is MatchFormat.Badminton -> "Player ${index + 1}"
+        else -> if (index == 0) "Team A" else "Team B"
+    }
+}
+
+/** The noun for that side's name field and icon: "Team" / "Player" / "Pair". */
+private val CreateMatchDraft.sideNoun: String
+    get() = sideLabel(0).substringBeforeLast(' ')
+
+/**
  * Sprint 1 — Create Match Wizard. Four steps: Type → Rules → Teams → Review.
  * Self-contained UI + local form state. [onCreate] hands the assembled draft to
  * the caller (backend persistence + XP ledger arrive in later sprints).
@@ -215,14 +513,16 @@ fun CreateMatchWizard(
     sport: String = "Cricket",
     modifier: Modifier = Modifier,
 ) {
-    // Cricket is the only sport wired end-to-end. For everything else, gate here rather
-    // than fall through the cricket wizard (which would persist a mislabelled match).
-    if (!sport.equals("Cricket", ignoreCase = true)) {
+    // Cricket, Football and Badminton are wired end-to-end (cricket → toss + keypad,
+    // football → clock + goal scorer, badminton → points/games scorer). Anything else
+    // still gates here rather than falling through and persisting a mislabelled match.
+    val key = sport.lowercase()
+    if (key != "cricket" && key != "football" && key != "badminton") {
         SportComingSoon(sport = sport, onDismiss = onDismiss, modifier = modifier)
         return
     }
 
-    val draft = remember { CreateMatchDraft().apply { this.sport = "cricket" } }
+    val draft = remember(key) { CreateMatchDraft(key) }
     var step by remember { mutableStateOf(0) }
     val lastStep = 3
 
@@ -241,6 +541,9 @@ fun CreateMatchWizard(
         WizardTopBar(
             step = step,
             total = lastStep + 1,
+            // Name the sport in the chrome — three sports share this wizard, and the
+            // steps alone no longer tell you which one you're creating.
+            sport = draft.spec.displayName,
             onBack = { if (step == 0) onDismiss() else step-- },
             onClose = onDismiss,
         )
@@ -359,7 +662,7 @@ private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
     // A public match needs BOTH a GPS fix (so it can be found by distance) and a
     // readable place name (so the card means something). Private matches never
     // reach a feed, so neither is required there.
-    1 -> d.overs > 0 && d.playersPerSide > 0 &&
+    1 -> formatComplete(d.format) && d.playersPerSide > 0 &&
         (d.isPrivate || (d.latitude != null && d.longitude != null && d.locality.trim().length >= 2))
     2 -> d.teamA.isNotBlank() && d.teamB.isNotBlank()
     else -> true
@@ -370,17 +673,31 @@ private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
  * [canAdvance] exactly — a greyed-out Continue with no explanation is the same
  * dead end the player-profile form had.
  */
+/** A format is only usable if every number in it is positive — the steppers clamp, so this is a floor, not a UI guard. */
+private fun formatComplete(f: MatchFormat): Boolean = when (f) {
+    is MatchFormat.Cricket -> f.overs > 0
+    is MatchFormat.Football -> f.halves > 0 && f.halfLengthMin > 0
+    is MatchFormat.Badminton -> f.bestOf > 0 && f.pointsTo > 0
+}
+
+/** What the footer names as missing when [formatComplete] fails, in that sport's words. */
+private fun formatMissingLabel(f: MatchFormat): String = when (f) {
+    is MatchFormat.Cricket -> "the number of overs"
+    is MatchFormat.Football -> "the half length"
+    is MatchFormat.Badminton -> "the number of games"
+}
+
 private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
     1 -> when {
-        d.overs <= 0 -> "the number of overs"
+        !formatComplete(d.format) -> formatMissingLabel(d.format)
         d.playersPerSide <= 0 -> "players per side"
         !d.isPrivate && (d.latitude == null || d.longitude == null) -> "your match location"
         !d.isPrivate && d.locality.trim().length < 2 -> "the area or village"
         else -> null
     }
     2 -> when {
-        d.teamA.isBlank() -> "a name for team A"
-        d.teamB.isBlank() -> "a name for team B"
+        d.teamA.isBlank() -> "a name for ${d.sideLabel(0)}"
+        d.teamB.isBlank() -> "a name for ${d.sideLabel(1)}"
         else -> null
     }
     else -> null
@@ -388,7 +705,13 @@ private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
 
 // ─────────────────────────────────────────────────────────────── Top bar ──────
 @Composable
-private fun WizardTopBar(step: Int, total: Int, onBack: () -> Unit, onClose: () -> Unit) {
+private fun WizardTopBar(
+    step: Int,
+    total: Int,
+    onBack: () -> Unit,
+    onClose: () -> Unit,
+    sport: String = "",
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -400,7 +723,11 @@ private fun WizardTopBar(step: Int, total: Int, onBack: () -> Unit, onClose: () 
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("Create Match", color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Text("Step ${step + 1} of $total", color = Text3, fontSize = 12.sp)
+                Text(
+                    if (sport.isBlank()) "Step ${step + 1} of $total" else "$sport · Step ${step + 1} of $total",
+                    color = Text3,
+                    fontSize = 12.sp,
+                )
             }
             IconCircle(Icons.Default.Close, "Close", onClose)
         }
@@ -423,9 +750,9 @@ private fun IconCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, cd
     Box(
         modifier = Modifier
             .size(36.dp)
+            .pressable(onClick = onClick)
             .clip(CircleShape)
-            .background(Color(0xFFF1F5F9))
-            .clickable(onClick = onClick),
+            .background(Color(0xFFF1F5F9)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, cd, tint = Text1, modifier = Modifier.size(18.dp))
@@ -451,10 +778,16 @@ private fun WizardFooter(
             .imePadding()
             .padding(16.dp)
     ) {
-        // Why the button is inert, named, before the user pokes at it.
-        if (missing != null) {
+        // Why the button is inert, named, before the user pokes at it. Slides away
+        // rather than vanishing — the line disappearing is how you notice the form
+        // just became valid.
+        AnimatedVisibility(
+            visible = missing != null,
+            enter = fadeIn(tween(180)) + expandVertically(tween(180)),
+            exit = fadeOut(tween(140)) + shrinkVertically(tween(140)),
+        ) {
             Text(
-                text = "Add $missing to continue",
+                text = "Add ${missing.orEmpty()} to continue",
                 color = Text2,
                 fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -465,17 +798,38 @@ private fun WizardFooter(
         // the end — a deliberate blue→green hand-off so the final action reads as "go".
         val isCommit = step == lastStep
         val accent = if (isCommit) Green else Blue
+
+        // The moment a step becomes completable is the most satisfying beat in a
+        // wizard, and it used to pass unmarked: the fill snapped from 35% to solid.
+        // Now it eases in, and the hand is told.
+        val view = LocalView.current
+        val container by animateColorAsState(
+            targetValue = if (canContinue) accent else accent.copy(alpha = 0.35f),
+            animationSpec = tween(220),
+            label = "footerFill",
+        )
+        var wasReady by remember(step) { mutableStateOf(canContinue) }
+        LaunchedEffect(canContinue) {
+            if (canContinue && !wasReady) view.performHapticFeedback(Feel.TICK)
+            wasReady = canContinue
+        }
+
         Button(
-            onClick = onContinue,
+            onClick = {
+                // Creating the match is the one irreversible action in the flow, so it
+                // gets its own weight — distinct from every Continue that preceded it.
+                view.performHapticFeedback(if (isCommit) Feel.COMMIT else Feel.SELECT)
+                onContinue()
+            },
             enabled = canContinue,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = accent,
+                containerColor = container,
                 contentColor = Color.White,
-                disabledContainerColor = accent.copy(alpha = 0.35f),
+                disabledContainerColor = container,
                 disabledContentColor = Color.White.copy(alpha = 0.7f),
             ),
         ) {
@@ -496,7 +850,8 @@ private fun StepType(draft: CreateMatchDraft) {
         subtitle = if (draft.isPrivate)
             "Private games are just a scoreboard for your group — no XP, no ranking."
         else
-            "This sets how much it's worth. Tournament games rank higher than gully games.",
+            // "gully" is cricket's word — a football screen shouldn't use it.
+            "This sets how much it's worth. Tournament games rank higher than ${draft.spec.casualPlural}.",
     ) {
         // Public vs Private — the top-level choice. It decides whether this match
         // participates in XP/ranking at all.
@@ -513,6 +868,7 @@ private fun StepType(draft: CreateMatchDraft) {
                 val locked = type != MatchType.CASUAL
                 MatchTypeCard(
                     type = type,
+                    spec = draft.spec,
                     selected = draft.type == type && !locked,
                     locked = locked,
                     onClick = {
@@ -582,9 +938,9 @@ private fun VisibilityTab(
 ) {
     Column(
         modifier
+            .pressable(onClick = onClick)
             .clip(RoundedCornerShape(11.dp))
             .background(if (selected) Blue else Color.Transparent)
-            .clickable(onClick = onClick)
             .padding(vertical = 12.dp, horizontal = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -595,17 +951,31 @@ private fun VisibilityTab(
 }
 
 @Composable
-private fun MatchTypeCard(type: MatchType, selected: Boolean, onClick: () -> Unit, locked: Boolean = false) {
+private fun MatchTypeCard(
+    type: MatchType,
+    spec: SportSpec,
+    selected: Boolean,
+    onClick: () -> Unit,
+    locked: Boolean = false,
+) {
+    // The casual tier is the one that speaks the sport's own language — "Gully" in
+    // cricket, "kickabout" in football. League and Tournament read the same everywhere.
+    val isCasual = type == MatchType.CASUAL
+    val label = if (isCasual) spec.casualLabel else type.label
+    val tagline = if (isCasual) spec.casualTagline else type.tagline
+    val icon = if (isCasual) spec.icon else type.icon
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // A locked tier still presses — the toast explaining why is the response,
+            // and a card that ignores the finger entirely reads as broken, not gated.
+            .pressable(onClick = onClick)
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) BlueTint else Surface)
             .border(
                 BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
                 RoundedCornerShape(16.dp),
             )
-            .clickable(onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -617,13 +987,13 @@ private fun MatchTypeCard(type: MatchType, selected: Boolean, onClick: () -> Uni
                 .alpha(if (locked) 0.55f else 1f),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(type.icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).alpha(if (locked) 0.55f else 1f)) {
-            Text(type.label, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(2.dp))
-            Text(type.tagline, color = Text2, fontSize = 13.sp, maxLines = 1)
+            Text(tagline, color = Text2, fontSize = 13.sp, maxLines = 1)
         }
         Spacer(Modifier.width(10.dp))
         if (locked) {
@@ -670,36 +1040,34 @@ private fun SelectDot(selected: Boolean) {
 
 // ─────────────────────────────────────────────────────── Step 2 · Rules ────────
 @Composable
-private fun StepRules(draft: CreateMatchDraft, loadBookings: suspend () -> List<com.haraan.app.data.BookingLite>) {
+private fun StepRules(
+    draft: CreateMatchDraft,
+    loadBookings: suspend () -> List<com.haraan.app.data.BookingLite>,
+) {
+    val spec = draft.spec
     StepScaffold(
         title = "Format & rules",
-        subtitle = "How long, what ball, how many a side.",
+        subtitle = spec.rulesSubtitle,
     ) {
-        FieldLabel("Overs per side")
-        Stepper(
-            value = draft.overs,
-            onChange = { draft.overs = it.coerceIn(1, 50) },
-            min = 1, max = 50,
-            suffix = "ov",
-        )
+        // The format block — the one question that defines the sport. Presets first:
+        // one tap gets a real match, and "Custom" opens the numbers for anyone whose
+        // game doesn't fit a preset.
+        FieldLabel("Match format")
+        FormatPicker(draft)
         Spacer(Modifier.height(20.dp))
 
-        FieldLabel("Ball type")
-        ChipRow(
-            options = BallType.entries.toList(),
-            selected = draft.ball,
-            label = { it.label },
-            onSelect = { draft.ball = it },
-        )
-        Spacer(Modifier.height(20.dp))
-
-        FieldLabel("Players per side")
-        Stepper(
-            value = draft.playersPerSide,
-            onChange = { draft.playersPerSide = it.coerceIn(2, 15) },
-            min = 2, max = 15,
-        )
-        Spacer(Modifier.height(20.dp))
+        // Badminton fixes this with singles/doubles, so the stepper would only be a
+        // way to create something the sport doesn't have.
+        if (spec.showPlayersStepper) {
+            FieldLabel("Players per side")
+            Stepper(
+                value = draft.playersPerSide,
+                onChange = { draft.playersPerSide = it.coerceIn(spec.playersRange) },
+                min = spec.playersRange.first,
+                max = spec.playersRange.last,
+            )
+            Spacer(Modifier.height(20.dp))
+        }
 
         // Location is captured from GPS, not typed. The fix is what makes this match
         // findable by distance; the name below is only how it reads on the card. A
@@ -767,6 +1135,180 @@ private fun StepRules(draft: CreateMatchDraft, loadBookings: suspend () -> List<
     }
 }
 
+/**
+ * The format block. Presets carry the common cases; "Custom" reveals that sport's own
+ * numbers. Ball type sits outside the preset set for cricket because it varies
+ * independently of length — a 20-over game is played on tennis, tape or leather.
+ */
+@Composable
+private fun FormatPicker(draft: CreateMatchDraft) {
+    val spec = draft.spec
+    val presets = spec.presets
+    // Custom opens on demand, and also whenever the current format doesn't correspond
+    // to any preset (e.g. re-entering after editing the numbers).
+    var custom by remember { mutableStateOf(presets.none { it.matches(draft) }) }
+
+    FormatPresetRow(
+        presets = presets,
+        customSelected = custom,
+        isSelected = { !custom && it.matches(draft) },
+        onSelect = { preset -> custom = false; preset.apply(draft) },
+        onCustom = { custom = true },
+    )
+
+    if (custom) {
+        // Only in Custom: a selected preset card already states its own format, so
+        // echoing it there would just repeat the line directly above it.
+        Spacer(Modifier.height(10.dp))
+        Text(draft.format.summaryLine, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(16.dp))
+        when (val f = draft.format) {
+            is MatchFormat.Cricket -> {
+                FieldLabel("Overs per side")
+                Stepper(
+                    value = f.overs,
+                    onChange = { draft.format = f.copy(overs = it.coerceIn(1, 50)) },
+                    min = 1, max = 50,
+                    suffix = "ov",
+                )
+            }
+            is MatchFormat.Football -> {
+                FieldLabel("Halves")
+                Stepper(
+                    value = f.halves,
+                    onChange = { draft.format = f.copy(halves = it.coerceIn(1, 2)) },
+                    min = 1, max = 2,
+                )
+                Spacer(Modifier.height(16.dp))
+                FieldLabel("Half length")
+                // Fives, because nobody plays a 23-minute half and the stepper
+                // shouldn't make you tap twenty times to reach one that's real.
+                Stepper(
+                    value = f.halfLengthMin,
+                    onChange = { draft.format = f.copy(halfLengthMin = it.coerceIn(5, 45)) },
+                    min = 5, max = 45, step = 5,
+                    suffix = "min",
+                )
+            }
+            is MatchFormat.Badminton -> {
+                FieldLabel("Singles or doubles")
+                ChipRow(
+                    options = listOf(false, true),
+                    selected = f.doubles,
+                    label = { if (it) "Doubles" else "Singles" },
+                    onSelect = { doubles ->
+                        draft.format = f.copy(doubles = doubles)
+                        draft.playersPerSide = if (doubles) 2 else 1
+                    },
+                )
+                Spacer(Modifier.height(16.dp))
+                FieldLabel("Games")
+                ChipRow(
+                    options = listOf(1, 3, 5),
+                    selected = f.bestOf,
+                    label = { if (it == 1) "One game" else "Best of $it" },
+                    onSelect = { draft.format = f.copy(bestOf = it) },
+                )
+                Spacer(Modifier.height(16.dp))
+                FieldLabel("Points per game")
+                ChipRow(
+                    options = listOf(11, 15, 21),
+                    selected = f.pointsTo,
+                    label = { "To $it" },
+                    onSelect = { draft.format = f.copy(pointsTo = it) },
+                )
+            }
+        }
+    }
+
+    // Ball type is cricket's alone, and independent of length — kept out of the
+    // presets so picking "T20" never silently changes the ball you're playing with.
+    if (draft.format is MatchFormat.Cricket) {
+        Spacer(Modifier.height(20.dp))
+        FieldLabel("Ball type")
+        ChipRow(
+            options = BallType.entries.toList(),
+            selected = draft.ball,
+            label = { it.label },
+            onSelect = { ball ->
+                (draft.format as? MatchFormat.Cricket)?.let { draft.format = it.copy(ball = ball) }
+            },
+        )
+    }
+}
+
+/** The preset cards, plus the Custom escape hatch, as one wrapping row. */
+@Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+private fun FormatPresetRow(
+    presets: List<FormatPreset>,
+    customSelected: Boolean,
+    isSelected: (FormatPreset) -> Boolean,
+    onSelect: (FormatPreset) -> Unit,
+    onCustom: () -> Unit,
+) {
+    // Two per row, equal width — three presets plus Custom make a clean 2×2 block.
+    // Left to wrap naturally, the fourth card stranded itself on its own line and
+    // read like a layout accident rather than a choice.
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        maxItemsInEachRow = 2,
+    ) {
+        presets.forEach { preset ->
+            FormatPresetCard(
+                label = preset.label,
+                sub = preset.sub,
+                selected = isSelected(preset),
+                onClick = { onSelect(preset) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        FormatPresetCard(
+            label = "Custom",
+            sub = "Set it yourself",
+            selected = customSelected,
+            onClick = onCustom,
+            modifier = Modifier.weight(1f),
+        )
+        // An odd preset count would leave the last card double-width; a spacer keeps
+        // every card on the same grid.
+        if (presets.size % 2 == 0) Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun FormatPresetCard(
+    label: String,
+    sub: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .pressable(onClick = onClick)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) BlueTint else Surface)
+            .border(
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
+                RoundedCornerShape(14.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) Blue else Text1,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(sub, color = if (selected) Blue.copy(alpha = 0.75f) else Text3, fontSize = 12.sp, maxLines = 1)
+    }
+}
+
 // Lists the creator's recent CONFIRMED turf bookings so they can attach the one this
 // match was played on. The chosen booking id rides along on create; the backend
 // validates it and auto-verifies the result against it.
@@ -804,10 +1346,10 @@ private fun TurfBookingPicker(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .pressable { onSelect(if (sel) null else b.id) }
                         .clip(RoundedCornerShape(12.dp))
                         .background(Surface)
                         .border(1.5.dp, if (sel) Green else Stroke, RoundedCornerShape(12.dp))
-                        .clickable { onSelect(if (sel) null else b.id) }
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1105,11 +1647,12 @@ private fun resolveCurrentLocality(context: Context): String? = try {
 @Composable
 private fun StepTeams(draft: CreateMatchDraft, searchPlayers: suspend (String) -> List<PlayerLite>) {
     StepScaffold(
-        title = "Teams & squads",
-        subtitle = "Name both sides. Search players by @username or name.",
+        title = draft.spec.teamsTitle,
+        subtitle = draft.spec.teamsSubtitle,
     ) {
         TeamBlock(
-            heading = "Team A",
+            heading = draft.sideLabel(0),
+            noun = draft.sideNoun,
             name = draft.teamA,
             onName = { draft.teamA = it },
             emblemIndex = draft.teamAEmblem,
@@ -1122,7 +1665,8 @@ private fun StepTeams(draft: CreateMatchDraft, searchPlayers: suspend (String) -
         )
         Spacer(Modifier.height(20.dp))
         TeamBlock(
-            heading = "Team B",
+            heading = draft.sideLabel(1),
+            noun = draft.sideNoun,
             name = draft.teamB,
             onName = { draft.teamB = it },
             emblemIndex = draft.teamBEmblem,
@@ -1160,9 +1704,9 @@ private fun PlayerResultRow(
     Row(
         Modifier
             .fillMaxWidth()
+            .pressable(enabled = !alreadyAdded, onClick = onAdd)
             .clip(RoundedCornerShape(12.dp))
             .background(if (alreadyAdded) Color(0xFFF3F5F8) else Color(0xFFF7F9FC))
-            .clickable(enabled = !alreadyAdded, onClick = onAdd)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1199,6 +1743,8 @@ private fun PlayerResultRow(
 @Composable
 private fun TeamBlock(
     heading: String,
+    /** "Team" / "Player" / "Pair" — labels the name field and the icon picker. */
+    noun: String,
     name: String,
     onName: (String) -> Unit,
     emblemIndex: Int,
@@ -1245,10 +1791,11 @@ private fun TeamBlock(
     ) {
         Text(heading, color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        WizardTextField(value = name, onChange = onName, placeholder = "Team name")
+        WizardTextField(value = name, onChange = onName, placeholder = "$noun name")
         Spacer(Modifier.height(12.dp))
 
         TeamIconPicker(
+            noun = noun,
             emblemIndex = emblemIndex,
             photoUri = photoUri,
             onEmblem = onEmblem,
@@ -1310,7 +1857,7 @@ private fun TeamBlock(
                 color = Blue,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { showGuest = true },
+                modifier = Modifier.pressable { showGuest = true },
             )
         } else {
             Spacer(Modifier.height(10.dp))
@@ -1326,13 +1873,13 @@ private fun TeamBlock(
                 Box(
                     Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (canAddGuest) Green else Stroke)
-                        .clickable(enabled = canAddGuest) {
+                        .pressable(enabled = canAddGuest) {
                             squad.add(SquadMember(id = "", name = guestName.trim(), isGuest = true))
                             guestName = ""
                             showGuest = false
-                        },
+                        }
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (canAddGuest) Green else Stroke),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Add, "Add guest", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -1424,8 +1971,10 @@ private fun TeamBlock(
                     Icons.Default.Close, "Remove",
                     tint = Text3,
                     modifier = Modifier
-                        .size(18.dp)
-                        .clickable { squad.removeAt(i) },
+                        // Removing someone is destructive — a firmer, distinctly
+                        // different response from the tick that added them.
+                        .pressable(haptic = Feel.REMOVE) { squad.removeAt(i) }
+                        .size(18.dp),
                 )
             }
         }
@@ -1438,10 +1987,10 @@ private fun TeamBlock(
 private fun LeaderBadge(label: String, active: Boolean, activeColor: Color, onClick: () -> Unit) {
     Box(
         Modifier
+            .pressable { onClick() }
             .clip(RoundedCornerShape(6.dp))
             .background(if (active) activeColor else Color.Transparent)
             .then(if (active) Modifier else Modifier.border(1.dp, Stroke, RoundedCornerShape(6.dp)))
-            .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1461,6 +2010,7 @@ private fun LeaderBadge(label: String, active: Boolean, activeColor: Color, onCl
 // wins over the emblem; tapping an emblem clears the photo.
 @Composable
 private fun TeamIconPicker(
+    noun: String,
     emblemIndex: Int,
     photoUri: android.net.Uri?,
     onEmblem: (Int) -> Unit,
@@ -1474,7 +2024,7 @@ private fun TeamIconPicker(
         TeamIconPreview(emblemIndex, photoUri, size = 52.dp)
         Spacer(Modifier.width(12.dp))
         Column {
-            Text("Team icon", color = Text1, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("$noun icon", color = Text1, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 if (photoUri != null) "Custom image" else "Pick a default or upload your own",
                 color = Text3, fontSize = 12.sp,
@@ -1491,9 +2041,9 @@ private fun TeamIconPicker(
             Box(
                 Modifier
                     .size(44.dp)
+                    .pressable { onPhoto(null); onEmblem(i) }
                     .clip(CircleShape)
-                    .border(BorderStroke(if (selected) 2.5.dp else 0.dp, Blue), CircleShape)
-                    .clickable { onPhoto(null); onEmblem(i) },
+                    .border(BorderStroke(if (selected) 2.5.dp else 0.dp, Blue), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 androidx.compose.foundation.Image(
@@ -1594,7 +2144,7 @@ private fun SummaryCard(draft: CreateMatchDraft) {
             TeamIconPreview(draft.teamAEmblem, draft.teamAPhoto, size = 28.dp)
             Spacer(Modifier.width(6.dp))
             Text(
-                "${draft.teamA.ifBlank { "Team A" }}  vs  ${draft.teamB.ifBlank { "Team B" }}",
+                "${draft.teamA.ifBlank { draft.sideLabel(0) }}  vs  ${draft.teamB.ifBlank { draft.sideLabel(1) }}",
                 color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
@@ -1604,11 +2154,19 @@ private fun SummaryCard(draft: CreateMatchDraft) {
         }
         Spacer(Modifier.height(14.dp))
         SummaryRow("Mode", if (draft.isPrivate) "Private" else "Public")
-        SummaryRow("Type", draft.type.label)
-        SummaryRow("Format", "${draft.overs} overs · ${draft.ball.label} ball")
-        SummaryRow("Per side", "${draft.playersPerSide} players")
+        SummaryRow("Sport", draft.spec.displayName)
+        SummaryRow("Type", if (draft.type == MatchType.CASUAL) draft.spec.casualLabel else draft.type.label)
+        // Reads in the sport's own terms — "2 × 25 min", "Doubles · best of 3 to 21" —
+        // instead of the old bare "Sport: Football", which confirmed nothing.
+        SummaryRow("Format", draft.format.summaryLine)
+        if (draft.spec.showPlayersStepper) {
+            SummaryRow("Per side", "${draft.playersPerSide} players")
+        }
         SummaryRow("Venue", draft.venue.ifBlank { "—" } + if (draft.onHaraanTurf) "  · Haraan turf" else "")
-        SummaryRow("Squads", "${draft.squadA.size} + ${draft.squadB.size} added")
+        SummaryRow(
+            if (draft.format is MatchFormat.Badminton) "Players" else "Squads",
+            "${draft.squadA.size} + ${draft.squadB.size} added",
+        )
     }
 }
 
@@ -1659,10 +2217,10 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onS
             val isSel = opt == selected
             Box(
                 Modifier
+                    .pressable { onSelect(opt) }
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (isSel) Blue else Surface)
                     .border(1.dp, if (isSel) Blue else Stroke, RoundedCornerShape(12.dp))
-                    .clickable { onSelect(opt) }
                     .padding(horizontal = 18.dp, vertical = 12.dp),
             ) {
                 Text(
@@ -1679,7 +2237,16 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onS
 // One cohesive pill — [ − | value | + ] — rather than three floating tiles. The ∓ zones
 // dim and stop responding at the bounds so the limits read visually, not just by clamping.
 @Composable
-private fun Stepper(value: Int, onChange: (Int) -> Unit, min: Int, max: Int, suffix: String = "") {
+private fun Stepper(
+    value: Int,
+    onChange: (Int) -> Unit,
+    min: Int,
+    max: Int,
+    suffix: String = "",
+    // Football's half length moves in fives — a 23-minute half isn't a thing, and a
+    // step of 1 would mean twenty taps to get from 25 to 45.
+    step: Int = 1,
+) {
     Row(
         Modifier
             .clip(RoundedCornerShape(12.dp))
@@ -1687,8 +2254,9 @@ private fun Stepper(value: Int, onChange: (Int) -> Unit, min: Int, max: Int, suf
             .border(1.dp, Stroke, RoundedCornerShape(12.dp)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StepperZone("−", enabled = value > min) { onChange(value - 1) }
+        StepperZone("−", enabled = value > min) { onChange((value - step).coerceAtLeast(min)) }
         StepperDivider()
+
         Box(
             Modifier
                 .widthIn(min = if (suffix.isBlank()) 56.dp else 76.dp)
@@ -1701,21 +2269,55 @@ private fun Stepper(value: Int, onChange: (Int) -> Unit, min: Int, max: Int, suf
             )
         }
         StepperDivider()
-        StepperZone("+", enabled = value < max) { onChange(value + 1) }
+        StepperZone("+", enabled = value < max) { onChange((value + step).coerceAtMost(max)) }
     }
 }
 
+/**
+ * One −/+ zone. Fires once on tap, then **repeats while held**, accelerating — going
+ * from 11 a side down to 5 was six separate taps with nothing under the finger.
+ * Each increment ticks, so the count can be felt without watching the number.
+ */
 @Composable
 private fun StepperZone(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val view = LocalView.current
+
+    // Held past the threshold, repeat and speed up. `enabled` is a key, so reaching a
+    // bound cancels the loop rather than spinning against a clamped value.
+    LaunchedEffect(pressed, enabled) {
+        if (!pressed || !enabled) return@LaunchedEffect
+        delay(450)
+        var gap = 130L
+        while (true) {
+            view.performHapticFeedback(Feel.TICK)
+            onClick()
+            delay(gap)
+            gap = (gap * 82 / 100).coerceAtLeast(45L)
+        }
+    }
+
     Box(
         Modifier
             .size(46.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+            ) {
+                view.performHapticFeedback(Feel.TICK)
+                onClick()
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(
             symbol,
-            color = if (enabled) Text1 else Text3.copy(alpha = 0.4f),
+            color = when {
+                !enabled -> Text3.copy(alpha = 0.4f)
+                pressed -> Blue
+                else -> Text1
+            },
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
         )
@@ -1732,10 +2334,10 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (B
     Row(
         Modifier
             .fillMaxWidth()
+            .pressable { onToggle(!checked) }
             .clip(RoundedCornerShape(14.dp))
             .background(Surface)
             .border(1.dp, if (checked) Green else Stroke, RoundedCornerShape(14.dp))
-            .clickable { onToggle(!checked) }
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

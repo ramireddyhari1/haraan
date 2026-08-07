@@ -90,6 +90,10 @@ class MatchDetailsViewModel : ViewModel() {
             rrr = "",
             status = o.optString("status"),
             isLive = o.optBoolean("isLive", false),
+            // Was never parsed, so MatchUiState.sport always fell back to "cricket" and
+            // every match — football included — opened the cricket scorecard.
+            sport = o.optString("sport", "cricket").ifBlank { "cricket" },
+            football = parseFootball(o.optJSONObject("football")),
 
             // ── Rich live fields the backend already sends in the flat payload. ──
             // Stats arrive as strings ("34 (19)", "1-41 (3.5)"); MatchStatsMapper

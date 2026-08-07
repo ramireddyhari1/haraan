@@ -434,12 +434,146 @@ final class PlayersController extends Controller
             ->get();
 
         return response()->json([
-            'results' => $rows->map(fn (User $u) => $this->playerCard($u))->all(),
+            'results' => $this->playerCards($rows, $me instanceof User ? $me : null),
         ]);
     }
 
+    /**
+     * Follow a player.
+     *
+     * Idempotent and self-reporting: the response always carries the resulting
+     * state and follower count, so the client can settle the button from the
+     * server's answer instead of guessing — which is what stops a double-tap on a
+     * slow connection leaving the UI out of sync with the database.
+     */
+    public function follow(Request $request, string $playerId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $target = $this->resolvePlayer($playerId);
+
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        if (! $me->follow($target)) {
+            return response()->json([
+                'error' => $target->id === $me->id
+                    ? 'You cannot follow yourself'
+                    : 'That account cannot be followed',
+            ], 422);
+        }
+
+        return response()->json($this->followState($target, $me));
+    }
+
+    public function unfollow(Request $request, string $playerId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $target = $this->resolvePlayer($playerId);
+
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        $me->unfollow($target);
+
+        return response()->json($this->followState($target, $me));
+    }
+
+    /** Who follows this player. */
+    public function followers(Request $request, string $playerId): JsonResponse
+    {
+        return $this->followList($request, $playerId, 'followers');
+    }
+
+    /** Who this player follows. */
+    public function following(Request $request, string $playerId): JsonResponse
+    {
+        return $this->followList($request, $playerId, 'following');
+    }
+
+    /** Shared body of followers()/following(). */
+    private function followList(Request $request, string $playerId, string $relation): JsonResponse
+    {
+        $target = $this->resolvePlayer($playerId);
+
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        $me = $request->attributes->get('auth_user');
+
+        $rows = $target->{$relation}()
+            ->where('is_guest', false)
+            ->orderByDesc('player_follows.created_at')
+            ->limit(100)
+            ->get();
+
+        return response()->json([
+            'results' => $this->playerCards($rows, $me instanceof User ? $me : null),
+        ]);
+    }
+
+    /** Accepts an HRN player id or an @handle, so deep links work either way. */
+    private function resolvePlayer(string $playerId): ?User
+    {
+        $playerId = trim($playerId);
+
+        if (str_starts_with($playerId, '@')) {
+            return User::query()
+                ->where('username', User::normalizeUsername(ltrim($playerId, '@')))
+                ->first();
+        }
+
+        return User::query()->where('player_id', $playerId)->first();
+    }
+
+    /** @return array{is_following: bool, followers_count: int, player_id: string|null} */
+    private function followState(User $target, User $viewer): array
+    {
+        return [
+            'player_id' => $target->player_id,
+            'is_following' => $viewer->isFollowing($target),
+            'followers_count' => $target->followers()->count(),
+        ];
+    }
+
+    /**
+     * Map a set of players to cards, resolving the viewer's follow state for all of
+     * them in ONE query rather than per row — a 20-result search that asks
+     * "am I following this one?" twenty times is the classic N+1 that makes a
+     * search feel sluggish on a phone.
+     *
+     * @param  \Illuminate\Support\Collection<int, User>  $players
+     * @return array<int, array<string, mixed>>
+     */
+    private function playerCards($players, ?User $viewer): array
+    {
+        $followedIds = [];
+
+        if ($viewer !== null && $players->isNotEmpty()) {
+            $followedIds = $viewer->following()
+                ->whereIn('users.id', $players->pluck('id'))
+                ->pluck('users.id')
+                ->flip()
+                ->all();
+        }
+
+        return $players->map(fn (User $u) => $this->playerCard($u, isset($followedIds[$u->id])))->all();
+    }
+
     /** The one shape every player-picker in the app reads. */
-    private function playerCard(User $user): array
+    private function playerCard(User $user, ?bool $isFollowing = null): array
     {
         return [
             'player_id' => $user->player_id,
@@ -448,6 +582,12 @@ final class PlayersController extends Controller
             'district'  => $user->district,
             'state'     => $user->state,
             'avatar'    => $user->avatar,
+            // Social signal — a search result with nothing but a name reads dead.
+            // These are already on the row, so they cost nothing to include.
+            'primary_sport' => $user->primary_sport,
+            'matches'       => (int) ($user->career_matches ?? 0),
+            'xp'            => (int) ($user->ranked_xp ?? 0),
+            'is_following'  => $isFollowing,
         ];
     }
 }

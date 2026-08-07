@@ -126,6 +126,13 @@ data class MatchUiState(
     val isLive: Boolean = true,
     /** Sport code, e.g. "cricket", "football", "badminton". Drives which scorer/view opens. */
     val sport: String = "cricket",
+    /**
+     * Football's own state — scoreline, clock and timeline. Null for every other
+     * sport. Held here rather than folded into the cricket fields above, because a
+     * football match has no runs, overs or economy and blanking those out is how a
+     * screen ends up showing cricket furniture with the numbers removed.
+     */
+    val football: FootballState? = null,
 
     // ── Result verification (create → verify → XP) ──
     /** Backend verification state: "" (n/a), "pending", "settled", or "expired". */

@@ -228,6 +228,19 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     // silently loses: Laravel matches the first route, so this controller never ran.
     Route::get('/find', [PlayersController::class, 'search']);
     Route::get('/username-available', [PlayersController::class, 'usernameAvailable']);
+
+    // Social graph. {player} accepts an HRN id or an @handle (see resolvePlayer),
+    // so a deep link from a shared profile works without the client translating.
+    // Registered inside this literal-prefixed group so they never collide with the
+    // catch-all `players/{playerId}` below — the same trap that made
+    // `api/players/search` unreachable.
+    Route::post('/{player}/follow', [PlayersController::class, 'follow']);
+    Route::delete('/{player}/follow', [PlayersController::class, 'unfollow']);
+    // POST twin: Android's HttpURLConnection has no usable DELETE-with-body path,
+    // and the consumer app speaks the same dialect as the partner check-in route.
+    Route::post('/{player}/unfollow', [PlayersController::class, 'unfollow']);
+    Route::get('/{player}/followers', [PlayersController::class, 'followers']);
+    Route::get('/{player}/following', [PlayersController::class, 'following']);
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
@@ -243,7 +256,19 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     Route::post('/{id}/verify', [MatchesController::class, 'verify']);     // organizer/venue → High/Verified
     Route::post('/{id}/dispute', [MatchesController::class, 'dispute']);   // reputation penalty
     Route::post('/{id}/score-action', [MatchesController::class, 'scoreAction']);
+
+    // Football / badminton scoring. Deliberately separate from /score-action:
+    // cricket keeps its per-ball pipeline, and recordEvent refuses cricket, so a
+    // cricket score can never be moved by two competing mechanisms.
+    // The client posts WHAT HAPPENED; the server derives the scoreline.
+    Route::post('/{id}/events', [MatchesController::class, 'recordEvent']);
+    Route::post('/{id}/events/undo', [MatchesController::class, 'undoEvent']);
+    Route::post('/{id}/sport-state', [MatchesController::class, 'updateSportState']);
 });
+
+// Timeline read — signed in, but not creator-gated: anyone who can see the match
+// can see how it unfolded.
+Route::middleware('auth.jwt')->get('/matches/{id}/events', [MatchesController::class, 'events']);
 
 // -------------------------------------------------------------------------
 //  Leaderboards (public, read-only)

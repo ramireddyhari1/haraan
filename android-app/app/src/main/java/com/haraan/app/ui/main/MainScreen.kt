@@ -1899,10 +1899,12 @@ private fun GameHubTabScreen(
           if (blocks.any { it.type == "top_players" }) blocks
           else blocks + com.haraan.app.data.HomeBlock(id = "top_players", type = "top_players", title = null)
         }
-    // ActionBoard matches are cricket today (LiveMatchRow has no sport field yet), so the sport
-    // filter treats them as Cricket: a non-cricket selection shows the honest empty state. Swap
-    // for a real per-match sport filter once the backend tags matches with a sport.
-    val actionBoardMatches = if (selectedSport == "All" || selectedSport == "Cricket") liveMatches else emptyList()
+    // Real per-sport filter now that /api/live-matches tags each row (it defaults to
+    // cricket, so matches created before the column existed still show). This used to
+    // be hard-coded to hand back an empty list for anything but cricket, which made
+    // the Badminton and Football boards permanently empty by construction.
+    val actionBoardMatches = if (selectedSport == "All") liveMatches
+      else liveMatches.filter { it.sport.equals(selectedSport, ignoreCase = true) }
 
     val homeBlocks: Map<String, androidx.compose.foundation.lazy.LazyListScope.() -> Unit> = mapOf(
     "actionboard" to {
@@ -3462,8 +3464,17 @@ private fun CrexMatchesScreen(
   var createdJoinCode by remember { mutableStateOf<String?>(null) }
   // After a match is created, drive the toss flow (coin flip → bat/bowl → opening lineup → start).
   var tossSetup by remember { mutableStateOf<com.haraan.app.ui.matches.TossSetup?>(null) }
+  // Football's counterpart to tossSetup — set after creating a football match, which
+  // has no toss to run.
+  var footballSetup by remember { mutableStateOf<com.haraan.app.ui.matches.FootballScorerSetup?>(null) }
+  var badmintonSetup by remember { mutableStateOf<com.haraan.app.ui.matches.BadmintonScorerSetup?>(null) }
   // Drives the "Join private match by code" dialog.
   var showJoinDialog by remember { mutableStateOf(false) }
+  // Player directory search — opened from the header's search field.
+  var showPlayerSearch by remember { mutableStateOf(false) }
+  // A player opened FROM search. Layered over it, so backing out returns to the
+  // results rather than dumping the user on the board.
+  var searchedPlayerId by remember { mutableStateOf<String?>(null) }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val matchRepository = remember { com.haraan.app.data.MatchRepository() }
@@ -3618,7 +3629,12 @@ private fun CrexMatchesScreen(
             .padding(horizontal = 16.dp)
             .padding(top = 12.dp, bottom = 2.dp)
         ) {
-          CrexHeaderSection(onBack, onCreateMatch = { requireRankedAccess { showCreateWizard = true } }, onJoinByCode = { showJoinDialog = true })
+          CrexHeaderSection(
+            onBack,
+            onCreateMatch = { requireRankedAccess { showCreateWizard = true } },
+            onJoinByCode = { showJoinDialog = true },
+            onSearch = { showPlayerSearch = true },
+          )
           // Live/Finished/District/State board strip — back up top, directly under the header.
           CrexTabsSection(
             selectedTab = selectedTab,
@@ -3717,6 +3733,10 @@ private fun CrexMatchesScreen(
                     matchType = draft.type.serverValue,
                     overs = draft.overs,
                     ball = draft.ball.serverValue,
+                    // The sport's own format, as chosen on the Rules step. Lands in
+                    // `sport_state.format` so the scorer reopens on the real numbers
+                    // instead of the 45-minute / best-of-3 defaults it used to assume.
+                    format = draft.format.toServerMap(),
                     playersPerSide = draft.playersPerSide,
                     venue = draft.venue,
                     locality = draft.locality,
@@ -3738,7 +3758,43 @@ private fun CrexMatchesScreen(
                   uploadTeamLogoIfPresent(context, matchRepository, token, result.matchId, "home", draft.teamAPhoto)
                   uploadTeamLogoIfPresent(context, matchRepository, token, result.matchId, "away", draft.teamBPhoto)
                   showCreateWizard = false
-                  // Straight into the toss: coin flip → bat/bowl → opening lineup → start.
+
+                  // Football has no toss and no innings — it goes straight to the goal
+                  // scorer. Cricket keeps coin flip → bat/bowl → opening lineup → start.
+                  if (draft.sport.equals("badminton", ignoreCase = true)) {
+                    badmintonSetup = com.haraan.app.ui.matches.BadmintonScorerSetup(
+                      matchId = result.matchId.toString(),
+                      teamA = draft.teamA,
+                      teamB = draft.teamB,
+                      bestOf = draft.bestOf,
+                      formatLabel = draft.formatLabel,
+                      isPrivate = result.isPrivate,
+                      joinCode = result.joinCode,
+                    )
+                    return@launch
+                  }
+
+                  if (draft.sport.equals("football", ignoreCase = true)) {
+                    footballSetup = com.haraan.app.ui.matches.FootballScorerSetup(
+                      matchId = result.matchId.toString(),
+                      teamA = draft.teamA,
+                      teamB = draft.teamB,
+                      teamAEmblem = emblems.getOrNull(draft.teamAEmblem)?.key ?: "",
+                      teamBEmblem = emblems.getOrNull(draft.teamBEmblem)?.key ?: "",
+                      formatLabel = "${draft.formatLabel} · ${draft.playersPerSide}-a-side",
+                      // The clock runs on the half length the creator actually chose,
+                      // not the 45-minute default no gully match plays.
+                      halfLengthMin = draft.halfLengthMin,
+                      isPrivate = result.isPrivate,
+                      joinCode = result.joinCode,
+                      // Squads travel with the setup so a goal can be attributed to a
+                      // player instead of going down as an anonymous tally.
+                      squadA = draft.squadA.toList(),
+                      squadB = draft.squadB.toList(),
+                    )
+                    return@launch
+                  }
+
                   // The share code (private) is surfaced after the toss, not before.
                   tossSetup = com.haraan.app.ui.matches.TossSetup(
                     matchId = result.matchId.toString(),
@@ -3773,6 +3829,77 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) emptyList() else accountRepository.fetchBookings(token)
         },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Football scorer. Every tap records an EVENT — the server counts the goals and
+    // hands back the scoreline, so the tally on screen can't drift from the match's
+    // own timeline. `null` back means the call failed; the screen keeps its
+    // optimistic value rather than snapping backwards mid-match.
+    footballSetup?.let { setup ->
+      com.haraan.app.ui.matches.FootballScorerScreen(
+        setup = setup,
+        onGoal = { side, player, _, minute ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else matchRepository.recordMatchEvent(
+            token = token,
+            matchId = setup.matchId,
+            kind = "goal",
+            side = side,
+            minute = minute,
+            playerName = player,
+          )
+        },
+        onCard = { side, player, kind, minute ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else matchRepository.recordMatchEvent(
+            token = token,
+            matchId = setup.matchId,
+            kind = kind,
+            side = side,
+            minute = minute,
+            playerName = player,
+          )
+        },
+        onUndoGoal = { side ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else matchRepository.undoMatchEvent(token, setup.matchId, side)
+        },
+        finishMatch = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.completeMatch(token, setup.matchId)
+        },
+        onDone = { footballSetup = null },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Badminton: games won are the durable result, so each completed game is pushed
+    // as a `point` event for that side and the server counts the games.
+    badmintonSetup?.let { setup ->
+      com.haraan.app.ui.matches.BadmintonScorerScreen(
+        setup = setup,
+        pushGames = { side, _ ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) {
+            matchRepository.recordMatchEvent(
+              token = token,
+              matchId = setup.matchId,
+              kind = "point",
+              side = side,
+              detail = "game",
+            )
+          }
+        },
+        finishMatch = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.completeMatch(token, setup.matchId)
+        },
+        onDone = { badmintonSetup = null },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -3815,6 +3942,28 @@ private fun CrexMatchesScreen(
           showJoinDialog = false
           onJoinByCode(code)
         },
+      )
+    }
+
+    // Full-screen so the keyboard and a long result list get the whole viewport,
+    // rather than fighting the board behind a half-height sheet.
+    if (showPlayerSearch) {
+      com.haraan.app.ui.social.PlayerSearchScreen(
+        onClose = { showPlayerSearch = false },
+        // Opens the same real profile the leaderboard uses — no second, lesser
+        // profile card for people who arrived via search.
+        onOpenPlayer = { playerId -> searchedPlayerId = playerId },
+      )
+    }
+
+    searchedPlayerId?.let { playerId ->
+      com.haraan.app.ui.profile.PlayerProfileScreen(
+        onBack = { searchedPlayerId = null },
+        fetchProfile = {
+          val token = com.haraan.app.data.TokenStore.getToken(context)
+          profileRepository.fetchPlayer(token, playerId)
+        },
+        modifier = Modifier.statusBarsPadding(),
       )
     }
 
@@ -4081,7 +4230,12 @@ private fun JoinByCodeDialog(onDismiss: () -> Unit, onJoin: (String) -> Unit) {
 }
 
 @Composable
-private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onJoinByCode: () -> Unit = {}) {
+private fun CrexHeaderSection(
+  onBack: () -> Unit,
+  onCreateMatch: () -> Unit,
+  onJoinByCode: () -> Unit = {},
+  onSearch: () -> Unit = {},
+) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
@@ -4105,33 +4259,38 @@ private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onJ
       )
     }
 
-    // Wordmark — gives the bar a branded identity instead of a lone icon button.
-    Text(
-      text = "Haraan",
-      fontSize = 18.sp,
-      fontWeight = FontWeight.ExtraBold,
-      color = LightPrimaryText,
-      letterSpacing = (-0.5).sp,
-    )
-
-    Spacer(modifier = Modifier.weight(1f))
-
-    // Search demoted to an icon — on a leaderboard it's secondary, so this declutters the
-    // header (brand left, actions right) and lets the board breathe.
-    Box(
+    // The wordmark used to sit here, repeating a brand the user already knows they
+    // are inside, next to a search icon that did nothing. The space now carries the
+    // one thing this screen was missing: finding people. Tapping opens the full
+    // search screen — an inline field here would fight the keyboard with the board
+    // behind it.
+    Row(
       modifier = Modifier
-        .size(38.dp)
+        .weight(1f)
+        .height(38.dp)
         .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9)),
-      contentAlignment = Alignment.Center
+        .background(Color(0xFFF1F5F9))
+        .clickable(onClick = onSearch)
+        .padding(horizontal = 12.dp),
+      verticalAlignment = Alignment.CenterVertically
     ) {
       Icon(
         imageVector = Icons.Default.Search,
-        contentDescription = "Search",
-        tint = LightSecondaryText,
-        modifier = Modifier.size(18.dp)
+        contentDescription = null,
+        tint = Color(0xFF94A3B8),
+        modifier = Modifier.size(17.dp)
+      )
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = "Search players",
+        fontSize = 13.5.sp,
+        color = Color(0xFF94A3B8),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
+
+    Spacer(modifier = Modifier.width(2.dp))
 
     // Join a private match by its share code.
     Box(

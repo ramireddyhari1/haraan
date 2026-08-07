@@ -86,6 +86,13 @@ fun MatchDetailsScreen(
                 Text("No match data available", color = Color.Gray, fontSize = 16.sp)
             }
         }
+        is MatchScreenState.Success if state.data.sport.equals("football", ignoreCase = true) -> {
+            // Football gets its own screen. The five tabs below are cricket's — Info,
+            // Commentary, Live, Scorecard, MVP only mean anything for a ball-by-ball
+            // sport, and a football match rendered through them showed a scorecard
+            // with every number blank.
+            FootballMatchScreen(state = state.data, onBack = onBack, modifier = modifier)
+        }
         is MatchScreenState.Success -> {
             // Open on Commentary by default (index 1 in tabsList).
             val pagerState = rememberPagerState(initialPage = 1, pageCount = { tabsList.size })

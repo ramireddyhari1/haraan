@@ -219,6 +219,50 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasOne(HostProfile::class);
     }
 
+    // -------------------------------------------------------------------------
+    //  Player follows — the ActionBoard social graph
+    // -------------------------------------------------------------------------
+
+    /** Players this user follows. */
+    public function following(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'player_follows', 'follower_id', 'followee_id')
+            ->withTimestamps();
+    }
+
+    /** Players who follow this user. */
+    public function followers(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'player_follows', 'followee_id', 'follower_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Follow another player. Idempotent — following twice is a no-op rather than a
+     * duplicate row, so a double-tap on a slow connection can't break the button.
+     * Returns false when the follow was refused (yourself, or a guest account).
+     */
+    public function follow(self $player): bool
+    {
+        if ($player->id === $this->id || $player->is_guest) {
+            return false;
+        }
+
+        $this->following()->syncWithoutDetaching([$player->id]);
+
+        return true;
+    }
+
+    public function unfollow(self $player): void
+    {
+        $this->following()->detach($player->id);
+    }
+
+    public function isFollowing(self $player): bool
+    {
+        return $this->following()->whereKey($player->id)->exists();
+    }
+
     /** Venues this desk person is explicitly limited to (Phase 3 scoping). */
     public function assignedVenues(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {

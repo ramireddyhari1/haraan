@@ -1,13 +1,12 @@
 package com.haraan.app.ui.matches
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,19 +15,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,366 +39,486 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.haraan.app.ui.matches.create.emblemDrawableFor
+import com.haraan.app.data.MatchScoreState
+import com.haraan.app.data.SquadMember
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// Palette mirrors the CREX light theme used across the create wizard / match screens.
-private val Bg = Color(0xFFEBEBF0)
+private val Bg = Color(0xFFF1F3F7)
 private val Surface = Color(0xFFFFFFFF)
+private val Ink = Color(0xFF111827)
+private val Muted = Color(0xFF6B7280)
+private val Faint = Color(0xFF9AA0AC)
 private val Blue = Color(0xFF2563EB)
-private val Green = Color(0xFF16A34A)
-private val Text1 = Color(0xFF111827)
-private val Text2 = Color(0xFF5A5A6A)
-private val Text3 = Color(0xFF9A9AA8)
-private val Stroke = Color(0xFFE2E8F0)
-
-/** Everything the football scorer needs to open, bundled at create time (mirrors [TossSetup]). */
-data class FootballScorerSetup(
-    val matchId: String,
-    val teamA: String,
-    val teamB: String,
-    val teamAEmblem: String = "",
-    val teamBEmblem: String = "",
-    val formatLabel: String = "",
-    val isPrivate: Boolean = false,
-    val joinCode: String = "",
-    // Seed the tallies — 0/0 for a fresh match, or the current score when resuming.
-    val initialHome: Int = 0,
-    val initialAway: Int = 0,
-)
+private val Amber = Color(0xFFF59E0B)
+private val Red = Color(0xFFDC2626)
+private val Line = Color(0xFFE6EAF0)
 
 /**
- * A deliberately-simple goals scorer for football matches. Each side has a −/+
- * tally; every change is pushed to the backend (idempotent absolute score) so the
- * live feed tracks it. "Full time" completes the match and hands back the result.
+ * The football match scorer.
  *
- * This is the football counterpart to the cricket toss→keypad flow. It's a first
- * cut: goals only, no cards/subs/timeline yet.
+ * Rebuilt from a two-box +/− stepper, which read as a calculator rather than a
+ * match: no clock, no half, no minute on a goal, no record of what you just tapped
+ * and no way to see a mistake. A scorer that can't show you what it recorded is one
+ * you stop trusting by the second half.
+ *
+ * What's on screen now is the match: a live clock you start and stop, the half,
+ * a goal button per side that asks **who scored**, and a running feed of everything
+ * recorded — each row undoable.
+ *
+ * The screen still does not own the score. Every action posts an EVENT and the
+ * server hands back the settled scoreline.
  */
 @Composable
 fun FootballScorerScreen(
     setup: FootballScorerSetup,
-    pushScore: suspend (side: String, score: Int) -> Unit,
+    onGoal: suspend (side: String, player: String?, minuteLabel: String, minute: Int) -> MatchScoreState?,
+    onCard: suspend (side: String, player: String?, kind: String, minute: Int) -> MatchScoreState?,
+    onUndoGoal: suspend (side: String) -> MatchScoreState?,
     finishMatch: suspend () -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var home by remember { mutableIntStateOf(setup.initialHome) }
-    var away by remember { mutableIntStateOf(setup.initialAway) }
+    var home by remember { mutableStateOf(setup.initialHome) }
+    var away by remember { mutableStateOf(setup.initialAway) }
+    var clock by remember { mutableStateOf(MatchClock(halfLengthMin = setup.halfLengthMin)) }
     var finishing by remember { mutableStateOf(false) }
+    var confirmFullTime by remember { mutableStateOf(false) }
+    var pickerFor by remember { mutableStateOf<String?>(null) }
+    var pickerKind by remember { mutableStateOf("goal") }
+    val feed = remember { mutableStateListOf<ScorerFeedItem>() }
     val scope = rememberCoroutineScope()
 
-    // Push a side's new total to the backend. Fire-and-forget: the on-screen tally
-    // is the source of truth, and the endpoint is idempotent so a dropped call
-    // self-heals on the next tap.
-    fun push(side: String, value: Int) {
-        scope.launch { runCatching { pushScore(side, value) } }
+    // One tick a second while the half is running. Stops dead when paused, so half
+    // time doesn't quietly keep counting.
+    LaunchedEffect(clock.running) {
+        while (clock.running) {
+            delay(1000)
+            clock = clock.tick()
+        }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Bg)
-    ) {
-        // Top bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Surface)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFF1F5F9))
-                    .clickable(enabled = !finishing, onClick = onDone),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Match scorer", color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    setup.formatLabel.ifBlank { "Football" },
-                    color = Text3, fontSize = 12.sp,
+    fun settle(state: MatchScoreState?) {
+        if (state != null) { home = state.home; away = state.away }
+    }
+
+    fun record(side: String, kind: String, player: String?) {
+        val label = clock.label
+        val minute = clock.minute
+        val team = if (side == "home") setup.teamA else setup.teamB
+        feed.add(0, ScorerFeedItem(kind, side, team, player, label))
+        if (kind == "goal") { if (side == "home") home++ else away++ }
+
+        scope.launch {
+            runCatching {
+                settle(
+                    if (kind == "goal") onGoal(side, player, label, minute)
+                    else onCard(side, player, kind, minute)
                 )
             }
-            LivePill()
+        }
+    }
+
+    fun undo(item: ScorerFeedItem, index: Int) {
+        feed.removeAt(index)
+        if (item.kind == "goal") {
+            if (item.side == "home") { if (home > 0) home-- } else { if (away > 0) away-- }
+            scope.launch { runCatching { settle(onUndoGoal(item.side)) } }
+        }
+    }
+
+    Column(modifier = modifier.fillMaxSize().background(Bg)) {
+
+        Scoreboard(setup, home, away, clock, onBack = onDone, enabled = !finishing)
+
+        ClockBar(
+            clock = clock,
+            onToggle = { clock = clock.copy(running = !clock.running) },
+            onHalfTime = { clock = clock.copy(running = false) },
+            onSecondHalf = { clock = clock.startSecondHalf() },
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GoalButton(setup.teamA, Modifier.weight(1f)) { pickerKind = "goal"; pickerFor = "home" }
+            GoalButton(setup.teamB, Modifier.weight(1f)) { pickerKind = "goal"; pickerFor = "away" }
         }
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            ScoreCard(
-                team = setup.teamA,
-                emblemKey = setup.teamAEmblem,
-                score = home,
-                onMinus = { if (home > 0) { home--; push("home", home) } },
-                onPlus = { home++; push("home", home) },
-            )
-            ScoreCard(
-                team = setup.teamB,
-                emblemKey = setup.teamBEmblem,
-                score = away,
-                onMinus = { if (away > 0) { away--; push("away", away) } },
-                onPlus = { away++; push("away", away) },
-            )
+            CardButton("Card · ${setup.teamA}", Modifier.weight(1f)) { pickerKind = "yellow"; pickerFor = "home" }
+            CardButton("Card · ${setup.teamB}", Modifier.weight(1f)) { pickerKind = "yellow"; pickerFor = "away" }
         }
 
-        // Finish
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(Surface)
-                .navigationBarsPadding()
-                .padding(16.dp)
-        ) {
-            Button(
-                onClick = {
-                    if (!finishing) {
-                        finishing = true
-                        scope.launch {
-                            // Make sure the final scoreline is persisted before completing.
-                            runCatching { pushScore("home", home) }
-                            runCatching { pushScore("away", away) }
-                            runCatching { finishMatch() }
-                            finishing = false
-                            onDone()
-                        }
+        Spacer(Modifier.height(14.dp))
+
+        Text(
+            "Match feed",
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = Faint,
+            modifier = Modifier.padding(horizontal = 18.dp),
+        )
+        Spacer(Modifier.height(6.dp))
+
+        Box(Modifier.weight(1f)) {
+            if (feed.isEmpty()) {
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "Nothing recorded yet",
+                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Start the clock, then record a goal when one goes in. Everything you tap shows here so you can check it — or undo it.",
+                        fontSize = 12.5.sp, color = Muted, textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
+                    itemsIndexed(feed) { index, item ->
+                        FeedRow(item) { undo(item, index) }
                     }
-                },
-                enabled = !finishing,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Green,
-                    contentColor = Color.White,
-                    disabledContainerColor = Green.copy(alpha = 0.4f),
-                    disabledContentColor = Color.White.copy(alpha = 0.8f),
-                ),
-            ) {
-                if (finishing) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
-                } else {
-                    Text(resultLabel(setup, home, away), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
+
+        FullTimeBar(
+            home = home, away = away, teamA = setup.teamA, teamB = setup.teamB,
+            enabled = !finishing,
+        ) { confirmFullTime = true }
     }
-}
 
-private fun resultLabel(setup: FootballScorerSetup, home: Int, away: Int): String = when {
-    home > away -> "Full time · ${setup.teamA} win $home–$away"
-    away > home -> "Full time · ${setup.teamB} win $away–$home"
-    else -> "Full time · $home–$away draw"
-}
-
-@Composable
-private fun ScoreCard(
-    team: String,
-    emblemKey: String,
-    score: Int,
-    onMinus: () -> Unit,
-    onPlus: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Crest(emblemKey)
-        Spacer(Modifier.width(12.dp))
-        Text(
-            team,
-            color = Text1,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
+    // Who scored? A goal without a name is a tally; with one it's a match record.
+    pickerFor?.let { side ->
+        PlayerPicker(
+            title = if (pickerKind == "goal") "Who scored?" else "Who was booked?",
+            team = if (side == "home") setup.teamA else setup.teamB,
+            squad = if (side == "home") setup.squadA else setup.squadB,
+            onPick = { name -> record(side, pickerKind, name); pickerFor = null },
+            onDismiss = { pickerFor = null },
         )
-        Spacer(Modifier.width(8.dp))
-        TallyButton("−", enabled = score > 0, onClick = onMinus)
-        Box(
-            modifier = Modifier.width(56.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("$score", color = Text1, fontSize = 30.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        }
-        TallyButton("+", enabled = true, onClick = onPlus)
     }
-}
 
-@Composable
-private fun TallyButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .background(if (enabled) Blue.copy(alpha = if (symbol == "+") 1f else 0.12f) else Bg)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            symbol,
-            color = when {
-                symbol == "+" && enabled -> Color.White
-                enabled -> Blue
-                else -> Text3.copy(alpha = 0.5f)
+    if (confirmFullTime) {
+        AlertDialog(
+            onDismissRequest = { confirmFullTime = false },
+            title = { Text("End the match?") },
+            text = {
+                Text(
+                    "Final score ${setup.teamA} $home – $away ${setup.teamB}. " +
+                        "This locks the match and freezes the stats — it can't be scored again.",
+                )
             },
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmFullTime = false
+                    finishing = true
+                    clock = clock.copy(running = false)
+                    scope.launch { runCatching { finishMatch() }; finishing = false; onDone() }
+                }) { Text("End match", color = Red, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFullTime = false }) { Text("Keep scoring", color = Muted) }
+            },
         )
     }
 }
 
-@Composable
-private fun Crest(emblemKey: String) {
-    val resId = emblemDrawableFor(emblemKey)
-    Box(
-        modifier = Modifier.size(44.dp).clip(CircleShape).background(Bg),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (resId != null) {
-            Image(
-                painter = painterResource(resId),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().clip(CircleShape),
-            )
-        }
-    }
-}
+/* ----------------------------------------------------------- scoreboard */
 
-/**
- * Read-only match view for the simple-scored sports (football goals, badminton
- * games) — where any tap lands when the viewer can't score it (someone else's
- * match, or one that's finished). Deliberately minimal: teams, the scoreline, and
- * the match state. No cricket tabs.
- */
 @Composable
-fun SimpleMatchView(
-    state: com.haraan.app.ui.matches.MatchUiState,
+private fun Scoreboard(
+    setup: FootballScorerSetup,
+    home: Int,
+    away: Int,
+    clock: MatchClock,
     onBack: () -> Unit,
-    onConfirm: suspend () -> Unit = {},
-    modifier: Modifier = Modifier,
+    enabled: Boolean,
 ) {
-    val isBadminton = state.sport == "badminton"
-    val sportLabel = if (isBadminton) "Badminton" else "Football"
-    val home = state.score.toIntOrNull() ?: 0
-    val away = state.opponentScore.toIntOrNull() ?: 0
-    val completed = !state.isLive && state.status.trim().lowercase().let {
-        it == "completed" || it.startsWith("full")
-    }
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Bg)
+        Modifier.fillMaxWidth().background(Surface).statusBarsPadding()
+            .padding(horizontal = 16.dp).padding(top = 6.dp, bottom = 16.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Surface)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFF1F5F9))
-                    .clickable(onClick = onBack),
+                Modifier.size(34.dp).clip(CircleShape).background(Color(0xFFF1F5F9))
+                    .clickable(enabled = enabled, onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink, modifier = Modifier.size(17.dp))
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(sportLabel, color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Text(state.competition.ifBlank { "Match" }, color = Text3, fontSize = 12.sp)
+                Text("Match scorer", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    setup.formatLabel.ifBlank { "Football" },
+                    fontSize = 11.5.sp, color = Faint,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
-            if (state.isLive) LivePill()
+            LiveDot(clock.running)
         }
 
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Surface)
-                    .border(1.dp, Stroke, RoundedCornerShape(18.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                FootballTeamRow(state.team1FullName.ifBlank { state.team1 }, home, leading = home > away && completed)
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Stroke))
-                FootballTeamRow(state.team2FullName.ifBlank { state.team2 }, away, leading = away > home && completed)
-            }
-            val endLabel = if (isBadminton) "Result" else "Full time"
-            val statusText = when {
-                completed && home > away -> "$endLabel · ${state.team1FullName.ifBlank { state.team1 }} won"
-                completed && away > home -> "$endLabel · ${state.team2FullName.ifBlank { state.team2 }} won"
-                completed -> "$endLabel · draw"
-                state.isLive -> "Live now"
-                else -> state.status.ifBlank { "Scheduled" }
-            }
-            Text(statusText, color = Text2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            if (state.venue.isNotBlank()) {
-                Text(state.venue, color = Text3, fontSize = 13.sp)
-            }
-            ResultVerificationBar(state = state, onConfirm = onConfirm)
+        Spacer(Modifier.height(16.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TeamName(setup.teamA, Modifier.weight(1f), TextAlign.Start)
+            Text(
+                "$home",
+                fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Ink,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+            Text("–", fontSize = 22.sp, color = Faint)
+            Text(
+                "$away",
+                fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Ink,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+            TeamName(setup.teamB, Modifier.weight(1f), TextAlign.End)
         }
     }
 }
 
 @Composable
-private fun FootballTeamRow(name: String, score: Int, leading: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).background(Bg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(teamShortCode(name), color = Text2, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            name,
-            color = Text1,
-            fontSize = 16.sp,
-            fontWeight = if (leading) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text("$score", color = Text1, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-    }
+private fun TeamName(name: String, modifier: Modifier, align: TextAlign) {
+    Text(
+        name, modifier = modifier, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+        color = Ink, textAlign = align, maxLines = 2, overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
-private fun LivePill() {
+private fun LiveDot(running: Boolean) {
     Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFFFDECEC))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+        Modifier.clip(RoundedCornerShape(9.dp))
+            .background(if (running) Color(0xFFFEE2E2) else Color(0xFFF1F5F9))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFDC2626)))
+        Box(Modifier.size(5.dp).clip(CircleShape).background(if (running) Red else Faint))
+        Spacer(Modifier.width(5.dp))
+        Text(
+            if (running) "LIVE" else "PAUSED",
+            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            color = if (running) Red else Muted,
+        )
+    }
+}
+
+/* -------------------------------------------------------------- clock */
+
+@Composable
+private fun ClockBar(
+    clock: MatchClock,
+    onToggle: () -> Unit,
+    onHalfTime: () -> Unit,
+    onSecondHalf: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().background(Surface)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(clock.label, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Text(clock.halfLabel, fontSize = 11.5.sp, color = Faint)
+        }
+
+        ClockAction(if (clock.running) "Pause" else "Start", primary = !clock.running, onClick = onToggle)
+        Spacer(Modifier.width(8.dp))
+        if (clock.half == 1) {
+            ClockAction("Half time", primary = false, onClick = onHalfTime)
+            Spacer(Modifier.width(8.dp))
+            ClockAction("2nd half", primary = false, onClick = onSecondHalf)
+        }
+    }
+}
+
+@Composable
+private fun ClockAction(label: String, primary: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (primary) Blue else Color(0xFFF1F5F9))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+            color = if (primary) Color.White else Ink,
+        )
+    }
+}
+
+/* ------------------------------------------------------------ actions */
+
+@Composable
+private fun GoalButton(team: String, modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Blue)
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Goal", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(Modifier.width(6.dp))
-        Text("LIVE", color = Color(0xFFDC2626), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(
+            team, fontSize = 12.5.sp, color = Color.White.copy(alpha = 0.82f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun CardButton(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Surface)
+            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Muted,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/* --------------------------------------------------------------- feed */
+
+@Composable
+private fun FeedRow(item: ScorerFeedItem, onUndo: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp)).background(Surface)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            item.minuteLabel,
+            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Faint,
+            modifier = Modifier.width(48.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                when (item.kind) {
+                    "goal" -> "Goal · ${item.teamName}"
+                    "yellow" -> "Yellow card · ${item.teamName}"
+                    "red" -> "Red card · ${item.teamName}"
+                    else -> "${item.kind.replaceFirstChar { it.uppercase() }} · ${item.teamName}"
+                },
+                fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+                color = if (item.kind == "goal") Ink else Amber,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            item.player?.let {
+                Text(it, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Text(
+            "Undo",
+            fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Red,
+            modifier = Modifier.clickable(onClick = onUndo).padding(start = 10.dp, top = 4.dp, bottom = 4.dp),
+        )
+    }
+}
+
+/* ------------------------------------------------------------ pickers */
+
+@Composable
+private fun PlayerPicker(
+    title: String,
+    team: String,
+    squad: List<SquadMember>,
+    onPick: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                Text(team, fontSize = 12.sp, color = Faint)
+                Spacer(Modifier.height(8.dp))
+                if (squad.isEmpty()) {
+                    Text(
+                        "No squad was recorded for this team, so this goes down without a name.",
+                        fontSize = 13.sp, color = Muted,
+                    )
+                } else {
+                    squad.forEach { member ->
+                        Text(
+                            member.name,
+                            fontSize = 14.5.sp,
+                            color = Ink,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { onPick(member.name) }
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                }
+            }
+        },
+        // Always offer "don't know": in gully football the scorer often doesn't, and
+        // forcing a name would either stall the tap or invent one.
+        confirmButton = { TextButton(onClick = { onPick(null) }) { Text("Don't know", color = Blue) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Muted) } },
+    )
+}
+
+/* ----------------------------------------------------------- full time */
+
+@Composable
+private fun FullTimeBar(
+    home: Int,
+    away: Int,
+    teamA: String,
+    teamB: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val result = when {
+        home > away -> "$teamA lead $home–$away"
+        away > home -> "$teamB lead $away–$home"
+        else -> "Level at $home–$away"
+    }
+
+    Column(
+        Modifier.fillMaxWidth().background(Surface).navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(result, fontSize = 12.sp, color = Faint)
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier.fillMaxWidth().height(48.dp)
+                .clip(RoundedCornerShape(13.dp))
+                // Ending the match locks it and freezes the stats. That is a
+                // consequence, not a celebration — so it reads as a serious dark
+                // action, never a cheerful green "done".
+                .background(Ink)
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("End match", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
     }
 }

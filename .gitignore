@@ -47,3 +47,6 @@ whatsapp-api/.wwebjs_auth/
 whatsapp-api/.wwebjs_cache/
 **/.wwebjs_auth/
 **/.wwebjs_cache/
+
+# Session scratch — screenshots and notes captured while working, never part of the app.
+_IGNORE_session/
