@@ -36,8 +36,15 @@ class EventAnalyticsStatsWidget extends StatsOverviewWidget implements HasAction
      */
     protected string $view = 'filament.resources.events.widgets.event-analytics-stats';
 
-    /** Statuses that represent money actually earned. */
-    private const PAID = ['confirmed', 'paid', 'completed'];
+    /**
+     * Statuses that represent money actually earned.
+     *
+     * `checked_in` belongs here with the rest: it is a CONFIRMED ticket whose holder has
+     * walked through the door, not a different kind of sale. Leaving it out made every card
+     * on this page shed tickets as the event was scanned — while the hero banner directly
+     * above them, and the twenty other widgets that count the same way, kept them.
+     */
+    private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 
     /** Statuses that represent lost / reversed revenue. */
     private const LOST = ['cancelled', 'refunded', 'failed'];

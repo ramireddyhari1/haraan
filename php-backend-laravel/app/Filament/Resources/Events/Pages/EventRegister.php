@@ -199,8 +199,11 @@ class EventRegister extends Page
 
         $service->attachOrderId($order, (string) $rzp['id']);
 
-        // A desk payment can take longer than the 1-minute web hold; push the lock out so the
-        // background sweep can't reclaim these seats mid-checkout and let the order oversell.
+        // A desk payment runs at the pace of a queue: card handed over, terminal, receipt. Hold
+        // the seats for the full window so the background sweep can't reclaim them mid-checkout
+        // and let the order oversell. Same length as the standard hold now
+        // (BookingService::RESERVATION_HOLD_MINUTES) — restated rather than inherited, because
+        // this one is about the desk's own pace, not the buyer's.
         Booking::query()->whereIn('id', $order->pluck('id')->all())
             ->update(['reserved_until' => now()->addMinutes(15)]);
 

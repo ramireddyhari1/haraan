@@ -29,6 +29,29 @@ Artisan::command('bookings:release-expired', function (BookingService $bookings)
 
 Schedule::command('bookings:release-expired')->everyMinute();
 
+// Tickets that were paid for but never confirmed — the buyer's client died between Razorpay
+// capturing the money and our confirm call, so the order sits PENDING or was written off as
+// EXPIRED while the charge stands. Asks Razorpay which of those orders actually holds a
+// captured payment. Reports only; pass --apply to confirm them and send the tickets out.
+Artisan::command('bookings:reconcile-payments {--days=30} {--apply}', function (BookingService $bookings) {
+    $found = $bookings->reconcileUnconfirmedPayments((int) $this->option('days'), (bool) $this->option('apply'));
+
+    if ($found === []) {
+        $this->info('No paid-but-unconfirmed ticket orders found.');
+
+        return;
+    }
+
+    $this->table(
+        ['Razorpay order', 'Booking(s)', 'Payment', 'Action'],
+        array_map(fn (array $r): array => [
+            $r['order'], implode(', ', $r['bookings']), $r['payment'] ?? '—', $r['action'],
+        ], $found),
+    );
+
+    $this->warn(count($found) . ' order(s) listed.' . ($this->option('apply') ? '' : ' Re-run with --apply to confirm them.'));
+})->purpose('Find (and optionally fix) ticket orders Razorpay captured but that never confirmed');
+
 // Waitlist offers on a freed court-hour are time-boxed. Without this they never
 // lapse, so the first person offered silently holds a slot they may never pay for
 // — which is worse than having no waitlist, because it looks sold and earns

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Booking;
 use App\Models\CreditPack;
 use App\Models\PartnerCredit;
 use App\Models\PartnerPlan;
@@ -33,7 +34,10 @@ final class RazorpayBilling
 {
     private const SUBSCRIPTIONS_ENDPOINT = 'https://api.razorpay.com/v1/subscriptions';
 
-    public function __construct(private readonly RazorpayGateway $gateway) {}
+    public function __construct(
+        private readonly RazorpayGateway $gateway,
+        private readonly BookingService $bookings,
+    ) {}
 
     // -------------------------------------------------------------------------
     // Subscriptions
@@ -112,9 +116,59 @@ final class RazorpayBilling
             'subscription.activated', 'subscription.charged' => $this->markPaid($payload),
             'subscription.halted', 'subscription.pending' => $this->markStatus($payload, PartnerSubscription::STATUS_HALTED),
             'subscription.cancelled', 'subscription.completed', 'subscription.expired' => $this->markStatus($payload, PartnerSubscription::STATUS_CANCELLED),
-            'payment.captured' => $this->grantFromPayment($payload),
+            'payment.captured' => $this->applyCapturedPayment($payload),
             default => 'ignored',
         };
+    }
+
+    /**
+     * A captured one-off payment. Two different things buy through this same event, so the
+     * handler asks what the payment was FOR before it acts: a ticket order (identified by the
+     * Razorpay order id we stamped on the reservation) or a partner credit pack.
+     *
+     * Tickets come first because they are the case that can silently lose a customer's money.
+     * Confirmation used to depend entirely on the client round-trip after checkout — a killed
+     * app or a closed tab meant the payment landed and the booking never left PENDING, so the
+     * buyer had no ticket and the host's analytics never saw the sale. This is the server-side
+     * backstop: Razorpay tells us directly, and it retries until we answer 200.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function applyCapturedPayment(array $payload): string
+    {
+        $entity = $payload['payload']['payment']['entity'] ?? [];
+        $orderId = trim((string) ($entity['order_id'] ?? ''));
+        $paymentId = trim((string) ($entity['id'] ?? ''));
+
+        if ($orderId === '' || $paymentId === '') {
+            return $this->grantFromPayment($payload);
+        }
+
+        $bookings = Booking::query()->where('razorpay_order_id', $orderId)->get();
+
+        if ($bookings->isEmpty()) {
+            return $this->grantFromPayment($payload);
+        }
+
+        // Only an order still waiting on its payment may be confirmed from here. A capture
+        // event delivered late against an order that has since been cancelled or refunded
+        // must not resurrect it into a live ticket — that money's story already ended.
+        $confirmable = $bookings->filter(
+            fn (Booking $b) => in_array(strtoupper((string) $b->status), ['PENDING', 'EXPIRED'], true),
+        );
+
+        if ($confirmable->isEmpty()) {
+            // Nothing to do, and nothing wrong: the buyer's own confirm call usually wins
+            // this race. Razorpay redelivers until it gets a 200, and re-sending the ticket
+            // on every retry would be its own bug.
+            return 'booking_not_confirmable';
+        }
+
+        $this->bookings->confirmReservation($confirmable->pluck('id')->all(), $paymentId);
+
+        BookingNotifier::dispatch($confirmable->first()->refresh());
+
+        return 'booking_confirmed';
     }
 
     /** @param array<string, mixed> $payload */

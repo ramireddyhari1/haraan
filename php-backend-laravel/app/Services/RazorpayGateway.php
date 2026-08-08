@@ -74,6 +74,53 @@ final class RazorpayGateway
     }
 
     /**
+     * The id of a CAPTURED payment against a Razorpay order, or null when the order has not
+     * been paid. Asks Razorpay directly, so it is the authority when our own record of an
+     * order is in doubt — a buyer whose browser died after paying leaves us a reservation
+     * that looks abandoned and a payment that very much happened.
+     *
+     * Only `captured` counts. An `authorized` payment is money held, not money taken, and it
+     * can still fail; orders here are created with `payment_capture: 1`, so authorisation
+     * turns into capture within seconds and the webhook picks up anything that lands late.
+     *
+     * @throws RuntimeException  When Razorpay can't be reached or answers with an error — the
+     *                           caller must treat that as "don't know", never as "not paid".
+     */
+    public function capturedPaymentFor(string $orderId): ?string
+    {
+        if (! $this->isConfigured() || trim($orderId) === '') {
+            return null;
+        }
+
+        try {
+            $response = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()
+                ->timeout(15)
+                ->get(self::ORDERS_ENDPOINT . '/' . trim($orderId) . '/payments');
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('Could not reach the payment provider.', 502);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Could not read the payment order.', 502);
+        }
+
+        foreach ((array) ($response->json('items') ?? []) as $payment) {
+            if (! is_array($payment) || ($payment['status'] ?? null) !== 'captured') {
+                continue;
+            }
+
+            $id = trim((string) ($payment['id'] ?? ''));
+
+            if ($id !== '') {
+                return $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Verify a Razorpay checkout signature: HMAC-SHA256(order_id|payment_id, secret) must equal
      * the returned signature (constant-time). Returns false on any mismatch or missing secret.
      */
