@@ -3474,6 +3474,11 @@ private fun CrexMatchesScreen(
   var selectedTab by remember { mutableStateOf(0) }
   // Alerts open as a sheet over the board, the same one the header bell used.
   var showAlerts by remember { mutableStateOf(false) }
+  // Player-to-player DMs. `showChatList` is the destination; `openThread` is the one
+  // conversation on top of it.
+  var showChatList by remember { mutableStateOf(false) }
+  var openThread by remember { mutableStateOf<com.haraan.app.data.ChatThread?>(null) }
+  val dmRepository = remember { com.haraan.app.data.DirectMessageRepository() }
   var showCreateWizard by remember { mutableStateOf(false) }
   // Which follower/following list is open, if any: (playerId, relation, display name).
   // The endpoints shipped with the original follow work and nothing ever opened them.
@@ -3623,7 +3628,7 @@ private fun CrexMatchesScreen(
         current = "Matches",
         onHomeClick = onHomeClick,
         onMatchesClick = { scope.launch { listState.animateScrollToItem(0) } },
-        onChatClick = onOpenChat,
+        onChatClick = { requireRankedAccess { showChatList = true } },
         onAlertsClick = { showAlerts = true },
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
@@ -3998,6 +4003,24 @@ private fun CrexMatchesScreen(
         },
         onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
         onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        onMessage = { pid, name ->
+          scope.launch {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                openThread = com.haraan.app.data.ChatThread(
+                  id = r.conversationId, playerId = pid, name = name,
+                  username = null, avatar = null, lastMessage = null,
+                  lastMessageAt = null, unreadCount = 0,
+                )
+              // Say WHY rather than doing nothing — the rule is not obvious.
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+              else ->
+                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+            }
+          }
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4048,6 +4071,24 @@ private fun CrexMatchesScreen(
         },
         onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
         onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        onMessage = { pid, name ->
+          scope.launch {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                openThread = com.haraan.app.data.ChatThread(
+                  id = r.conversationId, playerId = pid, name = name,
+                  username = null, avatar = null, lastMessage = null,
+                  lastMessageAt = null, unreadCount = 0,
+                )
+              // Say WHY rather than doing nothing — the rule is not obvious.
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+              else ->
+                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+            }
+          }
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4069,6 +4110,56 @@ private fun CrexMatchesScreen(
         },
         onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
         onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        onMessage = { pid, name ->
+          scope.launch {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                openThread = com.haraan.app.data.ChatThread(
+                  id = r.conversationId, playerId = pid, name = name,
+                  username = null, avatar = null, lastMessage = null,
+                  lastMessageAt = null, unreadCount = 0,
+                )
+              // Say WHY rather than doing nothing — the rule is not obvious.
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+              else ->
+                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+            }
+          }
+        },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Messages. Rendered after the board so it sits above it, and the open thread
+    // after the list for the same reason.
+    if (showChatList) {
+      com.haraan.app.ui.social.ChatListScreen(
+        load = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.ThreadsResult.Failed
+          else dmRepository.threads(token)
+        },
+        onOpenThread = { openThread = it },
+        onClose = { showChatList = false },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    openThread?.let { thread ->
+      com.haraan.app.ui.social.ChatThreadScreen(
+        title = thread.name,
+        avatar = thread.avatar,
+        load = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.messages(token, thread.id)
+        },
+        send = { body ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.send(token, thread.id, body)
+        },
+        onClose = { openThread = null },
         modifier = Modifier.statusBarsPadding(),
       )
     }

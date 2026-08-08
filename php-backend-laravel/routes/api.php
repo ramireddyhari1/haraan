@@ -243,6 +243,18 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::get('/{player}/following', [PlayersController::class, 'following']);
 });
 
+// -------------------------------------------------------------------------
+//  Direct messages between players. Separate from /support, which is the
+//  player <-> admin desk and cannot represent two players talking.
+//  Gated on mutual follow inside DirectMessageService.
+// -------------------------------------------------------------------------
+Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
+    Route::get('/', [\App\Http\Controllers\Api\DirectMessageController::class, 'index']);
+    Route::post('/with/{playerId}', [\App\Http\Controllers\Api\DirectMessageController::class, 'with']);
+    Route::get('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'messages'])->whereNumber('id');
+    Route::post('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'send'])->whereNumber('id');
+});
+
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
 // Registered after the literal /players/* routes above so it never shadows them.
 //

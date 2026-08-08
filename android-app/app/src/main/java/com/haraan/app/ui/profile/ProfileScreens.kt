@@ -571,6 +571,8 @@ fun PlayerProfileScreen(
     /** Open the follower / following lists. Null leaves the counts inert. */
     onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
     onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
+    /** Open a DM with this player. Null hides the button entirely. */
+    onMessage: ((playerId: String, name: String) -> Unit)? = null,
 ) {
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
@@ -621,6 +623,7 @@ fun PlayerProfileScreen(
                 onToggleFollow = onToggleFollow,
                 onOpenFollowers = onOpenFollowers,
                 onOpenFollowing = onOpenFollowing,
+                onMessage = onMessage,
             )
         }
     }
@@ -641,6 +644,7 @@ private fun ProfileContent(
     onToggleFollow: (suspend (Boolean) -> Boolean?)? = null,
     onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
     onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
+    onMessage: ((playerId: String, name: String) -> Unit)? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     var showShare by remember { mutableStateOf(false) }
@@ -671,6 +675,7 @@ private fun ProfileContent(
                 onShare = { showShare = true },
                 onOpenFollowers = onOpenFollowers,
                 onOpenFollowing = onOpenFollowing,
+                onMessage = onMessage,
             )
         }
 
@@ -755,6 +760,7 @@ private fun SocialBar(
     onShare: () -> Unit,
     onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
     onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
+    onMessage: ((playerId: String, name: String) -> Unit)? = null,
 ) {
     val social = p.social ?: return
     val scope = rememberCoroutineScope()
@@ -786,6 +792,26 @@ private fun SocialBar(
         // Follow on someone else's profile; Share on your own. A signed-out viewer gets
         // Share too — offering Follow with no session would only fail on tap.
         Spacer(Modifier.height(10.dp))
+        // Message appears only when BOTH sides follow each other, which is precisely
+        // when the server will permit a conversation. Showing it any earlier would be
+        // a button that exists to be refused.
+        val mutual = following && social.followsMe
+        if (mutual && onMessage != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable { onMessage(p.playerId, p.name) }
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Surface)
+                    .border(1.5.dp, BlueBright, RoundedCornerShape(14.dp))
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Message", color = BlueBright, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
         if (social.canFollow && onToggleFollow != null) {
             val label = if (following) "Following" else "Follow"
             Box(

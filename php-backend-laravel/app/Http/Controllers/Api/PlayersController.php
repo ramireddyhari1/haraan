@@ -210,6 +210,9 @@ final class PlayersController extends Controller
             // Never true for your own profile: you cannot follow yourself, and the
             // button slot becomes Share there instead.
             'is_following'    => $viewer instanceof User && ! $isSelf && $viewer->isFollowing($user),
+            // The other half of "mutual". Messaging requires both directions, and the
+            // client cannot work that out from is_following alone.
+            'follows_me'      => $viewer instanceof User && ! $isSelf && $user->isFollowing($viewer),
             'is_self'         => $isSelf,
             // A signed-out viewer has no follow state to act on at all.
             'can_follow'      => $viewer instanceof User && ! $isSelf,

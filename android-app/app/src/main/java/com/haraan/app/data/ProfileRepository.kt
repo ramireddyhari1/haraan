@@ -70,6 +70,8 @@ data class SocialState(
   val followersCount: Int,
   val followingCount: Int,
   val isFollowing: Boolean,
+  /** Do THEY follow ME — the other half of the mutual test that gates messaging. */
+  val followsMe: Boolean,
   val isSelf: Boolean,
   val canFollow: Boolean,
 )
@@ -299,6 +301,7 @@ class ProfileRepository(
           followersCount = s.optInt("followers_count", 0),
           followingCount = s.optInt("following_count", 0),
           isFollowing = s.optBoolean("is_following", false),
+          followsMe = s.optBoolean("follows_me", false),
           isSelf = s.optBoolean("is_self", false),
           canFollow = s.optBoolean("can_follow", false),
         )
