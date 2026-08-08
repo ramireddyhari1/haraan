@@ -30,7 +30,7 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        return response()->json($this->profilePayload($user));
+        return response()->json($this->profilePayload($user, $user));
     }
 
     /**
@@ -50,7 +50,9 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'No player with that ID'], 404);
         }
 
-        return response()->json($this->profilePayload($user));
+        // The viewer, when there is one: a signed-out visitor still gets the profile,
+        // just with no follow state to settle a button against.
+        return response()->json($this->profilePayload($user, $request->attributes->get('auth_user')));
     }
 
     /**
@@ -59,7 +61,7 @@ final class PlayersController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function profilePayload(User $user): array
+    private function profilePayload(User $user, mixed $viewer = null): array
     {
         $pid = $user->player_id;
         $month = now()->format('Y-m');
@@ -134,8 +136,39 @@ final class PlayersController extends Controller
             // batting figures that can never be anything but zero.
             'sport_career' => $this->sportCareer($user),
 
+            // The social graph. The follow system was built and wired into player
+            // SEARCH, but the profile — the one screen where following belongs —
+            // never received any of it: no counts, no button, no way to tell whether
+            // you already follow the person you are looking at.
+            'social' => $this->socialState($user, $viewer),
+
             'recent_matches'  => $recent,
             'achievements'    => $this->buildAchievements($pid, $user),
+        ];
+    }
+
+    /**
+     * Follower graph for the profile header, plus whether the viewer already follows
+     * this player so the button opens in the right state instead of flickering.
+     *
+     * [$viewer] is null for a signed-out visitor — a public profile still renders, it
+     * just cannot offer a Follow button.
+     *
+     * @return array<string, mixed>
+     */
+    private function socialState(User $user, mixed $viewer): array
+    {
+        $isSelf = $viewer instanceof User && (int) $viewer->id === (int) $user->id;
+
+        return [
+            'followers_count' => $user->followers()->count(),
+            'following_count' => $user->following()->count(),
+            // Never true for your own profile: you cannot follow yourself, and the
+            // button slot becomes Share there instead.
+            'is_following'    => $viewer instanceof User && ! $isSelf && $viewer->isFollowing($user),
+            'is_self'         => $isSelf,
+            // A signed-out viewer has no follow state to act on at all.
+            'can_follow'      => $viewer instanceof User && ! $isSelf,
         ];
     }
 

@@ -518,6 +518,12 @@ fun PlayerProfileScreen(
     /** True when this is the signed-in player's own profile. */
     isSelf: Boolean = false,
     onCreateMatch: (() -> Unit)? = null,
+    /**
+     * Follow/unfollow this player, returning the state the SERVER settled on (null =
+     * the call failed, so the optimistic toggle rolls back). Null callback means the
+     * caller cannot act on the follow graph and the button is not offered.
+     */
+    onToggleFollow: (suspend (Boolean) -> Boolean?)? = null,
 ) {
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
@@ -565,6 +571,7 @@ fun PlayerProfileScreen(
                 onRefresh = { refreshing = true; reloadKey++ },
                 isSelf = isSelf,
                 onCreateMatch = onCreateMatch,
+                onToggleFollow = onToggleFollow,
             )
         }
     }
@@ -582,6 +589,7 @@ private fun ProfileContent(
     onRefresh: () -> Unit,
     isSelf: Boolean = false,
     onCreateMatch: (() -> Unit)? = null,
+    onToggleFollow: (suspend (Boolean) -> Boolean?)? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     var showShare by remember { mutableStateOf(false) }
@@ -601,6 +609,18 @@ private fun ProfileContent(
         // Identity — photo, tier, level, trust+ID (each fact appears once, only here).
         item { HeroCard(p, e, onCopyId = { clipboard.setText(AnnotatedString(p.playerId)) }, onShare = { showShare = true }) }
 
+        // Identity, then the social graph, then the sport. Followers matter even with
+        // no matches played, so this sits above the played/not-played branch.
+        item {
+            Spacer(Modifier.height(14.dp))
+            SocialBar(
+                p = p,
+                matches = matchesPlayed(p),
+                onToggleFollow = onToggleFollow,
+                onShare = { showShare = true },
+            )
+        }
+
         val played = hasAnyHistory(p)
 
         if (!played) {
@@ -611,8 +631,11 @@ private fun ProfileContent(
             // Signature — the district rank as the screen's dominant number.
             item { Spacer(Modifier.height(14.dp)); DistrictRankCard(p) }
 
-            // Career stats (real) — per-sport cells + rank, with count-up.
-            item { Spacer(Modifier.height(14.dp)); SectionTitle("Career"); Spacer(Modifier.height(12.dp)); StatRow(p) }
+            // Career stats (real), per-sport. Hidden entirely for a sport that has no
+            // per-player performance figure rather than shown as an empty heading.
+            if (careerCells(p).isNotEmpty()) {
+                item { Spacer(Modifier.height(14.dp)); SectionTitle("Career"); Spacer(Modifier.height(12.dp)); StatRow(p) }
+            }
         }
 
         // Recent form (real) — last five results as a W/L guide.
@@ -660,6 +683,123 @@ private fun ProfileContent(
 }
 
 /**
+ * The social block: the follow triplet, then the action it implies.
+ *
+ * This is what the profile was missing. The follow system existed end to end —
+ * `player_follows`, follow/unfollow/followers/following endpoints — and was wired into
+ * player SEARCH, but the profile carried none of it: no counts, no button, and no way
+ * to tell whether you already followed the person you were looking at.
+ *
+ * Matches sits here rather than in the Career strip below because it is a volume
+ * figure, the same kind of number as a follower count; Career is left to say how well
+ * you actually played. It also keeps Matches from appearing twice.
+ */
+@Composable
+private fun SocialBar(
+    p: PlayerProfile,
+    matches: Int,
+    onToggleFollow: (suspend (Boolean) -> Boolean?)?,
+    onShare: () -> Unit,
+) {
+    val social = p.social ?: return
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+
+    // Optimistic, then settled by whatever the server says. A follow that silently
+    // failed but left a filled "Following" button is the worst outcome here, so a null
+    // response rolls the toggle back.
+    var following by remember(p.playerId, social.isFollowing) { mutableStateOf(social.isFollowing) }
+    var followers by remember(p.playerId, social.followersCount) { mutableStateOf(social.followersCount) }
+    var busy by remember(p.playerId) { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(Surface)
+                .border(1.dp, Stroke, RoundedCornerShape(18.dp))
+                .padding(vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SocialCount(matches, "Matches")
+            SocialCount(followers, "Followers")
+            SocialCount(social.followingCount, "Following")
+        }
+
+        // Follow on someone else's profile; Share on your own. A signed-out viewer gets
+        // Share too — offering Follow with no session would only fail on tap.
+        Spacer(Modifier.height(10.dp))
+        if (social.canFollow && onToggleFollow != null) {
+            val label = if (following) "Following" else "Follow"
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable(enabled = !busy, haptic = null) {
+                        val next = !following
+                        // Tell the hand what happened, differently in each direction:
+                        // gaining a follow lands, dropping one is a removal.
+                        view.performHapticFeedback(if (next) Feel.COMMIT else Feel.REMOVE)
+                        following = next
+                        followers = (followers + if (next) 1 else -1).coerceAtLeast(0)
+                        busy = true
+                        scope.launch {
+                            val settled = onToggleFollow(next)
+                            if (settled == null) {
+                                // Roll back — the request never landed.
+                                following = !next
+                                followers = (followers + if (next) -1 else 1).coerceAtLeast(0)
+                            } else if (settled != next) {
+                                following = settled
+                                followers = (social.followersCount + if (settled) 1 else 0)
+                            }
+                            busy = false
+                        }
+                    }
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (following) Surface else BlueBright)
+                    .then(
+                        if (following) Modifier.border(1.5.dp, Stroke, RoundedCornerShape(14.dp))
+                        else Modifier,
+                    )
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    color = if (following) Text1 else Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        } else if (social.isSelf) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable(onClick = onShare)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Surface)
+                    .border(1.5.dp, Stroke, RoundedCornerShape(14.dp))
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Share profile", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialCount(value: Int, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("${AnimatedInt(value)}", color = Text1, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = Text3, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
  * Has this player actually done anything yet?
  *
  * Matters because the profile was designed for someone with a season behind them,
@@ -667,10 +807,30 @@ private fun ProfileContent(
  * 0 wickets, — rank, 0 XP and "No settled matches yet" — six separate ways of
  * saying *you have nothing*, with no route out of it.
  */
-private fun hasAnyHistory(p: PlayerProfile): Boolean {
-    val matches = p.sportCareer?.stats?.firstOrNull { it.label == "Matches" }?.value ?: p.careerMatches
-    return matches > 0 || p.recentMatches.isNotEmpty() || p.rankDistrict != null || p.rankedXp > 0
-}
+private fun hasAnyHistory(p: PlayerProfile): Boolean =
+    matchesPlayed(p) > 0 || p.recentMatches.isNotEmpty() || p.rankDistrict != null || p.rankedXp > 0
+
+/** Matches in the player's own sport, falling back to cricket's column on an old server. */
+private fun matchesPlayed(p: PlayerProfile): Int =
+    p.sportCareer?.stats?.firstOrNull { it.label == "Matches" }?.value ?: p.careerMatches
+
+/**
+ * Performance cells for the Career strip — the sport's own figures MINUS Matches,
+ * which now lives in the social triplet (showing it twice was the same mistake the
+ * duplicated rank was).
+ *
+ * Can legitimately come back EMPTY: badminton records points per side, so it reports
+ * matches and nothing else. The section hides rather than printing a bare heading.
+ */
+private fun careerCells(p: PlayerProfile): List<com.haraan.app.data.CareerStat> =
+    (
+        p.sportCareer?.stats
+            ?: listOf(
+                com.haraan.app.data.CareerStat("Matches", p.careerMatches),
+                com.haraan.app.data.CareerStat("Runs", p.careerRuns),
+                com.haraan.app.data.CareerStat("Wickets", p.careerWickets),
+            )
+        ).filterNot { it.label == "Matches" }
 
 /**
  * The one card a brand-new player sees in place of the zeros. States plainly what
@@ -895,6 +1055,19 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, on
                         Pill("ORGANIZER", Gold, GoldTint)
                     }
                 }
+                // The @handle, which the profile never showed at all — it was on the
+                // model and in every search row, but this screen offered a display name
+                // and a Player ID (HRN00039), a database key nobody shares.
+                p.username?.takeIf { it.isNotBlank() }?.let { handle ->
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "@$handle",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
                 Spacer(Modifier.height(5.dp))
                 Box(
                     Modifier.clip(RoundedCornerShape(7.dp)).background(Green.copy(alpha = 0.9f))
@@ -1013,12 +1186,7 @@ private fun StatRow(p: PlayerProfile) {
     // Cells come from the player's own sport. Falling back to cricket only when the
     // server is too old to send the block — this screen used to show every player
     // Runs and Wickets, so a footballer's career read "0 runs, 0 wickets" forever.
-    val cells = p.sportCareer?.stats
-        ?: listOf(
-            com.haraan.app.data.CareerStat("Matches", p.careerMatches),
-            com.haraan.app.data.CareerStat("Runs", p.careerRuns),
-            com.haraan.app.data.CareerStat("Wickets", p.careerWickets),
-        )
+    val cells = careerCells(p)
 
     // No box, no border, no dividers. A bordered card of centred numbers separated by
     // hairlines is the single most generic thing on this screen — and the "Career"

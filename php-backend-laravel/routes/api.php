@@ -245,7 +245,11 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
 // Registered after the literal /players/* routes above so it never shadows them.
-Route::get('players/{playerId}', [PlayersController::class, 'show']);
+//
+// OPTIONAL auth, not none: a guest must still be able to open a shared profile, but a
+// signed-in viewer needs `auth_user` populated or `social.is_following` is always false
+// and the Follow button opens in the wrong state for everyone you already follow.
+Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);
 
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {

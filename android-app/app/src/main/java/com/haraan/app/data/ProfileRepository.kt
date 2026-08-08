@@ -50,6 +50,21 @@ data class CareerStat(val label: String, val value: Int)
 
 data class SportCareer(val sport: String, val stats: List<CareerStat>)
 
+/**
+ * The follow graph as it applies to the viewer looking at this profile.
+ *
+ * [canFollow] is deliberately separate from [isFollowing]: a signed-out visitor and a
+ * player looking at their own profile both have `isFollowing = false`, but neither
+ * should be offered a Follow button, and for opposite reasons.
+ */
+data class SocialState(
+  val followersCount: Int,
+  val followingCount: Int,
+  val isFollowing: Boolean,
+  val isSelf: Boolean,
+  val canFollow: Boolean,
+)
+
 data class PlayerProfile(
   val id: Int,
   val playerId: String,
@@ -75,6 +90,11 @@ data class PlayerProfile(
    * read zero. Null only for a server too old to send the block.
    */
   val sportCareer: SportCareer? = null,
+  /**
+   * Follower counts + whether the viewer already follows this player. Null only for a
+   * server too old to send the block — the follow UI hides rather than guessing.
+   */
+  val social: SocialState? = null,
   val profileComplete: Boolean,
   val recentMatches: List<RecentMatch>,
   val achievements: List<AchievementDto> = emptyList(),
@@ -256,6 +276,15 @@ class ProfileRepository(
       careerRuns = json.optJSONObject("career")?.optInt("runs", 0) ?: 0,
       careerWickets = json.optJSONObject("career")?.optInt("wickets", 0) ?: 0,
       sportCareer = parseSportCareer(json.optJSONObject("sport_career")),
+      social = json.optJSONObject("social")?.let { s ->
+        SocialState(
+          followersCount = s.optInt("followers_count", 0),
+          followingCount = s.optInt("following_count", 0),
+          isFollowing = s.optBoolean("is_following", false),
+          isSelf = s.optBoolean("is_self", false),
+          canFollow = s.optBoolean("can_follow", false),
+        )
+      },
       profileComplete = json.optBoolean("profile_complete", false),
       recentMatches = recent,
       achievements = achievements,

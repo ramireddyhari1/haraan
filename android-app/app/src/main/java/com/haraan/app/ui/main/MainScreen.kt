@@ -1000,6 +1000,11 @@ internal fun MainAppContainer(
       com.haraan.app.ui.profile.PlayerProfileScreen(
         onBack = { gameHubPlayerId = null },
         fetchProfile = { playerProfileRepository.fetchPlayer(token, playerId) },
+        // Follow straight from the profile — the follow API was only reachable from a
+        // search row before this.
+        onToggleFollow = { follow ->
+          com.haraan.app.data.PlayerRepository().setFollowing(token.orEmpty(), playerId, follow)
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -3966,6 +3971,10 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getToken(context)
           profileRepository.fetchPlayer(token, playerId)
         },
+        onToggleFollow = { follow ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setFollowing(token, playerId, follow)
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4009,6 +4018,10 @@ private fun CrexMatchesScreen(
         fetchProfile = {
           val token = com.haraan.app.data.TokenStore.getToken(context)
           profileRepository.fetchPlayer(token, player.playerId)
+        },
+        onToggleFollow = { follow ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setFollowing(token, player.playerId, follow)
         },
         modifier = Modifier.statusBarsPadding(),
       )
