@@ -92,26 +92,42 @@ import com.haraan.app.data.ApiConfig
 import kotlinx.coroutines.launch
 import com.haraan.app.data.PlayerProfile
 import com.haraan.app.data.RecentMatch
+import com.haraan.app.ui.theme.HaraanColors
 
-// ─── Palette: blue + green (energetic / gamified player area) ────────────────────
-private val Bg        = Color(0xFFF6F8FB)
-private val Surface   = Color(0xFFFFFFFF)
-private val Navy      = Color(0xFF0F172A)
-private val Blue      = Color(0xFF1E3A8A)
-private val BlueBright= Color(0xFF2563EB)
-private val Green     = Color(0xFF00B140)
-private val GreenTint = Color(0xFFE7F7EE)
-private val BlueTint  = Color(0xFFEAF1FE)
-private val Text1     = Color(0xFF111827)
-private val Text2     = Color(0xFF5A6473)
-private val Text3     = Color(0xFF9AA3B2)
-private val Stroke    = Color(0xFFE5E9F0)
+// ─── Palette ─────────────────────────────────────────────────────────────────
+// These are ALIASES onto the design system, not a private palette. This file used to
+// define twelve of its own hexes — including a `Green = 0xFF00B140` that directly
+// contradicted a decision already recorded in HaraanColors ("green is for actions
+// only"; GameHubGreen was deliberately made blue). Local names are kept because they
+// are referenced ~200 times here; only their SOURCE changed.
+private val Bg        = HaraanColors.Background
+private val Surface   = HaraanColors.Surface
+private val Blue      = HaraanColors.GameHubDeep
+private val BlueBright= HaraanColors.EventsBlue
+/** Success — a win, a verification. No longer the ring, the tier pill or a gradient stop. */
+private val Green     = HaraanColors.Success
+private val GreenTint = HaraanColors.SuccessTint
+private val BlueTint  = HaraanColors.AccentTint
+private val Text1     = HaraanColors.TextPrimary
+private val Text2     = HaraanColors.TextSecondary
+private val Text3     = HaraanColors.TextMuted
+private val Stroke    = HaraanColors.BorderLight
+// Achievement metals stay local: they are medal materials, not brand colours, and
+// nothing outside this screen uses them.
 private val Bronze    = Color(0xFFCD7F32)
 private val Silver    = Color(0xFF8E99A8)
 private val Gold      = Color(0xFFB8860B)
 private val GoldTint  = Color(0xFFFAF3E0)
 
-private val HeroGradient = Brush.linearGradient(listOf(Navy, Blue, Green))
+/**
+ * ONE hue, top to bottom. Was `linearGradient(Navy, Blue, Green)` — a gradient
+ * travelling across the colour wheel, which is the most reliable tell of a stock
+ * template. Both stops come from the system, so going near-black is a one-value edit
+ * in [HaraanColors.HeroSurface] rather than a change here.
+ */
+private val HeroGradient = Brush.verticalGradient(
+    listOf(HaraanColors.HeroSurfaceTop, HaraanColors.HeroSurface),
+)
 
 // Level, tier, profile-completion, win streak and recognition chips are all DERIVED from
 // real profile data (XP, filled fields, recent results). Only [achievements] remain a
@@ -1072,7 +1088,12 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, on
                         style = DrawStroke(width = sw, cap = StrokeCap.Round),
                     )
                     drawArc(
-                        color = Green,
+                        // White, not green. This ring is PROGRESS toward a complete
+                        // profile, and the house rule is blue/neutral for progress,
+                        // green for something landing. On a deep-blue hero, white is
+                        // the only progress colour with real contrast — and it lets the
+                        // player's photo be the only colour in the card.
+                        color = HaraanColors.OnHero,
                         startAngle = -90f, sweepAngle = 360f * (e.profilePct / 100f), useCenter = false,
                         style = DrawStroke(width = sw, cap = StrokeCap.Round),
                     )
@@ -1120,11 +1141,24 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, on
                     )
                 }
                 Spacer(Modifier.height(5.dp))
+                // Tier chip. Was a solid signal-green block, which said "success" about
+                // a player who has done nothing yet — Rookie is a starting point, not an
+                // achievement. Now a quiet inset chip on the hero, so the tier reads as
+                // status rather than congratulation.
                 Box(
-                    Modifier.clip(RoundedCornerShape(7.dp)).background(Green.copy(alpha = 0.9f))
+                    Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(HaraanColors.OnHeroFaint)
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(7.dp))
                         .padding(horizontal = 9.dp, vertical = 4.dp),
                 ) {
-                    Text(e.tier.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        e.tier.uppercase(),
+                        color = HaraanColors.OnHero,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                    )
                 }
                 val loc = listOfNotNull(p.district, p.state).joinToString(" · ")
                 if (loc.isNotBlank()) {
@@ -1357,7 +1391,9 @@ private fun XpCard(p: PlayerProfile) {
                     .fillMaxWidth(pct)
                     .height(9.dp)
                     .clip(RoundedCornerShape(5.dp))
-                    .background(Brush.linearGradient(listOf(BlueBright, Green))),
+                    // Same single-hue rule as the hero — this card gets screenshotted
+                    // and shared, so it is the most public surface in the app.
+                    .background(HeroGradient),
             )
         }
     }
