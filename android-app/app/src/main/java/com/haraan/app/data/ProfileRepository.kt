@@ -57,6 +57,15 @@ data class SportCareer(val sport: String, val stats: List<CareerStat>)
  * player looking at their own profile both have `isFollowing = false`, but neither
  * should be offered a Follow button, and for opposite reasons.
  */
+/**
+ * How complete this profile is, measured against the player's OWN sport.
+ *
+ * [missing] carries KEYS, not sentences — the app owns the wording. The app used to
+ * work this out itself against cricket's fields, which is why a footballer was asked
+ * for a batting style and could never reach 100%.
+ */
+data class ProfileCompletion(val pct: Int, val missing: List<String>)
+
 data class SocialState(
   val followersCount: Int,
   val followingCount: Int,
@@ -95,6 +104,8 @@ data class PlayerProfile(
    * server too old to send the block — the follow UI hides rather than guessing.
    */
   val social: SocialState? = null,
+  /** Null only for a server too old to send it; the app then falls back to its own count. */
+  val completion: ProfileCompletion? = null,
   val profileComplete: Boolean,
   val recentMatches: List<RecentMatch>,
   val achievements: List<AchievementDto> = emptyList(),
@@ -276,6 +287,13 @@ class ProfileRepository(
       careerRuns = json.optJSONObject("career")?.optInt("runs", 0) ?: 0,
       careerWickets = json.optJSONObject("career")?.optInt("wickets", 0) ?: 0,
       sportCareer = parseSportCareer(json.optJSONObject("sport_career")),
+      completion = json.optJSONObject("profile_completion")?.let { c ->
+        val arr = c.optJSONArray("missing")
+        ProfileCompletion(
+          pct = c.optInt("pct", 0),
+          missing = buildList { if (arr != null) for (i in 0 until arr.length()) add(arr.optString(i)) },
+        )
+      },
       social = json.optJSONObject("social")?.let { s ->
         SocialState(
           followersCount = s.optInt("followers_count", 0),

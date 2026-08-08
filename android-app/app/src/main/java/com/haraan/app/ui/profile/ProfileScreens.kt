@@ -154,6 +154,29 @@ private fun achievementTier(tier: String): BadgeTier = when (tier.lowercase()) {
     else -> BadgeTier.BRONZE
 }
 
+/**
+ * Wording for a missing-field key. The server names the FACT ("foot"); the sentence
+ * lives here, so a label can be reworded without a backend deploy — same split as
+ * the per-sport career cells.
+ */
+private fun completionStepLabel(key: String): String = when (key) {
+    "avatar" -> "Add photo"
+    "state" -> "Set state"
+    "district" -> "Set district"
+    // Cricket
+    "role" -> "Set role"
+    "batting" -> "Batting style"
+    "bowling" -> "Bowling style"
+    // Football
+    "position" -> "Set position"
+    "foot" -> "Strong foot"
+    // Badminton
+    "format" -> "Singles or doubles"
+    "hand" -> "Playing hand"
+    // A key this build has no wording for is better shown readably than dropped.
+    else -> key.replaceFirstChar { it.uppercase() }
+}
+
 /** Derive the gamified layer from REAL profile fields — no invented numbers. */
 private fun deriveExtras(p: PlayerProfile): PlayerExtras {
     val xp = p.rankedXp
@@ -165,15 +188,20 @@ private fun deriveExtras(p: PlayerProfile): PlayerExtras {
         xp >= 200 -> "Prospect"
         else -> "Rookie"
     }
-    val fields = listOf(p.avatar, p.district, p.state, p.playerRole, p.battingStyle, p.bowlingStyle, p.gender, p.dateOfBirth)
-    val filled = fields.count { !it.isNullOrBlank() }
-    val profilePct = filled * 100 / fields.size
-    val steps = buildList {
-        if (p.avatar.isNullOrBlank()) add("Add photo")
-        if (p.playerRole.isNullOrBlank()) add("Set role")
-        if (p.battingStyle.isNullOrBlank()) add("Batting style")
-        if (p.recentMatches.isEmpty()) add("Play a match")
+    // Completion comes from the server, which knows what each SPORT requires. This used
+    // to be worked out here against cricket's fields — so a footballer was asked for a
+    // "Batting style" they cannot set, and capped at 37% however complete they were.
+    // The fallback is the old cricket count, for a server too old to send the block.
+    val profilePct = p.completion?.pct ?: run {
+        val fields = listOf(p.avatar, p.district, p.state, p.playerRole, p.battingStyle, p.bowlingStyle, p.gender, p.dateOfBirth)
+        fields.count { !it.isNullOrBlank() } * 100 / fields.size
     }
+    val steps = p.completion?.missing?.map(::completionStepLabel)
+        ?: buildList {
+            if (p.avatar.isNullOrBlank()) add("Add photo")
+            if (p.playerRole.isNullOrBlank()) add("Set role")
+            if (p.recentMatches.isEmpty()) add("Play a match")
+        }
     // Current win streak = leading run of wins in the (newest-first) recent list.
     val streakWins = p.recentMatches.takeWhile { it.won }.count()
     val chips = buildList {

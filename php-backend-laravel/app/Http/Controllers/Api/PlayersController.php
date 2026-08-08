@@ -142,8 +142,52 @@ final class PlayersController extends Controller
             // you already follow the person you are looking at.
             'social' => $this->socialState($user, $viewer),
 
+            // What this player still has to fill in, in THEIR sport's terms. The app
+            // used to compute this itself against cricket's fields, so a footballer was
+            // asked for a batting style and could never reach 100% however complete
+            // their profile actually was.
+            'profile_completion' => $this->profileCompletion($user),
+
             'recent_matches'  => $recent,
             'achievements'    => $this->buildAchievements($pid, $user),
+        ];
+    }
+
+    /**
+     * How complete this profile is, measured against what the player's OWN sport
+     * requires — {@see User::SPORT_REQUIRED_ATTRS}, the same list
+     * {@see User::isActionboardProfileComplete()} gates on.
+     *
+     * Returns KEYS, not sentences: the app owns the wording so a label can change
+     * without a deploy, exactly as with `sport_career`.
+     *
+     * Deliberately profile FIELDS only. "Play a match" is not a field you can fill in,
+     * and the empty-state card already asks for it — counting it here meant a fully
+     * filled-in profile still read as incomplete.
+     *
+     * @return array<string, mixed>
+     */
+    private function profileCompletion(User $user): array
+    {
+        $attrs = is_array($user->sport_attributes) ? $user->sport_attributes : [];
+
+        // Ordered: identity first, then the sport's own attributes.
+        $checks = [
+            'state'    => filled($user->state),
+            'district' => filled($user->district),
+            'avatar'   => filled($user->avatar),
+        ];
+
+        foreach (User::SPORT_REQUIRED_ATTRS[$user->primary_sport] ?? [] as $key) {
+            $checks[$key] = ! empty($attrs[$key]);
+        }
+
+        $missing = array_keys(array_filter($checks, static fn (bool $ok): bool => ! $ok));
+        $total = count($checks);
+
+        return [
+            'pct' => $total === 0 ? 100 : (int) round((($total - count($missing)) / $total) * 100),
+            'missing' => array_values($missing),
         ];
     }
 
