@@ -46,13 +46,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.haraan.app.ui.theme.HaraanColors
 
-private val Ink = Color(0xFF111827)
-private val Muted = Color(0xFF6B7280)
-private val Faint = Color(0xFF94A3B8)
-private val Accent = Color(0xFF2563EB)
-private val Field = Color(0xFFF1F5F9)
-private val Hairline = Color(0xFFF1F5F9)
+private val Ink = HaraanColors.TextPrimary
+private val Muted = HaraanColors.TextSecondary
+private val Faint = HaraanColors.TextMuted
+private val Accent = HaraanColors.EventsBlue
+private val Field = HaraanColors.Field
+private val Hairline = HaraanColors.Field
 
 /**
  * Find a player by @handle and follow them.

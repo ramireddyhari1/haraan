@@ -36,16 +36,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.haraan.app.ui.theme.HaraanColors
 
-private val Bg = Color(0xFFF1F3F7)
-private val Surface = Color(0xFFFFFFFF)
-private val Ink = Color(0xFF111827)
-private val Muted = Color(0xFF6B7280)
-private val Faint = Color(0xFF9AA0AC)
-private val Blue = Color(0xFF2563EB)
-private val Amber = Color(0xFFF59E0B)
-private val Red = Color(0xFFDC2626)
-private val Hairline = Color(0xFFE9EDF3)
+private val Bg = HaraanColors.Background
+private val Surface = HaraanColors.Surface
+private val Ink = HaraanColors.TextPrimary
+private val Muted = HaraanColors.TextSecondary
+private val Faint = HaraanColors.TextMuted
+private val Blue = HaraanColors.EventsBlue
+private val Amber = HaraanColors.Warning
+private val Red = HaraanColors.Danger
+private val Hairline = HaraanColors.BorderLight
 
 /**
  * Football's match detail screen.

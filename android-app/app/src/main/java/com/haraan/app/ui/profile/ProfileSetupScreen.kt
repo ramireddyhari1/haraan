@@ -78,23 +78,24 @@ import com.haraan.app.data.UsernameCheck
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.haraan.app.ui.theme.HaraanColors
 
 // The canvas is WHITE and the inputs are filled — not the other way round. Previously
 // white fields sat on an #EBEBF0 canvas, so every control read as a separate floating
 // box and the screen looked like a bare form rather than a page. Filled-on-white gives
 // the fields a quiet grouped rhythm and lets the blue accents actually carry.
-private val Bg = Color(0xFFFFFFFF)
-private val Surface = Color(0xFFFFFFFF)
-private val FieldFill = Color(0xFFF4F6FA)
-private val Blue = Color(0xFF2563EB)
-private val Green = Color(0xFF16A34A)
-private val Text1 = Color(0xFF111827)
-private val Text2 = Color(0xFF5A5A6A)
-private val Text3 = Color(0xFF9A9AA8)
-private val Stroke = Color(0xFFE4E8EF)
-private val Track = Color(0xFFE8EBF0)
-private val BlueTint = Color(0xFFEFF4FF)
-private val Disabled = Color(0xFFE9ECF2)
+private val Bg = HaraanColors.Surface
+private val Surface = HaraanColors.Surface
+private val FieldFill = HaraanColors.Background
+private val Blue = HaraanColors.EventsBlue
+private val Green = HaraanColors.Success
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Text3 = HaraanColors.TextMuted
+private val Stroke = HaraanColors.BorderLight
+private val Track = HaraanColors.BorderLight
+private val BlueTint = HaraanColors.AccentTint
+private val Disabled = HaraanColors.BorderLight
 private val DashRing = Color(0xFFC7D0DE)
 
 private val INDIAN_STATES = listOf(

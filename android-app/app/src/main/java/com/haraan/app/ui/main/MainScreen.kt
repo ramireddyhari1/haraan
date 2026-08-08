@@ -240,23 +240,23 @@ private val AccentBlue = Color(0xFF7FB8D8)
 
 private val LightBackground = Color(0xFFF5F5F5)
 private val LightCard = Color.White
-private val LightPrimaryText = Color(0xFF111827)
-private val LightSecondaryText = Color(0xFF6B7280)
-private val LightMutedText = Color(0xFF9CA3AF)
-private val LightDivider = Color(0xFFEEF2F7)
-private val LightAccentBlue = Color(0xFF2563EB)
-private val LightNavIndicator = Color(0xFFF1F5F9)
+private val LightPrimaryText = HaraanColors.TextPrimary
+private val LightSecondaryText = HaraanColors.TextSecondary
+private val LightMutedText = HaraanColors.TextMuted
+private val LightDivider = HaraanColors.Hairline
+private val LightAccentBlue = HaraanColors.EventsBlue
+private val LightNavIndicator = HaraanColors.Field
 
 // Premium Light/Hybrid Color Palette
-private val Midnight = Color(0xFFF8FAFC)        // Slate 50 background
-private val MidnightAlt = Color(0xFFF1F5F9)     // Slate 100 card backgrounds
-private val CardTint = Color(0xFFFFFFFF)        // Card container color
-private val CardStroke = Color(0xFFE2E8F0)      // Slate 200 borders
+private val Midnight = HaraanColors.Background        // Slate 50 background
+private val MidnightAlt = HaraanColors.Field     // Slate 100 card backgrounds
+private val CardTint = HaraanColors.Surface        // Card container color
+private val CardStroke = HaraanColors.BorderLight      // Slate 200 borders
 private val MIBlue = Color(0xFF0F62FE)
-private val MIGreen = Color(0xFF2563EB)
-private val AccentWhite = Color(0xFFFFFFFF)
-private val BorderGray = Color(0xFFE2E8F0)
-private val TextMuted = Color(0xFF64748B)       // Slate 500 secondary text
+private val MIGreen = HaraanColors.EventsBlue
+private val AccentWhite = HaraanColors.Surface
+private val BorderGray = HaraanColors.BorderLight
+private val TextMuted = HaraanColors.TextSecondary       // Slate 500 secondary text
 private val UnifiedCornerRadius = 20.dp
 
 // ─────────────────────────────────────────────────────────────────────────────

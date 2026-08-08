@@ -42,14 +42,15 @@ import com.haraan.app.data.DiscoveredPlayer
 import com.haraan.app.data.DiscoveryOutcome
 import com.haraan.app.ui.pressable
 import kotlinx.coroutines.launch
+import com.haraan.app.ui.theme.HaraanColors
 
 // Mirrors PlayerSearchScreen's palette. Repeated rather than shared because those are
 // file-private there; the two screens are siblings and must not drift apart in colour.
-private val Ink = Color(0xFF111827)
-private val Muted = Color(0xFF6B7280)
-private val Faint = Color(0xFF94A3B8)
-private val Accent = Color(0xFF2563EB)
-private val Field = Color(0xFFF1F5F9)
+private val Ink = HaraanColors.TextPrimary
+private val Muted = HaraanColors.TextSecondary
+private val Faint = HaraanColors.TextMuted
+private val Accent = HaraanColors.EventsBlue
+private val Field = HaraanColors.Field
 
 /** Which side of the graph this screen is showing. */
 enum class FollowRelation(val slug: String, val title: String) {

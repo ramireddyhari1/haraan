@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
 import com.haraan.app.R
 import kotlinx.coroutines.delay
+import com.haraan.app.ui.theme.HaraanColors
 
 /**
  * Stage 2 of the launch experience — the brand moment the system splash hands off to.
@@ -54,7 +55,7 @@ import kotlinx.coroutines.delay
  */
 
 /** The seam colour. Must stay equal to `@color/splash_background`. */
-private val SplashBase = Color(0xFFF5F8FC)
+private val SplashBase = HaraanColors.Background
 private val GhostGrey = Color(0xFFDBE3EF)
 
 // Web parity: cubic-bezier(0.16, 1, 0.3, 1) for the entrance pop and

@@ -96,22 +96,23 @@ import com.haraan.app.data.VenueApiItem
 import com.haraan.app.data.VenueRepository
 import com.haraan.app.data.VenueSlotItem
 import kotlinx.coroutines.launch
+import com.haraan.app.ui.theme.HaraanColors
 
 // ─── Palette: blue + green, light/business feel (file-private) ───────────────────
-private val Bg        = Color(0xFFF4F7FB)
-private val Surface   = Color(0xFFFFFFFF)
+private val Bg        = HaraanColors.Background
+private val Surface   = HaraanColors.Surface
 private val Navy      = Color(0xFF07111F)
 private val NavyMid   = Color(0xFF102B52)
-private val Blue      = Color(0xFF1E3A8A)
-private val BlueBright= Color(0xFF2563EB)
-private val Green     = Color(0xFF00B140)
-private val GreenTint = Color(0xFFE7F7EE)
-private val BlueTint  = Color(0xFFEAF1FE)
-private val Text1     = Color(0xFF0F172A)
-private val Text2     = Color(0xFF5A6473)
-private val Text3     = Color(0xFF9AA3B2)
-private val Stroke    = Color(0xFFE5E9F0)
-private val DangerBg  = Color(0xFFFDECEF)
+private val Blue      = HaraanColors.GameHubDeep
+private val BlueBright= HaraanColors.EventsBlue
+private val Green     = HaraanColors.Success
+private val GreenTint = HaraanColors.SuccessTint
+private val BlueTint  = HaraanColors.AccentTint
+private val Text1     = HaraanColors.TextPrimary
+private val Text2     = HaraanColors.TextSecondary
+private val Text3     = HaraanColors.TextMuted
+private val Stroke    = HaraanColors.BorderLight
+private val DangerBg  = HaraanColors.DangerTint
 private val Danger    = Color(0xFFD23F57)
 
 // The hero — the screen's ONE saturated moment. Navy → blue → green, exactly as the

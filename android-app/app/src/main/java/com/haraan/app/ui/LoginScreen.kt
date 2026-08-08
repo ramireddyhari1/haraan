@@ -77,6 +77,7 @@ import com.haraan.app.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import com.haraan.app.ui.theme.HaraanColors
 
 @Composable
 fun LoginRoute(
@@ -145,18 +146,18 @@ fun LoginRoute(
 // Palette — content lives on a white card; the card floats over a full-bleed,
 // slowly-zooming hero image with a soft scrim.
 private val Ink = Color(0xFF0A0E14)
-private val Accent = Color(0xFF2563EB)
-private val Text1 = Color(0xFF0F172A)
-private val Text2 = Color(0xFF475569)
-private val Text3 = Color(0xFF94A3B8)
-private val Stroke = Color(0xFFE2E8F0)
-private val FieldBg = Color(0xFFF8FAFC)
+private val Accent = HaraanColors.EventsBlue
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Text3 = HaraanColors.TextMuted
+private val Stroke = HaraanColors.BorderLight
+private val FieldBg = HaraanColors.Background
 private val FrostFill = Color.White.copy(alpha = 0.16f)
 private val FrostBorder = Color.White.copy(alpha = 0.30f)
-private val Danger = Color(0xFFDC2626)
+private val Danger = HaraanColors.Danger
 // Green is reserved for the committed/done state — blue stays the "act now" colour.
-private val Success = Color(0xFF16A34A)
-private val SuccessTint = Color(0xFFE7F7EC)
+private val Success = HaraanColors.Success
+private val SuccessTint = HaraanColors.SuccessTint
 
 // ── Type scale ────────────────────────────────────────────────────────────────
 // Three sizes, three weights. The premium read on this screen comes from using

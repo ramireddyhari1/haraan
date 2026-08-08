@@ -30,11 +30,12 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.haraan.app.data.ApiConfig
 import com.haraan.app.data.DiscoveredPlayer
+import com.haraan.app.ui.theme.HaraanColors
 
-private val Ink = Color(0xFF111827)
-private val Muted = Color(0xFF6B7280)
-private val Accent = Color(0xFF2563EB)
-private val Hairline = Color(0xFFF1F5F9)
+private val Ink = HaraanColors.TextPrimary
+private val Muted = HaraanColors.TextSecondary
+private val Accent = HaraanColors.EventsBlue
+private val Hairline = HaraanColors.Field
 
 /**
  * One player in the directory.

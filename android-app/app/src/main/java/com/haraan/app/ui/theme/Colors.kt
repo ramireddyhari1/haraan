@@ -46,6 +46,18 @@ object HaraanColors {
     val AccentTint = Color(0xFFEAF1FE)        // Quiet blue well behind accent text
     val Hairline = Color(0xFFEDF1F6)          // Lighter than BorderLight, for internal rules
 
+    /** Inert well: search fields, icon buttons, unselected chips. */
+    val Field = Color(0xFFF1F5F9)
+
+    /** Attention, not failure — expiring, pending, "needs a look". */
+    val Warning = Color(0xFFF59E0B)
+    val WarningTint = Color(0xFFFFF6D5)
+
+    /** Failure: validation errors, destructive confirmation. Distinct from LiveRed,
+     *  which means a match is in progress and must not read as an error. */
+    val Danger = Color(0xFFDC2626)
+    val DangerTint = Color(0xFFFDECEF)
+
     /**
      * Player tiers. A progression you can read at a glance — Rookie is deliberately
      * NEUTRAL so later tiers mean something by contrast. "ROOKIE" in a saturated

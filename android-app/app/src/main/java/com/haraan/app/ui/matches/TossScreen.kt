@@ -71,19 +71,20 @@ import com.haraan.app.data.TokenStore
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.random.Random
+import com.haraan.app.ui.theme.HaraanColors
 
 // ── palette (mirrors the create-flow tokens) ──
-private val TossBg = Color(0xFFEBEBF0)
-private val TossSurface = Color(0xFFFFFFFF)
-private val TossBlue = Color(0xFF2563EB)
-private val TossGreen = Color(0xFF16A34A)
-private val TossAmber = Color(0xFFF59E0B)
-private val TossText1 = Color(0xFF111827)
-private val TossText2 = Color(0xFF5A5A6A)
-private val TossText3 = Color(0xFF9A9AA8)
-private val TossStroke = Color(0xFFE2E8F0)
+private val TossBg = HaraanColors.Background
+private val TossSurface = HaraanColors.Surface
+private val TossBlue = HaraanColors.EventsBlue
+private val TossGreen = HaraanColors.Success
+private val TossAmber = HaraanColors.Warning
+private val TossText1 = HaraanColors.TextPrimary
+private val TossText2 = HaraanColors.TextSecondary
+private val TossText3 = HaraanColors.TextMuted
+private val TossStroke = HaraanColors.BorderLight
 // Gold coin tones — a warm metallic that reads as "celebration", not "disabled grey".
-private val CoinHi = Color(0xFFFFF6D5)   // top highlight
+private val CoinHi = HaraanColors.WarningTint   // top highlight
 private val CoinMid = Color(0xFFF4C24B)  // brass body
 private val CoinLo = Color(0xFFB07A16)   // shaded edge
 private val CoinRim = Color(0xFFC9950F)  // rim ring

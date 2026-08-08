@@ -40,16 +40,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import com.haraan.app.ui.theme.HaraanColors
 
 // Palette mirrors the CREX light theme used across the create wizard / scorers.
-private val Bg = Color(0xFFEBEBF0)
-private val Surface = Color(0xFFFFFFFF)
-private val Blue = Color(0xFF2563EB)
-private val Green = Color(0xFF16A34A)
-private val Text1 = Color(0xFF111827)
-private val Text2 = Color(0xFF5A5A6A)
-private val Text3 = Color(0xFF9A9AA8)
-private val Stroke = Color(0xFFE2E8F0)
+private val Bg = HaraanColors.Background
+private val Surface = HaraanColors.Surface
+private val Blue = HaraanColors.EventsBlue
+private val Green = HaraanColors.Success
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Text3 = HaraanColors.TextMuted
+private val Stroke = HaraanColors.BorderLight
 
 /** What the badminton scorer needs to open (mirrors [FootballScorerSetup]). */
 data class BadmintonScorerSetup(
