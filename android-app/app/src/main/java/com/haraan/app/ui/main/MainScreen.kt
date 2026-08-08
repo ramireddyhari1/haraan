@@ -228,6 +228,8 @@ import com.haraan.app.ui.components.HaraanCard
 import com.haraan.app.ui.components.HaraanImage
 import com.haraan.app.ui.animations.pressScale
 import com.haraan.app.ui.animations.haraanShimmer
+import com.haraan.app.ui.pressable
+import androidx.compose.material.icons.filled.ChatBubble
 
 private val Maroon = Color(0xFF7A1D2A)
 private val DeepMaroon = Color(0xFF4D1019)
@@ -622,7 +624,8 @@ internal fun MainAppContainer(
         onHomeClick = {
           showActionBoardDetail = false
           activeSubTab = "GameHub"
-        }
+        },
+        onOpenChat = { onItemClick(com.haraan.app.SupportChat) },
       )
     } else {
       val isGameHubTab = (selectedTab == 0 && activeSubTab == "GameHub")
@@ -3441,8 +3444,9 @@ private fun DistrictActionBoardScreen(
   onMatchClick: (String) -> Unit,
   onHomeClick: () -> Unit,
   onJoinByCode: (String) -> Unit = {},
+  onOpenChat: () -> Unit = {},
 ) {
-  CrexMatchesScreen(onBack, onMatchClick, onHomeClick, onJoinByCode)
+  CrexMatchesScreen(onBack, onMatchClick, onHomeClick, onJoinByCode, onOpenChat)
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -3452,6 +3456,7 @@ private fun CrexMatchesScreen(
   onMatchClick: (String) -> Unit,
   onHomeClick: () -> Unit,
   onJoinByCode: (String) -> Unit = {},
+  onOpenChat: () -> Unit = {},
 ) {
   val view = LocalView.current
 
@@ -3464,8 +3469,11 @@ private fun CrexMatchesScreen(
   }
 
   val bg = LightBackground
-  var selectedSport by remember { mutableStateOf("Cricket") }
+  // "All" now, not "Cricket": sport is a filter and the honest default is everything.
+  var selectedSport by remember { mutableStateOf("All") }
   var selectedTab by remember { mutableStateOf(0) }
+  // Alerts open as a sheet over the board, the same one the header bell used.
+  var showAlerts by remember { mutableStateOf(false) }
   var showCreateWizard by remember { mutableStateOf(false) }
   // Which follower/following list is open, if any: (playerId, relation, display name).
   // The endpoints shipped with the original follow work and nothing ever opened them.
@@ -3611,9 +3619,12 @@ private fun CrexMatchesScreen(
     contentWindowInsets = WindowInsets(0),
     bottomBar = {
       CrexBottomBar(
-        selectedSport = selectedSport,
-        onSportSelected = { selectedSport = it },
+        // The board IS the Matches destination, so that slot is always the active one.
+        current = "Matches",
         onHomeClick = onHomeClick,
+        onMatchesClick = { scope.launch { listState.animateScrollToItem(0) } },
+        onChatClick = onOpenChat,
+        onAlertsClick = { showAlerts = true },
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
         onOthersClick = { requireRankedAccess { showProfile = true } }
@@ -3653,6 +3664,16 @@ private fun CrexMatchesScreen(
             selectedTab = selectedTab,
             onTabSelected = { selectedTab = it }
           )
+          // Sport is a FILTER over the list, not a destination — it used to occupy
+          // three primary nav slots. Shown only on Live/Finished: District and State
+          // are leaderboards that do not filter by sport, and a chip row that did
+          // nothing there would be a dead control.
+          if (selectedTab <= 1) {
+            SportFilterRow(
+              selected = selectedSport,
+              onSelected = { selectedSport = it },
+            )
+          }
         }
 
       LazyColumn(
@@ -3667,36 +3688,31 @@ private fun CrexMatchesScreen(
       ) {
         if (selectedTab == 0) {
           // ── LIVE: in-progress matches first, then what's coming up ──
-          when (selectedSport) {
-            "Cricket" -> {
-              // ONE list, already ranked by the server: starred → nearest → live →
-              // freshest. Splitting it into sections was the thing making curation
-              // and locality compete for the same slot; the ⭐ on the card carries
-              // "an admin picked this" without costing a heading.
-              when {
-                liveFeed == null -> item { GameHubFeedSkeleton() }
-                liveFeed!!.isEmpty() -> item {
-                  Box(modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                    Text("No matches yet", color = Color(0xFF94A3B8), fontSize = 13.sp)
-                  }
-                }
-                else -> {
-                  item { CrexLeagueTitle("Matches near you") }
-                  item { LiveFeedGroup(rows = liveFeed!!, onMatchClick = onMatchClick) }
-                  item { Spacer(modifier = Modifier.height(8.dp)) }
-                }
-              }
-            }
+          //
+          // Sport is a FILTER over the one ranked feed, not a switch. This used to be
+          // `when (selectedSport) { "Cricket" -> feed; else -> empty }`, which was only
+          // ever right because the bottom bar defaulted to Cricket — the moment sport
+          // became a filter with an "All" default, every match vanished.
+          val sportFeed = liveFeed?.let { rows ->
+            if (selectedSport == "All") rows
+            else rows.filter { it.sport.equals(selectedSport, ignoreCase = true) }
+          }
+          // ONE list, already ranked by the server: starred → nearest → live →
+          // freshest. The ⭐ on the card carries "an admin picked this" without
+          // costing a heading.
+          when {
+            sportFeed == null -> item { GameHubFeedSkeleton() }
+            sportFeed.isEmpty() -> item { CrexTabEmpty(emptyLiveLabel(selectedSport)) }
             else -> {
-              // Only Cricket has a real live feed today. Other sports show an honest
-              // empty state instead of fabricated pro fixtures.
-              item { CrexTabEmpty("No live $selectedSport matches yet") }
+              item { CrexLeagueTitle("Matches near you") }
+              item { LiveFeedGroup(rows = sportFeed, onMatchClick = onMatchClick) }
+              item { Spacer(modifier = Modifier.height(8.dp)) }
             }
           }
         } else if (selectedTab == 1) {
           // ── FINISHED: completed results only. No real finished-match feed is wired
           // yet, so every sport shows an honest empty state (no demo results). ──
-          item { CrexTabEmpty("No finished $selectedSport matches yet") }
+          item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
         } else if (selectedTab == 2) {
           districtSummary?.let { summary ->
             item { DistrictHomeCard(summary) }
@@ -4055,6 +4071,11 @@ private fun CrexMatchesScreen(
         onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
         modifier = Modifier.statusBarsPadding(),
       )
+    }
+
+    // Alerts — the same inbox the header bell opened, now a primary destination.
+    if (showAlerts) {
+      NotificationsSheet(onDismiss = { showAlerts = false })
     }
 
     // Follower / following list, opened from a profile's counts. MUST come after the
@@ -6996,20 +7017,99 @@ private fun CrexUpcomingMatchCard(
   }
 }
 
+/**
+ * Empty-state wording for the board. The filter value must not leak into the
+ * sentence: with the "All" chip active the old string read "No live All matches yet".
+ */
+private fun emptyLiveLabel(sport: String): String =
+  if (sport == "All") "No live matches right now" else "No live $sport matches right now"
+
+private fun emptyFinishedLabel(sport: String): String =
+  if (sport == "All") "No finished matches yet" else "No finished $sport matches yet"
+
+/**
+ * Sport filter for the board. Was three slots in the PRIMARY navigation, which made
+ * "which sport" a place you go rather than a lens on one list — and pushed Chat and
+ * Alerts out of reach behind header icons.
+ *
+ * "All" leads because the honest default is everything; a player who only cares about
+ * one sport picks it once and the list obeys inside whichever tab they are on.
+ */
+@Composable
+private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
+  val sports = listOf(
+    "All" to null,
+    "Cricket" to Icons.Filled.SportsCricket,
+    "Football" to Icons.Filled.SportsFootball,
+    "Badminton" to Icons.Filled.SportsTennis,
+  )
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .horizontalScroll(rememberScrollState())
+      .padding(horizontal = 16.dp, vertical = 10.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    sports.forEach { (label, icon) ->
+      val isSel = label == selected
+      Row(
+        modifier = Modifier
+          .pressable { onSelected(label) }
+          .clip(RoundedCornerShape(20.dp))
+          .background(if (isSel) HaraanColors.EventsBlue else Color.White)
+          .border(
+            1.dp,
+            if (isSel) HaraanColors.EventsBlue else HaraanColors.BorderLight,
+            RoundedCornerShape(20.dp),
+          )
+          .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (icon != null) {
+          Icon(
+            icon,
+            contentDescription = null,
+            tint = if (isSel) Color.White else HaraanColors.TextSecondary,
+            modifier = Modifier.size(15.dp),
+          )
+          Spacer(Modifier.width(6.dp))
+        }
+        Text(
+          label,
+          color = if (isSel) Color.White else HaraanColors.TextPrimary,
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+        )
+      }
+    }
+  }
+}
+
 @Composable
 private fun CrexBottomBar(
-  selectedSport: String,
-  onSportSelected: (String) -> Unit,
+  /** The destination currently on screen — "Matches" while the board is up. */
+  current: String,
   onHomeClick: () -> Unit,
+  onMatchesClick: () -> Unit = {},
+  onChatClick: () -> Unit = {},
+  onAlertsClick: () -> Unit = {},
   onOthersClick: () -> Unit = {}
 ) {
-  // (label, filled icon, outlined icon) — outline when idle, filled when active, one
-  // coherent family; "Player" opens the player's own profile (Person metaphor).
+  // Primary navigation — DESTINATIONS, not filters.
+  //
+  // Three of these five slots used to be sports (Cricket / Badminton / Football),
+  // which made the app's top-level structure "which sport am I looking at" and left
+  // Chat and Alerts buried behind header icons. Sport is a filter over one list, not
+  // a place you go, so it moved into the board as a chip row; the freed slots now
+  // carry the things a player actually returns for.
+  //
+  // (label, filled icon, outlined icon) — outline when idle, filled when active.
   val items = listOf(
     Triple("Home", Icons.Filled.Home, Icons.Outlined.Home),
-    Triple("Cricket", Icons.Filled.SportsCricket, Icons.Outlined.SportsCricket),
-    Triple("Badminton", Icons.Filled.SportsTennis, Icons.Outlined.SportsTennis),
-    Triple("Football", Icons.Filled.SportsFootball, Icons.Outlined.SportsFootball),
+    Triple("Matches", Icons.Filled.SportsCricket, Icons.Outlined.SportsCricket),
+    Triple("Chat", Icons.Filled.ChatBubble, Icons.Outlined.ChatBubbleOutline),
+    Triple("Alerts", Icons.Filled.Notifications, Icons.Outlined.Notifications),
     Triple("Player", Icons.Filled.Person, Icons.Outlined.Person),
   )
 
@@ -7042,7 +7142,7 @@ private fun CrexBottomBar(
     verticalAlignment = Alignment.CenterVertically,
   ) {
     items.forEach { (label, filledIcon, outlinedIcon) ->
-      val isSelected = label == selectedSport
+      val isSelected = label == current
       // Springy scale + lift on the active icon — the bit of motion that reads premium.
       val sel by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0f,
@@ -7061,8 +7161,10 @@ private fun CrexBottomBar(
           ) {
             when (label) {
               "Home" -> onHomeClick()
-              "Player" -> onOthersClick()
-              else -> onSportSelected(label)
+              "Matches" -> onMatchesClick()
+              "Chat" -> onChatClick()
+              "Alerts" -> onAlertsClick()
+              else -> onOthersClick()
             }
           },
         horizontalAlignment = Alignment.CenterHorizontally,
