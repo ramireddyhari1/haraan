@@ -319,11 +319,15 @@ data class SportSpec(
             showPlayersStepper = false,
         )
 
-        fun forKey(sport: String): SportSpec = when (sport.lowercase()) {
-            "football" -> Football
-            "badminton" -> Badminton
-            else -> Cricket
-        }
+        /**
+         * Every sport that can be created AND scored end to end. The sport step offers
+         * exactly these, which is why the wizard no longer needs a "coming soon" gate:
+         * an unsupported sport can't be chosen in the first place.
+         */
+        val supported: List<SportSpec> = listOf(Cricket, Football, Badminton)
+
+        fun forKey(sport: String): SportSpec =
+            supported.firstOrNull { it.key == sport.lowercase() } ?: Cricket
     }
 }
 
@@ -437,24 +441,23 @@ fun CreateMatchWizard(
     onCreate: (CreateMatchDraft) -> Unit,
     searchPlayers: suspend (query: String) -> List<PlayerLite> = { emptyList() },
     loadBookings: suspend () -> List<com.haraan.app.data.BookingLite> = { emptyList() },
-    // The sport the creator picked on the ActionBoard tab. Only Cricket has a full
-    // create/toss/scorer flow today; any other sport is shown an honest "coming soon"
-    // gate so it can never silently be created as a cricket match.
+    /**
+     * The tab the creator pressed Create from. It PRE-SELECTS the sport step rather
+     * than locking it: opening from the Cricket tab and being unable to make anything
+     * but a cricket match was the complaint, but making everyone choose from scratch
+     * would tax the common case. So the common path is one extra tap, not one extra
+     * decision — and the choice is visible and changeable.
+     */
     sport: String = "Cricket",
     modifier: Modifier = Modifier,
 ) {
-    // Cricket, Football and Badminton are wired end-to-end (cricket → toss + keypad,
-    // football → clock + goal scorer, badminton → points/games scorer). Anything else
-    // still gates here rather than falling through and persisting a mislabelled match.
-    val key = sport.lowercase()
-    if (key != "cricket" && key != "football" && key != "badminton") {
-        SportComingSoon(sport = sport, onDismiss = onDismiss, modifier = modifier)
-        return
-    }
+    // Now wizard state, not a parameter: changing it rebuilds the draft, because
+    // format and players-per-side only mean anything within a sport.
+    var sportKey by remember { mutableStateOf(SportSpec.forKey(sport).key) }
 
-    val draft = remember(key) { CreateMatchDraft(key) }
+    val draft = remember(sportKey) { CreateMatchDraft(sportKey) }
     var step by remember { mutableStateOf(0) }
-    val lastStep = 3
+    val lastStep = 4
 
     // System Back must do exactly what the top bar's ← does. Until this existed the
     // press fell through to the Activity and closed the app mid-wizard, discarding
@@ -490,9 +493,10 @@ fun CreateMatchWizard(
             label = "wizardStep",
         ) { s ->
             when (s) {
-                0 -> StepType(draft)
-                1 -> StepRules(draft, loadBookings)
-                2 -> StepTeams(draft, searchPlayers)
+                0 -> StepSport(selected = sportKey, onSelect = { sportKey = it })
+                1 -> StepType(draft)
+                2 -> StepRules(draft, loadBookings)
+                3 -> StepTeams(draft, searchPlayers)
                 else -> StepReview(draft)
             }
         }
@@ -509,92 +513,79 @@ fun CreateMatchWizard(
     }
 }
 
+// ─────────────────────────────────────────────────────── Step 1 · Sport ────────
 /**
- * Gate shown when a creator taps "Create" on a non-cricket ActionBoard tab. Cricket is the
- * only sport with a full toss + scorer + feed today; rather than silently produce a cricket
- * match, we say so plainly and send them back. Removing this branch (and wiring a real
- * per-sport create) is the follow-up once each sport has its own scorer flow.
+ * Which sport this is. Replaces the old "coming soon" gate outright: the picker only
+ * offers sports that can be created AND scored end to end, so an unsupported one can
+ * no longer be reached, let alone silently persisted as cricket.
+ *
+ * Arrives pre-selected from the tab you pressed Create on, so the usual path is a
+ * single Continue. Changing it here rebuilds the draft with that sport's own defaults
+ * — nothing has been entered yet at this point, so nothing is lost.
  */
 @Composable
-private fun SportComingSoon(sport: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Bg)
+private fun StepSport(selected: String, onSelect: (String) -> Unit) {
+    StepScaffold(
+        title = "What are you playing?",
+        subtitle = "Everything after this — the format, the sides, the scorer — follows from this.",
     ) {
-        WizardTopBar(
-            step = 0,
-            total = 1,
-            onBack = onDismiss,
-            onClose = onDismiss,
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(CircleShape)
-                    .background(Blue.copy(alpha = 0.10f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.SportsCricket,
-                    contentDescription = null,
-                    tint = Blue,
-                    modifier = Modifier.size(40.dp),
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "$sport is coming soon",
-                color = Text1,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Live scoring for $sport isn't ready yet. Right now only Cricket matches can be created and scored on the ActionBoard.",
-                color = Text3,
-                fontSize = 14.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                lineHeight = 20.sp,
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(Surface)
-                .navigationBarsPadding()
-                .padding(16.dp)
-        ) {
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
-            ) {
-                Text("Got it", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
+        SportSpec.supported.forEachIndexed { i, spec ->
+            if (i > 0) Spacer(Modifier.height(12.dp))
+            SportCard(spec = spec, selected = spec.key == selected, onClick = { onSelect(spec.key) })
         }
     }
 }
 
+@Composable
+private fun SportCard(spec: SportSpec, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pressable(onClick = onClick)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) BlueTint else Surface)
+            .border(
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
+                RoundedCornerShape(16.dp),
+            )
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (selected) Blue.copy(alpha = 0.12f) else Bg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(spec.icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(spec.displayName, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(2.dp))
+            // The formats it offers — concrete, so the choice is about the game rather
+            // than the word.
+            Text(
+                spec.presets.joinToString(" · ") { it.label },
+                color = Text2,
+                fontSize = 13.sp,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        SelectDot(selected)
+    }
+}
+
+// Step indices: 0 sport · 1 type · 2 rules · 3 teams · 4 review.
 private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
     // A public match needs BOTH a GPS fix (so it can be found by distance) and a
     // readable place name (so the card means something). Private matches never
     // reach a feed, so neither is required there.
-    1 -> formatComplete(d.format) && d.playersPerSide > 0 &&
+    2 -> formatComplete(d.format) && d.playersPerSide > 0 &&
         (d.isPrivate || (d.latitude != null && d.longitude != null && d.locality.trim().length >= 2))
-    2 -> d.teamA.isNotBlank() && d.teamB.isNotBlank()
+    3 -> d.teamA.isNotBlank() && d.teamB.isNotBlank()
     else -> true
 }
 
@@ -618,14 +609,14 @@ private fun formatMissingLabel(f: MatchFormat): String = when (f) {
 }
 
 private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
-    1 -> when {
+    2 -> when {
         !formatComplete(d.format) -> formatMissingLabel(d.format)
         d.playersPerSide <= 0 -> "players per side"
         !d.isPrivate && (d.latitude == null || d.longitude == null) -> "your match location"
         !d.isPrivate && d.locality.trim().length < 2 -> "the area or village"
         else -> null
     }
-    2 -> when {
+    3 -> when {
         d.teamA.isBlank() -> "a name for ${d.sideLabel(0)}"
         d.teamB.isBlank() -> "a name for ${d.sideLabel(1)}"
         else -> null
