@@ -38,6 +38,18 @@ sealed class UsernameCheck {
   object Unknown : UsernameCheck()
 }
 
+/**
+ * One career figure — a real number with the word the sport actually uses for it.
+ *
+ * Modelled as a list rather than fixed fields because sports genuinely have
+ * different numbers of them: cricket has three, football three, badminton one.
+ * A sport with no per-player record contributes FEWER cells rather than a zero
+ * standing in for a stat nobody tracks.
+ */
+data class CareerStat(val label: String, val value: Int)
+
+data class SportCareer(val sport: String, val stats: List<CareerStat>)
+
 data class PlayerProfile(
   val id: Int,
   val playerId: String,
@@ -57,6 +69,12 @@ data class PlayerProfile(
   val careerMatches: Int,
   val careerRuns: Int,
   val careerWickets: Int,
+  /**
+   * Career in the player's OWN sport. The three fields above are cricket's — a
+   * footballer's profile was advertising runs and wickets that could only ever
+   * read zero. Null only for a server too old to send the block.
+   */
+  val sportCareer: SportCareer? = null,
   val profileComplete: Boolean,
   val recentMatches: List<RecentMatch>,
   val achievements: List<AchievementDto> = emptyList(),
@@ -158,6 +176,29 @@ class ProfileRepository(
     }
   }
 
+  /**
+   * Turns the server's semantic career block into ordered, labelled cells.
+   *
+   * The server sends facts (`goals`, `wickets`); the wording lives here so the app
+   * controls how a stat reads without a deploy. A key the server omitted is a stat
+   * that sport does not record — it is skipped, never rendered as a zero.
+   */
+  private fun parseSportCareer(json: JSONObject?): SportCareer? {
+    if (json == null) return null
+    val sport = json.optString("sport", "cricket").ifBlank { "cricket" }
+
+    val order = when (sport.lowercase()) {
+      "football" -> listOf("matches" to "Matches", "goals" to "Goals", "assists" to "Assists")
+      "badminton" -> listOf("matches" to "Matches")
+      else -> listOf("matches" to "Matches", "runs" to "Runs", "wickets" to "Wickets")
+    }
+
+    val stats = order.mapNotNull { (key, label) ->
+      if (json.has(key)) CareerStat(label, json.optInt(key, 0)) else null
+    }
+    return SportCareer(sport = sport.lowercase(), stats = stats)
+  }
+
   private fun parseProfile(json: JSONObject): PlayerProfile {
     val recent = mutableListOf<RecentMatch>()
     val arr = json.optJSONArray("recent_matches")
@@ -214,6 +255,7 @@ class ProfileRepository(
       careerMatches = json.optJSONObject("career")?.optInt("matches", 0) ?: 0,
       careerRuns = json.optJSONObject("career")?.optInt("runs", 0) ?: 0,
       careerWickets = json.optJSONObject("career")?.optInt("wickets", 0) ?: 0,
+      sportCareer = parseSportCareer(json.optJSONObject("sport_career")),
       profileComplete = json.optBoolean("profile_complete", false),
       recentMatches = recent,
       achievements = achievements,

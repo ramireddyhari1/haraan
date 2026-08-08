@@ -54,7 +54,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalView
+import com.haraan.app.ui.Feel
+import com.haraan.app.ui.pressable
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -505,17 +510,30 @@ fun PlayerProfileScreen(
     onBack: () -> Unit,
     fetchProfile: suspend () -> PlayerProfile,
     modifier: Modifier = Modifier,
+    /**
+     * Opens the create-match flow from the empty state. Null when this is somebody
+     * ELSE's profile — which also switches the empty-state copy, since you cannot
+     * play another player's first match for them.
+     */
+    /** True when this is the signed-in player's own profile. */
+    isSelf: Boolean = false,
+    onCreateMatch: (() -> Unit)? = null,
 ) {
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey) {
-        state = ProfileState.Loading
+        // Only blank to a spinner on the FIRST load. A pull-to-refresh keeps the
+        // profile on screen and lets the refresh indicator do the talking —
+        // otherwise pulling down throws away the thing you were looking at.
+        if (state !is ProfileState.Loaded) state = ProfileState.Loading
         state = try {
             ProfileState.Loaded(fetchProfile())
         } catch (e: Exception) {
             ProfileState.Error(e.message ?: "Unable to load profile.")
         }
+        refreshing = false
     }
 
     Column(
@@ -533,22 +551,49 @@ fun PlayerProfileScreen(
                     Spacer(Modifier.height(12.dp))
                     Box(
                         Modifier
+                            .pressable { reloadKey++ }
                             .clip(RoundedCornerShape(10.dp))
                             .background(BlueBright)
-                            .clickable { reloadKey++ }
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                     ) { Text("Retry", color = Color.White, fontWeight = FontWeight.Bold) }
                 }
             }
-            is ProfileState.Loaded -> ProfileContent(s.profile, deriveExtras(s.profile))
+            is ProfileState.Loaded -> ProfileContent(
+                s.profile,
+                deriveExtras(s.profile),
+                refreshing = refreshing,
+                onRefresh = { refreshing = true; reloadKey++ },
+                isSelf = isSelf,
+                onCreateMatch = onCreateMatch,
+            )
         }
     }
 }
 
 @Composable
-private fun ProfileContent(p: PlayerProfile, e: PlayerExtras) {
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun ProfileContent(
+    p: PlayerProfile,
+    e: PlayerExtras,
+    // A rank and an XP total change while you are looking at them. Until now the only
+    // way to re-fetch was to force an error and hit Retry. Both hoisted to the caller,
+    // which owns the fetch and so is the only thing that knows when it finished.
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    isSelf: Boolean = false,
+    onCreateMatch: (() -> Unit)? = null,
+) {
     val clipboard = LocalClipboardManager.current
     var showShare by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            view.performHapticFeedback(Feel.TICK)
+            onRefresh()
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -556,19 +601,29 @@ private fun ProfileContent(p: PlayerProfile, e: PlayerExtras) {
         // Identity — photo, tier, level, trust+ID (each fact appears once, only here).
         item { HeroCard(p, e, onCopyId = { clipboard.setText(AnnotatedString(p.playerId)) }, onShare = { showShare = true }) }
 
-        // Signature — the district rank as the screen's dominant number.
-        item { Spacer(Modifier.height(14.dp)); DistrictRankCard(p) }
+        val played = hasAnyHistory(p)
 
-        // Career stats (real) — matches / runs / wickets / rank, with count-up.
-        item { Spacer(Modifier.height(14.dp)); SectionTitle("Career"); Spacer(Modifier.height(12.dp)); StatRow(p) }
+        if (!played) {
+            // One purposeful card instead of a rank that says "Unranked", a stat strip
+            // of zeros, an XP card at 0 and an empty match list.
+            item { Spacer(Modifier.height(14.dp)); FirstMatchCard(p, isSelf, onCreateMatch) }
+        } else {
+            // Signature — the district rank as the screen's dominant number.
+            item { Spacer(Modifier.height(14.dp)); DistrictRankCard(p) }
+
+            // Career stats (real) — per-sport cells + rank, with count-up.
+            item { Spacer(Modifier.height(14.dp)); SectionTitle("Career"); Spacer(Modifier.height(12.dp)); StatRow(p) }
+        }
 
         // Recent form (real) — last five results as a W/L guide.
         if (p.recentMatches.isNotEmpty()) {
             item { Spacer(Modifier.height(20.dp)); SectionTitle("Recent form"); Spacer(Modifier.height(12.dp)); RecentForm(p.recentMatches) }
         }
 
-        // XP (real).
-        item { Spacer(Modifier.height(20.dp)); SectionTitle("Experience"); Spacer(Modifier.height(12.dp)); XpCard(p) }
+        // XP (real). Folded into the first-match card while there is none.
+        if (played) {
+            item { Spacer(Modifier.height(20.dp)); SectionTitle("Experience"); Spacer(Modifier.height(12.dp)); XpCard(p) }
+        }
 
         // Recognition (real chips) — only when the player has earned any.
         if (e.chips.isNotEmpty()) {
@@ -586,11 +641,12 @@ private fun ProfileContent(p: PlayerProfile, e: PlayerExtras) {
             item { Spacer(Modifier.height(12.dp)); Achievements(e.achievements) }
         }
 
-        item { Spacer(Modifier.height(24.dp)); SectionTitle("Recent matches") }
-        item { Spacer(Modifier.height(12.dp)) }
-        if (p.recentMatches.isEmpty()) {
-            item { Text("No settled matches yet.", color = Text3, fontSize = 14.sp) }
-        } else {
+        // Only worth a heading once there is something under it — an empty "Recent
+        // matches / No settled matches yet" was the fourth way this screen told a new
+        // player they had nothing.
+        if (p.recentMatches.isNotEmpty()) {
+            item { Spacer(Modifier.height(24.dp)); SectionTitle("Recent matches") }
+            item { Spacer(Modifier.height(12.dp)) }
             items(p.recentMatches.size) { i ->
                 RecentMatchRow(p.recentMatches[i])
                 Spacer(Modifier.height(8.dp))
@@ -598,8 +654,92 @@ private fun ProfileContent(p: PlayerProfile, e: PlayerExtras) {
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
+    }
 
     if (showShare) ShareCardSheet(p, e, onDismiss = { showShare = false })
+}
+
+/**
+ * Has this player actually done anything yet?
+ *
+ * Matters because the profile was designed for someone with a season behind them,
+ * and almost nobody is: a new player was shown "Unranked", 0 matches, 0 runs,
+ * 0 wickets, — rank, 0 XP and "No settled matches yet" — six separate ways of
+ * saying *you have nothing*, with no route out of it.
+ */
+private fun hasAnyHistory(p: PlayerProfile): Boolean {
+    val matches = p.sportCareer?.stats?.firstOrNull { it.label == "Matches" }?.value ?: p.careerMatches
+    return matches > 0 || p.recentMatches.isNotEmpty() || p.rankDistrict != null || p.rankedXp > 0
+}
+
+/**
+ * The one card a brand-new player sees in place of the zeros. States plainly what
+ * fills the profile in, and — on your own profile — offers the action that does it.
+ *
+ * [isSelf] drives the copy and [onCreateMatch] the button, and they are deliberately
+ * SEPARATE: this screen is opened for your own profile from two different places, and
+ * only one of them sits in a scope that can open the create-match flow. Deriving
+ * "is this me" from the callback put "hasn't completed a match" on your own profile.
+ */
+@Composable
+private fun FirstMatchCard(p: PlayerProfile, isSelf: Boolean, onCreateMatch: (() -> Unit)?) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(20.dp))
+            .padding(20.dp),
+    ) {
+        Text(
+            if (isSelf) "Play your first match" else "No matches yet",
+            color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (isSelf) {
+                "Your rank, career figures and XP all start the moment a match you played " +
+                    "is completed and both captains confirm the result."
+            } else {
+                "${p.name.ifBlank { "This player" }} hasn't completed a match on Haraan yet, " +
+                    "so there's nothing to rank."
+            },
+            color = Text2, fontSize = 14.sp, lineHeight = 20.sp,
+        )
+
+        if (isSelf) {
+            // The ladder, so "nothing yet" still shows a next rung rather than a void.
+            Spacer(Modifier.height(16.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(BlueTint)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Level 1", color = BlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("250 XP to Level 2", color = BlueBright.copy(alpha = 0.8f), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+        }
+
+        if (onCreateMatch != null) {
+            Spacer(Modifier.height(16.dp))
+            // Blue: this moves you forward. Green is reserved for something landing.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable { onCreateMatch() }
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(BlueBright)
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Create a match", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }
 
 /** Count-up number — the big stats animate to their value instead of snapping in. */
@@ -770,8 +910,9 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, on
             }
             Column(horizontalAlignment = Alignment.End) {
                 Box(
-                    Modifier.size(32.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f))
-                        .clickable(onClick = onShare),
+                    Modifier.size(32.dp)
+                        .pressable(onClick = onShare)
+                        .clip(CircleShape).background(Color.White.copy(alpha = 0.16f)),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Default.Share, "Share card", tint = Color.White, modifier = Modifier.size(16.dp)) }
                 Spacer(Modifier.height(8.dp))
@@ -781,18 +922,34 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, on
                 ) {
                     Text("LVL ${e.level}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
                 }
-                Spacer(Modifier.height(5.dp))
-                Text("${e.profilePct}% complete", color = Color.White.copy(alpha = 0.85f), fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                // Only worth saying while there is something left to do. At 100% this
+                // was 10.5sp of congratulation floating under the level chip, visually
+                // detached from the ring on the far left that it was describing.
+                if (e.profilePct < 100) {
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "${e.profilePct}% complete",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
-        // Trust + ID row
+        // Trust + ID row. Copying used to be a silent no-op — setText and nothing
+        // else: no haptic, no toast, no visual change. You could not tell it had
+        // worked, so you tapped again. Now the row answers.
         Spacer(Modifier.height(16.dp))
+        var copied by remember { mutableStateOf(false) }
+        LaunchedEffect(copied) {
+            if (copied) { delay(1600); copied = false }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
+                .pressable(haptic = Feel.COMMIT) { onCopyId(); copied = true }
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.1f))
-                .clickable(onClick = onCopyId)
+                .background(Color.White.copy(alpha = if (copied) 0.2f else 0.1f))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -802,8 +959,20 @@ private fun HeroCard(p: PlayerProfile, e: PlayerExtras, onCopyId: () -> Unit, on
             Spacer(Modifier.width(14.dp))
             Box(Modifier.width(1.dp).height(16.dp).background(Color.White.copy(alpha = 0.3f)))
             Spacer(Modifier.width(14.dp))
-            Text("ID ${p.playerId}", color = Color.White.copy(alpha = 0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Icon(Icons.Default.ContentCopy, "Copy", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
+            Text(
+                if (copied) "Copied to clipboard" else "ID ${p.playerId}",
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                if (copied) "Copied" else "Copy",
+                tint = Color.White.copy(alpha = if (copied) 1f else 0.8f),
+                modifier = Modifier.size(15.dp),
+            )
         }
         if (e.profilePct < 100 && e.profileSteps.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -841,56 +1010,72 @@ private fun ReputationChips(chips: List<RepChip>) {
 // ─────────────────────────────────────────────────────── Stat row (REAL) ────────
 @Composable
 private fun StatRow(p: PlayerProfile) {
+    // Cells come from the player's own sport. Falling back to cricket only when the
+    // server is too old to send the block — this screen used to show every player
+    // Runs and Wickets, so a footballer's career read "0 runs, 0 wickets" forever.
+    val cells = p.sportCareer?.stats
+        ?: listOf(
+            com.haraan.app.data.CareerStat("Matches", p.careerMatches),
+            com.haraan.app.data.CareerStat("Runs", p.careerRuns),
+            com.haraan.app.data.CareerStat("Wickets", p.careerWickets),
+        )
+
+    // No box, no border, no dividers. A bordered card of centred numbers separated by
+    // hairlines is the single most generic thing on this screen — and the "Career"
+    // heading already provides the grouping the box was doing. Left-aligned so the
+    // numbers sit on the same optical margin as every heading down the page.
+    //
+    // Rank is deliberately NOT here any more: it is the whole point of the card
+    // directly above, and showing it twice made neither instance feel like the answer.
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(32.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        cells.forEach { stat ->
+            StatCell("${AnimatedInt(stat.value)}", stat.label)
+        }
+    }
+}
+
+@Composable
+private fun StatCell(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.Start) {
+        // Ink, not green. Green had been doing five unrelated jobs on this screen —
+        // completion ring, tier pill, every career number, both gradients — so it had
+        // stopped meaning anything. It is reserved now for a good thing landing.
+        Text(value, color = Text1, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.height(2.dp))
+        Text(label.uppercase(), color = Text3, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    }
+}
+
+// ─────────────────────────────────────────────── District ranking (REAL) ────────
+@Composable
+private fun DistrictRankCard(p: PlayerProfile) {
+    // Was a second full-width saturated gradient sitting directly under the hero's.
+    // Two of them shouted at the same volume, so neither led. On a light surface the
+    // rank is MORE prominent, not less: it is now the only saturated number on a white
+    // card instead of white-on-green competing with the block above it.
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp))
-            .padding(vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StatCell("${AnimatedInt(p.careerMatches)}", "Matches", Green)
-        VDivider()
-        StatCell("${AnimatedInt(p.careerRuns)}", "Runs", Green)
-        VDivider()
-        StatCell("${AnimatedInt(p.careerWickets)}", "Wickets", Green)
-        VDivider()
-        StatCell(p.rankDistrict?.let { "#$it" } ?: "—", "Rank", BlueBright)
-    }
-}
-
-@Composable
-private fun StatCell(value: String, label: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = color, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = Text3, fontSize = 11.5.sp)
-    }
-}
-
-@Composable
-private fun VDivider() {
-    Box(Modifier.width(1.dp).height(34.dp).background(Stroke))
-}
-
-// ─────────────────────────────────────────────── District ranking (REAL) ────────
-@Composable
-private fun DistrictRankCard(p: PlayerProfile) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Brush.linearGradient(listOf(BlueBright, Green)))
             .padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("DISTRICT RANKING", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            Text("DISTRICT RANKING", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
             Spacer(Modifier.height(4.dp))
-            Text(p.rankDistrict?.let { "#${AnimatedInt(it)}" } ?: "Unranked", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-            Text("${p.district ?: "Your"} District", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+            Text(
+                p.rankDistrict?.let { "#${AnimatedInt(it)}" } ?: "Unranked",
+                color = if (p.rankDistrict != null) BlueBright else Text3,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            Text("${p.district ?: "Your"} District", color = Text2, fontSize = 13.sp)
         }
         // Real wider-context ranks (state / country) instead of an invented monthly delta.
         Column(horizontalAlignment = Alignment.End) {
@@ -903,13 +1088,13 @@ private fun DistrictRankCard(p: PlayerProfile) {
 @Composable
 private fun RankChip(label: String, value: String) {
     Row(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.18f))
+        Modifier.clip(RoundedCornerShape(10.dp)).background(BlueTint)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = BlueBright.copy(alpha = 0.75f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(6.dp))
-        Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+        Text(value, color = BlueBright, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 

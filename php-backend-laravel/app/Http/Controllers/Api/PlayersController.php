@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\LiveMatch;
+use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -117,6 +119,8 @@ final class PlayersController extends Controller
             'rank_state'      => $user->rank_state,
             'rank_country'    => $user->rank_country,
 
+            // Cricket's career, kept at this key unchanged so older app builds that read
+            // career.runs / career.wickets keep working.
             'career' => [
                 'matches'       => (int) ($user->career_matches ?? 0),
                 'runs'          => (int) ($user->career_runs ?? 0),
@@ -125,8 +129,75 @@ final class PlayersController extends Controller
                 'overs_bowled'  => $user->career_overs_bowled ?? '0.0',
             ],
 
+            // The same question asked in the player's OWN sport. `career` above is
+            // cricket-only (runs/wickets), so a footballer's profile was advertising
+            // batting figures that can never be anything but zero.
+            'sport_career' => $this->sportCareer($user),
+
             'recent_matches'  => $recent,
             'achievements'    => $this->buildAchievements($pid, $user),
+        ];
+    }
+
+    /**
+     * Career figures phrased in the player's own sport.
+     *
+     * Every number here is derived from a real record — the ball log for cricket, the
+     * `match_events` timeline for football, squad membership for match counts. Where a
+     * sport has no per-player record, this returns FEWER cells rather than inventing
+     * one: badminton points are recorded per side, not per player, so a badminton
+     * player gets matches only. An empty-but-honest profile beats a padded one.
+     *
+     * @return array<string, mixed>
+     */
+    private function sportCareer(User $user): array
+    {
+        $sport = strtolower((string) ($user->primary_sport ?? 'cricket'));
+        $pid   = (string) $user->player_id;
+
+        if ($sport === 'cricket' || $sport === '') {
+            return [
+                'sport'   => 'cricket',
+                'matches' => (int) ($user->career_matches ?? 0),
+                'runs'    => (int) ($user->career_runs ?? 0),
+                'wickets' => (int) ($user->career_wickets ?? 0),
+            ];
+        }
+
+        // Matches played in THIS sport. career_matches is written by the cricket ball-log
+        // replay, so it is always 0 for a footballer no matter how many games they play.
+        $matches = $pid === '' ? 0 : LiveMatch::query()
+            ->whereRaw('lower(sport) = ?', [$sport])
+            ->whereRaw('lower(status) = ?', ['completed'])
+            ->where(function ($q) use ($pid): void {
+                $q->where('home_squad', 'like', '%"' . $pid . '"%')
+                  ->orWhere('away_squad', 'like', '%"' . $pid . '"%');
+            })
+            ->count();
+
+        if ($sport === 'football') {
+            $tally = function (string $kind) use ($user): int {
+                return (int) MatchEvent::query()
+                    ->where('player_id', $user->id)
+                    ->where('kind', $kind)
+                    ->count();
+            };
+
+            return [
+                'sport'   => 'football',
+                'matches' => $matches,
+                // Own goals deliberately excluded — they move the opposition's score and
+                // are not the player's goal tally.
+                'goals'   => $tally(MatchEvent::GOAL),
+                'assists' => $tally(MatchEvent::ASSIST),
+            ];
+        }
+
+        // Badminton (and anything newer): points are recorded per side, so there is no
+        // honest per-player figure to show yet.
+        return [
+            'sport'   => $sport,
+            'matches' => $matches,
         ];
     }
 

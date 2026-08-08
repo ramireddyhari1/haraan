@@ -987,6 +987,9 @@ internal fun MainAppContainer(
       com.haraan.app.ui.profile.PlayerProfileScreen(
         onBack = { showCricketProfile = false },
         fetchProfile = { playerProfileRepository.fetchMe(token) },
+        // Own profile — so the empty state speaks in second person. No create-match
+        // CTA here: this scope has no handle on the ActionBoard wizard.
+        isSelf = true,
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4018,6 +4021,13 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getToken(context)
             ?: throw IllegalStateException("Please sign in to view your profile.")
           profileRepository.fetchMe(token)
+        },
+        // Empty-state CTA. Closes the profile first — otherwise the wizard opens
+        // behind it. Goes through the same ranked-access gate as the Create button.
+        isSelf = true,
+        onCreateMatch = {
+          showProfile = false
+          requireRankedAccess { showCreateWizard = true }
         },
         modifier = Modifier.statusBarsPadding(),
       )

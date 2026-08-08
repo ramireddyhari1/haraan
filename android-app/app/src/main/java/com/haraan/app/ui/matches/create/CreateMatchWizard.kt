@@ -22,6 +22,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
+import com.haraan.app.ui.Feel
+import com.haraan.app.ui.pressable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -116,79 +118,6 @@ private val Stroke = Color(0xFFE2E8F0)
 private val BlueTint = Color(0xFFEFF4FF)
 private val Green = Color(0xFF16A34A)
 private val GreenTint = Color(0xFFE9F7EF)
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Feel — haptics + press response.
-//
-// The wizard had neither: every card was a bare `clickable` over an opaque
-// background, so the ripple landed *under* the fill and nothing moved, dimmed or
-// ticked. A selection simply appeared once your finger left. On a screen built for
-// fast tapping that is what makes it read as a web form rather than an app.
-// ─────────────────────────────────────────────────────────────────────────────
-private object Feel {
-    /** Discrete increments — one per step of a counter. */
-    const val TICK = android.view.HapticFeedbackConstants.CLOCK_TICK
-
-    /** Picking one thing out of several: a chip, a card, a toggle. */
-    const val SELECT = android.view.HapticFeedbackConstants.KEYBOARD_TAP
-
-    /**
-     * The match is created. Heavier and distinct from every other tap in the flow —
-     * CONFIRM is API 30+, so older devices get the closest thing they have.
-     */
-    val COMMIT: Int
-        get() = if (android.os.Build.VERSION.SDK_INT >= 30) {
-            android.view.HapticFeedbackConstants.CONFIRM
-        } else {
-            android.view.HapticFeedbackConstants.LONG_PRESS
-        }
-
-    /**
-     * Taking something away — dropping a player off a squad. Deliberately NOT [COMMIT]:
-     * CONFIRM reads as "that worked", which is the wrong note for a removal.
-     */
-    val REMOVE: Int
-        get() = if (android.os.Build.VERSION.SDK_INT >= 30) {
-            android.view.HapticFeedbackConstants.REJECT
-        } else {
-            android.view.HapticFeedbackConstants.LONG_PRESS
-        }
-}
-
-/**
- * A tappable surface that acknowledges the press *while the finger is down* —
- * scaling back a touch and firing a haptic — instead of only after it lifts.
- *
- * MUST be first in the modifier chain: the `graphicsLayer` only scales what is drawn
- * after it, so a `clip`/`background` placed ahead of it would stay put while the
- * content shrank inside it. Ripple is off because these surfaces are opaque and
- * painted over it anyway; the scale is the affordance.
- */
-@Composable
-private fun Modifier.pressable(
-    enabled: Boolean = true,
-    haptic: Int? = Feel.SELECT,
-    onClick: () -> Unit,
-): Modifier {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed && enabled) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 900f),
-        label = "pressScale",
-    )
-    val view = LocalView.current
-    return this
-        .graphicsLayer { scaleX = scale; scaleY = scale }
-        .clickable(
-            interactionSource = interaction,
-            indication = null,
-            enabled = enabled,
-        ) {
-            haptic?.let { view.performHapticFeedback(it) }
-            onClick()
-        }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain — Sprint 1 keeps this local. Match type sets the XP CEILING only;
