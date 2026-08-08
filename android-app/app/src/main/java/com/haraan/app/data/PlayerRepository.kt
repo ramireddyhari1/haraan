@@ -188,6 +188,44 @@ class PlayerRepository(
   }
 
   /**
+   * Who follows [playerId], or who they follow — `relation` is "followers" or
+   * "following".
+   *
+   * Reuses [DiscoveryOutcome] and [parseDiscovered] because the server returns the
+   * same player-card shape here as it does for search, so a follower row and a search
+   * row are the same object and can share one row composable.
+   */
+  suspend fun followList(token: String?, playerId: String, relation: String): DiscoveryOutcome =
+    withContext(Dispatchers.IO) {
+      val encoded = URLEncoder.encode(playerId.trim(), "UTF-8")
+      val connection = (URL("${baseUrl.trimEnd('/')}/api/players/$encoded/$relation").openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 10000
+        readTimeout = 10000
+        setRequestProperty("Accept", "application/json")
+        if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+      }
+
+      try {
+        val code = connection.responseCode
+        if (code == 401 || code == 403) return@withContext DiscoveryOutcome.Unauthorized
+        if (code !in 200..299) return@withContext DiscoveryOutcome.Failed
+
+        val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+        val arr = JSONObject(body).optJSONArray("results")
+          ?: return@withContext DiscoveryOutcome.Success(emptyList())
+
+        DiscoveryOutcome.Success(buildList {
+          for (i in 0 until arr.length()) parseDiscovered(arr.getJSONObject(i))?.let { add(it) }
+        })
+      } catch (_: Exception) {
+        DiscoveryOutcome.Failed
+      } finally {
+        connection.disconnect()
+      }
+    }
+
+  /**
    * Follow or unfollow, returning the state the SERVER settled on rather than what
    * we optimistically assumed. Null means the call failed and the caller should roll
    * its optimistic toggle back — silently leaving a filled "Following" button on a

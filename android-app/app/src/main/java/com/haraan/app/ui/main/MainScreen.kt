@@ -3467,6 +3467,11 @@ private fun CrexMatchesScreen(
   var selectedSport by remember { mutableStateOf("Cricket") }
   var selectedTab by remember { mutableStateOf(0) }
   var showCreateWizard by remember { mutableStateOf(false) }
+  // Which follower/following list is open, if any: (playerId, relation, display name).
+  // The endpoints shipped with the original follow work and nothing ever opened them.
+  var followList by remember {
+    mutableStateOf<Triple<String, com.haraan.app.ui.social.FollowRelation, String>?>(null)
+  }
   var isCreatingMatch by remember { mutableStateOf(false) }
   // Holds the share code after a private match is created (drives the share dialog).
   var createdJoinCode by remember { mutableStateOf<String?>(null) }
@@ -3975,6 +3980,8 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) null else playerRepository.setFollowing(token, playerId, follow)
         },
+        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4023,6 +4030,8 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) null else playerRepository.setFollowing(token, player.playerId, follow)
         },
+        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4042,6 +4051,32 @@ private fun CrexMatchesScreen(
           showProfile = false
           requireRankedAccess { showCreateWizard = true }
         },
+        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Follower / following list, opened from a profile's counts. MUST come after the
+    // profile overlays: later children of a Box draw on top, and rendered earlier this
+    // sat behind the very profile it was opened from -- present in the semantics tree
+    // (so uiautomator saw its header) but invisible on screen.
+    followList?.let { (listPlayerId, relation, listName) ->
+      com.haraan.app.ui.social.FollowListScreen(
+        playerId = listPlayerId,
+        relation = relation,
+        playerName = listName,
+        token = com.haraan.app.data.TokenStore.getToken(context),
+        load = { pid, rel ->
+          playerRepository.followList(com.haraan.app.data.TokenStore.getToken(context), pid, rel)
+        },
+        onToggleFollow = { pid, follow ->
+          val t = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (t == null) null else playerRepository.setFollowing(t, pid, follow)
+        },
+        // Tapping a row opens that player's profile on top of the list.
+        onOpenPlayer = { pid -> searchedPlayerId = pid },
+        onClose = { followList = null },
         modifier = Modifier.statusBarsPadding(),
       )
     }

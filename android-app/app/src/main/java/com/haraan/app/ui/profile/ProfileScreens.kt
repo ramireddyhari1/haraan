@@ -524,6 +524,9 @@ fun PlayerProfileScreen(
      * caller cannot act on the follow graph and the button is not offered.
      */
     onToggleFollow: (suspend (Boolean) -> Boolean?)? = null,
+    /** Open the follower / following lists. Null leaves the counts inert. */
+    onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
+    onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
 ) {
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
@@ -572,6 +575,8 @@ fun PlayerProfileScreen(
                 isSelf = isSelf,
                 onCreateMatch = onCreateMatch,
                 onToggleFollow = onToggleFollow,
+                onOpenFollowers = onOpenFollowers,
+                onOpenFollowing = onOpenFollowing,
             )
         }
     }
@@ -590,6 +595,8 @@ private fun ProfileContent(
     isSelf: Boolean = false,
     onCreateMatch: (() -> Unit)? = null,
     onToggleFollow: (suspend (Boolean) -> Boolean?)? = null,
+    onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
+    onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     var showShare by remember { mutableStateOf(false) }
@@ -618,6 +625,8 @@ private fun ProfileContent(
                 matches = matchesPlayed(p),
                 onToggleFollow = onToggleFollow,
                 onShare = { showShare = true },
+                onOpenFollowers = onOpenFollowers,
+                onOpenFollowing = onOpenFollowing,
             )
         }
 
@@ -700,6 +709,8 @@ private fun SocialBar(
     matches: Int,
     onToggleFollow: (suspend (Boolean) -> Boolean?)?,
     onShare: () -> Unit,
+    onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
+    onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
 ) {
     val social = p.social ?: return
     val scope = rememberCoroutineScope()
@@ -724,8 +735,8 @@ private fun SocialBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SocialCount(matches, "Matches")
-            SocialCount(followers, "Followers")
-            SocialCount(social.followingCount, "Following")
+            SocialCount(followers, "Followers", onClick = onOpenFollowers?.let { open -> { open(p.playerId, p.name) } })
+            SocialCount(social.followingCount, "Following", onClick = onOpenFollowing?.let { open -> { open(p.playerId, p.name) } })
         }
 
         // Follow on someone else's profile; Share on your own. A signed-out viewer gets
@@ -790,9 +801,21 @@ private fun SocialBar(
     }
 }
 
+/**
+ * One count. Tappable only when there is a list behind it — a control that looks
+ * pressable and does nothing is the hollowness this work has been removing, so
+ * Matches (which has no list screen) stays inert.
+ */
 @Composable
-private fun SocialCount(value: Int, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun SocialCount(value: Int, label: String, onClick: (() -> Unit)? = null) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = if (onClick != null) {
+            Modifier.pressable(onClick = onClick).padding(horizontal = 12.dp, vertical = 4.dp)
+        } else {
+            Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        },
+    ) {
         Text("${AnimatedInt(value)}", color = Text1, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(2.dp))
         Text(label, color = Text3, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
