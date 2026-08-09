@@ -1293,7 +1293,13 @@
         /* No scroll-snap here: snap containers re-snap on every viewport resize,
            and the URL bar collapsing during a vertical swipe IS a resize — the
            rail kept jumping sideways mid-scroll. The app's row free-scrolls too. */
-        overscroll-behavior-x: contain;
+        /* `none`, not `contain`. Both stop scroll chaining, but `contain` keeps the
+           local overscroll affordance — and on Android 12+ that affordance is a
+           stretch RenderEffect that warps every pixel in the scroller. The 96px rank
+           numbers deform far more visibly than the posters do, so a swipe that ran
+           out of rail looked like the whole section was being pulled out of shape.
+           `none` drops the stretch and keeps the containment. */
+        overscroll-behavior-x: none;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
         margin-left: calc(50% - 50vw);
@@ -1301,6 +1307,11 @@
         /* start 36 clears the rank number, which bleeds 24px off the first card. */
         padding: 4px 24px 12px 36px;
     }
+    /* The other half of the same artifact: the stretch on the PAGE scroller. Pulling
+       the feed past its top warps everything the viewport is showing, and Trending is
+       where you see it. Scoped to the feed pages by body class, the way /events/{id}
+       already does it — the trade-off is that browser pull-to-refresh is off here. */
+    body.feed-page { overscroll-behavior-y: none; }
     .mtrends::-webkit-scrollbar { display: none; }
     .mtrend {
         position: relative;

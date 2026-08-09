@@ -1,4 +1,5 @@
 @extends('site.layout')
+@section('body_class', 'feed-page')
 @section('content')
 
 {{-- ============================================================= --}}

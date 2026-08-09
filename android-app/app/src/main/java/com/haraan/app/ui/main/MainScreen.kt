@@ -1186,7 +1186,12 @@ private fun EventsTabScreen(
     modifier = Modifier
       .fillMaxSize()
       .background(HaraanColors.Background),
-    verticalArrangement = Arrangement.spacedBy(16.dp)
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+    // No edge stretch on the feed. Android 12+'s overscroll is a RenderEffect that
+    // warps every pixel in the container, and the Trending rail's oversized rank
+    // glyphs smear badly when the list is pulled past its top. The list now stops
+    // cleanly at both ends instead.
+    overscrollEffect = null
   ) {
     // 1. "Haraan special" band — the feed's opening slab, in the slot the
     //    sponsored ad used to hold. The most valuable space on the feed now
@@ -8594,7 +8599,12 @@ private fun TrendingRowSection(
   LazyRow(
     contentPadding = PaddingValues(start = 36.dp, end = 24.dp),
     horizontalArrangement = Arrangement.spacedBy(32.dp),
-    modifier = Modifier.fillMaxWidth()
+    modifier = Modifier.fillMaxWidth(),
+    // The rail's own edge effect is orientation-agnostic — it pulls the top/bottom
+    // edges from any vertical component of a drag that lands on these cards, which
+    // stretched the rank numbers while the feed underneath was scrolling. The rail
+    // keeps its fling; it just no longer draws a stretch.
+    overscrollEffect = null
   ) {
     itemsIndexed(events) { index, event ->
       Box(
