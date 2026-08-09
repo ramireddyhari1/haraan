@@ -62,6 +62,24 @@ sealed interface DiscoveryOutcome {
   data object Failed : DiscoveryOutcome
 }
 
+/**
+ * One photo on a player's profile grid.
+ *
+ * [image] is the server's root-relative path ("/storage/posts/x.jpg"), exactly the shape
+ * avatars come back in — run it through [ApiConfig.mediaUrl] before handing it to a loader.
+ *
+ * [mine] is the SERVER's answer to "may this viewer delete it", not a local comparison of
+ * ids. The grid is public, so it renders for guests too; only the owner gets the delete
+ * affordance, and only the owner's DELETE is honoured.
+ */
+data class PlayerPost(
+  val id: Long,
+  val image: String,
+  val caption: String?,
+  val createdAt: String?,
+  val mine: Boolean,
+)
+
 /** One member of a team squad. Registered players have a Player ID; guests have a name only. */
 data class SquadMember(
   val id: String,
@@ -259,6 +277,137 @@ class PlayerRepository(
         connection.disconnect()
       }
     }
+
+  /**
+   * The photo grid on [playerId]'s profile, newest first.
+   *
+   * Token is optional because the grid is public — a guest opening a shared profile still
+   * sees the photos. Passing it when we have one is what makes `mine` true on your own
+   * profile, so don't drop it. Null means the call failed; an empty list means "no posts
+   * yet", and the two must stay distinguishable or a network blip renders as an empty
+   * state that invites you to post something you already posted.
+   */
+  suspend fun posts(token: String?, playerId: String): List<PlayerPost>? = withContext(Dispatchers.IO) {
+    val encoded = URLEncoder.encode(playerId.trim(), "UTF-8")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/$encoded/posts").openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+    }
+
+    try {
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
+      buildList {
+        for (i in 0 until arr.length()) parsePost(arr.getJSONObject(i))?.let { add(it) }
+      }
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * Add a photo to your OWN grid — the server takes the poster from the token, so there is
+   * no player id to pass and no way to post onto someone else's profile.
+   *
+   * Multipart by hand, mirroring [ProfileRepository.uploadAvatar]; the field name `image`
+   * has to match the controller's validation key. Returns the created post so the caller
+   * can prepend it without a refetch, or null on failure.
+   */
+  suspend fun uploadPost(
+    token: String,
+    imageBytes: ByteArray,
+    mimeType: String,
+    caption: String? = null,
+  ): PlayerPost? = withContext(Dispatchers.IO) {
+    val boundary = "----HaraanBoundary${System.currentTimeMillis()}"
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 30000
+      readTimeout = 30000
+      setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    val ext = when (mimeType.lowercase()) {
+      "image/png" -> "png"
+      "image/webp" -> "webp"
+      else -> "jpg"
+    }
+    val lineEnd = "\r\n"
+    val dashes = "--"
+
+    try {
+      connection.outputStream.use { out ->
+        out.write("$dashes$boundary$lineEnd".toByteArray())
+        out.write("Content-Disposition: form-data; name=\"image\"; filename=\"post.$ext\"$lineEnd".toByteArray())
+        out.write("Content-Type: $mimeType$lineEnd$lineEnd".toByteArray())
+        out.write(imageBytes)
+        out.write(lineEnd.toByteArray())
+        if (!caption.isNullOrBlank()) {
+          out.write("$dashes$boundary$lineEnd".toByteArray())
+          out.write("Content-Disposition: form-data; name=\"caption\"$lineEnd$lineEnd".toByteArray())
+          out.write(caption.trim().toByteArray(Charsets.UTF_8))
+          out.write(lineEnd.toByteArray())
+        }
+        out.write("$dashes$boundary$dashes$lineEnd".toByteArray())
+      }
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      parsePost(JSONObject(body))
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * Delete one of your own posts. The server re-checks ownership, so a wrong id fails
+   * there rather than deleting someone else's photo.
+   *
+   * Hits the POST twin `/posts/{id}/delete`, not the DELETE verb, for the same reason
+   * [setFollowing] uses a POST `/unfollow`: HttpURLConnection has no dependable
+   * DELETE-with-body path. (A method-override header would not help — Laravel only honours
+   * overrides via a `_method` form field, and only once explicitly enabled.)
+   */
+  suspend fun deletePost(token: String, postId: Long): Boolean = withContext(Dispatchers.IO) {
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts/$postId/delete").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write("{}".toByteArray()) }
+      connection.responseCode in 200..299
+    } catch (_: Exception) {
+      false
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  private fun parsePost(json: JSONObject): PlayerPost? {
+    val id = json.optLong("id", 0L).takeIf { it > 0L } ?: return null
+    val image = json.optString("image", "").clean() ?: return null
+    return PlayerPost(
+      id = id,
+      image = image,
+      caption = json.optString("caption", null).clean(),
+      createdAt = json.optString("created_at", null).clean(),
+      mine = json.optBoolean("mine", false),
+    )
+  }
 
   private fun parseDiscovered(json: JSONObject): DiscoveredPlayer? {
     val id = json.optString("player_id", "").takeIf { it.isNotBlank() } ?: return null

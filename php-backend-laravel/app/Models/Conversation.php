@@ -17,6 +17,7 @@ class Conversation extends Model
 
     protected $casts = [
         'last_message_at' => 'datetime',
+        'is_group' => 'boolean',
     ];
 
     public function messages(): HasMany
@@ -31,9 +32,23 @@ class Conversation extends Model
             ->withTimestamps();
     }
 
-    /** The other person in a 1:1, from [$viewer]'s point of view. */
+    /**
+     * The other person in a 1:1, from [$viewer]'s point of view. Meaningless for a
+     * group (there is no single "other"), so callers must branch on [is_group] first.
+     */
     public function counterpart(User $viewer): ?User
     {
         return $this->participants->firstWhere('id', '!=', $viewer->id);
+    }
+
+    /**
+     * Everyone in the conversation except [$viewer]. For a group this is the roster the
+     * list card stacks avatars from; for a 1:1 it is the single counterpart.
+     *
+     * @return \Illuminate\Support\Collection<int, User>
+     */
+    public function others(User $viewer): \Illuminate\Support\Collection
+    {
+        return $this->participants->where('id', '!=', $viewer->id)->values();
     }
 }

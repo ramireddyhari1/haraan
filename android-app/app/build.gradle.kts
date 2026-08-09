@@ -22,8 +22,11 @@ android {
         applicationId = "com.haraan.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 18
-        versionName = "1.0.17"
+        versionCode = 19
+        versionName = "1.0.18"
+        // Without this, `connectedDebugAndroidTest` builds the androidTest APK and then runs
+        // nothing — the androidTest deps below are inert until a runner is named.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Points at the deployed server over HTTPS (nginx TLS -> Laravel) so the app works
         // on any device on any network without `adb reverse`. For local dev, switch back to
         // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000` (and temporarily allow

@@ -307,6 +307,8 @@ fun MainScreen(
   
   var cachedToken by remember { mutableStateOf<String?>(null) }
   var hasCheckedCache by remember { mutableStateOf(false) }
+  // Incremented on every account switch to force a full rebuild of the signed-in shell.
+  var sessionEpoch by remember { mutableStateOf(0) }
 
   LaunchedEffect(Unit) {
     cachedToken = com.haraan.app.data.TokenStore.getToken(context)
@@ -327,16 +329,28 @@ fun MainScreen(
 
   if (isUserLoggedIn) {
     val activeToken = cachedToken ?: loginState.token ?: ""
-    MainAppContainer(
-      token = activeToken,
-      onItemClick = onItemClick,
-      onLogout = {
-        com.haraan.app.data.TokenStore.saveToken(context, "")
-        cachedToken = null
-        viewModel.onPhoneChanged("")
-        viewModel.onOtpChanged("")
-      }
-    )
+    // Rebuilt from scratch whenever the active account changes. The container holds a
+    // large amount of per-session state in `remember` (feeds, profiles, chat threads,
+    // gate results); keying it means a switch discards all of it at once rather than
+    // relying on every screen to notice the account moved.
+    androidx.compose.runtime.key(sessionEpoch) {
+      MainAppContainer(
+        token = activeToken,
+        onItemClick = onItemClick,
+        onLogout = {
+          com.haraan.app.data.TokenStore.saveToken(context, "")
+          cachedToken = null
+          viewModel.onPhoneChanged("")
+          viewModel.onOtpChanged("")
+        },
+        onSessionChanged = {
+          // Re-read rather than trusting a passed-in value: AccountStore is the thing
+          // that just wrote the active slot, so it is the authority on what it now holds.
+          cachedToken = com.haraan.app.data.TokenStore.getToken(context)
+          sessionEpoch++
+        },
+      )
+    }
   } else {
     com.haraan.app.ui.LoginRoute(
       onSkipClick = {
@@ -444,7 +458,15 @@ private data class TabInfo(val title: String, val icon: androidx.compose.ui.grap
 internal fun MainAppContainer(
   token: String,
   onItemClick: (NavKey) -> Unit,
-  onLogout: () -> Unit
+  onLogout: () -> Unit,
+  /**
+   * The active account changed underneath us (switched, added, or signed out into
+   * another one). The caller tears this whole container down and rebuilds it — see the
+   * `key(sessionEpoch)` at the call site. Nothing here tries to surgically refresh the
+   * dozens of caches inside; discarding them all is the only way to be sure none of the
+   * previous account's data survives under the new account's name.
+   */
+  onSessionChanged: () -> Unit = {},
 ) {
   val localContext = LocalContext.current
   // Saveable so returning from a pushed screen (e.g. Match Details) lands back on the
@@ -626,6 +648,9 @@ internal fun MainAppContainer(
           activeSubTab = "GameHub"
         },
         onOpenChat = { onItemClick(com.haraan.app.SupportChat) },
+        // The account switcher lives on the self-profile tab, which this screen owns.
+        onSignedOutCompletely = onLogout,
+        onSessionChanged = onSessionChanged,
       )
     } else {
       val isGameHubTab = (selectedTab == 0 && activeSubTab == "GameHub")
@@ -3445,8 +3470,13 @@ private fun DistrictActionBoardScreen(
   onHomeClick: () -> Unit,
   onJoinByCode: (String) -> Unit = {},
   onOpenChat: () -> Unit = {},
+  onSignedOutCompletely: () -> Unit = {},
+  onSessionChanged: () -> Unit = {},
 ) {
-  CrexMatchesScreen(onBack, onMatchClick, onHomeClick, onJoinByCode, onOpenChat)
+  CrexMatchesScreen(
+    onBack, onMatchClick, onHomeClick, onJoinByCode, onOpenChat,
+    onSignedOutCompletely, onSessionChanged,
+  )
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -3457,6 +3487,10 @@ private fun CrexMatchesScreen(
   onHomeClick: () -> Unit,
   onJoinByCode: (String) -> Unit = {},
   onOpenChat: () -> Unit = {},
+  /** The last account on the device signed out — the app must return to the login wall. */
+  onSignedOutCompletely: () -> Unit = {},
+  /** A different account is now active; the caller rebuilds the signed-in shell. */
+  onSessionChanged: () -> Unit = {},
 ) {
   val view = LocalView.current
 
@@ -3475,8 +3509,11 @@ private fun CrexMatchesScreen(
   // Alerts open as a sheet over the board, the same one the header bell used.
   var showAlerts by remember { mutableStateOf(false) }
   // Player-to-player DMs. `showChatList` is the destination; `openThread` is the one
-  // conversation on top of it.
+  // conversation on top of it. `showNewGroup` is the group-create flow; `chatReload` is
+  // bumped after create/leave so the list re-fetches without a manual round trip.
   var showChatList by remember { mutableStateOf(false) }
+  var showNewGroup by remember { mutableStateOf(false) }
+  var chatReload by remember { mutableStateOf(0) }
   var openThread by remember { mutableStateOf<com.haraan.app.data.ChatThread?>(null) }
   val dmRepository = remember { com.haraan.app.data.DirectMessageRepository() }
   var showCreateWizard by remember { mutableStateOf(false) }
@@ -3507,9 +3544,20 @@ private fun CrexMatchesScreen(
   val playerRepository = remember { com.haraan.app.data.PlayerRepository() }
   val profileRepository = remember { com.haraan.app.data.ProfileRepository() }
   val accountRepository = remember { com.haraan.app.data.AccountRepository() }
+  val authRepository = remember { com.haraan.app.data.HaraanAuthRepository() }
   var showMenu by remember { mutableStateOf(false) }
   var showSettings by remember { mutableStateOf(false) }
   var showProfile by remember { mutableStateOf(false) }
+
+  // ── Multi-account switcher ────────────────────────────────────────────────────
+  // The roster is state, not a read-through to AccountStore, so the sheet re-renders
+  // the moment an account is added or removed.
+  var accounts by remember { mutableStateOf(com.haraan.app.data.AccountStore.accounts(context)) }
+  var showAccounts by remember { mutableStateOf(false) }
+  var switchingAccount by remember { mutableStateOf(false) }
+  // Set while the "Add account" login is on screen. The existing session stays active
+  // and untouched behind it, so cancelling leaves the user exactly where they were.
+  var addingAccount by remember { mutableStateOf(false) }
   var selectedLeaderboardPlayer by remember { mutableStateOf<LeaderboardPlayer?>(null) }
   val listState = rememberLazyListState()
 
@@ -3519,6 +3567,11 @@ private fun CrexMatchesScreen(
   com.haraan.app.ui.DismissOnBack(selectedLeaderboardPlayer != null) { selectedLeaderboardPlayer = null }
   com.haraan.app.ui.DismissOnBack(showJoinDialog) { showJoinDialog = false }
   com.haraan.app.ui.DismissOnBack(showSettings) { showSettings = false }
+  // Back cancels adding an account; the session underneath is untouched either way.
+  com.haraan.app.ui.DismissOnBack(addingAccount) { addingAccount = false }
+  // Not while a switch is in flight — backing out mid-write would leave the sheet's idea
+  // of the active account out of step with the token slot.
+  com.haraan.app.ui.DismissOnBack(showAccounts && !switchingAccount) { showAccounts = false }
   com.haraan.app.ui.DismissOnBack(showProfile) { showProfile = false }
   com.haraan.app.ui.DismissOnBack(showMenu && !showSettings && !showProfile) { showMenu = false }
 
@@ -3624,15 +3677,17 @@ private fun CrexMatchesScreen(
     contentWindowInsets = WindowInsets(0),
     bottomBar = {
       CrexBottomBar(
-        // The board IS the Matches destination, so that slot is always the active one.
-        current = "Matches",
-        onHomeClick = onHomeClick,
-        onMatchesClick = { scope.launch { listState.animateScrollToItem(0) } },
-        onChatClick = { requireRankedAccess { showChatList = true } },
+        // Chat and Player both render inside this scaffold as tabs, so the active slot
+        // follows whichever is up; otherwise the board (Matches) is what's showing.
+        current = if (showProfile) "Player" else if (showChatList) "Chat" else "Matches",
+        onHomeClick = { showChatList = false; showProfile = false; onHomeClick() },
+        // Switching tabs is just clearing the other flags — same scaffold, no nav.
+        onMatchesClick = { showChatList = false; showProfile = false; scope.launch { listState.animateScrollToItem(0) } },
+        onChatClick = { showProfile = false; requireRankedAccess { showChatList = true } },
         onAlertsClick = { showAlerts = true },
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
-        onOthersClick = { requireRankedAccess { showProfile = true } }
+        onOthersClick = { showChatList = false; requireRankedAccess { showProfile = true } }
       )
     }
   ) { padding ->
@@ -3740,6 +3795,76 @@ private fun CrexMatchesScreen(
           }
         }
       }
+      }
+
+      // Chat is a bottom-bar destination, so its list renders INSIDE the scaffold body:
+      // the bottom bar stays visible (Chat active) and there is no back arrow. Drawn last
+      // in this Box so it sits over the board, above the bar. A single conversation is
+      // still a pushed screen with its own back button, rendered outside the scaffold.
+      if (showChatList) {
+        com.haraan.app.ui.social.ChatListScreen(
+          load = {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token == null) com.haraan.app.data.DirectMessageRepository.ThreadsResult.Failed
+            else dmRepository.threads(token)
+          },
+          onOpenThread = { openThread = it },
+          onNewGroup = { requireRankedAccess { showNewGroup = true } },
+          // Hardware back from the Chat tab returns to the board.
+          onClose = { showChatList = false },
+          showBack = false,
+          reloadKey = chatReload,
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+
+      // Player profile as a bottom-bar tab: rendered inside the scaffold body so the bar
+      // stays visible (Player active) and there's no "Player Profile" back bar. Another
+      // player's profile (from search / a leaderboard) stays a pushed screen, below.
+      if (showProfile) {
+        com.haraan.app.ui.profile.PlayerProfileScreen(
+          onBack = { showProfile = false },
+          fetchProfile = {
+            val token = com.haraan.app.data.TokenStore.getToken(context)
+              ?: throw IllegalStateException("Please sign in to view your profile.")
+            profileRepository.fetchMe(token)
+          },
+          isSelf = true,
+          showTopBar = false,
+          onOpenAccounts = { showAccounts = true },
+          // An app that was signed in BEFORE the switcher existed has a live token and an
+          // empty roster. Adopting it here — the moment we know whose profile that token
+          // belongs to — is what stops the sheet claiming there are no accounts while the
+          // user is plainly signed in. Idempotent, so running on every load is fine.
+          onProfileLoaded = { profile ->
+            com.haraan.app.data.AccountStore.adoptExistingSessionIfNeeded(context, profile)
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+          },
+          onCreateMatch = {
+            showProfile = false
+            requireRankedAccess { showCreateWizard = true }
+          },
+          onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+          onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+          onMessage = { pid, name ->
+            scope.launch {
+              val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+              when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+                is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                  openThread = com.haraan.app.data.ChatThread(
+                    id = r.conversationId, playerId = pid, name = name,
+                    username = null, avatar = null, lastMessage = null,
+                    lastMessageAt = null, unreadCount = 0,
+                  )
+                is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                  Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+                else ->
+                  Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+              }
+            }
+          },
+          modifier = Modifier.fillMaxSize(),
+        )
       }
     }
   }
@@ -4032,12 +4157,32 @@ private fun CrexMatchesScreen(
         onLeaderboards = { showMenu = false; selectedTab = 2 },
         onSettings = { showMenu = false; showSettings = true },
         onSignOut = {
-          com.haraan.app.data.TokenStore.clearToken(context)
-          // Drop the cached gate result with the session, or the next Create tap
-          // would sail past a login that is no longer there.
-          profileReady = false
-          showMenu = false
-          Toast.makeText(context, "Signed out.", Toast.LENGTH_SHORT).show()
+          // Signs out the ACTIVE account only and falls through to the next one on the
+          // device — it no longer wipes every account just because one was signed out.
+          // Reaching the login wall now means the last account is gone.
+          val active = com.haraan.app.data.AccountStore.active(context)
+          scope.launch {
+            if (active != null) runCatching { authRepository.logout(active.token) }
+            val fallback = if (active != null) {
+              com.haraan.app.data.AccountStore.remove(context, active.playerId)
+            } else {
+              com.haraan.app.data.AccountStore.clearAll(context); null
+            }
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+            // Drop the cached gate result with the session, or the next Create tap
+            // would sail past a login that is no longer there.
+            profileReady = false
+            showMenu = false
+            if (fallback == null) {
+              com.haraan.app.data.TokenStore.clearToken(context)
+              Toast.makeText(context, "Signed out.", Toast.LENGTH_SHORT).show()
+              onSignedOutCompletely()
+            } else {
+              com.haraan.app.push.PushRegistrar.syncToken(context)
+              Toast.makeText(context, "Now signed in as ${fallback.handleOrId}.", Toast.LENGTH_SHORT).show()
+              onSessionChanged()
+            }
+          }
         },
         fetchProfile = {
           val token = com.haraan.app.data.TokenStore.getToken(context)
@@ -4051,6 +4196,124 @@ private fun CrexMatchesScreen(
     if (showSettings) {
       com.haraan.app.ui.profile.SettingsScreen(
         onBack = { showSettings = false },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // ── Account switcher ──────────────────────────────────────────────────────
+    if (showAccounts) {
+      com.haraan.app.ui.profile.AccountSwitcherSheet(
+        accounts = accounts,
+        activePlayerId = com.haraan.app.data.AccountStore.active(context)?.playerId,
+        canAdd = !com.haraan.app.data.AccountStore.isFull(context),
+        switching = switchingAccount,
+        onDismiss = { if (!switchingAccount) showAccounts = false },
+        onAdd = {
+          showAccounts = false
+          addingAccount = true
+        },
+        onSwitch = { target ->
+          switchingAccount = true
+          scope.launch {
+            // Make it active FIRST, then prove the token still works, because every
+            // repository reads the session from TokenStore rather than taking it as an
+            // argument — there is no way to make an authenticated call "as" an account
+            // that isn't the active one.
+            com.haraan.app.data.AccountStore.switchTo(context, target.playerId)
+            val ok = runCatching { profileRepository.fetchMe(target.token) }.isSuccess
+
+            if (ok) {
+              // Re-point this device's push registration at the new account. The backend
+              // keys a device row by its FCM token, so this hands notifications over;
+              // the previous account stops getting them here, by design.
+              com.haraan.app.push.PushRegistrar.syncToken(context)
+              switchingAccount = false
+              showAccounts = false
+              onSessionChanged()
+            } else {
+              // A stored token can die while it sits here — the account was signed out on
+              // another device, or it simply expired. Drop the dead entry and say so,
+              // instead of switching into a session that 401s on every screen.
+              val fallback = com.haraan.app.data.AccountStore.remove(context, target.playerId)
+              accounts = com.haraan.app.data.AccountStore.accounts(context)
+              switchingAccount = false
+              showAccounts = false
+              Toast.makeText(
+                context,
+                "${target.handleOrId} was signed out. Add the account again to use it.",
+                Toast.LENGTH_LONG,
+              ).show()
+              if (fallback == null) onSignedOutCompletely() else onSessionChanged()
+            }
+          }
+        },
+        onSignOut = { target ->
+          switchingAccount = true
+          scope.launch {
+            // Revoke server-side before forgetting locally: once the token is gone from
+            // the device there is nothing left to authenticate the logout call with.
+            runCatching { authRepository.logout(target.token) }
+            val fallback = com.haraan.app.data.AccountStore.remove(context, target.playerId)
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+            switchingAccount = false
+            showAccounts = false
+            if (fallback == null) {
+              // That was the last account — back to the login wall.
+              onSignedOutCompletely()
+            } else {
+              com.haraan.app.push.PushRegistrar.syncToken(context)
+              Toast.makeText(context, "Now signed in as ${fallback.handleOrId}.", Toast.LENGTH_SHORT).show()
+              onSessionChanged()
+            }
+          }
+        },
+      )
+    }
+
+    // "Add account" — a full sign-in rendered OVER the running app. The current session
+    // stays active the whole time, so backing out of this returns to it untouched.
+    if (addingAccount) {
+      com.haraan.app.ui.LoginRoute(
+        onSkipClick = { addingAccount = false },
+        onLoginSuccess = { newToken ->
+          scope.launch {
+            val profile = runCatching { profileRepository.fetchMe(newToken) }.getOrNull()
+            if (profile == null) {
+              // Never store a token we could not resolve to a player: it would sit in the
+              // switcher as a nameless row that fails the moment it is tapped.
+              addingAccount = false
+              Toast.makeText(context, "Couldn't finish adding that account.", Toast.LENGTH_LONG).show()
+              return@launch
+            }
+            val added = com.haraan.app.data.AccountStore.upsertAndActivate(
+              context,
+              com.haraan.app.data.StoredAccount(
+                playerId = profile.playerId,
+                name = profile.name,
+                username = profile.username,
+                avatar = profile.avatar,
+                token = newToken,
+              ),
+            )
+            if (added is com.haraan.app.data.AddAccountResult.RosterFull) {
+              // The sheet greys out "Add account" when full, so this is the race where the
+              // roster filled while this sign-in was in flight. The store refused, leaving
+              // the current session intact — say so rather than pretending it worked.
+              addingAccount = false
+              Toast.makeText(
+                context,
+                "You can only keep ${com.haraan.app.data.AccountStore.MAX_ACCOUNTS} accounts on this device. " +
+                  "Remove one, then add ${profile.username?.let { "@$it" } ?: profile.playerId}.",
+                Toast.LENGTH_LONG,
+              ).show()
+              return@launch
+            }
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+            com.haraan.app.push.PushRegistrar.syncToken(context)
+            addingAccount = false
+            onSessionChanged()
+          }
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4093,64 +4356,15 @@ private fun CrexMatchesScreen(
       )
     }
 
-    if (showProfile) {
-      com.haraan.app.ui.profile.PlayerProfileScreen(
-        onBack = { showProfile = false },
-        fetchProfile = {
-          val token = com.haraan.app.data.TokenStore.getToken(context)
-            ?: throw IllegalStateException("Please sign in to view your profile.")
-          profileRepository.fetchMe(token)
-        },
-        // Empty-state CTA. Closes the profile first — otherwise the wizard opens
-        // behind it. Goes through the same ranked-access gate as the Create button.
-        isSelf = true,
-        onCreateMatch = {
-          showProfile = false
-          requireRankedAccess { showCreateWizard = true }
-        },
-        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
-        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
-        onMessage = { pid, name ->
-          scope.launch {
-            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
-              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
-                openThread = com.haraan.app.data.ChatThread(
-                  id = r.conversationId, playerId = pid, name = name,
-                  username = null, avatar = null, lastMessage = null,
-                  lastMessageAt = null, unreadCount = 0,
-                )
-              // Say WHY rather than doing nothing — the rule is not obvious.
-              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
-                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
-              else ->
-                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
-            }
-          }
-        },
-        modifier = Modifier.statusBarsPadding(),
-      )
-    }
-
-    // Messages. Rendered after the board so it sits above it, and the open thread
-    // after the list for the same reason.
-    if (showChatList) {
-      com.haraan.app.ui.social.ChatListScreen(
-        load = {
-          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token == null) com.haraan.app.data.DirectMessageRepository.ThreadsResult.Failed
-          else dmRepository.threads(token)
-        },
-        onOpenThread = { openThread = it },
-        onClose = { showChatList = false },
-        modifier = Modifier.statusBarsPadding(),
-      )
-    }
-
+    // Self profile now renders inside the scaffold body (see above) so it keeps the
+    // bottom bar and drops the top back bar. Messages list does the same. A single open
+    // conversation stays a pushed screen with a back button.
     openThread?.let { thread ->
       com.haraan.app.ui.social.ChatThreadScreen(
         title = thread.name,
         avatar = thread.avatar,
+        isGroup = thread.isGroup,
+        subtitle = if (thread.isGroup && thread.memberCount > 0) "${thread.memberCount} members" else null,
         load = {
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) emptyList() else dmRepository.messages(token, thread.id)
@@ -4159,7 +4373,39 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) null else dmRepository.send(token, thread.id, body)
         },
+        // Only groups can be left; leaving refreshes the list so the row disappears.
+        onLeave = if (thread.isGroup) {
+          {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            val ok = token != null && dmRepository.leaveGroup(token, thread.id)
+            if (ok) chatReload++
+            ok
+          }
+        } else null,
         onClose = { openThread = null },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Group-create flow, opened from the New group button on the Chat tab. On success we
+    // bump the reload key so the list shows the new group, and open it straight away.
+    if (showNewGroup) {
+      com.haraan.app.ui.social.NewGroupScreen(
+        loadCandidates = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.eligibleMembers(token)
+        },
+        create = { title, ids ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.GroupResult.Failed
+          else dmRepository.createGroup(token, title, ids)
+        },
+        onCreated = { thread ->
+          showNewGroup = false
+          chatReload++
+          openThread = thread
+        },
+        onClose = { showNewGroup = false },
         modifier = Modifier.statusBarsPadding(),
       )
     }

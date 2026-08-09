@@ -283,6 +283,38 @@ class HaraanAuthRepository(
     )
   }
 
+  /**
+   * End [token]'s session on the SERVER, not just on this device.
+   *
+   * The backend bumps the account's token_version, which invalidates every token that
+   * account holds — including on its other devices. That is the only revocation these
+   * stateless JWTs allow, and it is why the sign-out confirmation says so out loud.
+   *
+   * Returns false when the call didn't land. Callers still forget the token locally in
+   * that case: leaving an account the user asked to remove sitting in the switcher is
+   * worse than leaving a token alive on the server until it expires.
+   */
+  suspend fun logout(token: String): Boolean = withContext(Dispatchers.IO) {
+    val connection = (URL(baseUrl.trimEnd('/') + "/api/auth/logout").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 15000
+      readTimeout = 15000
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write("{}".toByteArray()) }
+      // 401 counts as done: the session was already dead, which is the desired end state.
+      connection.responseCode in 200..299 || connection.responseCode == 401
+    } catch (_: Exception) {
+      false
+    } finally {
+      connection.disconnect()
+    }
+  }
+
   private fun postJson(path: String, jsonBody: JSONObject): HttpResult {
     val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"

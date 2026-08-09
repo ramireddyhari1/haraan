@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
+use App\Models\PlayerPost;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -651,6 +652,92 @@ final class PlayersController extends Controller
     public function following(Request $request, string $playerId): JsonResponse
     {
         return $this->followList($request, $playerId, 'following');
+    }
+
+    /**
+     * GET /api/players/{player}/posts — the player's photo grid, newest first. Public:
+     * anyone who can see the profile can see the posts. [mine] tells the client whether
+     * to offer delete on each cell.
+     */
+    public function posts(Request $request, string $playerId): JsonResponse
+    {
+        $target = $this->resolvePlayer($playerId);
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        $me = $request->attributes->get('auth_user');
+        $mine = $me instanceof User && $me->id === $target->id;
+
+        $posts = PlayerPost::query()
+            ->where('user_id', $target->id)
+            ->orderByDesc('id')
+            ->limit(120)
+            ->get();
+
+        return response()->json([
+            'results' => $posts->map(fn (PlayerPost $p) => [
+                'id' => (int) $p->id,
+                'image' => $p->image_path,
+                'caption' => $p->caption,
+                'created_at' => $p->created_at?->toIso8601String(),
+                'mine' => $mine,
+            ])->values(),
+        ]);
+    }
+
+    /** POST /api/players/posts — add a photo to your own grid. */
+    public function storePost(Request $request): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $request->validate([
+            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'], // 8 MB
+            'caption' => ['nullable', 'string', 'max:300'],
+        ]);
+
+        $path = $request->file('image')->store('posts', 'public');
+        $post = PlayerPost::create([
+            'user_id' => $user->id,
+            'image_path' => '/storage/' . $path,
+            'caption' => $request->input('caption'),
+        ]);
+
+        return response()->json([
+            'id' => (int) $post->id,
+            'image' => $post->image_path,
+            'caption' => $post->caption,
+            'created_at' => $post->created_at?->toIso8601String(),
+            'mine' => true,
+        ], 201);
+    }
+
+    /** DELETE /api/players/posts/{id} — remove your own post (file + row). */
+    public function destroyPost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ((int) $post->user_id !== (int) $user->id) {
+            return response()->json(['error' => 'Not your post'], 403);
+        }
+
+        $path = $post->image_path;
+        if (is_string($path) && str_starts_with($path, '/storage/')) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete(substr($path, strlen('/storage/')));
+        }
+        $post->delete();
+
+        return response()->json(['deleted' => true]);
     }
 
     /** Shared body of followers()/following(). */

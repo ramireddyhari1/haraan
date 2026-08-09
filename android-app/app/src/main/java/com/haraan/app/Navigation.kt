@@ -57,6 +57,10 @@ fun MainNavigation() {
             onLoginSuccess = { token ->
               TokenStore.saveToken(ctx, token)
               com.haraan.app.push.PushRegistrar.syncToken(ctx)
+              // The roster is filled in lazily from the profile screen
+              // (adoptExistingSessionIfNeeded) rather than here: this is the checkout
+              // login wall, and blocking a ticket purchase on a profile fetch that only
+              // the account switcher needs would be the wrong trade.
               backStack.removeLastOrNull()
               backStack.add(gate.pendingOrder)
             }

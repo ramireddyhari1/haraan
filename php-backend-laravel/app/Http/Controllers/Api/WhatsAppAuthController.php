@@ -111,11 +111,7 @@ final class WhatsAppAuthController extends Controller
 
         return response()->json([
             'message' => 'Login successful via WhatsApp.',
-            'token' => JwtService::issue([
-                'sub' => $user->id,
-                'phone' => $user->phone,
-                'role' => $user->role,
-            ], (string) config('app.jwt_secret')),
+            'token' => JwtService::issueForUser($user, (string) config('app.jwt_secret')),
             'user' => new UserResource($user),
         ]);
     }

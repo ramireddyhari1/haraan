@@ -4,8 +4,58 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\User;
+
 final class JwtService
 {
+    /**
+     * The ONLY way a login path should mint a session token.
+     *
+     * Every token must carry `tv` (the user's token_version) or the auth middleware
+     * cannot tell a live session from a revoked one. Six separate login controllers
+     * built their payloads by hand; a seventh that forgot the claim would silently
+     * mint tokens that survive every logout. Issuing through here makes that
+     * impossible to get wrong.
+     */
+    public static function issueForUser(User $user, string $secret, int $ttlSeconds = 604800): string
+    {
+        return self::issue([
+            'sub' => $user->id,
+            'email' => $user->email,
+            'phone' => $user->phone,
+            'role' => $user->role,
+            'tv' => (int) ($user->token_version ?? 0),
+        ], $secret, $ttlSeconds);
+    }
+
+    /**
+     * Invalidate every token this user holds, on every device, by moving the version
+     * their live tokens were stamped with. Returns the new version.
+     */
+    public static function revokeAllFor(User $user): int
+    {
+        $next = (int) ($user->token_version ?? 0) + 1;
+        $user->forceFill(['token_version' => $next])->save();
+
+        return $next;
+    }
+
+    /**
+     * True when this decoded payload still matches the user's current version.
+     *
+     * Tokens minted before this column existed carry no `tv`. They are accepted while
+     * the user is still at version 0 — otherwise deploying this would sign out every
+     * existing session at once — and stop being accepted the moment that user logs out
+     * of anything, which is exactly when we want them gone.
+     */
+    public static function versionMatches(array $payload, User $user): bool
+    {
+        $current = (int) ($user->token_version ?? 0);
+        $claimed = array_key_exists('tv', $payload) ? (int) $payload['tv'] : 0;
+
+        return $claimed === $current;
+    }
+
     public static function issue(array $payload, string $secret, int $ttlSeconds = 604800): string
     {
         $header = ['alg' => 'HS256', 'typ' => 'JWT'];

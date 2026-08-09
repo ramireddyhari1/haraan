@@ -67,11 +67,7 @@ final class FirebasePhoneAuthController extends Controller
         return response()->json([
             'message' => $isNew ? 'Welcome to Haraan!' : 'Welcome back!',
             'newUser' => $isNew,
-            'token' => JwtService::issue([
-                'sub' => $user->id,
-                'email' => $user->email,
-                'role' => $user->role,
-            ], (string) config('app.jwt_secret')),
+            'token' => JwtService::issueForUser($user, (string) config('app.jwt_secret')),
             'user' => new UserResource($user),
         ]);
     }

@@ -19,6 +19,12 @@ data class ChatThread(
   val lastMessage: String?,
   val lastMessageAt: String?,
   val unreadCount: Int,
+  /** Group vs 1:1. Groups have a title (in [name]) and no single [playerId]. */
+  val isGroup: Boolean = false,
+  /** A few members' avatars (may hold nulls → render an initial), for the stacked row art. */
+  val memberAvatars: List<String?> = emptyList(),
+  val memberNames: List<String> = emptyList(),
+  val memberCount: Int = 0,
 )
 
 data class ChatMessage(
@@ -27,6 +33,17 @@ data class ChatMessage(
   /** True when this viewer sent it — decided by the SERVER, not by comparing ids here. */
   val mine: Boolean,
   val sentAt: String?,
+  /** Who sent it — used to label incoming bubbles in a GROUP thread. */
+  val senderName: String? = null,
+  val senderAvatar: String? = null,
+)
+
+/** A player you may start a chat or group with — a mutual follow. */
+data class ChatCandidate(
+  val playerId: String,
+  val name: String,
+  val username: String?,
+  val avatar: String?,
 )
 
 /**
@@ -59,6 +76,14 @@ class DirectMessageRepository(
     data object Failed : OpenChatResult
   }
 
+  /** Creating a group. Ready carries the new thread so the UI can open it immediately. */
+  sealed interface GroupResult {
+    data class Ready(val thread: ChatThread) : GroupResult
+    /** A chosen member is not a mutual follow. */
+    data object NotAllowed : GroupResult
+    data object Failed : GroupResult
+  }
+
   private fun conn(path: String, method: String, token: String): HttpURLConnection =
     (URL("${baseUrl.trimEnd('/')}$path").openConnection() as HttpURLConnection).apply {
       requestMethod = method
@@ -82,19 +107,7 @@ class DirectMessageRepository(
       val arr = json.optJSONArray("results")
       val list = buildList {
         if (arr != null) for (i in 0 until arr.length()) {
-          val o = arr.getJSONObject(i)
-          add(
-            ChatThread(
-              id = o.optLong("id"),
-              playerId = o.optString("player_id", null).cleanNull(),
-              name = o.optString("name", "").ifBlank { "Player" },
-              username = o.optString("username", null).cleanNull(),
-              avatar = o.optString("avatar", null).cleanNull(),
-              lastMessage = o.optString("last_message", null).cleanNull(),
-              lastMessageAt = o.optString("last_message_at", null).cleanNull(),
-              unreadCount = o.optInt("unread_count", 0),
-            )
-          )
+          add(parseThread(arr.getJSONObject(i)))
         }
       }
       ThreadsResult.Ready(list, json.optInt("unread_total", 0))
@@ -142,6 +155,8 @@ class DirectMessageRepository(
               body = o.optString("body", ""),
               mine = o.optBoolean("mine", false),
               sentAt = o.optString("sent_at", null).cleanNull(),
+              senderName = o.optString("sender_name", null).cleanNull(),
+              senderAvatar = o.optString("sender_avatar", null).cleanNull(),
             )
           )
         }
@@ -175,6 +190,100 @@ class DirectMessageRepository(
         c.disconnect()
       }
     }
+
+  /** Mutual follows — the honest contents of the "add members" picker. */
+  suspend fun eligibleMembers(token: String): List<ChatCandidate> = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/eligible", "GET", token)
+    try {
+      if (c.responseCode !in 200..299) return@withContext emptyList()
+      val body = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }
+      val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
+      buildList {
+        for (i in 0 until arr.length()) {
+          val o = arr.getJSONObject(i)
+          val pid = o.optString("player_id", null).cleanNull() ?: continue
+          add(
+            ChatCandidate(
+              playerId = pid,
+              name = o.optString("name", "").ifBlank { "Player" },
+              username = o.optString("username", null).cleanNull(),
+              avatar = o.optString("avatar", null).cleanNull(),
+            )
+          )
+        }
+      }
+    } catch (_: Exception) {
+      emptyList()
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  /** Create a group. On success returns the new thread so the UI can open it directly. */
+  suspend fun createGroup(token: String, title: String, memberPlayerIds: List<String>): GroupResult =
+    withContext(Dispatchers.IO) {
+      val c = conn("/api/dm/group", "POST", token)
+      try {
+        val payload = JSONObject()
+          .put("title", title.trim())
+          .put("members", org.json.JSONArray(memberPlayerIds))
+          .toString()
+        c.outputStream.use { it.write(payload.toByteArray()) }
+        when (c.responseCode) {
+          in 200..299 -> {
+            val res = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }
+            GroupResult.Ready(parseThread(JSONObject(res)))
+          }
+          403 -> GroupResult.NotAllowed
+          else -> GroupResult.Failed
+        }
+      } catch (_: Exception) {
+        GroupResult.Failed
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  /** Leave a group. False means it did not take, so the UI keeps the thread in place. */
+  suspend fun leaveGroup(token: String, conversationId: Long): Boolean = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/leave", "POST", token)
+    try {
+      c.outputStream.use { it.write("{}".toByteArray()) }
+      c.responseCode in 200..299
+    } catch (_: Exception) {
+      false
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  /** One thread card → [ChatThread]. Shared by the list and group-create responses. */
+  private fun parseThread(o: JSONObject): ChatThread {
+    val avatars = o.optJSONArray("member_avatars")
+    val names = o.optJSONArray("member_names")
+    return ChatThread(
+      id = o.optLong("id"),
+      playerId = o.optString("player_id", null).cleanNull(),
+      name = o.optString("name", "").ifBlank { "Player" },
+      username = o.optString("username", null).cleanNull(),
+      avatar = o.optString("avatar", null).cleanNull(),
+      lastMessage = o.optString("last_message", null).cleanNull(),
+      lastMessageAt = o.optString("last_message_at", null).cleanNull(),
+      unreadCount = o.optInt("unread_count", 0),
+      isGroup = o.optBoolean("is_group", false),
+      memberAvatars = buildList {
+        if (avatars != null) for (i in 0 until avatars.length()) {
+          add(avatars.optString(i, null).cleanNull())
+        }
+      },
+      memberNames = buildList {
+        if (names != null) for (i in 0 until names.length()) {
+          names.optString(i, null).cleanNull()?.let { add(it) }
+        }
+      },
+      memberCount = o.optInt("member_count", 0),
+    )
+  }
 
   private fun String?.cleanNull(): String? =
     this?.takeIf { it.isNotBlank() && it != "null" }

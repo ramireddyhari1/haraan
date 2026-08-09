@@ -50,7 +50,10 @@ Route::prefix('auth')->group(function (): void {
     // Email + password for the Android app — same semantics as the website's
     // /auth/password (unknown email signs up), but returns a JWT.
     Route::post('/password', [AuthController::class, 'passwordLogin'])->middleware('throttle:auth');
-    Route::post('/logout', [AuthController::class, 'logout']);
+    // Now behind auth.jwt: logout REVOKES the caller's sessions, so it has to know who
+    // is calling. A already-invalid token gets a 401, which is the honest answer —
+    // there is nothing left to revoke.
+    Route::middleware('auth.jwt')->post('/logout', [AuthController::class, 'logout']);
     Route::middleware('auth.jwt')->get('/me', [AuthController::class, 'me']);
 });
 
@@ -229,6 +232,14 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::get('/find', [PlayersController::class, 'search']);
     Route::get('/username-available', [PlayersController::class, 'usernameAvailable']);
 
+    // Photo posts (profile grid). Literal '/posts' registered here, before the catch-all
+    // {player}/* routes below, so it is never read as a {player} segment.
+    Route::post('/posts', [PlayersController::class, 'storePost']);
+    Route::delete('/posts/{id}', [PlayersController::class, 'destroyPost'])->whereNumber('id');
+    // POST twin, same reason /{player}/unfollow has one: Android's HttpURLConnection has
+    // no dependable DELETE path, so the app calls this instead of the verb above.
+    Route::post('/posts/{id}/delete', [PlayersController::class, 'destroyPost'])->whereNumber('id');
+
     // Social graph. {player} accepts an HRN id or an @handle (see resolvePlayer),
     // so a deep link from a shared profile works without the client translating.
     // Registered inside this literal-prefixed group so they never collide with the
@@ -250,9 +261,14 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
 // -------------------------------------------------------------------------
 Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
     Route::get('/', [\App\Http\Controllers\Api\DirectMessageController::class, 'index']);
+    // Mutual follows — the honest contents of a "start chat / add to group" picker.
+    Route::get('/eligible', [\App\Http\Controllers\Api\DirectMessageController::class, 'eligible']);
+    // Group creation. Registered before /{id}/* so "group" is never read as an id.
+    Route::post('/group', [\App\Http\Controllers\Api\DirectMessageController::class, 'group']);
     Route::post('/with/{playerId}', [\App\Http\Controllers\Api\DirectMessageController::class, 'with']);
     Route::get('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'messages'])->whereNumber('id');
     Route::post('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'send'])->whereNumber('id');
+    Route::post('/{id}/leave', [\App\Http\Controllers\Api\DirectMessageController::class, 'leave'])->whereNumber('id');
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
@@ -262,6 +278,13 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
 // signed-in viewer needs `auth_user` populated or `social.is_following` is always false
 // and the Follow button opens in the wrong state for everyone you already follow.
 Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);
+
+// Posts are public — a guest opening a shared profile sees the grid, same as the profile
+// itself. OPTIONAL auth, not none: the owner viewing their own grid needs `auth_user` set
+// or every cell comes back mine=false and the delete affordance disappears.
+// Two segments, so it can never shadow (or be shadowed by) the literal /players/* routes
+// or the single-segment players/{playerId} above.
+Route::middleware('auth.jwt.optional')->get('players/{player}/posts', [PlayersController::class, 'posts']);
 
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {

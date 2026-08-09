@@ -65,6 +65,70 @@ final class DirectMessageService
     }
 
     /**
+     * Create a group with [$creator] and [$members].
+     *
+     * Every member must mutually follow the creator — the same rule that governs 1:1,
+     * applied per person, so nobody can be pulled into a group by someone they haven't
+     * connected with. Returns null if the roster is empty or any member fails the rule,
+     * so the caller answers with a reason rather than a half-built group.
+     *
+     * @param  array<int, User>  $members
+     */
+    public function createGroup(User $creator, string $title, array $members): ?Conversation
+    {
+        $title = trim($title);
+        if ($title === '' || $members === []) {
+            return null;
+        }
+
+        // De-dupe and drop the creator if they were included by mistake.
+        $unique = [];
+        foreach ($members as $m) {
+            if ($m->id !== $creator->id) {
+                $unique[$m->id] = $m;
+            }
+        }
+        if ($unique === []) {
+            return null;
+        }
+
+        foreach ($unique as $member) {
+            if (! $this->canMessage($creator, $member)) {
+                return null;
+            }
+        }
+
+        return DB::transaction(function () use ($creator, $title, $unique): Conversation {
+            $conversation = Conversation::create([
+                'is_group' => true,
+                'title' => mb_substr($title, 0, 80),
+                'created_by' => $creator->id,
+            ]);
+            $conversation->participants()->attach(
+                array_merge([$creator->id], array_keys($unique))
+            );
+
+            return $conversation;
+        });
+    }
+
+    /**
+     * Remove [$user] from a group. Only meaningful for groups — a 1:1 is left by simply
+     * not opening it. When the last member leaves, the empty conversation (and its
+     * messages, via cascade) is deleted so it can't linger as an unreachable shell.
+     */
+    public function leaveGroup(Conversation $conversation, User $user): void
+    {
+        DB::transaction(function () use ($conversation, $user): void {
+            $conversation->participants()->detach($user->id);
+
+            if ($conversation->participants()->count() === 0) {
+                $conversation->delete();
+            }
+        });
+    }
+
+    /**
      * Append a message and move both sides' counters.
      *
      * The conversation's denormalised preview is updated in the same transaction as

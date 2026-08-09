@@ -34,6 +34,15 @@ final class EnsureJwtAuthenticated
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        // A signature that verifies only proves the token was minted by us — it says
+        // nothing about whether the session behind it is still wanted. Tokens are
+        // stateless with a 7-day TTL, so without this check a "signed out" token keeps
+        // working for a week. Same 401 shape as an expired token: clients already
+        // handle that by sending the user back to sign in.
+        if (!JwtService::versionMatches($payload, $user)) {
+            return new JsonResponse(['error' => 'Invalid or expired token'], 401);
+        }
+
         // Bridge JWT auth user with standard Laravel auth guard context
         Auth::setUser($user);
         $request->attributes->set('auth_user', $user);
