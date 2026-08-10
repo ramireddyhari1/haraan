@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -24,12 +25,15 @@ fun SectionHeader(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     onActionClick: (() -> Unit)? = null,
-    actionText: String = "See all"
+    actionText: String = "See all",
+    // Space above the title. Defaults to the standard 12dp; pass a smaller value when the
+    // header should bond to the section directly above it (e.g. "For You" under the brand band).
+    topPadding: Dp = 12.dp
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp) // Standard premium spacing
+            .padding(start = 16.dp, end = 16.dp, top = topPadding, bottom = 12.dp) // Standard premium spacing
     ) {
         // Subtitle placed ABOVE the title (Modern, editorial D2C/Premium approach)
         if (!subtitle.isNullOrEmpty()) {

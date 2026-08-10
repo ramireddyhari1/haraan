@@ -9,6 +9,7 @@ use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
 use App\Models\PlayerPost;
+use App\Models\PostLike;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -111,6 +112,8 @@ final class PlayersController extends Controller
             'sport_attributes' => $user->sport_attributes,
             'is_organizer'     => (bool) ($user->is_organizer ?? false),
             'profile_complete' => $user->isActionboardProfileComplete(),
+            // Account privacy (Instagram-style). Private accounts are hidden from the Home feed.
+            'is_private'       => ! $user->privacy_public_profile,
             'about'            => $this->aboutPayload($user),
 
             'ranked_xp'       => (int) ($user->ranked_xp ?? 0),
@@ -355,6 +358,10 @@ final class PlayersController extends Controller
             'birth_place'   => ['nullable', 'string', 'max:255'],
             'height'        => ['nullable', 'string', 'max:50'],
             'nationality'   => ['nullable', 'string', 'max:100'],
+            // Instagram-style account privacy, chosen at profile creation. Private hides the
+            // player's posts from the public Home feed (and their profile from the public).
+            // Nullable so older clients that never send it keep their current setting.
+            'is_private'    => ['nullable', 'boolean'],
         ]);
 
         // Handle: validated here rather than via a `unique:` rule so the shape complaint
@@ -409,6 +416,11 @@ final class PlayersController extends Controller
             'birth_place'   => $validated['birth_place'] ?? $user->birth_place,
             'height'        => $validated['height'] ?? $user->height,
             'nationality'   => $validated['nationality'] ?? $user->nationality,
+            // Public account = posts eligible for the Home feed. Only touched when the
+            // client actually sends the choice, so an omitted field never flips privacy.
+            'privacy_public_profile' => $request->has('is_private')
+                ? ! $request->boolean('is_private')
+                : $user->privacy_public_profile,
             'is_guest'      => false,
         ]);
 
@@ -428,6 +440,7 @@ final class PlayersController extends Controller
             'district'         => $user->district,
             'primary_sport'    => $user->primary_sport,
             'sport_attributes' => $user->sport_attributes,
+            'is_private'       => ! $user->privacy_public_profile,
             'about'            => $this->aboutPayload($user),
         ]);
     }
@@ -738,6 +751,136 @@ final class PlayersController extends Controller
         $post->delete();
 
         return response()->json(['deleted' => true]);
+    }
+
+    /**
+     * GET /api/posts/feed — the Instagram-style Home feed.
+     *
+     * Recent photo posts from PUBLIC accounts only (privacy_public_profile), newest
+     * first, each carrying its author card + like state. A `stories` strip (one entry
+     * per recent public poster) rides along in the same payload so the Home screen
+     * renders in a single round trip. Optional auth: guests see the feed but every
+     * post reads `liked=false` and `mine=false`.
+     */
+    public function feed(Request $request): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $meId = $me instanceof User ? (int) $me->id : null;
+
+        $posts = PlayerPost::query()
+            ->with('user')
+            ->withCount('likes')
+            ->whereHas('user', function ($q): void {
+                $q->where('is_guest', false)
+                    // Null = pre-privacy accounts, treated as public (same rule the
+                    // player search uses for privacy_discoverable).
+                    ->where(function ($sub): void {
+                        $sub->whereNull('privacy_public_profile')
+                            ->orWhere('privacy_public_profile', true);
+                    });
+            })
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get();
+
+        $likedIds = [];
+        if ($meId !== null && $posts->isNotEmpty()) {
+            $likedIds = PostLike::query()
+                ->where('user_id', $meId)
+                ->whereIn('post_id', $posts->pluck('id'))
+                ->pluck('post_id')
+                ->flip()
+                ->all();
+        }
+
+        $items = $posts->map(function (PlayerPost $p) use ($likedIds, $meId): array {
+            $author = $p->user;
+
+            return [
+                'id' => (int) $p->id,
+                'image' => $p->image_path,
+                'caption' => $p->caption,
+                'created_at' => $p->created_at?->toIso8601String(),
+                'like_count' => (int) $p->likes_count,
+                'liked' => isset($likedIds[$p->id]),
+                'mine' => $meId !== null && (int) $p->user_id === $meId,
+                'author' => [
+                    'player_id' => $author?->player_id,
+                    'username' => $author?->username,
+                    'name' => $author?->name,
+                    'avatar' => $author?->avatar,
+                ],
+            ];
+        })->values();
+
+        // One story bubble per recent public poster (their newest post), newest first.
+        $stories = $posts
+            ->unique('user_id')
+            ->take(20)
+            ->map(function (PlayerPost $p): array {
+                $author = $p->user;
+
+                return [
+                    'player_id' => $author?->player_id,
+                    'username' => $author?->username,
+                    'name' => $author?->name,
+                    'avatar' => $author?->avatar,
+                    'image' => $p->image_path,
+                ];
+            })->values();
+
+        return response()->json([
+            'stories' => $stories,
+            'posts' => $items,
+        ]);
+    }
+
+    /** POST /api/players/posts/{id}/like — like a post. Idempotent. */
+    public function likePost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        PostLike::query()->firstOrCreate([
+            'post_id' => (int) $post->id,
+            'user_id' => (int) $user->id,
+        ]);
+
+        return response()->json([
+            'liked' => true,
+            'like_count' => (int) $post->likes()->count(),
+        ]);
+    }
+
+    /** DELETE /api/players/posts/{id}/like — remove your like. Idempotent. */
+    public function unlikePost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        PostLike::query()
+            ->where('post_id', (int) $post->id)
+            ->where('user_id', (int) $user->id)
+            ->delete();
+
+        return response()->json([
+            'liked' => false,
+            'like_count' => (int) $post->likes()->count(),
+        ]);
     }
 
     /** Shared body of followers()/following(). */

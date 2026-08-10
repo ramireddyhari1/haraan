@@ -71,6 +71,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Campaign
@@ -166,6 +168,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -1197,7 +1202,7 @@ private fun EventsTabScreen(
     //    sponsored ad used to hold. The most valuable space on the feed now
     //    carries our own brand rather than someone else's.
     item {
-      HaraanSpecialBand(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+      HaraanSpecialBand(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp))
     }
 
     // Per-rail placement: an event shows in a rail when its admin-set `placements`
@@ -1211,7 +1216,10 @@ private fun EventsTabScreen(
     // 2. Hero Section: "Featured For You" with Infinite 3D Loop Pager
     item {
       SectionHeader(
-        title = "For You"
+        title = "For You",
+        // Bond to the "Haraan special" band directly above — the default 12dp top plus the
+        // band's spacing left a dead gap here (flagged in review).
+        topPadding = 0.dp
       )
     }
 
@@ -3553,6 +3561,9 @@ private fun CrexMatchesScreen(
   var showMenu by remember { mutableStateOf(false) }
   var showSettings by remember { mutableStateOf(false) }
   var showProfile by remember { mutableStateOf(false) }
+  // The Instagram-style social Home feed — a bottom-bar destination opened by the Home
+  // button. Renders inside the scaffold (bar stays visible), the same way Chat/Player do.
+  var showHomeFeed by remember { mutableStateOf(false) }
 
   // ── Multi-account switcher ────────────────────────────────────────────────────
   // The roster is state, not a read-through to AccountStore, so the sheet re-renders
@@ -3578,6 +3589,8 @@ private fun CrexMatchesScreen(
   // of the active account out of step with the token slot.
   com.haraan.app.ui.DismissOnBack(showAccounts && !switchingAccount) { showAccounts = false }
   com.haraan.app.ui.DismissOnBack(showProfile) { showProfile = false }
+  // Hardware back from the Home feed returns to the board (Matches), like the Chat tab does.
+  com.haraan.app.ui.DismissOnBack(showHomeFeed) { showHomeFeed = false }
   com.haraan.app.ui.DismissOnBack(showMenu && !showSettings && !showProfile) { showMenu = false }
 
   // Real GameHub live feed — null = still loading. Any failure yields an empty list,
@@ -3682,17 +3695,19 @@ private fun CrexMatchesScreen(
     contentWindowInsets = WindowInsets(0),
     bottomBar = {
       CrexBottomBar(
-        // Chat and Player both render inside this scaffold as tabs, so the active slot
-        // follows whichever is up; otherwise the board (Matches) is what's showing.
-        current = if (showProfile) "Player" else if (showChatList) "Chat" else "Matches",
-        onHomeClick = { showChatList = false; showProfile = false; onHomeClick() },
+        // Home (social feed), Chat and Player all render inside this scaffold as tabs, so
+        // the active slot follows whichever is up; otherwise the board (Matches) is showing.
+        current = if (showHomeFeed) "Home" else if (showProfile) "Player" else if (showChatList) "Chat" else "Matches",
+        // Home now opens the Instagram-style social feed (it used to jump back to Pulse —
+        // that affordance moved to the header's back arrow). Just another in-scaffold tab.
+        onHomeClick = { showChatList = false; showProfile = false; showHomeFeed = true },
         // Switching tabs is just clearing the other flags — same scaffold, no nav.
-        onMatchesClick = { showChatList = false; showProfile = false; scope.launch { listState.animateScrollToItem(0) } },
-        onChatClick = { showProfile = false; requireRankedAccess { showChatList = true } },
+        onMatchesClick = { showChatList = false; showProfile = false; showHomeFeed = false; scope.launch { listState.animateScrollToItem(0) } },
+        onChatClick = { showProfile = false; showHomeFeed = false; requireRankedAccess { showChatList = true } },
         onAlertsClick = { showAlerts = true },
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
-        onOthersClick = { showChatList = false; requireRankedAccess { showProfile = true } }
+        onOthersClick = { showChatList = false; showHomeFeed = false; requireRankedAccess { showProfile = true } }
       )
     }
   ) { padding ->
@@ -3747,7 +3762,7 @@ private fun CrexMatchesScreen(
         contentPadding = PaddingValues(
           start = 16.dp,
           end = 16.dp,
-          top = 4.dp,
+          top = 0.dp,
           bottom = 100.dp
         )
       ) {
@@ -3819,6 +3834,18 @@ private fun CrexMatchesScreen(
           onClose = { showChatList = false },
           showBack = false,
           reloadKey = chatReload,
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+
+      // Home feed as a bottom-bar tab: the Instagram-style social feed, rendered inside the
+      // scaffold body so the bar stays visible (Home active). Drawn over the board.
+      if (showHomeFeed) {
+        HomeFeedScreen(
+          repository = playerRepository,
+          tokenProvider = { com.haraan.app.data.TokenStore.getToken(context) },
+          onOpenPlayer = { pid -> searchedPlayerId = pid },
+          onCreatePost = { requireRankedAccess { showProfile = true } },
           modifier = Modifier.fillMaxSize(),
         )
       }
@@ -4477,12 +4504,13 @@ private fun CrexMatchesScreen(
     if (gateStep == 2) {
       com.haraan.app.ui.profile.PlayerProfileSetupScreen(
         onClose = { gateStep = 0; pendingRankedAction = null },
-        onSave = { name, st, district, primarySport, sportAttributes, gender, dob, birthPlace, height, nationality, photoUri, username ->
+        onSave = { name, st, district, primarySport, sportAttributes, gender, dob, birthPlace, height, nationality, photoUri, username, isPrivate ->
           val token = com.haraan.app.data.TokenStore.getToken(context)
             ?: throw IllegalStateException("Please sign in again.")
           profileRepository.saveProfile(
             token, name, st, district, primarySport, sportAttributes,
             gender, dob, birthPlace, height, nationality, username,
+            isPrivate = isPrivate,
           )
           uploadAvatarIfPresent(context, profileRepository, token, photoUri)
         },
@@ -4650,6 +4678,328 @@ private fun JoinByCodeDialog(onDismiss: () -> Unit, onJoin: (String) -> Unit) {
   )
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Home feed — the Instagram-style social feed behind the bottom bar's Home button.
+//  A stories strip of recent public posters over a vertical feed of photo posts with
+//  likes. Reads the public feed (/api/posts/feed); like/unlike are optimistic and
+//  settle from the server's authoritative count.
+// ═══════════════════════════════════════════════════════════════════════════════
+@Composable
+private fun HomeFeedScreen(
+  repository: com.haraan.app.data.PlayerRepository,
+  tokenProvider: () -> String?,
+  onOpenPlayer: (String) -> Unit,
+  onCreatePost: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val scope = rememberCoroutineScope()
+  var feed by remember { mutableStateOf<com.haraan.app.data.HomeFeed?>(null) }
+  var loading by remember { mutableStateOf(true) }
+  var posts by remember { mutableStateOf<List<com.haraan.app.data.FeedPost>>(emptyList()) }
+
+  val reload: suspend () -> Unit = {
+    loading = feed == null
+    val result = repository.homeFeed(tokenProvider())
+    if (result != null) {
+      feed = result
+      posts = result.posts
+    }
+    loading = false
+  }
+  LaunchedEffect(Unit) { reload() }
+
+  Box(modifier = modifier.background(Color.White)) {
+    when {
+      loading && feed == null -> {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          androidx.compose.material3.CircularProgressIndicator(color = HaraanColors.EventsBlue)
+        }
+      }
+      posts.isEmpty() && (feed?.stories.isNullOrEmpty()) -> {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(32.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          Icon(
+            imageVector = Icons.Outlined.FavoriteBorder,
+            contentDescription = null,
+            tint = HaraanColors.TextMuted,
+            modifier = Modifier.size(48.dp),
+          )
+          Spacer(Modifier.height(12.dp))
+          Text(
+            "No posts yet",
+            color = HaraanColors.TextPrimary,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+          )
+          Spacer(Modifier.height(6.dp))
+          Text(
+            "Photos from public players show up here. Be the first to post.",
+            color = HaraanColors.TextSecondary,
+            style = HaraanTypography.BodyMedium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          )
+          Spacer(Modifier.height(16.dp))
+          HaraanButton(
+            text = "Create a post",
+            onClick = onCreatePost,
+            containerColor = HaraanColors.EventsBlue,
+          )
+        }
+      }
+      else -> {
+        LazyColumn(
+          modifier = Modifier.fillMaxSize(),
+          contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+          // Title row
+          item {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Text(
+                "Home",
+                color = HaraanColors.TextPrimary,
+                style = HaraanTypography.TitleMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.ExtraBold),
+              )
+            }
+          }
+          // Stories strip
+          feed?.stories?.takeIf { it.isNotEmpty() }?.let { stories ->
+            item {
+              LazyRow(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+              ) {
+                item { StoryBubble(story = null, onClick = onCreatePost) }
+                items(stories) { story ->
+                  StoryBubble(
+                    story = story,
+                    onClick = { story.playerId?.let(onOpenPlayer) },
+                  )
+                }
+              }
+            }
+            item {
+              androidx.compose.material3.HorizontalDivider(
+                color = HaraanColors.BorderLight,
+                thickness = 1.dp,
+                modifier = Modifier.padding(top = 4.dp),
+              )
+            }
+          }
+          // Post feed
+          items(posts, key = { it.id }) { post ->
+            FeedPostCard(
+              post = post,
+              onOpenAuthor = { post.authorPlayerId?.let(onOpenPlayer) },
+              onToggleLike = {
+                val token = tokenProvider()
+                if (token.isNullOrBlank()) return@FeedPostCard
+                // Optimistic flip, settle from the server's authoritative count.
+                val target = !post.liked
+                posts = posts.map {
+                  if (it.id == post.id) it.copy(
+                    liked = target,
+                    likeCount = (it.likeCount + if (target) 1 else -1).coerceAtLeast(0),
+                  ) else it
+                }
+                scope.launch {
+                  val res = repository.setLike(token, post.id, target)
+                  if (res != null) {
+                    posts = posts.map {
+                      if (it.id == post.id) it.copy(liked = res.first, likeCount = res.second) else it
+                    }
+                  } else {
+                    // Roll back on failure.
+                    posts = posts.map {
+                      if (it.id == post.id) it.copy(
+                        liked = post.liked,
+                        likeCount = post.likeCount,
+                      ) else it
+                    }
+                  }
+                }
+              },
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/** One story bubble: a gradient-ringed avatar. `story == null` is the leading "New" ＋ bubble. */
+@Composable
+private fun StoryBubble(
+  story: com.haraan.app.data.FeedStory?,
+  onClick: () -> Unit,
+) {
+  Column(
+    horizontalAlignment = Alignment.CenterHorizontally,
+    modifier = Modifier.width(68.dp).clickable(onClick = onClick),
+  ) {
+    Box(
+      modifier = Modifier
+        .size(64.dp)
+        .clip(CircleShape)
+        .background(
+          if (story == null) androidx.compose.ui.graphics.SolidColor(HaraanColors.Field)
+          else Brush.linearGradient(listOf(HaraanColors.EventsBlue, HaraanColors.GameHubGreen))
+        )
+        .padding(2.5.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .clip(CircleShape)
+          .background(Color.White)
+          .padding(2.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (story == null) {
+          Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "New post",
+            tint = HaraanColors.EventsBlue,
+            modifier = Modifier.size(26.dp),
+          )
+        } else {
+          val avatar = com.haraan.app.data.ApiConfig.mediaUrl(story.avatar)
+          if (avatar != null) {
+            HaraanImage(
+              model = avatar,
+              contentDescription = story.name,
+              modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+          } else {
+            Box(
+              modifier = Modifier.fillMaxSize().clip(CircleShape).background(HaraanColors.Field),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                story.name.take(1).uppercase(),
+                color = HaraanColors.TextSecondary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+              )
+            }
+          }
+        }
+      }
+    }
+    Spacer(Modifier.height(5.dp))
+    Text(
+      text = if (story == null) "New" else (story.username?.let { "@$it" } ?: story.name),
+      color = HaraanColors.TextSecondary,
+      fontSize = 11.sp,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+  }
+}
+
+/** One post card: author row, photo, like control + count, caption. */
+@Composable
+private fun FeedPostCard(
+  post: com.haraan.app.data.FeedPost,
+  onOpenAuthor: () -> Unit,
+  onToggleLike: () -> Unit,
+) {
+  Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+    // Author row
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clickable(onClick = onOpenAuthor)
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      val avatar = com.haraan.app.data.ApiConfig.mediaUrl(post.authorAvatar)
+      Box(
+        modifier = Modifier.size(38.dp).clip(CircleShape).background(HaraanColors.Field),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (avatar != null) {
+          HaraanImage(model = avatar, contentDescription = post.authorName, modifier = Modifier.fillMaxSize().clip(CircleShape))
+        } else {
+          Text(post.authorName.take(1).uppercase(), color = HaraanColors.TextSecondary, fontWeight = FontWeight.Bold)
+        }
+      }
+      Spacer(Modifier.width(10.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          post.authorName,
+          color = HaraanColors.TextPrimary,
+          style = HaraanTypography.TitleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        post.authorUsername?.let {
+          Text("@$it", color = HaraanColors.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+      }
+    }
+    // Photo — square, edge to edge.
+    HaraanImage(
+      model = com.haraan.app.data.ApiConfig.mediaUrl(post.image),
+      contentDescription = post.caption ?: "Post by ${post.authorName}",
+      modifier = Modifier
+        .fillMaxWidth()
+        .aspectRatio(1f)
+        .background(HaraanColors.Field),
+    )
+    // Actions
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        imageVector = if (post.liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+        contentDescription = if (post.liked) "Unlike" else "Like",
+        tint = if (post.liked) HaraanColors.LiveRed else HaraanColors.TextPrimary,
+        modifier = Modifier
+          .clip(CircleShape)
+          .clickable(onClick = onToggleLike)
+          .padding(6.dp)
+          .size(26.dp),
+      )
+      if (post.likeCount > 0) {
+        Text(
+          text = if (post.likeCount == 1) "1 like" else "${post.likeCount} likes",
+          color = HaraanColors.TextPrimary,
+          style = HaraanTypography.TitleMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+        )
+      }
+    }
+    // Caption
+    if (!post.caption.isNullOrBlank()) {
+      Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+          text = buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+              append(post.authorUsername?.let { "@$it " } ?: (post.authorName + " "))
+            }
+            append(post.caption)
+          },
+          color = HaraanColors.TextPrimary,
+          style = HaraanTypography.BodyMedium.copy(fontSize = 13.5.sp),
+        )
+      }
+    }
+    Spacer(Modifier.height(6.dp))
+  }
+}
+
 @Composable
 private fun CrexHeaderSection(
   onBack: () -> Unit,
@@ -4664,19 +5014,23 @@ private fun CrexHeaderSection(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(10.dp)
   ) {
+    // Back to Pulse. This slot used to hold a decorative brand logo with no action; the
+    // "back to Pulse" affordance moved here off the bottom-bar Home button (which now opens
+    // the social Home feed). White surface + border so it reads as a real, tappable control.
     Box(
       modifier = Modifier
         .size(36.dp)
         .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9)),
+        .background(Color.White)
+        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
+        .clickable(onClick = onBack),
       contentAlignment = Alignment.Center
     ) {
-      Image(
-        painter = painterResource(id = com.haraan.app.R.drawable.haraan_copy),
-        contentDescription = "Haraan logo",
-        modifier = Modifier.size(22.dp),
-        contentScale = ContentScale.Fit,
-        colorFilter = ColorFilter.tint(LightAccentBlue)
+      Icon(
+        imageVector = Icons.Filled.ArrowBack,
+        contentDescription = "Back to Pulse",
+        tint = Color(0xFF475569),
+        modifier = Modifier.size(20.dp)
       )
     }
 
@@ -4690,7 +5044,10 @@ private fun CrexHeaderSection(
         .weight(1f)
         .height(38.dp)
         .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9))
+        // White surface + hairline border so the field lifts off the near-identical light
+        // background — the old slate-100 fill made it melt into the page (visibility flagged).
+        .background(Color.White)
+        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
         .clickable(onClick = onSearch)
         .padding(horizontal = 12.dp),
       verticalAlignment = Alignment.CenterVertically
@@ -4698,14 +5055,14 @@ private fun CrexHeaderSection(
       Icon(
         imageVector = Icons.Default.Search,
         contentDescription = null,
-        tint = Color(0xFF94A3B8),
+        tint = Color(0xFF64748B),
         modifier = Modifier.size(17.dp)
       )
       Spacer(modifier = Modifier.width(8.dp))
       Text(
         text = "Search players",
         fontSize = 13.5.sp,
-        color = Color(0xFF94A3B8),
+        color = Color(0xFF64748B),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
@@ -4713,19 +5070,21 @@ private fun CrexHeaderSection(
 
     Spacer(modifier = Modifier.width(2.dp))
 
-    // Join a private match by its share code.
+    // Join a private match by its share code. Same white-surface + border treatment so it
+    // reads as a real button, not a faint smudge.
     Box(
       modifier = Modifier
         .size(38.dp)
         .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9))
+        .background(Color.White)
+        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
         .clickable(onClick = onJoinByCode),
       contentAlignment = Alignment.Center
     ) {
       Icon(
         imageVector = Icons.Default.Login,
         contentDescription = "Join by code",
-        tint = LightSecondaryText,
+        tint = Color(0xFF475569),
         modifier = Modifier.size(18.dp)
       )
     }
@@ -6511,7 +6870,9 @@ private fun CrexLeagueTitle(title: String) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(top = 10.dp, bottom = 10.dp),
+      // Bond to the sport-filter chips directly above; the old 10dp top plus the chip row's
+      // own bottom padding left a dead gap here (flagged in review).
+      .padding(top = 0.dp, bottom = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
@@ -7389,7 +7750,9 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
     modifier = Modifier
       .fillMaxWidth()
       .horizontalScroll(rememberScrollState())
-      .padding(horizontal = 16.dp, vertical = 10.dp),
+      // Asymmetric: normal breathing above (under the Live/Finished tabs), tight below so the
+      // "Matches near you" title bonds to the chips.
+      .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {

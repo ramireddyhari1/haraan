@@ -80,6 +80,36 @@ data class PlayerPost(
   val mine: Boolean,
 )
 
+/** One post in the Instagram-style Home feed: the photo plus its author and like state. */
+data class FeedPost(
+  val id: Long,
+  val image: String,
+  val caption: String?,
+  val createdAt: String?,
+  val likeCount: Int,
+  val liked: Boolean,
+  val mine: Boolean,
+  val authorPlayerId: String?,
+  val authorName: String,
+  val authorUsername: String?,
+  val authorAvatar: String?,
+)
+
+/** One bubble in the Home feed's stories strip — a recent public poster. */
+data class FeedStory(
+  val playerId: String?,
+  val name: String,
+  val username: String?,
+  val avatar: String?,
+  val image: String?,
+)
+
+/** The Home feed payload: a stories strip on top and the vertical post feed below. */
+data class HomeFeed(
+  val stories: List<FeedStory>,
+  val posts: List<FeedPost>,
+)
+
 /** One member of a team squad. Registered players have a Player ID; guests have a name only. */
 data class SquadMember(
   val id: String,
@@ -397,6 +427,69 @@ class PlayerRepository(
     }
   }
 
+  /**
+   * The Instagram-style Home feed: recent posts from public accounts + a stories strip.
+   * Optional auth — a token makes `liked`/`mine` accurate; without one the feed still loads.
+   * Null means the call failed; an empty feed is a real, distinguishable state.
+   */
+  suspend fun homeFeed(token: String?): HomeFeed? = withContext(Dispatchers.IO) {
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/posts/feed").openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      val root = JSONObject(body)
+      val storyArr = root.optJSONArray("stories")
+      val postArr = root.optJSONArray("posts")
+      val stories = buildList {
+        if (storyArr != null) for (i in 0 until storyArr.length()) parseStory(storyArr.getJSONObject(i))?.let { add(it) }
+      }
+      val posts = buildList {
+        if (postArr != null) for (i in 0 until postArr.length()) parseFeedPost(postArr.getJSONObject(i))?.let { add(it) }
+      }
+      HomeFeed(stories = stories, posts = posts)
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * Like or unlike a post. Hits the POST twins (`/like`, `/unlike`) rather than the DELETE
+   * verb, same reason [deletePost] does. Returns the server-authoritative (liked, count) so
+   * a double-tap on a slow line settles the heart from the server, not a local guess; null
+   * on failure so the caller can roll the optimistic toggle back.
+   */
+  suspend fun setLike(token: String, postId: Long, liked: Boolean): Pair<Boolean, Int>? = withContext(Dispatchers.IO) {
+    val path = if (liked) "like" else "unlike"
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts/$postId/$path").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write("{}".toByteArray()) }
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      val root = JSONObject(body)
+      root.optBoolean("liked", liked) to root.optInt("like_count", 0)
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
   private fun parsePost(json: JSONObject): PlayerPost? {
     val id = json.optLong("id", 0L).takeIf { it > 0L } ?: return null
     val image = json.optString("image", "").clean() ?: return null
@@ -406,6 +499,36 @@ class PlayerRepository(
       caption = json.optString("caption", null).clean(),
       createdAt = json.optString("created_at", null).clean(),
       mine = json.optBoolean("mine", false),
+    )
+  }
+
+  private fun parseFeedPost(json: JSONObject): FeedPost? {
+    val id = json.optLong("id", 0L).takeIf { it > 0L } ?: return null
+    val image = json.optString("image", "").clean() ?: return null
+    val author = json.optJSONObject("author")
+    return FeedPost(
+      id = id,
+      image = image,
+      caption = json.optString("caption", null).clean(),
+      createdAt = json.optString("created_at", null).clean(),
+      likeCount = json.optInt("like_count", 0),
+      liked = json.optBoolean("liked", false),
+      mine = json.optBoolean("mine", false),
+      authorPlayerId = author?.optString("player_id", null).clean(),
+      authorName = author?.optString("name", null).clean() ?: "Player",
+      authorUsername = author?.optString("username", null).clean(),
+      authorAvatar = author?.optString("avatar", null).clean(),
+    )
+  }
+
+  private fun parseStory(json: JSONObject): FeedStory? {
+    val name = json.optString("name", null).clean() ?: "Player"
+    return FeedStory(
+      playerId = json.optString("player_id", null).clean(),
+      name = name,
+      username = json.optString("username", null).clean(),
+      avatar = json.optString("avatar", null).clean(),
+      image = json.optString("image", null).clean(),
     )
   }
 

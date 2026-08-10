@@ -240,6 +240,12 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     // no dependable DELETE path, so the app calls this instead of the verb above.
     Route::post('/posts/{id}/delete', [PlayersController::class, 'destroyPost'])->whereNumber('id');
 
+    // ❤ on the Home feed. Three segments, so never read as a {player} by the catch-all below.
+    Route::post('/posts/{id}/like', [PlayersController::class, 'likePost'])->whereNumber('id');
+    Route::delete('/posts/{id}/like', [PlayersController::class, 'unlikePost'])->whereNumber('id');
+    // POST twin — Android's HttpURLConnection has no dependable DELETE path.
+    Route::post('/posts/{id}/unlike', [PlayersController::class, 'unlikePost'])->whereNumber('id');
+
     // Social graph. {player} accepts an HRN id or an @handle (see resolvePlayer),
     // so a deep link from a shared profile works without the client translating.
     // Registered inside this literal-prefixed group so they never collide with the
@@ -285,6 +291,12 @@ Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersContro
 // Two segments, so it can never shadow (or be shadowed by) the literal /players/* routes
 // or the single-segment players/{playerId} above.
 Route::middleware('auth.jwt.optional')->get('players/{player}/posts', [PlayersController::class, 'posts']);
+
+// The Instagram-style Home feed: recent posts from public accounts + a stories strip.
+// OPTIONAL auth so a guest can browse; a signed-in viewer gets `liked`/`mine` populated.
+// Literal 'posts/feed' — two segments, registered after the /players/* group, so it never
+// collides with players/{playerId} or players/{player}/posts.
+Route::middleware('auth.jwt.optional')->get('posts/feed', [PlayersController::class, 'feed']);
 
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {

@@ -331,7 +331,7 @@ fun PlayerProfileSetupScreen(
         name: String, state: String, district: String,
         primarySport: String, sportAttributes: Map<String, String>,
         gender: String, dateOfBirth: String, birthPlace: String, height: String, nationality: String,
-        photoUri: Uri?, username: String,
+        photoUri: Uri?, username: String, isPrivate: Boolean,
     ) -> Unit,
     onDone: () -> Unit,
     // Live handle availability. Defaults to "can't tell", so any caller that doesn't wire
@@ -358,6 +358,9 @@ fun PlayerProfileSetupScreen(
     var height by remember { mutableStateOf("") }
     var nationality by remember { mutableStateOf("Indian") }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
+    // Account privacy (Instagram-style). Default public — Haraan is a public-first product,
+    // and only a public account's photos appear on the social Home feed.
+    var isPrivate by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var step by remember { mutableIntStateOf(0) }
@@ -651,6 +654,31 @@ fun PlayerProfileSetupScreen(
                                 ChipWrap(HANDEDNESS, sportAttrs["hand"].orEmpty()) { sportAttrs["hand"] = it }
                             }
                         }
+
+                        // Account privacy — the last thing before "Create profile". Public
+                        // accounts have their photo posts surface on the social Home feed;
+                        // private accounts stay off it.
+                        Spacer(Modifier.height(24.dp))
+                        Text("Account privacy", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "You can change this later in Settings.",
+                            color = Text3,
+                            fontSize = 12.5.sp,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                        )
+                        PrivacyOption(
+                            title = "Public account",
+                            subtitle = "Your photo posts appear on the Home feed and anyone can view your profile.",
+                            selected = !isPrivate,
+                            onClick = { isPrivate = false },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        PrivacyOption(
+                            title = "Private account",
+                            subtitle = "Your posts stay off the public Home feed.",
+                            selected = isPrivate,
+                            onClick = { isPrivate = true },
+                        )
                     }
                 }
 
@@ -709,7 +737,7 @@ fun PlayerProfileSetupScreen(
                                     name.trim(), state, district.trim(),
                                     primarySport, sportAttrs.toMap(),
                                     gender, dobIso, birthPlace.trim(), height, nationality, photoUri,
-                                    username.trim(),
+                                    username.trim(), isPrivate,
                                 )
                                 onDone()
                             } catch (e: Exception) {
@@ -770,6 +798,47 @@ private fun StepProgress(current: Int, total: Int) {
                     .clip(RoundedCornerShape(2.dp))
                     .background(fill),
             )
+        }
+    }
+}
+
+/** One selectable privacy card (Public / Private) with a leading radio dot. */
+@Composable
+private fun PrivacyOption(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+                width = if (selected) 1.5.dp else 1.dp,
+                color = if (selected) Blue else Stroke,
+                shape = RoundedCornerShape(14.dp),
+            )
+            .background(if (selected) Blue.copy(alpha = 0.06f) else Surface, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .border(2.dp, if (selected) Blue else Track, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(Blue))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Text1, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = Text2, fontSize = 12.5.sp, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }

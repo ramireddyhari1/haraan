@@ -406,6 +406,9 @@ class ProfileRepository(
     height: String? = null,
     nationality: String? = null,
     username: String? = null,
+    // Instagram-style account privacy chosen at profile creation. Null = don't touch the
+    // server's current setting (older callers that never ask). true = private account.
+    isPrivate: Boolean? = null,
   ): Boolean = withContext(Dispatchers.IO) {
     val body = JSONObject()
       .put("name", name)
@@ -414,6 +417,7 @@ class ProfileRepository(
       .put("primary_sport", primarySport)
       .put("sport_attributes", JSONObject(sportAttributes as Map<*, *>))
     if (!username.isNullOrBlank()) body.put("username", username.trim())
+    if (isPrivate != null) body.put("is_private", isPrivate)
     if (!gender.isNullOrBlank()) body.put("gender", gender)
     if (!dateOfBirth.isNullOrBlank()) body.put("date_of_birth", dateOfBirth)
     if (!birthPlace.isNullOrBlank()) body.put("birth_place", birthPlace)
