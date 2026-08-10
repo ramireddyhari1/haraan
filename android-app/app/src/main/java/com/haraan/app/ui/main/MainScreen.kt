@@ -13,7 +13,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateIntAsState
@@ -115,6 +117,14 @@ import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Scoreboard
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Scoreboard
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.SportsTennis
 import androidx.compose.material.icons.outlined.SportsFootball
 import androidx.compose.material.icons.filled.Stadium
@@ -3707,7 +3717,10 @@ private fun CrexMatchesScreen(
         onAlertsClick = { showAlerts = true },
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
-        onOthersClick = { showChatList = false; showHomeFeed = false; requireRankedAccess { showProfile = true } }
+        onOthersClick = { showChatList = false; showHomeFeed = false; requireRankedAccess { showProfile = true } },
+        // The active account's photo, so the Player tab shows a real face. Keyed on `accounts`
+        // so it refreshes when a profile loads or the user switches accounts.
+        avatarUrl = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.avatar },
       )
     }
   ) { padding ->
@@ -3717,7 +3730,10 @@ private fun CrexMatchesScreen(
         .fillMaxSize()
         .statusBarsPadding()
         .background(currentBg)
-        .padding(padding)
+        // Only reserve the TOP inset, not the bottom bar's — the feed then fills to the
+        // screen bottom and scrolls UNDER the floating bar, so match cards show behind it
+        // (the list's own bottom contentPadding keeps the last card clear of the bar).
+        .padding(top = padding.calculateTopPadding())
     ) {
       Column(modifier = Modifier.fillMaxSize()) {
         // Fixed app bar that lifts (frost + elevation) as the list scrolls beneath it —
@@ -3763,7 +3779,9 @@ private fun CrexMatchesScreen(
           start = 16.dp,
           end = 16.dp,
           top = 0.dp,
-          bottom = 100.dp
+          // Clears the floating bar (56dp) + its margins + the system nav inset, so the last
+          // card can scroll fully clear of the bar while the rest passes behind it.
+          bottom = 116.dp
         )
       ) {
         if (selectedTab == 0) {
@@ -7864,7 +7882,9 @@ private fun CrexBottomBar(
   onMatchesClick: () -> Unit = {},
   onChatClick: () -> Unit = {},
   onAlertsClick: () -> Unit = {},
-  onOthersClick: () -> Unit = {}
+  onOthersClick: () -> Unit = {},
+  /** The signed-in player's avatar; rendered as the Player tab so it carries a real face. */
+  avatarUrl: String? = null,
 ) {
   // Primary navigation — DESTINATIONS, not filters.
   //
@@ -7874,13 +7894,18 @@ private fun CrexBottomBar(
   // a place you go, so it moved into the board as a chip row; the freed slots now
   // carry the things a player actually returns for.
   //
-  // (label, filled icon, outlined icon) — outline when idle, filled when active.
+  // (label, active icon, idle icon) — softer Rounded family when active, geometric Outlined
+  // when idle, for a cohesive, modern set. Matches uses a sport-neutral Scoreboard (the board
+  // is multi-sport and score-led) rather than the old cricket bat, which was both
+  // cricket-specific and muddy at this size.
   val items = listOf(
-    Triple("Home", Icons.Filled.Home, Icons.Outlined.Home),
-    Triple("Matches", Icons.Filled.SportsCricket, Icons.Outlined.SportsCricket),
-    Triple("Chat", Icons.Filled.ChatBubble, Icons.Outlined.ChatBubbleOutline),
-    Triple("Alerts", Icons.Filled.Notifications, Icons.Outlined.Notifications),
-    Triple("Player", Icons.Filled.Person, Icons.Outlined.Person),
+    Triple("Home", Icons.Rounded.Home, Icons.Outlined.Home),
+    Triple("Matches", Icons.Rounded.Scoreboard, Icons.Outlined.Scoreboard),
+    // Telegram-style paper-plane for Chat (Send glyph) instead of a speech bubble.
+    Triple("Chat", Icons.AutoMirrored.Rounded.Send, Icons.Outlined.ChatBubbleOutline),
+    // A ringing bell (with sound waves) — more character/presence than a plain flat bell.
+    Triple("Alerts", Icons.Rounded.NotificationsActive, Icons.Outlined.Notifications),
+    Triple("Player", Icons.Rounded.Person, Icons.Outlined.Person),
   )
 
   // Deliberately NOT Material3's NavigationBar: its item internals carry padding
@@ -7889,7 +7914,14 @@ private fun CrexBottomBar(
   // Row owns the vertical rhythm instead, so the content is genuinely centred in
   // whatever HaraanBottomBar.Height says.
   val selectedColor = Color(0xFF2563EB)
-  val idleColor = Color(0xFF9AA0AC)
+  // A solid slate, not a washed-out light grey — idle icons are FILLED (below) so this reads
+  // as real weight rather than a faint outline. This is what gives the bar physical presence.
+  val idleColor = Color(0xFF5B6472)
+
+  // The Chat paper-plane flies for ~2s ONLY when its tab is tapped, then settles at rest.
+  // A one-shot Animatable driven from the click handler below, not an always-on loop.
+  val navScope = rememberCoroutineScope()
+  val chatFly = remember { Animatable(0f) }
 
   Row(
     modifier = Modifier
@@ -7911,7 +7943,7 @@ private fun CrexBottomBar(
       .clip(RoundedCornerShape(26.dp)),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    items.forEach { (label, filledIcon, outlinedIcon) ->
+    items.forEach { (label, filledIcon, _) ->
       val isSelected = label == current
       // Springy scale + lift on the active icon — the bit of motion that reads premium.
       val sel by animateFloatAsState(
@@ -7932,7 +7964,28 @@ private fun CrexBottomBar(
             when (label) {
               "Home" -> onHomeClick()
               "Matches" -> onMatchesClick()
-              "Chat" -> onChatClick()
+              "Chat" -> {
+                // A ~2s "flying" gesture that DECAYS to rest: the plane surges up-right, then
+                // each swing gets smaller and every segment is eased, so it settles softly
+                // instead of the loop halting abruptly.
+                navScope.launch {
+                  chatFly.snapTo(0f)
+                  chatFly.animateTo(
+                    targetValue = 0f,
+                    animationSpec = keyframes {
+                      durationMillis = 2000
+                      0f at 0 with FastOutSlowInEasing
+                      1f at 260 with FastOutSlowInEasing
+                      0.10f at 640 with FastOutSlowInEasing
+                      0.55f at 1020 with FastOutSlowInEasing
+                      0.06f at 1400 with FastOutSlowInEasing
+                      0.24f at 1720 with FastOutSlowInEasing
+                      0f at 2000 with FastOutSlowInEasing
+                    },
+                  )
+                }
+                onChatClick()
+              }
               "Alerts" -> onAlertsClick()
               else -> onOthersClick()
             }
@@ -7943,25 +7996,56 @@ private fun CrexBottomBar(
         // Selection pill sized to the icon, so it can never crowd the label.
         Box(
           modifier = Modifier
-            .size(width = 40.dp, height = 24.dp)
+            .size(width = 46.dp, height = 26.dp)
             .background(
               color = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
-              shape = RoundedCornerShape(12.dp)
+              shape = RoundedCornerShape(13.dp)
             ),
           contentAlignment = Alignment.Center,
         ) {
-          Icon(
-            imageVector = if (isSelected) filledIcon else outlinedIcon,
-            contentDescription = label,
-            tint = if (isSelected) selectedColor else idleColor,
-            modifier = Modifier
-              .size(20.dp)
-              .graphicsLayer {
-                val s = 1f + 0.14f * sel
-                scaleX = s
-                scaleY = s
-              }
-          )
+          val iconScale = Modifier.graphicsLayer {
+            val s = 1f + 0.14f * sel
+            scaleX = s
+            scaleY = s
+            if (label == "Chat") {
+              // Tilt the paper plane so its nose points up-and-forward (Telegram-style).
+              rotationZ = -25f
+              // Flies up-and-to-the-right while the tap-triggered animation runs, then rests.
+              translationX = chatFly.value * 5.dp.toPx()
+              translationY = -chatFly.value * 5.dp.toPx()
+            }
+          }
+          if (label == "Player" && !avatarUrl.isNullOrBlank()) {
+            // The Player tab carries the user's real photo — a face reads as far more
+            // present than a generic person glyph. A ring marks it active.
+            AsyncImage(
+              model = com.haraan.app.data.ApiConfig.mediaUrl(avatarUrl),
+              contentDescription = "Player",
+              contentScale = ContentScale.Crop,
+              modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(HaraanColors.Field, CircleShape)
+                .border(
+                  width = if (isSelected) 2.dp else 1.5.dp,
+                  color = if (isSelected) selectedColor else Color(0xFFCBD2DC),
+                  shape = CircleShape,
+                )
+                .then(iconScale)
+            )
+          } else {
+            Icon(
+              // Always the FILLED (Rounded) glyph — even when idle — so every tab has real
+              // body and weight. The old outline-when-idle read as thin and washed out; only
+              // colour + the pill + a scale lift now separate active from idle.
+              imageVector = filledIcon,
+              contentDescription = label,
+              tint = if (isSelected) selectedColor else idleColor,
+              modifier = Modifier
+                .size(23.dp)
+                .then(iconScale)
+            )
+          }
         }
         Spacer(Modifier.height(2.dp))
         Text(
