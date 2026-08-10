@@ -3846,6 +3846,9 @@ private fun CrexMatchesScreen(
           tokenProvider = { com.haraan.app.data.TokenStore.getToken(context) },
           onOpenPlayer = { pid -> searchedPlayerId = pid },
           onCreatePost = { requireRankedAccess { showProfile = true } },
+          // Universal ActionBoard exit: leave the feed AND return to Pulse, and reset the
+          // feed flag so re-entry lands on Matches (the chosen default) rather than here.
+          onBack = { showHomeFeed = false; onBack() },
           modifier = Modifier.fillMaxSize(),
         )
       }
@@ -4690,6 +4693,7 @@ private fun HomeFeedScreen(
   tokenProvider: () -> String?,
   onOpenPlayer: (String) -> Unit,
   onCreatePost: () -> Unit,
+  onBack: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val scope = rememberCoroutineScope()
@@ -4753,20 +4757,54 @@ private fun HomeFeedScreen(
           modifier = Modifier.fillMaxSize(),
           contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-          // Title row
+          // Brand top bar: the universal "back to Pulse" control pinned left, with the
+          // Haraan wordmark centred (and a BETA tag) — the same exit the board header
+          // carries, so leaving the ActionBoard is one tap from the Home feed too.
           item {
-            Row(
+            Box(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+              contentAlignment = Alignment.Center,
             ) {
-              Text(
-                "Home",
-                color = HaraanColors.TextPrimary,
-                style = HaraanTypography.TitleMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.ExtraBold),
-              )
+              Box(
+                modifier = Modifier
+                  .align(Alignment.CenterStart)
+                  .size(36.dp)
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(Color.White)
+                  .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
+                  .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.ArrowBack,
+                  contentDescription = "Back to Pulse",
+                  tint = Color(0xFF475569),
+                  modifier = Modifier.size(20.dp),
+                )
+              }
+              // Centred wordmark, larger, with a BETA badge riding at its top-right.
+              Row(verticalAlignment = Alignment.Top) {
+                Image(
+                  painter = painterResource(id = com.haraan.app.R.drawable.haraan_wordmark),
+                  contentDescription = "Haraan",
+                  contentScale = ContentScale.Fit,
+                  modifier = Modifier.height(30.dp),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                  text = "BETA",
+                  color = HaraanColors.EventsBlue,
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  letterSpacing = 0.6.sp,
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(HaraanColors.EventsBlue.copy(alpha = 0.12f))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
+              }
             }
           }
           // Stories strip
@@ -5007,16 +5045,13 @@ private fun CrexHeaderSection(
   onJoinByCode: () -> Unit = {},
   onSearch: () -> Unit = {},
 ) {
-  Row(
+  Column(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(top = 8.dp, bottom = 12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(10.dp)
+      .padding(top = 6.dp, bottom = 10.dp),
   ) {
-    // Back to Pulse. This slot used to hold a decorative brand logo with no action; the
-    // "back to Pulse" affordance moved here off the bottom-bar Home button (which now opens
-    // the social Home feed). White surface + border so it reads as a real, tappable control.
+    // Back to Pulse — its own row ABOVE the brand, so the ActionBoard's exit is the topmost
+    // control. White surface + border so it reads as a real, tappable button.
     Box(
       modifier = Modifier
         .size(36.dp)
@@ -5031,6 +5066,37 @@ private fun CrexHeaderSection(
         contentDescription = "Back to Pulse",
         tint = Color(0xFF475569),
         modifier = Modifier.size(20.dp)
+      )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+    // Brand: the H monogram + a BETA badge. This slot carries identity now that the
+    // back-to-Pulse control moved to the row above.
+    Row(verticalAlignment = Alignment.Top) {
+      Image(
+        painter = painterResource(id = com.haraan.app.R.drawable.haraan_copy),
+        contentDescription = "Haraan",
+        contentScale = ContentScale.Fit,
+        colorFilter = ColorFilter.tint(HaraanColors.EventsBlue),
+        modifier = Modifier.size(30.dp),
+      )
+      Spacer(modifier = Modifier.width(4.dp))
+      Text(
+        text = "BETA",
+        color = HaraanColors.EventsBlue,
+        fontSize = 8.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier
+          .clip(RoundedCornerShape(4.dp))
+          .background(HaraanColors.EventsBlue.copy(alpha = 0.12f))
+          .padding(horizontal = 4.dp, vertical = 1.dp),
       )
     }
 
@@ -5108,6 +5174,7 @@ private fun CrexHeaderSection(
       Text(text = "Create", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
     }
     // The menu (≡) that used to sit here now lives on the bottom-bar "Others" button.
+    }
   }
 }
 
@@ -7258,15 +7325,17 @@ private fun LiveFeedGroup(
   rows: List<com.haraan.app.data.LiveMatchRow>,
   onMatchClick: (String) -> Unit,
 ) {
-  MatchGroup {
-    rows.forEachIndexed { i, m ->
-      if (i > 0) MatchGroupDivider()
+  // Each match in its own floating card with space between them — the old single grouped
+  // surface with inset hairlines read as one crammed, "mixed" block (flagged by the user).
+  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    rows.forEach { m ->
       // Put the batting side on top (first-innings team leads the card). The top row is
       // then always the batting one, so battingTeam = 1 for the laid-out order.
       val battingSecond = m.battingTeam == 2
       // Compact codes (KP, PP) instead of long stored names, matching the hero card.
       val code1 = com.haraan.app.ui.matches.teamShortCode(m.team1)
       val code2 = com.haraan.app.ui.matches.teamShortCode(m.team2)
+      MatchGroup {
       MatchLiveContent(
         modifier = Modifier.fillMaxWidth(),
         onClick = { onMatchClick(m.id) },
@@ -7290,12 +7359,13 @@ private fun LiveFeedGroup(
         isFeatured = m.isFeatured,
         distanceKm = m.distanceKm,
       )
+      }
     }
   }
 }
 
-// One grouped surface for a league's matches — rows separated by inset hairlines,
-// instead of a stack of separate floating cards.
+// One floating card surface for a single match (or, in other callers, a small group).
+// Live groups sit highest in the GameHub depth hierarchy.
 @Composable
 private fun MatchGroup(content: @Composable () -> Unit) {
   Card(
@@ -7315,11 +7385,6 @@ private fun MatchGroup(content: @Composable () -> Unit) {
   ) {
     Column { content() }
   }
-}
-
-@Composable
-private fun MatchGroupDivider() {
-  Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(Color(0xFFEEF0F4)))
 }
 
 // Shimmer skeleton shown while the real live feed loads — a premium stand-in for a
