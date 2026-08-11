@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -152,6 +154,8 @@ import androidx.compose.material3.ripple
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -178,6 +182,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -3574,6 +3579,20 @@ private fun CrexMatchesScreen(
   // The Instagram-style social Home feed — a bottom-bar destination opened by the Home
   // button. Renders inside the scaffold (bar stays visible), the same way Chat/Player do.
   var showHomeFeed by remember { mutableStateOf(false) }
+  // Create-a-post flow: the picked images awaiting review + caption + Share (empty = not
+  // composing). Bumping feedReload after a post re-fetches the Home feed so it appears on top.
+  var pendingPostUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+  var feedReload by remember { mutableStateOf(0) }
+
+  // Tint the actual status bar blue (with white icons) while the Home feed is open, so the
+  // blue header runs edge-to-edge to the very top. Runs AFTER the transparent-reset SideEffect
+  // above, so it wins; reverts to transparent + dark icons when the feed closes.
+  SideEffect {
+    val activity = view.context as? Activity ?: return@SideEffect
+    val window = activity.window
+    window.statusBarColor = if (showHomeFeed) HaraanColors.EventsBlue.toArgb() else android.graphics.Color.TRANSPARENT
+    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !showHomeFeed
+  }
 
   // ── Multi-account switcher ────────────────────────────────────────────────────
   // The roster is state, not a read-through to AccountStore, so the sheet re-renders
@@ -3587,9 +3606,21 @@ private fun CrexMatchesScreen(
   var selectedLeaderboardPlayer by remember { mutableStateOf<LeaderboardPlayer?>(null) }
   val listState = rememberLazyListState()
 
+  // Photo picker for creating a post: pick up to 10 images, then open the compose screen
+  // (review/crop + caption) rather than uploading blind.
+  val postPicker = rememberLauncherForActivityResult(
+    ActivityResultContracts.PickMultipleVisualMedia(10),
+  ) { uris -> if (uris.isNotEmpty()) pendingPostUris = uris }
+
   // Back closes whatever is open here, topmost first. The create wizard is NOT listed:
   // it owns Back itself so it can step backwards through the form instead of discarding
   // a half-built match. Everything else is a simple dismiss.
+  //
+  // Registered FIRST (lowest priority) so the overlay handlers below win while something is
+  // open; when nothing is, this returns to Pulse — the system back now does what the old
+  // header back arrow did, so that button could be removed.
+  com.haraan.app.ui.DismissOnBack(true) { onBack() }
+  com.haraan.app.ui.DismissOnBack(pendingPostUris.isNotEmpty()) { pendingPostUris = emptyList() }
   com.haraan.app.ui.DismissOnBack(selectedLeaderboardPlayer != null) { selectedLeaderboardPlayer = null }
   com.haraan.app.ui.DismissOnBack(showJoinDialog) { showJoinDialog = false }
   com.haraan.app.ui.DismissOnBack(showSettings) { showSettings = false }
@@ -3718,9 +3749,11 @@ private fun CrexMatchesScreen(
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
         onOthersClick = { showChatList = false; showHomeFeed = false; requireRankedAccess { showProfile = true } },
-        // The active account's photo, so the Player tab shows a real face. Keyed on `accounts`
-        // so it refreshes when a profile loads or the user switches accounts.
+        // The active account's photo + name, so the Player tab shows a real face (or the
+        // name's initial when there's no photo). Keyed on `accounts` so it refreshes when a
+        // profile loads or the user switches accounts.
         avatarUrl = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.avatar },
+        avatarName = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.name },
       )
     }
   ) { padding ->
@@ -3750,7 +3783,6 @@ private fun CrexMatchesScreen(
             .padding(top = 12.dp, bottom = 2.dp)
         ) {
           CrexHeaderSection(
-            onBack,
             onCreateMatch = { requireRankedAccess { showCreateWizard = true } },
             onJoinByCode = { showJoinDialog = true },
             onSearch = { showPlayerSearch = true },
@@ -3863,7 +3895,10 @@ private fun CrexMatchesScreen(
           repository = playerRepository,
           tokenProvider = { com.haraan.app.data.TokenStore.getToken(context) },
           onOpenPlayer = { pid -> searchedPlayerId = pid },
-          onCreatePost = { requireRankedAccess { showProfile = true } },
+          // The + "New" bubble now opens the real create-post flow (pick → preview + caption),
+          // gated behind a complete ranked profile.
+          onCreatePost = { requireRankedAccess { postPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) } },
+          reloadKey = feedReload,
           // Universal ActionBoard exit: leave the feed AND return to Pulse, and reset the
           // feed flag so re-entry lands on Matches (the chosen default) rather than here.
           onBack = { showHomeFeed = false; onBack() },
@@ -4165,6 +4200,20 @@ private fun CrexMatchesScreen(
         // Opens the same real profile the leaderboard uses — no second, lesser
         // profile card for people who arrived via search.
         onOpenPlayer = { playerId -> searchedPlayerId = playerId },
+      )
+    }
+
+    // Compose-a-post: review/crop + caption + Share for the picked image(s).
+    if (pendingPostUris.isNotEmpty()) {
+      com.haraan.app.ui.social.CreatePostScreen(
+        imageUris = pendingPostUris,
+        onClose = { pendingPostUris = emptyList() },
+        onPosted = {
+          pendingPostUris = emptyList()
+          // Re-fetch the Home feed so the new post shows on top; jump to the feed tab.
+          feedReload += 1
+          showChatList = false; showProfile = false; showHomeFeed = true
+        },
       )
     }
 
@@ -4549,6 +4598,18 @@ private fun CrexMatchesScreen(
         modifier = Modifier.statusBarsPadding(),
       )
     }
+
+    // Paint the status-bar region blue while the Home feed is open, so the feed's blue header
+    // runs edge-to-edge to the very top. Drawn last (on top) over the app's light background;
+    // the SideEffect above turns the status-bar icons white to match.
+    if (showHomeFeed) {
+      Box(
+        Modifier
+          .fillMaxWidth()
+          .windowInsetsTopHeight(WindowInsets.statusBars)
+          .background(HaraanColors.EventsBlue),
+      )
+    }
   }
 }
 
@@ -4712,6 +4773,7 @@ private fun HomeFeedScreen(
   onOpenPlayer: (String) -> Unit,
   onCreatePost: () -> Unit,
   onBack: () -> Unit,
+  reloadKey: Int = 0,
   modifier: Modifier = Modifier,
 ) {
   val scope = rememberCoroutineScope()
@@ -4728,7 +4790,7 @@ private fun HomeFeedScreen(
     }
     loading = false
   }
-  LaunchedEffect(Unit) { reload() }
+  LaunchedEffect(reloadKey) { reload() }
 
   Box(modifier = modifier.background(Color.White)) {
     when {
@@ -4775,51 +4837,36 @@ private fun HomeFeedScreen(
           modifier = Modifier.fillMaxSize(),
           contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-          // Brand top bar: the universal "back to Pulse" control pinned left, with the
-          // Haraan wordmark centred (and a BETA tag) — the same exit the board header
-          // carries, so leaving the ActionBoard is one tap from the Home feed too.
+          // Brand top bar: a BLUE header with the WHITE Haraan logo + BETA, and soft rounded
+          // bottom corners so the white feed tucks under it. No back button — system back
+          // returns to the board.
           item {
             Box(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+                .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+                .background(HaraanColors.EventsBlue)
+                .padding(top = 14.dp, bottom = 16.dp),
               contentAlignment = Alignment.Center,
             ) {
-              Box(
-                modifier = Modifier
-                  .align(Alignment.CenterStart)
-                  .size(36.dp)
-                  .clip(RoundedCornerShape(12.dp))
-                  .background(Color.White)
-                  .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
-                  .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-              ) {
-                Icon(
-                  imageVector = Icons.Filled.ArrowBack,
-                  contentDescription = "Back to Pulse",
-                  tint = Color(0xFF475569),
-                  modifier = Modifier.size(20.dp),
-                )
-              }
-              // Centred wordmark, larger, with a BETA badge riding at its top-right.
               Row(verticalAlignment = Alignment.Top) {
                 Image(
                   painter = painterResource(id = com.haraan.app.R.drawable.haraan_wordmark),
                   contentDescription = "Haraan",
                   contentScale = ContentScale.Fit,
+                  colorFilter = ColorFilter.tint(Color.White),
                   modifier = Modifier.height(30.dp),
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(
                   text = "BETA",
-                  color = HaraanColors.EventsBlue,
+                  color = Color.White,
                   fontSize = 9.sp,
                   fontWeight = FontWeight.ExtraBold,
                   letterSpacing = 0.6.sp,
                   modifier = Modifier
                     .clip(RoundedCornerShape(5.dp))
-                    .background(HaraanColors.EventsBlue.copy(alpha = 0.12f))
+                    .background(Color.White.copy(alpha = 0.22f))
                     .padding(horizontal = 5.dp, vertical = 2.dp),
                 )
               }
@@ -5005,15 +5052,59 @@ private fun FeedPostCard(
         }
       }
     }
-    // Photo — square, edge to edge.
-    HaraanImage(
-      model = com.haraan.app.data.ApiConfig.mediaUrl(post.image),
-      contentDescription = post.caption ?: "Post by ${post.authorName}",
-      modifier = Modifier
-        .fillMaxWidth()
-        .aspectRatio(1f)
-        .background(HaraanColors.Field),
-    )
+    // Photo(s) — square, edge to edge. Multiple images render a swipeable carousel with dots.
+    if (post.images.size > 1) {
+      val postPager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { post.images.size })
+      Box(modifier = Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.pager.HorizontalPager(state = postPager) { page ->
+          HaraanImage(
+            model = com.haraan.app.data.ApiConfig.mediaUrl(post.images[page]),
+            contentDescription = post.caption ?: "Post by ${post.authorName}",
+            modifier = Modifier
+              .fillMaxWidth()
+              .aspectRatio(1f)
+              .background(HaraanColors.Field),
+          )
+        }
+        // "1/3" counter chip, top-right.
+        Text(
+          text = "${postPager.currentPage + 1}/${post.images.size}",
+          color = Color.White,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(10.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+        // Page dots along the bottom.
+        Row(
+          modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+          horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+          repeat(post.images.size) { i ->
+            val on = i == postPager.currentPage
+            Box(
+              modifier = Modifier
+                .size(if (on) 6.dp else 5.dp)
+                .clip(CircleShape)
+                .background(if (on) Color.White else Color.White.copy(alpha = 0.5f)),
+            )
+          }
+        }
+      }
+    } else {
+      HaraanImage(
+        model = com.haraan.app.data.ApiConfig.mediaUrl(post.image),
+        contentDescription = post.caption ?: "Post by ${post.authorName}",
+        modifier = Modifier
+          .fillMaxWidth()
+          .aspectRatio(1f)
+          .background(HaraanColors.Field),
+      )
+    }
     // Actions
     Row(
       modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 8.dp),
@@ -5058,44 +5149,19 @@ private fun FeedPostCard(
 
 @Composable
 private fun CrexHeaderSection(
-  onBack: () -> Unit,
   onCreateMatch: () -> Unit,
   onJoinByCode: () -> Unit = {},
   onSearch: () -> Unit = {},
 ) {
-  Column(
+  Row(
     modifier = Modifier
       .fillMaxWidth()
       .padding(top = 6.dp, bottom = 10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(10.dp)
   ) {
-    // Back to Pulse — its own row ABOVE the brand, so the ActionBoard's exit is the topmost
-    // control. White surface + border so it reads as a real, tappable button.
-    Box(
-      modifier = Modifier
-        .size(36.dp)
-        .clip(RoundedCornerShape(12.dp))
-        .background(Color.White)
-        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
-        .clickable(onClick = onBack),
-      contentAlignment = Alignment.Center
-    ) {
-      Icon(
-        imageVector = Icons.Filled.ArrowBack,
-        contentDescription = "Back to Pulse",
-        tint = Color(0xFF475569),
-        modifier = Modifier.size(20.dp)
-      )
-    }
-
-    Spacer(modifier = Modifier.height(10.dp))
-
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-    // Brand: the H monogram + a BETA badge. This slot carries identity now that the
-    // back-to-Pulse control moved to the row above.
+    // Brand: the H monogram + a BETA badge. Back-to-Pulse now lives on the system/phone
+    // back button (handled by DismissOnBack), so no in-header arrow is needed.
     Row(verticalAlignment = Alignment.Top) {
       Image(
         painter = painterResource(id = com.haraan.app.R.drawable.haraan_copy),
@@ -5127,9 +5193,10 @@ private fun CrexHeaderSection(
       modifier = Modifier
         .weight(1f)
         .height(38.dp)
+        // Soft shadow so the control floats off the page — the physical lift the flat white
+        // fields were missing.
+        .shadow(3.dp, RoundedCornerShape(12.dp), clip = false, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.10f))
         .clip(RoundedCornerShape(12.dp))
-        // White surface + hairline border so the field lifts off the near-identical light
-        // background — the old slate-100 fill made it melt into the page (visibility flagged).
         .background(Color.White)
         .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
         .clickable(onClick = onSearch)
@@ -5159,6 +5226,7 @@ private fun CrexHeaderSection(
     Box(
       modifier = Modifier
         .size(38.dp)
+        .shadow(3.dp, RoundedCornerShape(12.dp), clip = false, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.10f))
         .clip(RoundedCornerShape(12.dp))
         .background(Color.White)
         .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
@@ -5181,7 +5249,9 @@ private fun CrexHeaderSection(
       colors = ButtonDefaults.buttonColors(
         containerColor = LightAccentBlue,
         contentColor = Color.White
-      )
+      ),
+      // A real lift on the primary CTA — presses down on tap for tactile feedback.
+      elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp, pressedElevation = 1.dp),
     ) {
       Icon(
         imageVector = Icons.Default.Add,
@@ -5192,7 +5262,6 @@ private fun CrexHeaderSection(
       Text(text = "Create", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
     }
     // The menu (≡) that used to sit here now lives on the bottom-bar "Others" button.
-    }
   }
 }
 
@@ -5236,19 +5305,34 @@ private fun CrexTabsSection(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.Center
         ) {
-          Box(contentAlignment = Alignment.TopEnd) {
-            Icon(
-              imageVector = tab.icon,
-              contentDescription = null,
-              tint = tabColor,
-              modifier = Modifier.size(17.dp)
-            )
-            if (tab.title == "Live") {
-              LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
+          // The active tab's icon sits in a soft blue chip — a physical highlight that lifts
+          // the current tab out of the flat row.
+          val chipBg by androidx.compose.animation.animateColorAsState(
+            targetValue = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
+            animationSpec = tween(200),
+            label = "tabChip",
+          )
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+              .size(width = 40.dp, height = 28.dp)
+              .clip(RoundedCornerShape(9.dp))
+              .background(chipBg),
+          ) {
+            Box(contentAlignment = Alignment.TopEnd) {
+              Icon(
+                imageVector = tab.icon,
+                contentDescription = null,
+                tint = tabColor,
+                modifier = Modifier.size(17.dp)
+              )
+              if (tab.title == "Live") {
+                LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
+              }
             }
           }
 
-          Spacer(modifier = Modifier.height(5.dp))
+          Spacer(modifier = Modifier.height(4.dp))
 
           Text(
             text = tab.title,
@@ -7833,33 +7917,49 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
     modifier = Modifier
       .fillMaxWidth()
       .horizontalScroll(rememberScrollState())
-      // Asymmetric: normal breathing above (under the Live/Finished tabs), tight below so the
-      // "Matches near you" title bonds to the chips.
-      .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+      // Asymmetric: normal breathing above (under the Live/Finished tabs); a little room
+      // below for the chips' soft shadow while the "Matches near you" title stays close.
+      .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+    horizontalArrangement = Arrangement.spacedBy(9.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     sports.forEach { (label, icon) ->
       val isSel = label == selected
+      // Animated fill + a soft lift so the chips feel like physical, tappable objects rather
+      // than flat outlines: selected chips carry a blue-tinted glow, idle chips a faint
+      // neutral shadow that separates them from the light page.
+      val chipBg by animateColorAsState(
+        targetValue = if (isSel) HaraanColors.EventsBlue else Color.White,
+        animationSpec = tween(180),
+        label = "chipBg",
+      )
       Row(
         modifier = Modifier
-          .pressable { onSelected(label) }
-          .clip(RoundedCornerShape(20.dp))
-          .background(if (isSel) HaraanColors.EventsBlue else Color.White)
+          .shadow(
+            elevation = if (isSel) 6.dp else 2.dp,
+            shape = RoundedCornerShape(50),
+            clip = false,
+            ambientColor = if (isSel) HaraanColors.EventsBlue.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.05f),
+            spotColor = if (isSel) HaraanColors.EventsBlue.copy(alpha = 0.55f) else Color.Black.copy(alpha = 0.10f),
+          )
+          .clip(RoundedCornerShape(50))
+          .background(chipBg)
           .border(
             1.dp,
-            if (isSel) HaraanColors.EventsBlue else HaraanColors.BorderLight,
-            RoundedCornerShape(20.dp),
+            if (isSel) Color.Transparent else HaraanColors.BorderLight,
+            RoundedCornerShape(50),
           )
-          .padding(horizontal = 14.dp, vertical = 8.dp),
+          .pressable { onSelected(label) }
+          .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         if (icon != null) {
           Icon(
             icon,
             contentDescription = null,
-            tint = if (isSel) Color.White else HaraanColors.TextSecondary,
-            modifier = Modifier.size(15.dp),
+            // Brand-tinted sport icons give each chip a spot of life when idle; white on select.
+            tint = if (isSel) Color.White else HaraanColors.EventsBlue,
+            modifier = Modifier.size(16.dp),
           )
           Spacer(Modifier.width(6.dp))
         }
@@ -7885,6 +7985,8 @@ private fun CrexBottomBar(
   onOthersClick: () -> Unit = {},
   /** The signed-in player's avatar; rendered as the Player tab so it carries a real face. */
   avatarUrl: String? = null,
+  /** The player's name — its initial is shown when there's no photo (matches the profile). */
+  avatarName: String? = null,
 ) {
   // Primary navigation — DESTINATIONS, not filters.
   //
@@ -8015,13 +8117,13 @@ private fun CrexBottomBar(
               translationY = -chatFly.value * 5.dp.toPx()
             }
           }
-          if (label == "Player" && !avatarUrl.isNullOrBlank()) {
-            // The Player tab carries the user's real photo — a face reads as far more
-            // present than a generic person glyph. A ring marks it active.
-            AsyncImage(
-              model = com.haraan.app.data.ApiConfig.mediaUrl(avatarUrl),
-              contentDescription = "Player",
-              contentScale = ContentScale.Crop,
+          if (label == "Player") {
+            // The Player tab carries the user's identity. The initial is always drawn; a
+            // real photo (when present) is overlaid on top — so a missing or broken avatar
+            // shows the initial (like the profile) rather than an empty circle. A ring marks
+            // it active.
+            val photo = avatarUrl?.let { com.haraan.app.data.ApiConfig.mediaUrl(it) }
+            Box(
               modifier = Modifier
                 .size(24.dp)
                 .clip(CircleShape)
@@ -8031,8 +8133,24 @@ private fun CrexBottomBar(
                   color = if (isSelected) selectedColor else Color(0xFFCBD2DC),
                   shape = CircleShape,
                 )
-                .then(iconScale)
-            )
+                .then(iconScale),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = avatarName?.trim()?.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                color = if (isSelected) selectedColor else idleColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+              )
+              if (!photo.isNullOrBlank()) {
+                AsyncImage(
+                  model = photo,
+                  contentDescription = "Player",
+                  contentScale = ContentScale.Crop,
+                  modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
+              }
+            }
           } else {
             Icon(
               // Always the FILLED (Rounded) glyph — even when idle — so every tab has real

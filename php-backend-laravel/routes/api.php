@@ -222,6 +222,8 @@ Route::middleware('auth.jwt.optional')->group(function (): void {
 Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::get('/me', [PlayersController::class, 'me']);
     Route::post('/profile', [PlayersController::class, 'saveProfile']);
+    // Inline name + bio edit (profile Edit button), lighter than the full /profile save.
+    Route::post('/profile/basics', [PlayersController::class, 'updateBasics']);
     Route::post('/avatar', [PlayersController::class, 'uploadAvatar']); // profile photo
     Route::get('/lookup', [PlayersController::class, 'lookup']);
     // Squad building: find a teammate by handle or name instead of their Player ID.

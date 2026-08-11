@@ -9,6 +9,7 @@ use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
 use App\Models\PlayerPost;
+use App\Models\PostImage;
 use App\Models\PostLike;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -102,6 +103,7 @@ final class PlayersController extends Controller
             'player_id'        => $pid,
             'username'         => $user->username,
             'name'             => $user->name,
+            'bio'              => $user->bio,
             'avatar'           => $user->avatar,
             'district'         => $user->district,
             'state'            => $user->state,
@@ -446,6 +448,34 @@ final class PlayersController extends Controller
     }
 
     /**
+     * Inline edit of just the display name + bio (the profile's Edit button). Lighter than
+     * saveProfile, which requires the full setup payload (state/district/sport/attributes).
+     * POST /api/players/profile/basics
+     */
+    public function updateBasics(Request $request): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'bio' => ['nullable', 'string', 'max:160'],
+        ]);
+
+        $user->update([
+            'name' => trim($validated['name']),
+            'bio' => isset($validated['bio']) ? trim((string) $validated['bio']) : null,
+        ]);
+
+        return response()->json([
+            'name' => $user->name,
+            'bio' => $user->bio,
+        ]);
+    }
+
+    /**
      * Upload / replace the logged-in player's profile photo.
      * POST /api/players/avatar  (multipart: avatar=<image>)
      */
@@ -699,7 +729,13 @@ final class PlayersController extends Controller
         ]);
     }
 
-    /** POST /api/players/posts — add a photo to your own grid. */
+    /**
+     * POST /api/players/posts — add a photo post (one or many images = carousel).
+     *
+     * Accepts `images[]` (multi) or a single `image` (older clients). The first image is the
+     * cover, stored on `player_posts.image_path` so pre-carousel readers keep working; every
+     * image also gets a `post_images` row in order.
+     */
     public function storePost(Request $request): JsonResponse
     {
         $user = $request->attributes->get('auth_user');
@@ -708,22 +744,44 @@ final class PlayersController extends Controller
         }
 
         $request->validate([
-            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'], // 8 MB
+            'images' => ['sometimes', 'array', 'max:10'],
+            'images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:8192'], // 8 MB each
+            'image' => ['sometimes', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'caption' => ['nullable', 'string', 'max:300'],
         ]);
 
-        $path = $request->file('image')->store('posts', 'public');
+        // Normalize to an ordered list of uploaded files.
+        $files = $request->file('images');
+        if (! is_array($files) || count($files) === 0) {
+            $single = $request->file('image');
+            $files = $single ? [$single] : [];
+        }
+        if (count($files) === 0) {
+            return response()->json(['error' => 'No image provided'], 422);
+        }
+
+        $paths = [];
+        foreach ($files as $file) {
+            $paths[] = '/storage/' . $file->store('posts', 'public');
+        }
+
         $post = PlayerPost::create([
             'user_id' => $user->id,
-            'image_path' => '/storage/' . $path,
+            'image_path' => $paths[0],
             'caption' => $request->input('caption'),
         ]);
+        foreach ($paths as $i => $p) {
+            $post->images()->create(['image_path' => $p, 'position' => $i]);
+        }
 
         return response()->json([
             'id' => (int) $post->id,
             'image' => $post->image_path,
+            'images' => $paths,
             'caption' => $post->caption,
             'created_at' => $post->created_at?->toIso8601String(),
+            'like_count' => 0,
+            'liked' => false,
             'mine' => true,
         ], 201);
     }
@@ -744,9 +802,15 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'Not your post'], 403);
         }
 
-        $path = $post->image_path;
-        if (is_string($path) && str_starts_with($path, '/storage/')) {
-            \Illuminate\Support\Facades\Storage::disk('public')->delete(substr($path, strlen('/storage/')));
+        // Delete every image file (cover + carousel), then the row (cascade drops post_images).
+        $paths = $post->images()->pluck('image_path')->all();
+        if (empty($paths)) {
+            $paths = [$post->image_path];
+        }
+        foreach ($paths as $path) {
+            if (is_string($path) && str_starts_with($path, '/storage/')) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete(substr($path, strlen('/storage/')));
+            }
         }
         $post->delete();
 
@@ -768,7 +832,7 @@ final class PlayersController extends Controller
         $meId = $me instanceof User ? (int) $me->id : null;
 
         $posts = PlayerPost::query()
-            ->with('user')
+            ->with(['user', 'images'])
             ->withCount('likes')
             ->whereHas('user', function ($q): void {
                 $q->where('is_guest', false)
@@ -796,9 +860,15 @@ final class PlayersController extends Controller
         $items = $posts->map(function (PlayerPost $p) use ($likedIds, $meId): array {
             $author = $p->user;
 
+            $images = $p->images->pluck('image_path')->values()->all();
+            if (empty($images)) {
+                $images = [$p->image_path];
+            }
+
             return [
                 'id' => (int) $p->id,
                 'image' => $p->image_path,
+                'images' => $images,
                 'caption' => $p->caption,
                 'created_at' => $p->created_at?->toIso8601String(),
                 'like_count' => (int) $p->likes_count,

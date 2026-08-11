@@ -40,6 +40,9 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -63,6 +66,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,6 +75,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.haraan.app.data.AccountStore
 import com.haraan.app.data.PlayerPost
 import com.haraan.app.data.PlayerRepository
+import com.haraan.app.data.ProfileRepository
 import com.haraan.app.data.TokenStore
 import com.haraan.app.ui.Feel
 import com.haraan.app.ui.components.HaraanImage
@@ -110,6 +115,8 @@ import kotlinx.coroutines.launch
 import com.haraan.app.data.PlayerProfile
 import com.haraan.app.data.RecentMatch
 import com.haraan.app.ui.theme.HaraanColors
+import com.haraan.app.ui.theme.premiumCardShadow
+import androidx.compose.ui.draw.shadow
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 // These are ALIASES onto the design system, not a private palette. This file used to
@@ -690,6 +697,7 @@ private fun ProfileContent(
 ) {
     val clipboard = LocalClipboardManager.current
     var showShare by remember { mutableStateOf(false) }
+    var showEditProfile by remember { mutableStateOf(false) }
     // Which content tab is open: 0 = Matches, 1 = Stats, 2 = About, 3 = Posts.
     var selectedTab by remember { mutableStateOf(0) }
     val view = LocalView.current
@@ -708,6 +716,9 @@ private fun ProfileContent(
     var postsFailed by remember(p.playerId) { mutableStateOf(false) }
     var uploadingPost by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<PlayerPost?>(null) }
+    // Picked image(s) awaiting the compose screen (review + caption), so a pick no longer
+    // uploads blind.
+    var pendingPostUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
     suspend fun loadPosts() {
         // Token is optional — the grid is public — but sending ours is what makes the
@@ -720,35 +731,10 @@ private fun ProfileContent(
     LaunchedEffect(p.playerId) { loadPosts() }
 
     val postPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        uploadingPost = true
-        scope.launch {
-            val created = try {
-                val token = TokenStore.getToken(context)
-                val resolver = context.contentResolver
-                val mime = resolver.getType(uri) ?: "image/jpeg"
-                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    resolver.openInputStream(uri)?.use { it.readBytes() }
-                }
-                if (TokenStore.isSignedIn(token) && bytes != null) {
-                    PlayerRepository().uploadPost(token!!, bytes, mime)
-                } else null
-            } catch (_: Exception) {
-                null
-            }
-            uploadingPost = false
-            if (created != null) {
-                // Prepend rather than refetch: the server returned the created row, so the
-                // photo appears the instant the upload lands.
-                posts = listOf(created) + (posts ?: emptyList())
-                postsFailed = false
-                view.performHapticFeedback(Feel.TICK)
-            } else {
-                Toast.makeText(context, "Couldn't post that photo. Try again.", Toast.LENGTH_SHORT).show()
-            }
-        }
+        ActivityResultContracts.PickMultipleVisualMedia(10),
+    ) { uris ->
+        // Open the compose screen (review + caption) instead of uploading on the spot.
+        if (uris.isNotEmpty()) pendingPostUris = uris
     }
     androidx.compose.material3.pulltorefresh.PullToRefreshBox(
         isRefreshing = refreshing,
@@ -783,8 +769,10 @@ private fun ProfileContent(
         if (onOpenAccounts != null) {
             item {
                 AccountChip(
+                    // Always show the chevron so it reads as an account switcher you can tap
+                    // to add or switch accounts — even when there's only one signed in.
                     label = p.username?.let { "@$it" } ?: p.name,
-                    showChevron = accountCount > 1,
+                    showChevron = true,
                     onClick = onOpenAccounts,
                     modifier = Modifier.padding(bottom = 6.dp),
                 )
@@ -814,6 +802,7 @@ private fun ProfileContent(
                 onToggleFollow = onToggleFollow,
                 onShare = { showShare = true },
                 onMessage = onMessage,
+                onEdit = if (isSelf) ({ showEditProfile = true }) else null,
             )
         }
 
@@ -922,6 +911,24 @@ private fun ProfileContent(
     }
 
     if (showShare) ShareCardSheet(p, e, onDismiss = { showShare = false })
+    if (showEditProfile) {
+        EditProfileSheet(
+            currentName = p.name,
+            currentBio = p.bio,
+            onDismiss = { showEditProfile = false },
+            onSave = { newName, newBio ->
+                val token = TokenStore.getToken(context)
+                val ok = TokenStore.isSignedIn(token) &&
+                    ProfileRepository().updateBasics(token!!, newName, newBio)
+                if (ok) {
+                    view.performHapticFeedback(Feel.COMMIT)
+                    showEditProfile = false
+                    onRefresh()
+                }
+                ok
+            },
+        )
+    }
 
     // Deleting a photo is not undoable, so it asks first — and only ever offers on a post
     // the server told us is ours.
@@ -950,6 +957,22 @@ private fun ProfileContent(
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel", color = Text2) }
             },
             containerColor = Surface,
+        )
+    }
+
+    // Compose-a-post overlay: review + caption + Share for the picked image(s). Prepends the
+    // created post to the grid so it appears instantly.
+    if (pendingPostUris.isNotEmpty()) {
+        com.haraan.app.ui.DismissOnBack(true) { pendingPostUris = emptyList() }
+        com.haraan.app.ui.social.CreatePostScreen(
+            imageUris = pendingPostUris,
+            onClose = { pendingPostUris = emptyList() },
+            onPosted = { created ->
+                pendingPostUris = emptyList()
+                posts = listOf(created) + (posts ?: emptyList())
+                postsFailed = false
+                view.performHapticFeedback(Feel.TICK)
+            },
         )
     }
 }
@@ -1080,6 +1103,7 @@ private fun ProfileActions(
     onToggleFollow: (suspend (Boolean) -> Boolean?)?,
     onShare: () -> Unit,
     onMessage: ((playerId: String, name: String) -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
     val social = p.social ?: return
     val scope = rememberCoroutineScope()
@@ -1117,6 +1141,9 @@ private fun ProfileActions(
             }
         } else if (social.isSelf) {
             ActionButton(modifier = Modifier.weight(1f), label = "Share profile", filled = false, onClick = onShare)
+            if (onEdit != null) {
+                ActionButton(modifier = Modifier.weight(1f), label = "Edit profile", filled = false, onClick = onEdit)
+            }
         }
     }
 }
@@ -1133,6 +1160,14 @@ private fun ActionButton(
 ) {
     Box(
         modifier
+            // Subtle lift so the button reads as a physical control, not flat text.
+            .shadow(
+                elevation = if (filled) 6.dp else 3.dp,
+                shape = RoundedCornerShape(10.dp),
+                clip = false,
+                ambientColor = (if (filled) BlueBright else Color.Black).copy(alpha = 0.10f),
+                spotColor = (if (filled) BlueBright else Color.Black).copy(alpha = if (filled) 0.40f else 0.12f),
+            )
             .pressable(enabled = enabled, haptic = haptic, onClick = onClick)
             .clip(RoundedCornerShape(10.dp))
             .background(if (filled) BlueBright else Surface)
@@ -1215,9 +1250,11 @@ private fun FirstMatchCard(p: PlayerProfile, isSelf: Boolean, onCreateMatch: (()
     Column(
         Modifier
             .fillMaxWidth()
+            // Soft floating shadow (the app's card language) instead of a flat hairline —
+            // this is what gives the card physical lift.
+            .premiumCardShadow(radius = 20.dp, ambient = 16.dp, contact = 2.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(20.dp))
             .padding(20.dp),
     ) {
         Text(
@@ -1259,6 +1296,8 @@ private fun FirstMatchCard(p: PlayerProfile, isSelf: Boolean, onCreateMatch: (()
             Box(
                 Modifier
                     .fillMaxWidth()
+                    // Blue-tinted lift on the primary CTA so it reads as a raised button.
+                    .shadow(8.dp, RoundedCornerShape(14.dp), clip = false, ambientColor = BlueBright.copy(alpha = 0.35f), spotColor = BlueBright.copy(alpha = 0.5f))
                     .pressable { onCreateMatch() }
                     .clip(RoundedCornerShape(14.dp))
                     .background(BlueBright)
@@ -1297,9 +1336,9 @@ private fun RecentForm(matches: List<RecentMatch>) {
     Column(
         Modifier
             .fillMaxWidth()
+            .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
             .padding(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1349,9 +1388,9 @@ private fun AboutCard(rows: List<Pair<String, String>>) {
     Column(
         Modifier
             .fillMaxWidth()
+            .premiumCardShadow(radius = 16.dp, ambient = 14.dp, contact = 2.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(16.dp))
             .padding(vertical = 4.dp),
     ) {
         rows.forEachIndexed { i, (label, value) ->
@@ -1384,7 +1423,7 @@ private fun HeroCard(
     // Flat, Instagram-style header: avatar left, the three counts on the same row to its
     // right, then name / tier / handle / location as plain text below — no blue card.
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             // Avatar with a blue profile-completion ring on a light track.
             Box(contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(88.dp)) {
@@ -1426,33 +1465,40 @@ private fun HeroCard(
                 ) { Text("LVL ${e.level}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold) }
             }
             Spacer(Modifier.width(18.dp))
-            Row(
-                Modifier.weight(1f),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SocialCount(matches, "Matches")
-                SocialCount(followers, "Followers", onClick = onOpenFollowers)
-                SocialCount(following, "Following", onClick = onOpenFollowing)
+            // Name moved UP beside the avatar, with the three counts directly beneath it.
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.name.ifBlank { "Player" }, color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) { Text(e.tier.uppercase(), color = BlueBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp) }
+                    if (p.isOrganizer) { Spacer(Modifier.width(6.dp)); Pill("ORGANIZER", Gold, GoldTint) }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SocialCount(matches, "Matches")
+                    SocialCount(followers, "Followers", onClick = onOpenFollowers)
+                    SocialCount(following, "Following", onClick = onOpenFollowing)
+                }
             }
         }
 
-        // Name + tier, then @handle · location — the bio block, plain text like Instagram.
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(p.name.ifBlank { "Player" }, color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
-            ) { Text(e.tier.uppercase(), color = BlueBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp) }
-            if (p.isOrganizer) { Spacer(Modifier.width(6.dp)); Pill("ORGANIZER", Gold, GoldTint) }
-        }
+        // @handle · location, then the bio — plain text under the header, like Instagram.
         val handle = p.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
         val loc = listOfNotNull(p.district, p.state).joinToString(", ")
         val sub = listOfNotNull(handle, loc.ifBlank { null }).joinToString("  ·  ")
         if (sub.isNotBlank()) {
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(10.dp))
             Text(sub, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+        if (!p.bio.isNullOrBlank()) {
+            Spacer(Modifier.height(if (sub.isNotBlank()) 5.dp else 10.dp))
+            Text(p.bio!!, color = Text1, fontSize = 13.5.sp, lineHeight = 18.sp)
         }
 
         // Trust + ID — copyable, muted, on white. The row answers the tap (haptic + tick).
@@ -1558,9 +1604,9 @@ private fun DistrictRankCard(p: PlayerProfile) {
     Row(
         Modifier
             .fillMaxWidth()
+            .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
             .padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1609,9 +1655,9 @@ private fun XpCard(p: PlayerProfile) {
     Column(
         Modifier
             .fillMaxWidth()
+            .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
             .padding(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1775,6 +1821,84 @@ private fun trustColors(trust: String): Pair<Color, Color> = when (trust) {
     "high" -> Green to GreenTint
     "medium" -> Gold to GoldTint
     else -> Text3 to Bg
+}
+
+// ─────────────────────────────────────────────── Edit name + bio ─────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditProfileSheet(
+    currentName: String,
+    currentBio: String?,
+    onDismiss: () -> Unit,
+    onSave: suspend (name: String, bio: String?) -> Boolean,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf(currentName) }
+    var bio by remember { mutableStateOf(currentBio ?: "") }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Surface) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(20.dp)) {
+            Text("Edit profile", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+
+            Text("Name", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { if (it.length <= 40) name = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                enabled = !saving,
+            )
+
+            Spacer(Modifier.height(14.dp))
+            Text("Bio", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = bio,
+                onValueChange = { if (it.length <= 160) bio = it },
+                placeholder = { Text("Add a short bio…", color = Text3) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                shape = RoundedCornerShape(12.dp),
+                enabled = !saving,
+            )
+            Text("${bio.length}/160", color = Text3, fontSize = 11.sp, modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
+
+            error?.let { Spacer(Modifier.height(6.dp)); Text(it, color = HaraanColors.Danger, fontSize = 13.sp) }
+
+            Spacer(Modifier.height(18.dp))
+            val canSave = name.isNotBlank() && !saving
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable(enabled = canSave) {
+                        saving = true
+                        error = null
+                        scope.launch {
+                            val ok = onSave(name.trim(), bio.trim().ifBlank { null })
+                            saving = false
+                            if (!ok) error = "Couldn't save. Check your connection and try again."
+                        }
+                    }
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (canSave) BlueBright else Color(0xFFCBD2DC))
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                } else {
+                    Text("Save", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
 }
 
 // ─────────────────────────────────────────────── Shareable player card ───────────

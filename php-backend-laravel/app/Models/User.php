@@ -313,6 +313,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'player_id',
         'username',
         'name',
+        'bio',
         'email',
         'password',
         'phone',

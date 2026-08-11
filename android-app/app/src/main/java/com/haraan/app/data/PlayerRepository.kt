@@ -84,6 +84,8 @@ data class PlayerPost(
 data class FeedPost(
   val id: Long,
   val image: String,
+  /** All carousel images in order (at least [image]); size > 1 renders a swipeable carousel. */
+  val images: List<String>,
   val caption: String?,
   val createdAt: String?,
   val likeCount: Int,
@@ -399,6 +401,56 @@ class PlayerRepository(
   }
 
   /**
+   * Upload a carousel post: one or more JPEG images as `images[]`, plus an optional caption.
+   * The server stores them in order (first = cover). Returns the created post (cover) or null.
+   */
+  suspend fun uploadPost(
+    token: String,
+    images: List<ByteArray>,
+    caption: String? = null,
+  ): PlayerPost? = withContext(Dispatchers.IO) {
+    if (images.isEmpty()) return@withContext null
+    val boundary = "----HaraanBoundary${System.currentTimeMillis()}"
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 30000
+      readTimeout = 60000
+      setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    val lineEnd = "\r\n"
+    val dashes = "--"
+    try {
+      connection.outputStream.use { out ->
+        images.forEachIndexed { i, bytes ->
+          out.write("$dashes$boundary$lineEnd".toByteArray())
+          // Laravel reads a repeated `images[]` field as a file array.
+          out.write("Content-Disposition: form-data; name=\"images[]\"; filename=\"post$i.jpg\"$lineEnd".toByteArray())
+          out.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
+          out.write(bytes)
+          out.write(lineEnd.toByteArray())
+        }
+        if (!caption.isNullOrBlank()) {
+          out.write("$dashes$boundary$lineEnd".toByteArray())
+          out.write("Content-Disposition: form-data; name=\"caption\"$lineEnd$lineEnd".toByteArray())
+          out.write(caption.trim().toByteArray(Charsets.UTF_8))
+          out.write(lineEnd.toByteArray())
+        }
+        out.write("$dashes$boundary$dashes$lineEnd".toByteArray())
+      }
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      parsePost(JSONObject(body))
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
    * Delete one of your own posts. The server re-checks ownership, so a wrong id fails
    * there rather than deleting someone else's photo.
    *
@@ -506,9 +558,14 @@ class PlayerRepository(
     val id = json.optLong("id", 0L).takeIf { it > 0L } ?: return null
     val image = json.optString("image", "").clean() ?: return null
     val author = json.optJSONObject("author")
+    val imagesArr = json.optJSONArray("images")
+    val images = buildList {
+      if (imagesArr != null) for (i in 0 until imagesArr.length()) imagesArr.optString(i, null).clean()?.let { add(it) }
+    }.ifEmpty { listOf(image) }
     return FeedPost(
       id = id,
       image = image,
+      images = images,
       caption = json.optString("caption", null).clean(),
       createdAt = json.optString("created_at", null).clean(),
       likeCount = json.optInt("like_count", 0),

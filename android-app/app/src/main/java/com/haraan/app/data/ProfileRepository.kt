@@ -81,6 +81,7 @@ data class PlayerProfile(
   val playerId: String,
   val username: String?,
   val name: String,
+  val bio: String?,
   val avatar: String?,
   val district: String?,
   val state: String?,
@@ -274,6 +275,7 @@ class ProfileRepository(
       playerId = json.optString("player_id", ""),
       username = json.optString("username", null).cleanNull(),
       name = json.optString("name", ""),
+      bio = json.optString("bio", null).cleanNull(),
       avatar = json.optString("avatar", null).cleanNull(),
       district = json.optString("district", null).cleanNull(),
       state = json.optString("state", null).cleanNull(),
@@ -441,6 +443,32 @@ class ProfileRepository(
         throw IllegalStateException(parseError(err))
       }
       true
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * Inline edit of just the display name + bio (the profile's Edit button). Returns true on
+   * success. Lighter than [saveProfile], which needs the full setup payload.
+   */
+  suspend fun updateBasics(token: String, name: String, bio: String?): Boolean = withContext(Dispatchers.IO) {
+    val body = JSONObject().put("name", name.trim())
+    body.put("bio", bio?.trim() ?: "")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/profile/basics").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 15000
+      readTimeout = 15000
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+      connection.responseCode in 200..299
+    } catch (_: Exception) {
+      false
     } finally {
       connection.disconnect()
     }

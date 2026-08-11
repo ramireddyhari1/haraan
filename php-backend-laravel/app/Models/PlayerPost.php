@@ -24,4 +24,10 @@ class PlayerPost extends Model
     {
         return $this->hasMany(PostLike::class, 'post_id');
     }
+
+    /** Carousel images, in display order. Empty for pre-carousel posts (use image_path). */
+    public function images(): HasMany
+    {
+        return $this->hasMany(PostImage::class, 'post_id')->orderBy('position');
+    }
 }
