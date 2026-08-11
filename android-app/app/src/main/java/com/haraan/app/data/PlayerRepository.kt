@@ -90,7 +90,20 @@ data class FeedPost(
   val createdAt: String?,
   val likeCount: Int,
   val liked: Boolean,
+  val commentCount: Int,
+  val saved: Boolean,
   val mine: Boolean,
+  val authorPlayerId: String?,
+  val authorName: String,
+  val authorUsername: String?,
+  val authorAvatar: String?,
+)
+
+/** One comment on a post. */
+data class FeedComment(
+  val id: Long,
+  val body: String,
+  val createdAt: String?,
   val authorPlayerId: String?,
   val authorName: String,
   val authorUsername: String?,
@@ -542,6 +555,112 @@ class PlayerRepository(
     }
   }
 
+  /** Edit your own post's caption. Returns true on success. */
+  suspend fun updateCaption(token: String, postId: Long, caption: String?): Boolean = withContext(Dispatchers.IO) {
+    val payload = JSONObject().put("caption", caption?.trim() ?: "")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts/$postId/caption").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+      connection.responseCode in 200..299
+    } catch (_: Exception) {
+      false
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /** Save / unsave (bookmark) a post. Returns true on success. Uses the POST twins. */
+  suspend fun setSave(token: String, postId: Long, saved: Boolean): Boolean = withContext(Dispatchers.IO) {
+    val path = if (saved) "save" else "unsave"
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts/$postId/$path").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write("{}".toByteArray()) }
+      connection.responseCode in 200..299
+    } catch (_: Exception) {
+      false
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /** A post's comment thread (oldest first). Null on failure. */
+  suspend fun postComments(token: String?, postId: Long): List<FeedComment>? = withContext(Dispatchers.IO) {
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/posts/$postId/comments").openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
+      buildList {
+        for (i in 0 until arr.length()) parseComment(arr.getJSONObject(i))?.let { add(it) }
+      }
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /** Post a comment. Returns the created comment (prepend/append without a refetch), or null. */
+  suspend fun addComment(token: String, postId: Long, body: String): FeedComment? = withContext(Dispatchers.IO) {
+    val payload = JSONObject().put("body", body.trim())
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts/$postId/comments").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+      if (connection.responseCode !in 200..299) return@withContext null
+      val respBody = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      parseComment(JSONObject(respBody))
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  private fun parseComment(json: JSONObject): FeedComment? {
+    val id = json.optLong("id", 0L).takeIf { it > 0L } ?: return null
+    val body = json.optString("body", "").clean() ?: return null
+    val author = json.optJSONObject("author")
+    return FeedComment(
+      id = id,
+      body = body,
+      createdAt = json.optString("created_at", null).clean(),
+      authorPlayerId = author?.optString("player_id", null).clean(),
+      authorName = author?.optString("name", null).clean() ?: "Player",
+      authorUsername = author?.optString("username", null).clean(),
+      authorAvatar = author?.optString("avatar", null).clean(),
+    )
+  }
+
   private fun parsePost(json: JSONObject): PlayerPost? {
     val id = json.optLong("id", 0L).takeIf { it > 0L } ?: return null
     val image = json.optString("image", "").clean() ?: return null
@@ -570,6 +689,8 @@ class PlayerRepository(
       createdAt = json.optString("created_at", null).clean(),
       likeCount = json.optInt("like_count", 0),
       liked = json.optBoolean("liked", false),
+      commentCount = json.optInt("comment_count", 0),
+      saved = json.optBoolean("saved", false),
       mine = json.optBoolean("mine", false),
       authorPlayerId = author?.optString("player_id", null).clean(),
       authorName = author?.optString("name", null).clean() ?: "Player",

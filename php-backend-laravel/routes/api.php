@@ -237,6 +237,7 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     // Photo posts (profile grid). Literal '/posts' registered here, before the catch-all
     // {player}/* routes below, so it is never read as a {player} segment.
     Route::post('/posts', [PlayersController::class, 'storePost']);
+    Route::post('/posts/{id}/caption', [PlayersController::class, 'updatePost'])->whereNumber('id');
     Route::delete('/posts/{id}', [PlayersController::class, 'destroyPost'])->whereNumber('id');
     // POST twin, same reason /{player}/unfollow has one: Android's HttpURLConnection has
     // no dependable DELETE path, so the app calls this instead of the verb above.
@@ -247,6 +248,13 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::delete('/posts/{id}/like', [PlayersController::class, 'unlikePost'])->whereNumber('id');
     // POST twin — Android's HttpURLConnection has no dependable DELETE path.
     Route::post('/posts/{id}/unlike', [PlayersController::class, 'unlikePost'])->whereNumber('id');
+
+    // Comments + saves (bookmarks) on a post.
+    Route::post('/posts/{id}/comments', [PlayersController::class, 'addComment'])->whereNumber('id');
+    Route::post('/posts/{id}/save', [PlayersController::class, 'savePost'])->whereNumber('id');
+    Route::delete('/posts/{id}/save', [PlayersController::class, 'unsavePost'])->whereNumber('id');
+    // POST twin for unsave — HttpURLConnection has no dependable DELETE path.
+    Route::post('/posts/{id}/unsave', [PlayersController::class, 'unsavePost'])->whereNumber('id');
 
     // Social graph. {player} accepts an HRN id or an @handle (see resolvePlayer),
     // so a deep link from a shared profile works without the client translating.
@@ -299,6 +307,9 @@ Route::middleware('auth.jwt.optional')->get('players/{player}/posts', [PlayersCo
 // Literal 'posts/feed' — two segments, registered after the /players/* group, so it never
 // collides with players/{playerId} or players/{player}/posts.
 Route::middleware('auth.jwt.optional')->get('posts/feed', [PlayersController::class, 'feed']);
+
+// A post's comment thread (public, read-only). Optional auth. Two segments after `posts`.
+Route::middleware('auth.jwt.optional')->get('posts/{id}/comments', [PlayersController::class, 'comments'])->whereNumber('id');
 
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {

@@ -77,6 +77,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Campaign
@@ -147,6 +149,13 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -4777,9 +4786,15 @@ private fun HomeFeedScreen(
   modifier: Modifier = Modifier,
 ) {
   val scope = rememberCoroutineScope()
+  val context = LocalContext.current
   var feed by remember { mutableStateOf<com.haraan.app.data.HomeFeed?>(null) }
   var loading by remember { mutableStateOf(true) }
   var posts by remember { mutableStateOf<List<com.haraan.app.data.FeedPost>>(emptyList()) }
+  // The post whose comment thread is open (null = closed).
+  var commentPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+  // Owner actions: the post being edited (caption) / confirmed for delete.
+  var editPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+  var deletePost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
 
   val reload: suspend () -> Unit = {
     loading = feed == null
@@ -4932,11 +4947,103 @@ private fun HomeFeedScreen(
                   }
                 }
               },
+              onComment = { commentPost = post },
+              onShare = {
+                val who = post.authorUsername?.let { "@$it" } ?: post.authorName
+                val text = "Check out $who's post on Haraan — https://haraan.app"
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                  type = "text/plain"
+                  putExtra(android.content.Intent.EXTRA_TEXT, text)
+                }
+                context.startActivity(android.content.Intent.createChooser(send, "Share post"))
+              },
+              onToggleSave = {
+                val token = tokenProvider()
+                if (token.isNullOrBlank()) return@FeedPostCard
+                val target = !post.saved
+                posts = posts.map { if (it.id == post.id) it.copy(saved = target) else it }
+                scope.launch {
+                  val ok = repository.setSave(token, post.id, target)
+                  if (!ok) posts = posts.map { if (it.id == post.id) it.copy(saved = post.saved) else it }
+                }
+              },
+              onEditCaption = { editPost = post },
+              onDelete = { deletePost = post },
             )
           }
         }
       }
     }
+  }
+
+  commentPost?.let { cp ->
+    CommentSheet(
+      post = cp,
+      repository = repository,
+      tokenProvider = tokenProvider,
+      onOpenPlayer = onOpenPlayer,
+      onDismiss = { commentPost = null },
+      onCommentAdded = {
+        posts = posts.map { if (it.id == cp.id) it.copy(commentCount = it.commentCount + 1) else it }
+      },
+    )
+  }
+
+  // Edit caption dialog.
+  editPost?.let { ep ->
+    var text by remember(ep.id) { mutableStateOf(ep.caption ?: "") }
+    androidx.compose.material3.AlertDialog(
+      onDismissRequest = { editPost = null },
+      title = { Text("Edit caption", fontWeight = FontWeight.Bold) },
+      text = {
+        OutlinedTextField(
+          value = text,
+          onValueChange = { if (it.length <= 300) text = it },
+          placeholder = { Text("Write a caption…", color = HaraanColors.TextMuted) },
+          modifier = Modifier.fillMaxWidth(),
+          minLines = 2,
+          shape = RoundedCornerShape(12.dp),
+        )
+      },
+      confirmButton = {
+        androidx.compose.material3.TextButton(onClick = {
+          val token = tokenProvider()
+          if (!token.isNullOrBlank()) {
+            val newCap = text.trim().ifBlank { null }
+            posts = posts.map { if (it.id == ep.id) it.copy(caption = newCap) else it }
+            scope.launch { repository.updateCaption(token, ep.id, newCap) }
+          }
+          editPost = null
+        }) { Text("Save", color = HaraanColors.EventsBlue, fontWeight = FontWeight.Bold) }
+      },
+      dismissButton = {
+        androidx.compose.material3.TextButton(onClick = { editPost = null }) { Text("Cancel", color = HaraanColors.TextSecondary) }
+      },
+      containerColor = Color.White,
+    )
+  }
+
+  // Delete confirmation.
+  deletePost?.let { dp ->
+    androidx.compose.material3.AlertDialog(
+      onDismissRequest = { deletePost = null },
+      title = { Text("Delete this post?", fontWeight = FontWeight.Bold) },
+      text = { Text("This removes the photo(s) and can't be undone.", color = HaraanColors.TextSecondary) },
+      confirmButton = {
+        androidx.compose.material3.TextButton(onClick = {
+          val token = tokenProvider()
+          if (!token.isNullOrBlank()) {
+            posts = posts.filterNot { it.id == dp.id }
+            scope.launch { repository.deletePost(token, dp.id) }
+          }
+          deletePost = null
+        }) { Text("Delete", color = HaraanColors.LiveRed, fontWeight = FontWeight.Bold) }
+      },
+      dismissButton = {
+        androidx.compose.material3.TextButton(onClick = { deletePost = null }) { Text("Cancel", color = HaraanColors.TextSecondary) }
+      },
+      containerColor = Color.White,
+    )
   }
 }
 
@@ -5017,7 +5124,13 @@ private fun FeedPostCard(
   post: com.haraan.app.data.FeedPost,
   onOpenAuthor: () -> Unit,
   onToggleLike: () -> Unit,
+  onComment: () -> Unit = {},
+  onShare: () -> Unit = {},
+  onToggleSave: () -> Unit = {},
+  onEditCaption: () -> Unit = {},
+  onDelete: () -> Unit = {},
 ) {
+  var menuOpen by remember { mutableStateOf(false) }
   Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
     // Author row
     Row(
@@ -5049,6 +5162,36 @@ private fun FeedPostCard(
         )
         post.authorUsername?.let {
           Text("@$it", color = HaraanColors.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+      }
+      // Overflow menu: the owner can edit the caption or delete; anyone can share.
+      Box {
+        Icon(
+          imageVector = Icons.Filled.MoreVert,
+          contentDescription = "Post options",
+          tint = HaraanColors.TextSecondary,
+          modifier = Modifier
+            .clip(CircleShape)
+            .clickable { menuOpen = true }
+            .padding(6.dp)
+            .size(22.dp),
+        )
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+          if (post.mine) {
+            DropdownMenuItem(
+              text = { Text("Edit caption") },
+              onClick = { menuOpen = false; onEditCaption() },
+            )
+            DropdownMenuItem(
+              text = { Text("Delete", color = HaraanColors.LiveRed) },
+              onClick = { menuOpen = false; onDelete() },
+            )
+          } else {
+            DropdownMenuItem(
+              text = { Text("Share") },
+              onClick = { menuOpen = false; onShare() },
+            )
+          }
         }
       }
     }
@@ -5105,28 +5248,35 @@ private fun FeedPostCard(
           .background(HaraanColors.Field),
       )
     }
-    // Actions
+    // Actions — Instagram layout: like · comment · share on the left, save (bookmark) right.
     Row(
-      modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 8.dp),
+      modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Icon(
-        imageVector = if (post.liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-        contentDescription = if (post.liked) "Unlike" else "Like",
+      PostActionIcon(
+        icon = if (post.liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+        desc = if (post.liked) "Unlike" else "Like",
         tint = if (post.liked) HaraanColors.LiveRed else HaraanColors.TextPrimary,
-        modifier = Modifier
-          .clip(CircleShape)
-          .clickable(onClick = onToggleLike)
-          .padding(6.dp)
-          .size(26.dp),
+        onClick = onToggleLike,
       )
-      if (post.likeCount > 0) {
-        Text(
-          text = if (post.likeCount == 1) "1 like" else "${post.likeCount} likes",
-          color = HaraanColors.TextPrimary,
-          style = HaraanTypography.TitleMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
-        )
-      }
+      PostActionIcon(icon = Icons.Outlined.ChatBubbleOutline, desc = "Comment", tint = HaraanColors.TextPrimary, onClick = onComment)
+      PostActionIcon(icon = Icons.AutoMirrored.Rounded.Send, desc = "Share", tint = HaraanColors.TextPrimary, onClick = onShare)
+      Spacer(Modifier.weight(1f))
+      PostActionIcon(
+        icon = if (post.saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+        desc = if (post.saved) "Unsave" else "Save",
+        tint = HaraanColors.TextPrimary,
+        onClick = onToggleSave,
+      )
+    }
+    // Like count
+    if (post.likeCount > 0) {
+      Text(
+        text = if (post.likeCount == 1) "1 like" else "${post.likeCount} likes",
+        color = HaraanColors.TextPrimary,
+        style = HaraanTypography.TitleMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+        modifier = Modifier.padding(start = 16.dp, top = 2.dp),
+      )
     }
     // Caption
     if (!post.caption.isNullOrBlank()) {
@@ -5143,7 +5293,170 @@ private fun FeedPostCard(
         )
       }
     }
-    Spacer(Modifier.height(6.dp))
+    // Comment count — tap to open the thread.
+    if (post.commentCount > 0) {
+      Text(
+        text = if (post.commentCount == 1) "View 1 comment" else "View all ${post.commentCount} comments",
+        color = HaraanColors.TextMuted,
+        fontSize = 13.sp,
+        modifier = Modifier
+          .clickable(onClick = onComment)
+          .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
+      )
+    }
+    Spacer(Modifier.height(8.dp))
+  }
+}
+
+/** One tappable action icon in a post's action row (like/comment/share/save). */
+@Composable
+private fun PostActionIcon(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  desc: String,
+  tint: Color,
+  onClick: () -> Unit,
+  rotate: Float = 0f,
+) {
+  Icon(
+    imageVector = icon,
+    contentDescription = desc,
+    tint = tint,
+    modifier = Modifier
+      .clip(CircleShape)
+      .clickable(onClick = onClick)
+      .padding(7.dp)
+      .size(27.dp)
+      .then(if (rotate != 0f) Modifier.graphicsLayer { rotationZ = rotate } else Modifier),
+  )
+}
+
+// The comment thread for a post: a scrollable list + an input row pinned to the bottom.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommentSheet(
+  post: com.haraan.app.data.FeedPost,
+  repository: com.haraan.app.data.PlayerRepository,
+  tokenProvider: () -> String?,
+  onOpenPlayer: (String) -> Unit,
+  onDismiss: () -> Unit,
+  onCommentAdded: () -> Unit,
+) {
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val scope = rememberCoroutineScope()
+  var comments by remember { mutableStateOf<List<com.haraan.app.data.FeedComment>?>(null) }
+  var input by remember { mutableStateOf("") }
+  var sending by remember { mutableStateOf(false) }
+
+  LaunchedEffect(post.id) { comments = repository.postComments(tokenProvider(), post.id) }
+
+  ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Color.White) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .fillMaxHeight(0.86f)
+        .navigationBarsPadding()
+        .imePadding(),
+    ) {
+      Text(
+        "Comments",
+        color = HaraanColors.TextPrimary,
+        style = HaraanTypography.TitleMedium.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+      )
+      androidx.compose.material3.HorizontalDivider(color = HaraanColors.BorderLight, thickness = 1.dp)
+
+      Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        val list = comments
+        when {
+          list == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(color = HaraanColors.EventsBlue, modifier = Modifier.size(26.dp))
+          }
+          list.isEmpty() -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text("No comments yet", color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("Be the first to comment.", color = HaraanColors.TextSecondary, fontSize = 13.sp)
+          }
+          else -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+            items(list, key = { it.id }) { c -> CommentRow(c, onOpenPlayer) }
+          }
+        }
+      }
+
+      androidx.compose.material3.HorizontalDivider(color = HaraanColors.BorderLight, thickness = 1.dp)
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        OutlinedTextField(
+          value = input,
+          onValueChange = { if (it.length <= 500) input = it },
+          placeholder = { Text("Add a comment…", color = HaraanColors.TextMuted) },
+          modifier = Modifier.weight(1f),
+          shape = RoundedCornerShape(22.dp),
+          maxLines = 4,
+          enabled = !sending,
+        )
+        Spacer(Modifier.width(8.dp))
+        val canSend = input.isNotBlank() && !sending
+        Text(
+          text = "Post",
+          color = if (canSend) HaraanColors.EventsBlue else HaraanColors.TextMuted,
+          fontSize = 15.sp,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = canSend) {
+              val token = tokenProvider() ?: return@clickable
+              sending = true
+              scope.launch {
+                val created = repository.addComment(token, post.id, input.trim())
+                sending = false
+                if (created != null) {
+                  comments = (comments ?: emptyList()) + created
+                  input = ""
+                  onCommentAdded()
+                }
+              }
+            }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+      }
+    }
+  }
+}
+
+/** One comment: avatar, name/handle + body. */
+@Composable
+private fun CommentRow(c: com.haraan.app.data.FeedComment, onOpenPlayer: (String) -> Unit) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable { c.authorPlayerId?.let(onOpenPlayer) }
+      .padding(horizontal = 16.dp, vertical = 8.dp),
+  ) {
+    val avatar = com.haraan.app.data.ApiConfig.mediaUrl(c.authorAvatar)
+    Box(
+      modifier = Modifier.size(34.dp).clip(CircleShape).background(HaraanColors.Field),
+      contentAlignment = Alignment.Center,
+    ) {
+      if (avatar != null) {
+        HaraanImage(model = avatar, contentDescription = c.authorName, modifier = Modifier.fillMaxSize().clip(CircleShape))
+      } else {
+        Text(c.authorName.take(1).uppercase(), color = HaraanColors.TextSecondary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+      }
+    }
+    Spacer(Modifier.width(10.dp))
+    Text(
+      text = buildAnnotatedString {
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+          append(c.authorUsername?.let { "@$it " } ?: (c.authorName + " "))
+        }
+        append(c.body)
+      },
+      color = HaraanColors.TextPrimary,
+      style = HaraanTypography.BodyMedium.copy(fontSize = 13.5.sp),
+      modifier = Modifier.weight(1f),
+    )
   }
 }
 

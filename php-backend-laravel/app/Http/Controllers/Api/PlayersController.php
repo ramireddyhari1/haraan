@@ -9,8 +9,10 @@ use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
 use App\Models\PlayerPost;
+use App\Models\PostComment;
 use App\Models\PostImage;
 use App\Models\PostLike;
+use App\Models\PostSave;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -786,6 +788,34 @@ final class PlayersController extends Controller
         ], 201);
     }
 
+    /** POST /api/players/posts/{id}/caption — edit your own post's caption. */
+    public function updatePost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ((int) $post->user_id !== (int) $user->id) {
+            return response()->json(['error' => 'Not your post'], 403);
+        }
+
+        $validated = $request->validate([
+            'caption' => ['nullable', 'string', 'max:300'],
+        ]);
+        $caption = isset($validated['caption']) ? trim((string) $validated['caption']) : null;
+        $post->update(['caption' => ($caption === '' ? null : $caption)]);
+
+        return response()->json([
+            'id' => (int) $post->id,
+            'caption' => $post->caption,
+        ]);
+    }
+
     /** DELETE /api/players/posts/{id} — remove your own post (file + row). */
     public function destroyPost(Request $request, int $id): JsonResponse
     {
@@ -833,7 +863,7 @@ final class PlayersController extends Controller
 
         $posts = PlayerPost::query()
             ->with(['user', 'images'])
-            ->withCount('likes')
+            ->withCount(['likes', 'comments'])
             ->whereHas('user', function ($q): void {
                 $q->where('is_guest', false)
                     // Null = pre-privacy accounts, treated as public (same rule the
@@ -848,16 +878,24 @@ final class PlayersController extends Controller
             ->get();
 
         $likedIds = [];
+        $savedIds = [];
         if ($meId !== null && $posts->isNotEmpty()) {
+            $postIds = $posts->pluck('id');
             $likedIds = PostLike::query()
                 ->where('user_id', $meId)
-                ->whereIn('post_id', $posts->pluck('id'))
+                ->whereIn('post_id', $postIds)
+                ->pluck('post_id')
+                ->flip()
+                ->all();
+            $savedIds = PostSave::query()
+                ->where('user_id', $meId)
+                ->whereIn('post_id', $postIds)
                 ->pluck('post_id')
                 ->flip()
                 ->all();
         }
 
-        $items = $posts->map(function (PlayerPost $p) use ($likedIds, $meId): array {
+        $items = $posts->map(function (PlayerPost $p) use ($likedIds, $savedIds, $meId): array {
             $author = $p->user;
 
             $images = $p->images->pluck('image_path')->values()->all();
@@ -873,6 +911,8 @@ final class PlayersController extends Controller
                 'created_at' => $p->created_at?->toIso8601String(),
                 'like_count' => (int) $p->likes_count,
                 'liked' => isset($likedIds[$p->id]),
+                'comment_count' => (int) $p->comments_count,
+                'saved' => isset($savedIds[$p->id]),
                 'mine' => $meId !== null && (int) $p->user_id === $meId,
                 'author' => [
                     'player_id' => $author?->player_id,
@@ -951,6 +991,119 @@ final class PlayersController extends Controller
             'liked' => false,
             'like_count' => (int) $post->likes()->count(),
         ]);
+    }
+
+    /** GET /api/posts/{id}/comments — the comment thread, oldest first. Optional auth. */
+    public function comments(Request $request, int $id): JsonResponse
+    {
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        $rows = PostComment::query()
+            ->with('user')
+            ->where('post_id', $post->id)
+            ->orderBy('id')
+            ->limit(300)
+            ->get();
+
+        return response()->json([
+            'results' => $rows->map(fn (PostComment $c) => [
+                'id' => (int) $c->id,
+                'body' => $c->body,
+                'created_at' => $c->created_at?->toIso8601String(),
+                'author' => [
+                    'player_id' => $c->user?->player_id,
+                    'username' => $c->user?->username,
+                    'name' => $c->user?->name,
+                    'avatar' => $c->user?->avatar,
+                ],
+            ])->values(),
+        ]);
+    }
+
+    /** POST /api/players/posts/{id}/comments — add a comment. */
+    public function addComment(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'body' => ['required', 'string', 'max:500'],
+        ]);
+        $body = trim($validated['body']);
+        if ($body === '') {
+            return response()->json(['error' => 'Empty comment'], 422);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        $comment = PostComment::create([
+            'post_id' => (int) $post->id,
+            'user_id' => (int) $user->id,
+            'body' => $body,
+        ]);
+
+        return response()->json([
+            'id' => (int) $comment->id,
+            'body' => $comment->body,
+            'created_at' => $comment->created_at?->toIso8601String(),
+            'comment_count' => (int) $post->comments()->count(),
+            'author' => [
+                'player_id' => $user->player_id,
+                'username' => $user->username,
+                'name' => $user->name,
+                'avatar' => $user->avatar,
+            ],
+        ], 201);
+    }
+
+    /** POST /api/players/posts/{id}/save — bookmark a post. Idempotent. */
+    public function savePost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        PostSave::query()->firstOrCreate([
+            'post_id' => (int) $post->id,
+            'user_id' => (int) $user->id,
+        ]);
+
+        return response()->json(['saved' => true]);
+    }
+
+    /** DELETE /api/players/posts/{id}/save — remove the bookmark. Idempotent. */
+    public function unsavePost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        PostSave::query()
+            ->where('post_id', (int) $post->id)
+            ->where('user_id', (int) $user->id)
+            ->delete();
+
+        return response()->json(['saved' => false]);
     }
 
     /** Shared body of followers()/following(). */

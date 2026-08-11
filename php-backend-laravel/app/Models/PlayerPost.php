@@ -30,4 +30,14 @@ class PlayerPost extends Model
     {
         return $this->hasMany(PostImage::class, 'post_id')->orderBy('position');
     }
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(PostComment::class, 'post_id');
+    }
+
+    public function saves(): HasMany
+    {
+        return $this->hasMany(PostSave::class, 'post_id');
+    }
 }
