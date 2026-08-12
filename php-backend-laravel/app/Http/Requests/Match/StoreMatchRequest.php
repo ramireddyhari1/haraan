@@ -67,6 +67,11 @@ final class StoreMatchRequest extends FormRequest
             'onHaraanTurf'   => ['nullable', 'boolean'],
             'venueBookingId' => ['nullable', 'integer'],
 
+            // Future kick-off (ISO-8601). Omitted / null = "play now" (started right
+            // after creation via the toss). Must be in the future when present, so a
+            // scheduled match never lands already overdue.
+            'scheduledAt'    => ['nullable', 'date', 'after:now'],
+
             'teamA'          => ['required', 'string', 'max:255'],
             'teamB'          => ['required', 'string', 'max:255'],
 

@@ -50,6 +50,25 @@ fun MatchDetailsScreen(
         viewModel.load(id = matchId, code = joinCode, token = token)
     }
 
+    // Realtime push: subscribe to this match's channel while the screen is open, and
+    // refetch the instant a "match.updated" arrives — the WebSocket path that makes the
+    // score tick up the moment the scorer taps, not on the 12s poll below (kept as a
+    // fallback for when the socket is down). Public matches only (a channel needs the id).
+    if (matchId.isNotBlank()) {
+        androidx.compose.runtime.DisposableEffect(matchId) {
+            com.haraan.app.data.RealtimeClient.subscribe("match.$matchId")
+            onDispose { com.haraan.app.data.RealtimeClient.unsubscribe("match.$matchId") }
+        }
+        LaunchedEffect(matchId, joinCode) {
+            com.haraan.app.data.MatchRealtimeBus.updates.collect { id ->
+                if (id == matchId) {
+                    val token = com.haraan.app.data.TokenStore.getToken(loadContext)
+                    viewModel.refresh(id = matchId, code = joinCode, token = token)
+                }
+            }
+        }
+    }
+
     // Live auto-refresh — ticks the score every 12s while the match is live, AND re-pulls
     // the instant the viewer returns to the screen / foregrounds the app, so they never
     // stare at a frozen "LIVE" board. Lifecycle-aware: polling fully pauses off-screen

@@ -62,6 +62,8 @@ class LiveMatch extends Model
         'verification_deadline' => 'datetime',
         'verified_at' => 'datetime',
         'featured_at' => 'datetime',
+        // Future kick-off time when the creator scheduled the match; NULL = play now.
+        'scheduled_at' => 'datetime',
     ];
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */

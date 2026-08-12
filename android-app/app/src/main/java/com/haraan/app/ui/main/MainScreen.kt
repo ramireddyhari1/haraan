@@ -62,6 +62,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Apartment
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -3562,6 +3563,11 @@ private fun CrexMatchesScreen(
   var isCreatingMatch by remember { mutableStateOf(false) }
   // Holds the share code after a private match is created (drives the share dialog).
   var createdJoinCode by remember { mutableStateOf<String?>(null) }
+  // The creator's not-yet-started matches, for the Scheduled tab. null = still loading.
+  // `scheduledReload` is bumped after creating a scheduled match (or starting one) to
+  // re-fetch without a manual pull.
+  var scheduledMatches by remember { mutableStateOf<List<com.haraan.app.data.ScheduledMatch>?>(null) }
+  var scheduledReload by remember { mutableStateOf(0) }
   // After a match is created, drive the toss flow (coin flip → bat/bowl → opening lineup → start).
   var tossSetup by remember { mutableStateOf<com.haraan.app.ui.matches.TossSetup?>(null) }
   // Football's counterpart to tossSetup — set after creating a football match, which
@@ -3707,9 +3713,43 @@ private fun CrexMatchesScreen(
   val districtRepository = remember { com.haraan.app.data.DistrictRepository() }
   var districtSummary by remember { mutableStateOf<com.haraan.app.data.DistrictSummary?>(null) }
   LaunchedEffect(selectedTab) {
-    if ((selectedTab == 2 || selectedTab == 3) && districtSummary == null) {
+    // District (3) / State (4) leaderboards share the same district summary.
+    if ((selectedTab == 3 || selectedTab == 4) && districtSummary == null) {
       val token = com.haraan.app.data.TokenStore.getToken(context)
       districtSummary = districtRepository.fetchSummary(token)
+    }
+  }
+
+  // Scheduled tab (2): load the creator's not-yet-started matches. Re-fetches when the
+  // tab is opened and whenever `scheduledReload` bumps (after creating/starting one).
+  LaunchedEffect(selectedTab, scheduledReload) {
+    if (selectedTab == 2) {
+      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+      scheduledMatches = if (token == null) emptyList()
+        else runCatching { matchRepository.getScheduledMatches(token) }.getOrDefault(emptyList())
+    }
+  }
+
+  // Start a scheduled match: cricket runs the toss (same flow as right after create),
+  // which flips it Live. Football/badminton open the match itself — their scoring
+  // starts there, and reconstructing their scorer setup from a list row isn't wired.
+  fun startScheduledMatch(m: com.haraan.app.data.ScheduledMatch) {
+    if (m.sport.equals("cricket", ignoreCase = true)) {
+      tossSetup = com.haraan.app.ui.matches.TossSetup(
+        matchId = m.id,
+        teamA = m.teamA,
+        teamB = m.teamB,
+        squadA = m.squadA,
+        squadB = m.squadB,
+        isPrivate = m.isPrivate,
+        joinCode = m.joinCode,
+        teamAEmblem = m.teamAEmblem.ifBlank { null },
+        teamBEmblem = m.teamBEmblem.ifBlank { null },
+        teamAPhoto = null,
+        teamBPhoto = null,
+      )
+    } else {
+      onMatchClick(m.id)
     }
   }
 
@@ -3766,7 +3806,9 @@ private fun CrexMatchesScreen(
       )
     }
   ) { padding ->
-    val currentBg = if (selectedTab >= 2) T.BgPage else bg
+    // Leaderboard tabs (District 3 / State 4) use the page bg; Live/Finished/Scheduled
+    // keep the board bg.
+    val currentBg = if (selectedTab >= 3) T.BgPage else bg
     Box(
       modifier = Modifier
         .fillMaxSize()
@@ -3853,6 +3895,27 @@ private fun CrexMatchesScreen(
           // yet, so every sport shows an honest empty state (no demo results). ──
           item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
         } else if (selectedTab == 2) {
+          // ── SCHEDULED: the creator's own not-yet-started matches (future kick-offs
+          // + play-now matches whose toss was skipped). Tap "Start" to run the toss. ──
+          val scheduled = scheduledMatches
+          when {
+            scheduled == null -> item { GameHubFeedSkeleton() }
+            scheduled.isEmpty() -> item {
+              CrexTabEmpty("No scheduled matches. Create one and pick \"Schedule\" to see it here.")
+            }
+            else -> {
+              item { CrexLeagueTitle("Your scheduled matches") }
+              items(scheduled, key = { it.id }) { m ->
+                ScheduledMatchCard(
+                  match = m,
+                  onStart = { startScheduledMatch(m) },
+                  onOpen = { onMatchClick(m.id) },
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+              }
+            }
+          }
+        } else if (selectedTab == 3) {
           districtSummary?.let { summary ->
             item { DistrictHomeCard(summary) }
             item { Spacer(modifier = Modifier.height(4.dp)) }
@@ -3864,7 +3927,7 @@ private fun CrexMatchesScreen(
               onPlayerClick = { selectedLeaderboardPlayer = it },
             )
           }
-        } else if (selectedTab == 3) {
+        } else if (selectedTab == 4) {
           item {
             CrexLeaderboardSection(
               isStateBoard = true,
@@ -4008,12 +4071,30 @@ private fun CrexMatchesScreen(
                     latitude = draft.latitude,
                     longitude = draft.longitude,
                     district = draft.locationDistrict,
+                    // Future kick-off as ISO-8601 (with offset), or null for "play now".
+                    // SimpleDateFormat, not java.time: minSdk 24 has no Instant without
+                    // desugaring, and this string is all the server needs.
+                    scheduledAtIso = draft.scheduledAt?.let { millis ->
+                      java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
+                        .format(java.util.Date(millis))
+                    },
                   )
                   // Upload any custom team crests now that the match (and its id) exist.
                   // A failed upload doesn't fail the whole creation — the emblem stands in.
                   uploadTeamLogoIfPresent(context, matchRepository, token, result.matchId, "home", draft.teamAPhoto)
                   uploadTeamLogoIfPresent(context, matchRepository, token, result.matchId, "away", draft.teamBPhoto)
                   showCreateWizard = false
+
+                  // Scheduled for later → don't run the toss/scorer now. The match waits
+                  // in the Scheduled tab until the creator starts it. Applies to every
+                  // sport; land the user on that tab so they can see it queued.
+                  if (draft.scheduledAt != null) {
+                    Toast.makeText(context, "Match scheduled — start it from the Scheduled tab.", Toast.LENGTH_LONG).show()
+                    if (result.isPrivate && result.joinCode.isNotBlank()) createdJoinCode = result.joinCode
+                    selectedTab = 2
+                    scheduledReload++
+                    return@launch
+                  }
 
                   // Football has no toss and no innings — it goes straight to the goal
                   // scorer. Cricket keeps coin flip → bat/bowl → opening lineup → start.
@@ -4125,6 +4206,10 @@ private fun CrexMatchesScreen(
           if (token == null) null
           else matchRepository.undoMatchEvent(token, setup.matchId, side)
         },
+        onStat = { kind, side, inc ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.adjustStat(token, setup.matchId, kind, side, inc)
+        },
         finishMatch = {
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token != null) matchRepository.completeMatch(token, setup.matchId)
@@ -4172,9 +4257,18 @@ private fun CrexMatchesScreen(
         teamAPhoto = setup.teamAPhoto,
         teamBPhoto = setup.teamBPhoto,
         onStarted = {
+          val startedId = setup.matchId
+          val startedPrivate = setup.isPrivate
+          val startedCode = setup.joinCode
           tossSetup = null
-          // Private match → now surface the share code so the group can follow it.
-          if (setup.isPrivate && setup.joinCode.isNotBlank()) createdJoinCode = setup.joinCode
+          // Started from the Scheduled tab? It's Live now — drop it from that list.
+          scheduledReload++
+          // The match is now Live — open its detail screen so the creator lands on the
+          // scorer/scoreboard instead of being dropped back on the list.
+          onMatchClick(startedId)
+          // Private match → surface the share code so the group can follow it. Shown after
+          // the detail screen is pushed; the dialog rides on top of it.
+          if (startedPrivate && startedCode.isNotBlank()) createdJoinCode = startedCode
         },
         onCancel = {
           tossSetup = null
@@ -5589,6 +5683,7 @@ private fun CrexTabsSection(
   val tabs = listOf(
     TabItem("Live", Icons.Default.PlayArrow),
     TabItem("Finished", Icons.Default.CheckCircle),
+    TabItem("Scheduled", Icons.Default.Event),
     TabItem("District", Icons.Default.Apartment),
     TabItem("State", Icons.Default.AccountBalance)
   )
@@ -7378,6 +7473,113 @@ private fun CrexLeagueTitle(title: String) {
       fontSize = 12.sp,
       fontWeight = FontWeight.SemiBold,
     )
+  }
+}
+
+/**
+ * One row in the Scheduled tab: a match the creator hasn't started yet. Shows the two
+ * sides with their crests, the kick-off time (or "Ready to start" for a play-now match
+ * whose toss was skipped), and a Start button that runs the toss/opens the match. The
+ * whole card opens the match detail; the Start button is the primary action.
+ */
+@Composable
+private fun ScheduledMatchCard(
+  match: com.haraan.app.data.ScheduledMatch,
+  onStart: () -> Unit,
+  onOpen: () -> Unit,
+) {
+  val blue = HaraanColors.EventsBlue
+  val green = HaraanColors.Success
+  // Parse the ISO kick-off into a friendly label; null (play-now, toss skipped) reads
+  // as "Ready to start". A parse failure degrades to the raw absence rather than crashing.
+  val whenLabel = remember(match.scheduledAtIso) {
+    val iso = match.scheduledAtIso
+    if (iso.isNullOrBlank()) "Ready to start"
+    else runCatching {
+      val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(iso)
+      java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(parsed!!)
+    }.getOrDefault("Scheduled")
+  }
+  val isReady = match.scheduledAtIso.isNullOrBlank()
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(16.dp))
+      .background(Color.White)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
+      .clickable(onClick = onOpen)
+      .padding(14.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      ScheduledCrest(match.teamAEmblem, blue, match.teamA)
+      Spacer(Modifier.width(8.dp))
+      Text(
+        match.teamA.ifBlank { "Team A" },
+        color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+        maxLines = 1, modifier = Modifier.weight(1f),
+      )
+      Text("vs", color = HaraanColors.TextMuted, fontSize = 12.sp)
+      Text(
+        match.teamB.ifBlank { "Team B" },
+        color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+        maxLines = 1, textAlign = TextAlign.End, modifier = Modifier.weight(1f),
+      )
+      Spacer(Modifier.width(8.dp))
+      ScheduledCrest(match.teamBEmblem, Color(0xFFF59E0B), match.teamB)
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        if (isReady) Icons.Default.PlayArrow else Icons.Default.Event,
+        contentDescription = null,
+        tint = if (isReady) green else blue,
+        modifier = Modifier.size(16.dp),
+      )
+      Spacer(Modifier.width(6.dp))
+      Text(
+        whenLabel,
+        color = if (isReady) green else HaraanColors.TextSecondary,
+        fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.weight(1f),
+      )
+      if (match.isPrivate) {
+        Text("Private", color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(10.dp))
+      }
+      // Start is a commit action → green (per the app's CTA colour rules).
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(10.dp))
+          .background(green)
+          .clickable(onClick = onStart)
+          .padding(horizontal = 16.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text("Start", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+      }
+    }
+  }
+}
+
+/** A small circular team crest for the Scheduled card: emblem drawable, else the initial. */
+@Composable
+private fun ScheduledCrest(emblem: String, accent: Color, name: String) {
+  val res = emblem.takeIf { it.isNotBlank() }?.let { com.haraan.app.ui.matches.create.emblemDrawableFor(it) }
+  if (res != null) {
+    androidx.compose.foundation.Image(
+      painter = painterResource(res),
+      contentDescription = name,
+      contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+      modifier = Modifier.size(30.dp).clip(CircleShape),
+    )
+  } else {
+    Box(
+      modifier = Modifier.size(30.dp).clip(CircleShape).background(accent),
+      contentAlignment = Alignment.Center,
+    ) {
+      Text(name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+    }
   }
 }
 

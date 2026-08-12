@@ -78,6 +78,29 @@ data class LiveMatchRow(
 )
 
 /**
+ * A match the signed-in creator hasn't started yet (from GET /api/matches/scheduled).
+ * Carries everything needed to rebuild the toss/scorer setup and start it, so the
+ * Scheduled tab can resume a match without another round trip. [scheduledAtIso] is
+ * null for a "play now" match whose toss was skipped (the resume-later case).
+ */
+data class ScheduledMatch(
+  val id: String,
+  val sport: String,
+  val teamA: String,
+  val teamB: String,
+  val teamAEmblem: String,
+  val teamBEmblem: String,
+  val squadA: List<SquadMember>,
+  val squadB: List<SquadMember>,
+  val isPrivate: Boolean,
+  val joinCode: String,
+  val venue: String,
+  val locality: String,
+  /** ISO-8601 kick-off, or null for a "play now" match awaiting its toss. */
+  val scheduledAtIso: String?,
+)
+
+/**
  * Talks to the ActionBoard match API. Mirrors [HaraanAuthRepository]'s plain
  * HttpURLConnection style, adding the JWT Bearer header for protected routes.
  */
@@ -118,6 +141,12 @@ class MatchRepository(
     longitude: Double? = null,
     /** District resolved from that fix; the server prefers it over the profile's. */
     district: String = "",
+    /**
+     * Future kick-off as an ISO-8601 string, or null for "play now". When set, the
+     * match is born Scheduled with a start time and skips the immediate toss — it
+     * surfaces in the Scheduled tab until the creator starts it.
+     */
+    scheduledAtIso: String? = null,
   ): CreateMatchResult = withContext(Dispatchers.IO) {
     val body = JSONObject()
       .put("sport", sport.lowercase())
@@ -146,6 +175,7 @@ class MatchRepository(
       body.put("longitude", longitude)
     }
     if (district.isNotBlank()) body.put("district", district)
+    if (!scheduledAtIso.isNullOrBlank()) body.put("scheduledAt", scheduledAtIso)
     if (!teamAEmblem.isNullOrBlank()) body.put("teamAEmblem", teamAEmblem)
     if (!teamBEmblem.isNullOrBlank()) body.put("teamBEmblem", teamBEmblem)
     if (venueBookingId != null) body.put("venueBookingId", venueBookingId)
@@ -300,6 +330,52 @@ class MatchRepository(
   }
 
   /**
+   * GET /api/matches/scheduled — the signed-in creator's not-yet-started matches
+   * (future kick-offs + "play now" matches whose toss was skipped). Backs the
+   * Scheduled tab. Returns an empty list on any failure so the tab shows its empty
+   * state rather than an error.
+   */
+  suspend fun getScheduledMatches(token: String): List<ScheduledMatch> = withContext(Dispatchers.IO) {
+    try {
+      val body = ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/matches/scheduled", token)
+        ?: return@withContext emptyList()
+      val arr = JSONObject(body).optJSONArray("data") ?: return@withContext emptyList()
+      (0 until arr.length()).map { i ->
+        val o = arr.getJSONObject(i)
+        ScheduledMatch(
+          id = o.optString("id"),
+          sport = o.optString("sport", "cricket").ifBlank { "cricket" },
+          teamA = o.optString("teamA"),
+          teamB = o.optString("teamB"),
+          teamAEmblem = o.optString("teamAEmblem", ""),
+          teamBEmblem = o.optString("teamBEmblem", ""),
+          squadA = parseSquad(o.optJSONArray("squadA")),
+          squadB = parseSquad(o.optJSONArray("squadB")),
+          isPrivate = o.optBoolean("isPrivate", false),
+          joinCode = o.optString("joinCode", ""),
+          venue = o.optString("venue", ""),
+          locality = o.optString("locality", ""),
+          // JSONObject turns a JSON null into the literal "null" via optString; guard it.
+          scheduledAtIso = o.optString("scheduledAt").takeIf { it.isNotBlank() && it != "null" },
+        )
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  /** Parse a `[{id, name}, …]` squad array into [SquadMember]s (a null id → ""). */
+  private fun parseSquad(arr: org.json.JSONArray?): List<SquadMember> {
+    if (arr == null) return emptyList()
+    return (0 until arr.length()).mapNotNull { i ->
+      val o = arr.optJSONObject(i) ?: return@mapNotNull null
+      val name = o.optString("name").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+      val id = o.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: ""
+      SquadMember(id = id, name = name)
+    }
+  }
+
+  /**
    * GET /api/live-matches/{id} — live-match detail for the Match Details screen.
    * Pass [token] so a LOCAL match opened from the viewer's own district feed stays
    * reachable (the server 404s LOCAL matches outside the viewer's district).
@@ -365,6 +441,31 @@ class MatchRepository(
       if (response.code in 200..299) parseScoreState(response.body) else null
     } catch (_: Exception) {
       null
+    }
+  }
+
+  /**
+   * Adjust a football match-stat tally (shots, corners, fouls…) by one. [inc] true
+   * records the stat, false removes that side's most recent one. Stat events never
+   * move the score. Returns true on success so the scorer can keep its optimistic
+   * count, else fall back / retry.
+   */
+  suspend fun adjustStat(
+    token: String,
+    matchId: String,
+    kind: String,
+    side: String,
+    inc: Boolean,
+  ): Boolean = withContext(Dispatchers.IO) {
+    val body = JSONObject()
+      .put("kind", kind)
+      .put("side", side)
+      .put("op", if (inc) "inc" else "dec")
+    try {
+      val response = postJson("/api/matches/$matchId/stat", body, token)
+      response.code in 200..299
+    } catch (_: Exception) {
+      false
     }
   }
 

@@ -30,7 +30,7 @@ class MatchEventRecorder
      */
     public function record(LiveMatch $match, array $attributes, ?User $by = null): MatchEvent
     {
-        return DB::transaction(function () use ($match, $attributes, $by): MatchEvent {
+        $event = DB::transaction(function () use ($match, $attributes, $by): MatchEvent {
             // Lock the match row so two scorers on two phones can't claim the same
             // sequence number.
             $locked = LiveMatch::query()->lockForUpdate()->find($match->id) ?? $match;
@@ -50,6 +50,10 @@ class MatchEventRecorder
 
             return $event->refresh();
         });
+        // Push "this match changed" to anyone watching — after commit, so a listener
+        // that refetches always sees the just-recorded event.
+        \App\Events\MatchUpdated::dispatch($match->id);
+        return $event;
     }
 
     /** Remove an event (a mis-tap) and re-derive the score. */
@@ -59,6 +63,7 @@ class MatchEventRecorder
             $event->delete();
             $this->resync($match->fresh() ?? $match);
         });
+        \App\Events\MatchUpdated::dispatch($match->id);
     }
 
     /**
@@ -178,25 +183,101 @@ class MatchEventRecorder
 
         $state = is_array($match->sport_state) ? $match->sport_state : [];
 
+        // The timeline is the match's key moments only — goals, cards, subs. Stat-count
+        // events (shots, corners, fouls…) are aggregated into `stats` below, never
+        // listed one-by-one, or a busy match's timeline would drown in "Shot" rows.
+        $timelineKinds = [
+            MatchEvent::GOAL, MatchEvent::OWN_GOAL,
+            MatchEvent::YELLOW, MatchEvent::RED, MatchEvent::SUB,
+        ];
+
         return [
             'half' => $state['half'] ?? null,
             'clock_min' => $state['clock_min'] ?? null,
             'added' => $state['added'] ?? null,
             'home_scorers' => $this->scorerLine($events, 'home'),
             'away_scorers' => $this->scorerLine($events, 'away'),
-            'timeline' => $events->map(fn (MatchEvent $e): array => [
-                'sequence' => $e->sequence,
-                'minute' => $e->minute,
-                'minute_label' => $e->minuteLabel(),
-                'side' => $e->side,
-                'kind' => $e->kind,
-                'player' => $e->player_name,
-                'related' => $e->related_name,
-                'home_score' => $e->home_score,
-                'away_score' => $e->away_score,
-                'headline' => $e->headline(),
-            ])->all(),
+            'stats' => $this->statsBlock($events),
+            'timeline' => $events
+                ->filter(fn (MatchEvent $e): bool => in_array($e->kind, $timelineKinds, true))
+                ->map(fn (MatchEvent $e): array => [
+                    'sequence' => $e->sequence,
+                    'minute' => $e->minute,
+                    'minute_label' => $e->minuteLabel(),
+                    'side' => $e->side,
+                    'kind' => $e->kind,
+                    'player' => $e->player_name,
+                    'related' => $e->related_name,
+                    'home_score' => $e->home_score,
+                    'away_score' => $e->away_score,
+                    'headline' => $e->headline(),
+                ])
+                ->values()
+                ->all(),
         ];
+    }
+
+    /**
+     * Head-to-head match stats, grouped for the detail screen. Every number is a real
+     * tally of events the scorer recorded — nothing is estimated or modelled (no
+     * possession %, no xG), so a stat is only ever as true as what was tapped.
+     *
+     * `has_any` is driven by the counting stats (shots/corners/fouls/…), NOT by cards:
+     * a match with only goals and cards hasn't had its stats tracked, so the screen
+     * shows an empty state rather than a wall of honest-but-meaningless zeroes.
+     *
+     * @param  \Illuminate\Support\Collection<int, MatchEvent>  $events
+     * @return array<string, mixed>
+     */
+    private function statsBlock($events): array
+    {
+        $count = static fn (string $kind, string $side): int => $events
+            ->where('kind', $kind)->where('side', $side)->count();
+
+        // [label, event-kind] per metric, grouped exactly as the UI renders them.
+        $groups = [
+            'Attacking' => [
+                ['Total shots', 'shot'],
+                ['Shots on target', 'shot_on'],
+                ['Shots off target', 'shot_off'],
+                ['Blocked shots', 'shot_blocked'],
+                ['Corners', 'corner'],
+            ],
+            'Discipline' => [
+                ['Fouls', 'foul'],
+                ['Offsides', 'offside'],
+                ['Yellow cards', MatchEvent::YELLOW],
+                ['Red cards', MatchEvent::RED],
+            ],
+            'Defence' => [
+                ['Saves', 'save'],
+                ['Free kicks', 'free_kick'],
+            ],
+        ];
+
+        // Only the counting stats gate the section — cards alone don't make it "tracked".
+        $countingKinds = ['shot', 'shot_on', 'shot_off', 'shot_blocked', 'corner', 'foul', 'offside', 'save', 'free_kick'];
+        $hasAny = false;
+        foreach ($countingKinds as $k) {
+            if ($count($k, 'home') > 0 || $count($k, 'away') > 0) {
+                $hasAny = true;
+                break;
+            }
+        }
+
+        $out = [];
+        foreach ($groups as $title => $rows) {
+            $out[] = [
+                'title' => $title,
+                'rows' => array_map(static fn (array $r): array => [
+                    'label' => $r[0],
+                    'home' => $count($r[1], 'home'),
+                    'away' => $count($r[1], 'away'),
+                ], $rows),
+            ];
+        }
+
+        return ['has_any' => $hasAny, 'groups' => $out];
     }
 
     /**

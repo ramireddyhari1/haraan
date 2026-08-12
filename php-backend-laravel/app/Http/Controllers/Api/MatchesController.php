@@ -81,7 +81,14 @@ final class MatchesController extends Controller
             'competition'  => self::competitionLabel($v),
             'venue'        => $v['venue'] ?? 'Custom Match',
             'status'       => 'Scheduled',
-            'time'         => 'Scheduled',
+            // Future kick-off, when the creator scheduled one; NULL = play now. Status
+            // stays 'Scheduled' either way until the toss takes it Live.
+            'scheduled_at' => isset($v['scheduledAt']) ? \Illuminate\Support\Carbon::parse($v['scheduledAt']) : null,
+            // A human label for compact rows. A scheduled match shows its date; a
+            // play-now match keeps the plain "Scheduled" marker until it goes Live.
+            'time'         => isset($v['scheduledAt'])
+                ? \Illuminate\Support\Carbon::parse($v['scheduledAt'])->format('D, d M · g:i A')
+                : 'Scheduled',
             'home_score'   => 0,
             'away_score'   => 0,
             'overs'        => '0.0',
@@ -129,6 +136,74 @@ final class MatchesController extends Controller
             'message' => 'Match created',
             'data'    => $match,
         ], 201);
+    }
+
+    /**
+     * The signed-in creator's matches that haven't started yet — status still
+     * 'Scheduled' (the toss hasn't taken them Live). Covers BOTH cases the app's
+     * Scheduled tab needs:
+     *   • future kick-offs the creator picked a time for (scheduled_at set), and
+     *   • "play now" matches created but whose toss was skipped (scheduled_at null) —
+     *     the resume-later case, which previously had no way back to the toss.
+     *
+     * Returns a rich payload (squads, emblems, private/join code, format) so the app
+     * can rebuild the toss/scorer setup and start the match without another round trip.
+     * GET /api/matches/scheduled
+     */
+    public function scheduled(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+        if (!$authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        // lower(status): the column is mixed-case across historical rows, so match
+        // case-insensitively rather than on the literal 'Scheduled'.
+        $matches = LiveMatch::query()
+            ->where('user_id', $authUser->id)
+            ->whereRaw('lower(status) = ?', ['scheduled'])
+            // Soonest kick-off first; the not-yet-started "play now" matches
+            // (scheduled_at NULL) fall to the end, after the timed ones.
+            ->orderByRaw('scheduled_at IS NULL')
+            ->orderBy('scheduled_at')
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get();
+
+        $data = $matches->map(function (LiveMatch $m): array {
+            $squad = static function ($raw): array {
+                $out = [];
+                foreach ((is_array($raw) ? $raw : []) as $p) {
+                    if (is_array($p)) {
+                        $out[] = ['id' => $p['id'] ?? null, 'name' => (string) ($p['name'] ?? '')];
+                    } elseif (is_string($p) && $p !== '') {
+                        $out[] = ['id' => null, 'name' => $p];
+                    }
+                }
+                return $out;
+            };
+            $format = is_array($m->sport_state) ? ($m->sport_state['format'] ?? null) : null;
+
+            return [
+                'id'          => (string) $m->id,
+                'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
+                'teamA'       => (string) ($m->home_full ?: $m->home),
+                'teamB'       => (string) ($m->away_full ?: $m->away),
+                'teamAEmblem' => (string) ($m->home_emblem ?? ''),
+                'teamBEmblem' => (string) ($m->away_emblem ?? ''),
+                'squadA'      => $squad($m->home_squad),
+                'squadB'      => $squad($m->away_squad),
+                'isPrivate'   => (bool) $m->is_private,
+                'joinCode'    => (string) ($m->join_code ?? ''),
+                'venue'       => (string) ($m->venue ?? ''),
+                'locality'    => (string) ($m->locality ?? ''),
+                // ISO-8601 kick-off, or null for a "play now" match awaiting its toss.
+                'scheduledAt' => $m->scheduled_at?->toIso8601String(),
+                'format'      => is_array($format) ? $format : null,
+            ];
+        })->all();
+
+        return response()->json(['data' => $data]);
     }
 
     /**
@@ -213,6 +288,8 @@ final class MatchesController extends Controller
         \App\Services\CareerBattingService::rebuildAll();
         // Auto-verify Haraan turf matches; otherwise open the captain window.
         VenueVerificationService::onMatchCompleted($match);
+
+        \App\Events\MatchUpdated::dispatch($match->id);
 
         return response()->json(['message' => 'Match completed', 'data' => $match->fresh()]);
     }
@@ -531,6 +608,9 @@ final class MatchesController extends Controller
             self::maybeCompleteMatch($match, $currentInnings);
             $match->save();
         }
+
+        // Push "this match changed" so watchers refetch instantly (cricket per-ball).
+        \App\Events\MatchUpdated::dispatch($match->id);
 
         return response()->json([
             'message' => 'Score updated successfully',
@@ -923,6 +1003,52 @@ final class MatchesController extends Controller
      * Cricket keeps its own per-ball pipeline (scoreAction) and is refused here, so
      * there is never a second, competing way to move a cricket score.
      */
+    /**
+     * Adjust a match-stat tally (shots, corners, fouls…) by one. `op=inc` records a
+     * stat event; `op=dec` deletes that side's most recent event of the same kind (a
+     * mis-tap correction). Stat events never touch the score — only goals do — so this
+     * is safe to call freely during a live match. Returns the fresh football payload,
+     * so the scorer stays in sync with the server's own tallies.
+     * POST /api/matches/{id}/stat
+     */
+    public function adjustStat(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
+    {
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
+        }
+        /** @var LiveMatch $match */
+        $match = $gate;
+
+        if (strtolower((string) $match->sport) === 'cricket') {
+            return response()->json(['error' => 'Cricket matches are scored through /score-action.'], 422);
+        }
+
+        $data = $request->validate([
+            // The countable stat kinds only — never a scoring kind, so this endpoint
+            // can't be used to move the score.
+            'kind' => ['required', 'string', 'in:shot,shot_on,shot_off,shot_blocked,corner,foul,offside,save,free_kick'],
+            'side' => ['required', 'in:home,away'],
+            'op'   => ['required', 'in:inc,dec'],
+        ]);
+
+        if ($data['op'] === 'inc') {
+            $recorder->record($match, ['kind' => $data['kind'], 'side' => $data['side']], $request->attributes->get('auth_user'));
+        } else {
+            $last = MatchEvent::query()
+                ->where('live_match_id', $match->id)
+                ->where('kind', $data['kind'])
+                ->where('side', $data['side'])
+                ->orderByDesc('sequence')
+                ->first();
+            if ($last !== null) {
+                $recorder->undo($match, $last);
+            }
+        }
+
+        return response()->json($this->eventState($match->fresh(), $recorder), 200);
+    }
+
     public function recordEvent(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
     {
         $gate = $this->gateScorer($request, $id);

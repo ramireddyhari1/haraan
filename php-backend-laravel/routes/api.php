@@ -314,6 +314,9 @@ Route::middleware('auth.jwt.optional')->get('posts/{id}/comments', [PlayersContr
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {
     Route::post('/', [MatchesController::class, 'store']);
+    // The creator's not-yet-started matches (future kick-offs + skipped-toss ones),
+    // for the app's Scheduled tab. Literal segment, so never read as a {id}.
+    Route::get('/scheduled', [MatchesController::class, 'scheduled']);
     Route::post('/{id}/team-logo', [MatchesController::class, 'uploadTeamLogo']); // custom team crest
     Route::post('/{id}/complete', [MatchesController::class, 'complete']);
     Route::post('/{id}/confirm', [MatchesController::class, 'confirm']);   // captain confirm → Medium
@@ -327,6 +330,8 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     // The client posts WHAT HAPPENED; the server derives the scoreline.
     Route::post('/{id}/events', [MatchesController::class, 'recordEvent']);
     Route::post('/{id}/events/undo', [MatchesController::class, 'undoEvent']);
+    // Match-stat tallies (shots, corners, fouls…) — inc/dec by one. Never scoring.
+    Route::post('/{id}/stat', [MatchesController::class, 'adjustStat']);
     Route::post('/{id}/sport-state', [MatchesController::class, 'updateSportState']);
 });
 

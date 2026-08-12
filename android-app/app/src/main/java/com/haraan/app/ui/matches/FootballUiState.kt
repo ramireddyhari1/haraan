@@ -18,14 +18,27 @@ data class FootballState(
     val homeScorers: List<ScorerLine> = emptyList(),
     val awayScorers: List<ScorerLine> = emptyList(),
     val timeline: List<FootballEvent> = emptyList(),
+    /** Head-to-head match stats (shots, corners, fouls…), grouped and server-assembled. */
+    val stats: MatchStats? = null,
 ) {
+    /**
+     * The latest minute recorded on the timeline (a goal at 90' proves the match reached
+     * 90'), so the hero clock can never read behind a recorded event.
+     */
+    private val latestEventMinute: Int?
+        get() = timeline.mapNotNull { it.minuteLabel?.takeWhile { c -> c.isDigit() }?.toIntOrNull() }.maxOrNull()
+
     /** "67'" · "HT" · "FT" — whatever the hero should show under the score. */
-    fun clockLabel(isLive: Boolean): String = when {
-        !isLive -> "Full time"
-        clockMin != null && added != null && added > 0 -> "$clockMin'+$added"
-        clockMin != null -> "$clockMin'"
-        half != null -> "Half $half"
-        else -> "Live"
+    fun clockLabel(isLive: Boolean): String {
+        if (!isLive) return "Full time"
+        // Never behind the last event: an 85' goal with a stale 82' clock reads as broken.
+        val base = maxOf(clockMin ?: 0, latestEventMinute ?: 0)
+        return when {
+            base > 0 && added != null && added > 0 -> "$base'+$added"
+            base > 0 -> "$base'"
+            half != null -> "Half $half"
+            else -> "Live"
+        }
     }
 
     val goals: List<FootballEvent> get() = timeline.filter { it.kind == "goal" || it.kind == "own_goal" }
@@ -36,6 +49,19 @@ data class FootballState(
 data class ScorerLine(val name: String, val minutes: List<String>) {
     val label: String get() = if (minutes.isEmpty()) name else "$name ${minutes.joinToString(", ")}"
 }
+
+/** One head-to-head stat: a label and the two sides' tallies. */
+data class MatchStatRow(val label: String, val home: Int, val away: Int)
+
+/** A titled group of stats (e.g. "Attacking") as the detail screen renders them. */
+data class MatchStatGroup(val title: String, val rows: List<MatchStatRow>)
+
+/**
+ * The match's head-to-head stats. [hasAny] is false until the scorer has tracked at
+ * least one counting stat, so the screen can show an honest empty state instead of a
+ * wall of zeroes.
+ */
+data class MatchStats(val hasAny: Boolean, val groups: List<MatchStatGroup>)
 
 /**
  * One entry in the timeline. `headline` is composed server-side so the app, the
@@ -79,8 +105,28 @@ fun parseFootball(json: JSONObject?): FootballState? {
         }
     }
 
+    fun parseStats(o: JSONObject?): MatchStats? {
+        if (o == null) return null
+        val groupsArr = o.optJSONArray("groups") ?: return MatchStats(o.optBoolean("has_any", false), emptyList())
+        val groups = buildList {
+            for (i in 0 until groupsArr.length()) {
+                val g = groupsArr.optJSONObject(i) ?: continue
+                val rowsArr = g.optJSONArray("rows")
+                val rows = buildList {
+                    if (rowsArr != null) for (j in 0 until rowsArr.length()) {
+                        val r = rowsArr.optJSONObject(j) ?: continue
+                        add(MatchStatRow(r.optString("label"), r.optInt("home", 0), r.optInt("away", 0)))
+                    }
+                }
+                add(MatchStatGroup(g.optString("title"), rows))
+            }
+        }
+        return MatchStats(o.optBoolean("has_any", false), groups)
+    }
+
     val events = json.optJSONArray("timeline")
     return FootballState(
+        stats = parseStats(json.optJSONObject("stats")),
         half = json.optInt("half", -1).takeIf { it >= 0 },
         clockMin = json.optInt("clock_min", -1).takeIf { it >= 0 },
         added = json.optInt("added", -1).takeIf { it >= 0 },

@@ -51,6 +51,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -63,6 +65,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SportsSoccer
@@ -409,6 +413,12 @@ class CreateMatchDraft(sport: String = "cricket") {
     var teamBPhoto by mutableStateOf<android.net.Uri?>(null)
     val squadA = mutableStateListOf<SquadMember>()
     val squadB = mutableStateListOf<SquadMember>()
+
+    // When the match kicks off. null = "Play now" — created and the toss runs straight
+    // away (the default). A future epoch-millis value = "Schedule for later": the match
+    // is created with that start time, skips the immediate toss, and waits in the
+    // Scheduled tab until the creator starts it.
+    var scheduledAt by mutableStateOf<Long?>(null)
 }
 
 /**
@@ -2035,6 +2045,8 @@ private fun StepReview(draft: CreateMatchDraft) {
     ) {
         SummaryCard(draft)
         Spacer(Modifier.height(16.dp))
+        WhenCard(draft)
+        Spacer(Modifier.height(16.dp))
         if (draft.isPrivate) {
             ImpactNote(
                 "Private · no XP or ranking",
@@ -2048,6 +2060,316 @@ private fun StepReview(draft: CreateMatchDraft) {
                     "result within 72h to settle Ranked XP — otherwise it expires to Low trust.",
             )
         }
+    }
+}
+
+/**
+ * When the match kicks off: "Play now" (the default — runs the toss immediately) or
+ * "Schedule for later" (pick a date + time; the match waits in the Scheduled tab until
+ * the creator starts it). Uses the platform date/time pickers so it feels native and
+ * needs no extra Compose Material dependency.
+ */
+@Composable
+private fun WhenCard(draft: CreateMatchDraft) {
+    val isScheduled = draft.scheduledAt != null
+    // Drives the in-app schedule sheet. The platform DatePickerDialog was replaced with
+    // a custom, on-brand picker — the stock dialog ships a teal Holo theme that clashes
+    // hard with the app's blue design language.
+    var showSheet by remember { mutableStateOf(false) }
+    if (showSheet) {
+        ScheduleDialog(
+            initialMillis = draft.scheduledAt,
+            onDismiss = { showSheet = false },
+            onConfirm = { draft.scheduledAt = it; showSheet = false },
+        )
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text("When", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        // A segmented mode toggle — selection is a *progress* choice, so it reads blue
+        // (per the app's CTA rules: blue = progress, green = commit). Green stays
+        // reserved for the single "Create Match" commit button below, so the two don't
+        // compete. The selected side is a soft blue tint, not a solid fill.
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            WhenChoice(
+                label = "Play now",
+                icon = Icons.Filled.PlayArrow,
+                selected = !isScheduled,
+                modifier = Modifier.weight(1f),
+            ) { draft.scheduledAt = null }
+            WhenChoice(
+                label = "Schedule",
+                icon = Icons.Filled.Schedule,
+                selected = isScheduled,
+                modifier = Modifier.weight(1f),
+            ) { showSheet = true }
+        }
+        if (isScheduled) {
+            Spacer(Modifier.height(12.dp))
+            val fmt = remember { java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(BlueTint)
+                    .clickable { showSheet = true }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Schedule, null, tint = Blue, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    fmt.format(java.util.Date(draft.scheduledAt!!)),
+                    color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("Change", color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        } else {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "The toss runs right away and the match goes live.",
+                color = Text3, fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WhenChoice(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            // Selected = soft blue tint + blue border (not a solid fill, so it never
+            // reads as a primary button). Unselected = plain surface.
+            .background(if (selected) BlueTint else Surface)
+            .border(
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
+                RoundedCornerShape(14.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            label,
+            color = if (selected) Blue else Text2,
+            fontSize = 14.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+        )
+    }
+}
+
+/**
+ * In-app match scheduler — replaces the stock DatePickerDialog (whose teal Holo theme
+ * clashed with the app). A premium, on-brand sheet: a horizontal rail of upcoming days
+ * and one of 30-minute time slots, both tactile blue-selectable pills, with a live
+ * summary and a blue confirm. Past slots grey out when "Today" is selected, so a
+ * scheduled match can never land in the past.
+ */
+@Composable
+private fun ScheduleDialog(
+    initialMillis: Long?,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    // Midnight today, our day-0 anchor.
+    val today0 = remember {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val dayMs = 24L * 60 * 60 * 1000
+    // 30-minute slots, 6:00 AM → 11:30 PM — the realistic window for a gully match.
+    val slots = remember { (6 * 60..23 * 60 + 30 step 30).toList() }
+
+    // Seed selection from the existing pick, else ~1 hour out, snapped to a slot.
+    val seed = remember {
+        val base = initialMillis ?: (System.currentTimeMillis() + 60 * 60 * 1000)
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = base }
+        val dayIdx = (((c.apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis) - today0) / dayMs).toInt().coerceIn(0, 20)
+        val cc = java.util.Calendar.getInstance().apply { timeInMillis = base }
+        val minute = cc.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cc.get(java.util.Calendar.MINUTE)
+        val nearest = slots.minByOrNull { kotlin.math.abs(it - minute) } ?: (18 * 60)
+        dayIdx to nearest
+    }
+    var selDay by remember { mutableStateOf(seed.first) }
+    var selMinute by remember { mutableStateOf(seed.second) }
+
+    fun absMillis(dayIdx: Int, minute: Int): Long =
+        today0 + dayIdx * dayMs + minute.toLong() * 60_000
+
+    // On "Today", disable slots already past (with a small buffer); bump the selection
+    // forward if it fell into a now-disabled slot.
+    val nowBuf = System.currentTimeMillis() + 60_000
+    val firstEnabledToday = slots.firstOrNull { absMillis(0, it) >= nowBuf }
+    if (selDay == 0 && (firstEnabledToday == null || selMinute < firstEnabledToday)) {
+        // No enabled slot left today → jump to tomorrow; else snap to the first open slot.
+        if (firstEnabledToday == null) selDay = 1 else selMinute = firstEnabledToday
+    }
+
+    val dayFmt = remember { java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()) }
+    val dateFmt = remember { java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()) }
+    val timeFmt = remember { java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()) }
+    fun timeLabel(minute: Int): String = timeFmt.format(java.util.Date(absMillis(0, minute)))
+    val summaryFmt = remember { java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()) }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Surface)
+                .padding(20.dp)
+        ) {
+            Text("Schedule match", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(3.dp))
+            Text("Pick when it kicks off.", color = Text3, fontSize = 13.sp)
+            Spacer(Modifier.height(18.dp))
+
+            // ── Date rail ──
+            Text("DATE", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                for (i in 0..20) {
+                    val ms = today0 + i * dayMs
+                    val top = when (i) { 0 -> "Today"; 1 -> "Tomorrow"; else -> dayFmt.format(java.util.Date(ms)) }
+                    DayPill(
+                        top = top,
+                        day = dateFmt.format(java.util.Date(ms)),
+                        selected = selDay == i,
+                    ) { selDay = i }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // ── Time rail ──
+            Text("TIME", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                slots.forEach { minute ->
+                    val enabled = selDay != 0 || absMillis(0, minute) >= nowBuf
+                    TimePill(
+                        label = timeLabel(minute),
+                        selected = selMinute == minute && enabled,
+                        enabled = enabled,
+                    ) { selMinute = minute }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // Live summary of the chosen instant.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(BlueTint)
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Schedule, null, tint = Blue, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    summaryFmt.format(java.util.Date(absMillis(selDay, selMinute))),
+                    color = Text1, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, Stroke, RoundedCornerShape(14.dp))
+                        .clickable(onClick = onDismiss)
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Cancel", color = Text2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Blue)
+                        .clickable {
+                            // Final guard: never return a past instant (server rejects it too).
+                            onConfirm(maxOf(absMillis(selDay, selMinute), System.currentTimeMillis() + 60_000))
+                        }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Set time", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+/** A tactile day pill for the scheduler: weekday/label on top, date below; blue when picked. */
+@Composable
+private fun DayPill(top: String, day: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) Blue else Bg)
+            .border(BorderStroke(if (selected) 0.dp else 1.dp, Stroke), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(top, color = if (selected) Color.White.copy(alpha = 0.85f) else Text3, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(3.dp))
+        Text(day, color = if (selected) Color.White else Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+/** A tactile time-slot pill; blue when picked, greyed when it's already past (today). */
+@Composable
+private fun TimePill(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Blue else Bg)
+            .border(BorderStroke(if (selected) 0.dp else 1.dp, Stroke), RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = when {
+                selected -> Color.White
+                !enabled -> Text3.copy(alpha = 0.4f)
+                else -> Text1
+            },
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+        )
     }
 }
 
