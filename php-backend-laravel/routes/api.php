@@ -39,6 +39,9 @@ Route::middleware('auth.jwt.optional')->get('/config', [ConfigController::class,
 // On-the-fly UI translation (Google Cloud Translation proxy; server-side key + cache).
 Route::middleware('throttle:120,1')->post('/translate', [\App\Http\Controllers\Api\TranslationController::class, 'translate']);
 
+// Open matches near the viewer looking for players (browse public; requesting needs auth).
+Route::middleware('auth.jwt.optional')->get('/matches/open', [\App\Http\Controllers\Api\MatchJoinController::class, 'open']);
+
 // Localization bundles — public; app overlays these on its built-in strings.
 Route::get('/i18n', [\App\Http\Controllers\Api\I18nController::class, 'index']);
 Route::get('/i18n/{locale}', [\App\Http\Controllers\Api\I18nController::class, 'show']);
@@ -320,6 +323,12 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     // The creator's not-yet-started matches (future kick-offs + skipped-toss ones),
     // for the app's Scheduled tab. Literal segment, so never read as a {id}.
     Route::get('/scheduled', [MatchesController::class, 'scheduled']);
+
+    // Join-a-match: request to join an open match, and the owner's request inbox.
+    Route::get('/join-requests', [\App\Http\Controllers\Api\MatchJoinController::class, 'incoming']);
+    Route::post('/join-requests/{id}/respond', [\App\Http\Controllers\Api\MatchJoinController::class, 'respond'])->whereNumber('id');
+    Route::post('/{id}/join', [\App\Http\Controllers\Api\MatchJoinController::class, 'requestJoin'])->whereNumber('id');
+    Route::delete('/{id}/join', [\App\Http\Controllers\Api\MatchJoinController::class, 'cancelJoin'])->whereNumber('id');
     Route::post('/{id}/team-logo', [MatchesController::class, 'uploadTeamLogo']); // custom team crest
     Route::post('/{id}/complete', [MatchesController::class, 'complete']);
     Route::post('/{id}/confirm', [MatchesController::class, 'confirm']);   // captain confirm → Medium

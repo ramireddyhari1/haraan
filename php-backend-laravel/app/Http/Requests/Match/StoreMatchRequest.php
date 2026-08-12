@@ -72,6 +72,11 @@ final class StoreMatchRequest extends FormRequest
             // scheduled match never lands already overdue.
             'scheduledAt'    => ['nullable', 'date', 'after:now'],
 
+            // "Looking for players": open the match so nearby players can request to
+            // join, and how many more are wanted.
+            'openToJoin'     => ['nullable', 'boolean'],
+            'slotsNeeded'    => ['nullable', 'integer', 'min:0', 'max:30'],
+
             'teamA'          => ['required', 'string', 'max:255'],
             'teamB'          => ['required', 'string', 'max:255'],
 

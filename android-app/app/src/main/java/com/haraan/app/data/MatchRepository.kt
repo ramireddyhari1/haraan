@@ -101,6 +101,39 @@ data class ScheduledMatch(
 )
 
 /**
+ * An open match near the viewer that's looking for players (from GET /api/matches/open).
+ * [myStatus] is the viewer's own request state: none | pending | accepted | declined.
+ */
+data class OpenMatch(
+  val id: String,
+  val sport: String,
+  val team1: String,
+  val team2: String,
+  val team1Emblem: String,
+  val team2Emblem: String,
+  val venue: String,
+  val locality: String,
+  val competition: String,
+  val slotsNeeded: Int,
+  val scheduledAtIso: String?,
+  val distanceKm: Double?,
+  val myStatus: String,
+)
+
+/** A pending request from another player to join one of the viewer's matches. */
+data class IncomingJoinRequest(
+  val id: String,
+  val matchId: String,
+  val matchTitle: String,
+  val message: String,
+  val createdAtIso: String?,
+  val playerId: String,
+  val playerName: String,
+  val playerAvatar: String,
+  val trustScore: Int,
+)
+
+/**
  * Talks to the ActionBoard match API. Mirrors [HaraanAuthRepository]'s plain
  * HttpURLConnection style, adding the JWT Bearer header for protected routes.
  */
@@ -147,6 +180,9 @@ class MatchRepository(
      * surfaces in the Scheduled tab until the creator starts it.
      */
     scheduledAtIso: String? = null,
+    /** Open the match for nearby players to request to join, and how many are wanted. */
+    openToJoin: Boolean = false,
+    slotsNeeded: Int = 0,
   ): CreateMatchResult = withContext(Dispatchers.IO) {
     val body = JSONObject()
       .put("sport", sport.lowercase())
@@ -176,6 +212,7 @@ class MatchRepository(
     }
     if (district.isNotBlank()) body.put("district", district)
     if (!scheduledAtIso.isNullOrBlank()) body.put("scheduledAt", scheduledAtIso)
+    if (openToJoin) { body.put("openToJoin", true); body.put("slotsNeeded", slotsNeeded) }
     if (!teamAEmblem.isNullOrBlank()) body.put("teamAEmblem", teamAEmblem)
     if (!teamBEmblem.isNullOrBlank()) body.put("teamBEmblem", teamBEmblem)
     if (venueBookingId != null) body.put("venueBookingId", venueBookingId)
@@ -362,6 +399,108 @@ class MatchRepository(
     } catch (_: Exception) {
       emptyList()
     }
+  }
+
+  /**
+   * GET /api/matches/open — open matches near the viewer looking for players. Guests
+   * may browse (requesting needs auth). Ranked by distance server-side.
+   */
+  suspend fun getOpenMatches(
+    token: String? = null,
+    latitude: Double? = null,
+    longitude: Double? = null,
+    locality: String = "",
+    district: String = "",
+  ): List<OpenMatch> = withContext(Dispatchers.IO) {
+    try {
+      val params = buildList {
+        if (latitude != null && longitude != null) { add("lat=$latitude"); add("lng=$longitude") }
+        if (locality.isNotBlank()) add("locality=${java.net.URLEncoder.encode(locality, "UTF-8")}")
+        if (district.isNotBlank()) add("district=${java.net.URLEncoder.encode(district, "UTF-8")}")
+      }
+      val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
+      val body = ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/matches/open$query", token)
+        ?: return@withContext emptyList()
+      val arr = JSONObject(body).optJSONArray("data") ?: return@withContext emptyList()
+      (0 until arr.length()).map { i ->
+        val o = arr.getJSONObject(i)
+        OpenMatch(
+          id = o.optString("id"),
+          sport = o.optString("sport", "cricket").ifBlank { "cricket" },
+          team1 = o.optString("team1"),
+          team2 = o.optString("team2"),
+          team1Emblem = o.optString("team1Emblem", ""),
+          team2Emblem = o.optString("team2Emblem", ""),
+          venue = o.optString("venue", ""),
+          locality = o.optString("locality", ""),
+          competition = o.optString("competition", ""),
+          slotsNeeded = o.optInt("slotsNeeded", 0),
+          scheduledAtIso = o.optString("scheduledAt").takeIf { it.isNotBlank() && it != "null" },
+          distanceKm = o.optDouble("distanceKm", Double.NaN).takeUnless { it.isNaN() },
+          myStatus = o.optString("myStatus", "none").ifBlank { "none" },
+        )
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  /** GET /api/matches/join-requests — pending requests to join the viewer's matches. */
+  suspend fun getIncomingJoinRequests(token: String): List<IncomingJoinRequest> = withContext(Dispatchers.IO) {
+    try {
+      val body = ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/matches/join-requests", token)
+        ?: return@withContext emptyList()
+      val arr = JSONObject(body).optJSONArray("data") ?: return@withContext emptyList()
+      (0 until arr.length()).map { i ->
+        val o = arr.getJSONObject(i)
+        IncomingJoinRequest(
+          id = o.optString("id"),
+          matchId = o.optString("matchId"),
+          matchTitle = o.optString("matchTitle"),
+          message = o.optString("message", ""),
+          createdAtIso = o.optString("createdAt").takeIf { it.isNotBlank() && it != "null" },
+          playerId = o.optString("playerId", ""),
+          playerName = o.optString("playerName", "Player"),
+          playerAvatar = o.optString("playerAvatar", ""),
+          trustScore = o.optInt("trustScore", 0),
+        )
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  /** POST /api/matches/{id}/join — request to join an open match. */
+  suspend fun requestToJoin(token: String, matchId: String, message: String = ""): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val body = JSONObject()
+      if (message.isNotBlank()) body.put("message", message)
+      postJson("/api/matches/$matchId/join", body, token).code in 200..299
+    } catch (_: Exception) { false }
+  }
+
+  /** DELETE /api/matches/{id}/join — withdraw the viewer's own pending request. */
+  suspend fun cancelJoinRequest(token: String, matchId: String): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val conn = (URL("${baseUrl.trimEnd('/')}/api/matches/$matchId/join").openConnection() as HttpURLConnection).apply {
+        requestMethod = "DELETE"
+        connectTimeout = 15000; readTimeout = 15000
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      val ok = conn.responseCode in 200..299
+      conn.disconnect()
+      ok
+    } catch (_: Exception) { false }
+  }
+
+  /** POST /api/matches/join-requests/{id}/respond — owner accepts (side) or declines. */
+  suspend fun respondToJoinRequest(token: String, requestId: String, accept: Boolean, side: String? = null): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val body = JSONObject().put("action", if (accept) "accept" else "decline")
+      if (accept && side != null) body.put("side", side)
+      postJson("/api/matches/join-requests/$requestId/respond", body, token).code in 200..299
+    } catch (_: Exception) { false }
   }
 
   /** Parse a `[{id, name}, …]` squad array into [SquadMember]s (a null id → ""). */

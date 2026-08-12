@@ -3568,6 +3568,11 @@ private fun CrexMatchesScreen(
   // re-fetch without a manual pull.
   var scheduledMatches by remember { mutableStateOf<List<com.haraan.app.data.ScheduledMatch>?>(null) }
   var scheduledReload by remember { mutableStateOf(0) }
+  // Scheduled sub-tabs: 0 = Mine, 1 = Open near me (join-a-match discovery).
+  var scheduledSubTab by remember { mutableStateOf(0) }
+  var openMatches by remember { mutableStateOf<List<com.haraan.app.data.OpenMatch>?>(null) }
+  var incomingJoinRequests by remember { mutableStateOf<List<com.haraan.app.data.IncomingJoinRequest>>(emptyList()) }
+  var joinReload by remember { mutableStateOf(0) }
   // After a match is created, drive the toss flow (coin flip → bat/bowl → opening lineup → start).
   var tossSetup by remember { mutableStateOf<com.haraan.app.ui.matches.TossSetup?>(null) }
   // Football's counterpart to tossSetup — set after creating a football match, which
@@ -3727,6 +3732,32 @@ private fun CrexMatchesScreen(
       val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
       scheduledMatches = if (token == null) emptyList()
         else runCatching { matchRepository.getScheduledMatches(token) }.getOrDefault(emptyList())
+    }
+  }
+
+  // Incoming join requests to the viewer's matches (drives the "Mine" inbox + badge).
+  LaunchedEffect(selectedTab, joinReload) {
+    if (selectedTab == 2) {
+      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+      incomingJoinRequests = if (token == null) emptyList()
+        else runCatching { matchRepository.getIncomingJoinRequests(token) }.getOrDefault(emptyList())
+    }
+  }
+
+  // Open matches near the viewer — loaded when the "Open near me" sub-tab is showing.
+  LaunchedEffect(selectedTab, scheduledSubTab, joinReload) {
+    if (selectedTab == 2 && scheduledSubTab == 1) {
+      val token = com.haraan.app.data.TokenStore.getToken(context)
+      val here = locationRepo.cached() as? com.haraan.app.data.LocationState.Resolved
+      openMatches = runCatching {
+        matchRepository.getOpenMatches(
+          token = token,
+          latitude = here?.latitude,
+          longitude = here?.longitude,
+          locality = here?.area.orEmpty(),
+          district = here?.district.orEmpty(),
+        )
+      }.getOrDefault(emptyList())
     }
   }
 
@@ -3895,23 +3926,97 @@ private fun CrexMatchesScreen(
           // yet, so every sport shows an honest empty state (no demo results). ──
           item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
         } else if (selectedTab == 2) {
-          // ── SCHEDULED: the creator's own not-yet-started matches (future kick-offs
-          // + play-now matches whose toss was skipped). Tap "Start" to run the toss. ──
-          val scheduled = scheduledMatches
-          when {
-            scheduled == null -> item { GameHubFeedSkeleton() }
-            scheduled.isEmpty() -> item {
-              CrexTabEmpty("No scheduled matches. Create one and pick \"Schedule\" to see it here.")
-            }
-            else -> {
-              item { CrexLeagueTitle("Your scheduled matches") }
-              items(scheduled, key = { it.id }) { m ->
-                ScheduledMatchCard(
-                  match = m,
-                  onStart = { startScheduledMatch(m) },
-                  onOpen = { onMatchClick(m.id) },
+          // ── SCHEDULED: "Mine" = your not-yet-started matches + incoming join requests;
+          // "Open near me" = nearby matches looking for players you can request to join. ──
+          item {
+            ScheduledSubToggle(
+              selected = scheduledSubTab,
+              requestCount = incomingJoinRequests.size,
+              onSelect = { scheduledSubTab = it },
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+          }
+          if (scheduledSubTab == 0) {
+            // Incoming join-request inbox (owner accepts → player joins a squad).
+            if (incomingJoinRequests.isNotEmpty()) {
+              item { CrexLeagueTitle("Join requests") }
+              items(incomingJoinRequests, key = { "req-" + it.id }) { r ->
+                JoinRequestCard(
+                  request = r,
+                  onAccept = {
+                    scope.launch {
+                      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                      if (token != null && matchRepository.respondToJoinRequest(token, r.id, accept = true)) {
+                        Toast.makeText(context, "${r.playerName} added to the match.", Toast.LENGTH_SHORT).show()
+                        joinReload++; scheduledReload++
+                      } else Toast.makeText(context, "Couldn't accept. Try again.", Toast.LENGTH_SHORT).show()
+                    }
+                  },
+                  onDecline = {
+                    scope.launch {
+                      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                      if (token != null) matchRepository.respondToJoinRequest(token, r.id, accept = false)
+                      joinReload++
+                    }
+                  },
                 )
                 Spacer(modifier = Modifier.height(10.dp))
+              }
+              item { Spacer(modifier = Modifier.height(6.dp)) }
+            }
+            val scheduled = scheduledMatches
+            when {
+              scheduled == null -> item { GameHubFeedSkeleton() }
+              scheduled.isEmpty() -> item {
+                CrexTabEmpty("No scheduled matches. Create one and pick \"Schedule\" to see it here.")
+              }
+              else -> {
+                item { CrexLeagueTitle("Your scheduled matches") }
+                items(scheduled, key = { it.id }) { m ->
+                  ScheduledMatchCard(
+                    match = m,
+                    onStart = { startScheduledMatch(m) },
+                    onOpen = { onMatchClick(m.id) },
+                  )
+                  Spacer(modifier = Modifier.height(10.dp))
+                }
+              }
+            }
+          } else {
+            // ── OPEN NEAR ME: request to join a nearby match looking for players. ──
+            val open = openMatches
+            when {
+              open == null -> item { GameHubFeedSkeleton() }
+              open.isEmpty() -> item {
+                CrexTabEmpty("No open matches near you right now. Turn on \"Looking for players\" when you create one.")
+              }
+              else -> {
+                item { CrexLeagueTitle("Open matches near you") }
+                items(open, key = { "open-" + it.id }) { m ->
+                  OpenMatchCard(
+                    match = m,
+                    onOpen = { onMatchClick(m.id) },
+                    onRequest = {
+                      scope.launch {
+                        val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                        if (token == null) {
+                          Toast.makeText(context, "Please sign in to request to join.", Toast.LENGTH_SHORT).show()
+                        } else if (matchRepository.requestToJoin(token, m.id)) {
+                          Toast.makeText(context, "Request sent to the match owner.", Toast.LENGTH_SHORT).show()
+                          joinReload++
+                        } else Toast.makeText(context, "Couldn't send request. Try again.", Toast.LENGTH_SHORT).show()
+                      }
+                    },
+                    onCancel = {
+                      scope.launch {
+                        val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                        if (token != null) matchRepository.cancelJoinRequest(token, m.id)
+                        joinReload++
+                      }
+                    },
+                  )
+                  Spacer(modifier = Modifier.height(10.dp))
+                }
               }
             }
           }
@@ -4078,6 +4183,8 @@ private fun CrexMatchesScreen(
                       java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
                         .format(java.util.Date(millis))
                     },
+                    openToJoin = draft.openToJoin,
+                    slotsNeeded = draft.slotsNeeded,
                   )
                   // Upload any custom team crests now that the match (and its id) exist.
                   // A failed upload doesn't fail the whole creation — the emblem stands in.
@@ -7579,6 +7686,157 @@ private fun ScheduledCrest(emblem: String, accent: Color, name: String) {
       contentAlignment = Alignment.Center,
     ) {
       Text(name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+    }
+  }
+}
+
+/** Mine / Open-near-me segmented toggle for the Scheduled tab; badges pending requests. */
+@Composable
+private fun ScheduledSubToggle(selected: Int, requestCount: Int, onSelect: (Int) -> Unit) {
+  Row(
+    Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(Color(0xFFEDF1F6))
+      .padding(3.dp),
+    horizontalArrangement = Arrangement.spacedBy(3.dp),
+  ) {
+    SubTabChip("Mine", selected == 0, requestCount, Modifier.weight(1f)) { onSelect(0) }
+    SubTabChip("Open near me", selected == 1, 0, Modifier.weight(1f)) { onSelect(1) }
+  }
+}
+
+@Composable
+private fun SubTabChip(label: String, selected: Boolean, badge: Int, modifier: Modifier, onClick: () -> Unit) {
+  Box(
+    modifier
+      .clip(RoundedCornerShape(10.dp))
+      .background(if (selected) Color.White else Color.Transparent)
+      .clickable(onClick = onClick)
+      .padding(vertical = 9.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (selected) LightAccentBlue else Color(0xFF64748B))
+      if (badge > 0) {
+        Spacer(Modifier.width(6.dp))
+        Box(
+          Modifier.size(17.dp).clip(CircleShape).background(Color(0xFFEF4444)),
+          contentAlignment = Alignment.Center,
+        ) { Text("$badge", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black) }
+      }
+    }
+  }
+}
+
+/** A pending request from another player to join the viewer's match — accept or decline. */
+@Composable
+private fun JoinRequestCard(
+  request: com.haraan.app.data.IncomingJoinRequest,
+  onAccept: () -> Unit,
+  onDecline: () -> Unit,
+) {
+  Column(
+    Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(16.dp))
+      .background(Color.White)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
+      .padding(14.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(
+        Modifier.size(38.dp).clip(CircleShape).background(HaraanColors.EventsBlue.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (request.playerAvatar.isNotBlank()) {
+          AsyncImage(
+            model = com.haraan.app.data.ApiConfig.mediaUrl(request.playerAvatar),
+            contentDescription = request.playerName,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().clip(CircleShape),
+          )
+        } else {
+          Text(request.playerName.take(1).uppercase(), color = HaraanColors.EventsBlue, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        }
+      }
+      Spacer(Modifier.width(11.dp))
+      Column(Modifier.weight(1f)) {
+        Text(request.playerName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HaraanColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+          "wants to join · ${request.matchTitle}",
+          fontSize = 12.sp, color = HaraanColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
+    if (request.message.isNotBlank()) {
+      Spacer(Modifier.height(8.dp))
+      Text("“${request.message}”", fontSize = 12.5.sp, color = HaraanColors.TextSecondary)
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      Box(
+        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp)).clickable(onClick = onDecline).padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+      ) { Text("Decline", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = HaraanColors.TextSecondary) }
+      Box(
+        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(HaraanColors.Success).clickable(onClick = onAccept).padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+      ) { Text("Accept", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+    }
+  }
+}
+
+/** A nearby open match looking for players — request to join, or manage your request. */
+@Composable
+private fun OpenMatchCard(
+  match: com.haraan.app.data.OpenMatch,
+  onOpen: () -> Unit,
+  onRequest: () -> Unit,
+  onCancel: () -> Unit,
+) {
+  val blue = HaraanColors.EventsBlue
+  val green = HaraanColors.Success
+  Column(
+    Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(16.dp))
+      .background(Color.White)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
+      .clickable(onClick = onOpen)
+      .padding(14.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      ScheduledCrest(match.team1Emblem, blue, match.team1)
+      Spacer(Modifier.width(8.dp))
+      Text(match.team1.ifBlank { "Team A" }, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
+      Text("vs", color = HaraanColors.TextMuted, fontSize = 12.sp)
+      Text(match.team2.ifBlank { "Team B" }, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+      Spacer(Modifier.width(8.dp))
+      ScheduledCrest(match.team2Emblem, Color(0xFFF59E0B), match.team2)
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(Modifier.size(7.dp).clip(CircleShape).background(green))
+      Spacer(Modifier.width(6.dp))
+      Text(
+        "${match.slotsNeeded} " + if (match.slotsNeeded == 1) "spot left" else "spots left",
+        color = green, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+      )
+      match.distanceKm?.let {
+        Text("  ·  ${it} km", color = HaraanColors.TextMuted, fontSize = 12.sp)
+      }
+      Spacer(Modifier.weight(1f))
+      when (match.myStatus) {
+        "pending" -> Box(
+          Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(10.dp)).clickable(onClick = onCancel).padding(horizontal = 14.dp, vertical = 8.dp),
+        ) { Text("Requested · Cancel", color = HaraanColors.TextSecondary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold) }
+        "accepted" -> Text("You're in ✓", color = green, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        "declined" -> Text("Declined", color = HaraanColors.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        else -> Box(
+          Modifier.clip(RoundedCornerShape(10.dp)).background(blue).clickable(onClick = onRequest).padding(horizontal = 16.dp, vertical = 8.dp),
+        ) { Text("Request to join", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+      }
     }
   }
 }

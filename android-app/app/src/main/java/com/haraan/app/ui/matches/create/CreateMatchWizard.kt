@@ -78,6 +78,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -419,6 +421,11 @@ class CreateMatchDraft(sport: String = "cricket") {
     // is created with that start time, skips the immediate toss, and waits in the
     // Scheduled tab until the creator starts it.
     var scheduledAt by mutableStateOf<Long?>(null)
+
+    // "Looking for players": open the match so nearby players can request to join, and
+    // how many more the match wants. Public matches only.
+    var openToJoin by mutableStateOf(false)
+    var slotsNeeded by mutableStateOf(2)
 }
 
 /**
@@ -2036,6 +2043,68 @@ private fun TeamIconPreview(emblemIndex: Int, photoUri: android.net.Uri?, size: 
     }
 }
 
+/**
+ * "Looking for players?" — opens the match for nearby players to request to join, and
+ * how many the match wants. The discovery + request/approve flow lives in the Scheduled
+ * tab's "Open near me".
+ */
+@Composable
+private fun LookingForPlayersCard(draft: CreateMatchDraft) {
+    var open by remember { mutableStateOf(draft.openToJoin) }
+    var slots by remember { mutableStateOf(draft.slotsNeeded) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Looking for players?", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text("Let nearby players find your match and ask to join.", color = Text3, fontSize = 12.sp)
+            }
+            Switch(
+                checked = open,
+                onCheckedChange = { open = it; draft.openToJoin = it },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Blue,
+                    uncheckedThumbColor = Color.White,
+                    uncheckedTrackColor = Text3.copy(alpha = 0.4f),
+                    uncheckedBorderColor = Color.Transparent,
+                ),
+            )
+        }
+        if (open) {
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Players needed", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                SlotStepper(slots) { v -> slots = v; draft.slotsNeeded = v }
+            }
+        }
+    }
+}
+
+/** A compact `[−] N [+]` stepper for the players-needed count (1..20). */
+@Composable
+private fun SlotStepper(count: Int, onChange: (Int) -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Stroke, RoundedCornerShape(10.dp)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(34.dp).clickable { if (count > 1) onChange(count - 1) }, contentAlignment = Alignment.Center) {
+            Text("−", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = if (count > 1) Text2 else Text3)
+        }
+        Text("$count", Modifier.width(28.dp), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Text1, textAlign = TextAlign.Center)
+        Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Blue).clickable { if (count < 20) onChange(count + 1) }, contentAlignment = Alignment.Center) {
+            Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
 // ────────────────────────────────────────────────────── Step 4 · Review ────────
 @Composable
 private fun StepReview(draft: CreateMatchDraft) {
@@ -2046,6 +2115,12 @@ private fun StepReview(draft: CreateMatchDraft) {
         SummaryCard(draft)
         Spacer(Modifier.height(16.dp))
         WhenCard(draft)
+        // "Looking for players" only makes sense for public matches (a private one is
+        // closed by definition and never appears in discovery).
+        if (!draft.isPrivate) {
+            Spacer(Modifier.height(16.dp))
+            LookingForPlayersCard(draft)
+        }
         Spacer(Modifier.height(16.dp))
         if (draft.isPrivate) {
             ImpactNote(

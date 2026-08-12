@@ -114,6 +114,13 @@ final class MatchesController extends Controller
             'is_private'          => $isPrivate,
             'join_code'           => $isPrivate ? self::generateJoinCode() : null,
 
+            // "Looking for players": open to join-requests from nearby players. Private
+            // matches are never open (they're closed by definition).
+            'open_to_join'        => !$isPrivate && $request->boolean('openToJoin'),
+            'slots_needed'        => (!$isPrivate && $request->boolean('openToJoin'))
+                ? (int) ($v['slotsNeeded'] ?? 0)
+                : 0,
+
             // Geo-scoped visibility: born LOCAL, stamped with the creator's district
             // (and state, for the future STATE tier). Reach beyond the district is
             // granted by an admin — never chosen at creation.

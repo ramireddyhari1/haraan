@@ -64,6 +64,9 @@ class LiveMatch extends Model
         'featured_at' => 'datetime',
         // Future kick-off time when the creator scheduled the match; NULL = play now.
         'scheduled_at' => 'datetime',
+        // "Looking for players" — open-to-join discovery + how many more are wanted.
+        'open_to_join' => 'boolean',
+        'slots_needed' => 'integer',
     ];
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */
