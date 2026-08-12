@@ -89,4 +89,45 @@
         box-shadow:0 16px 40px -18px rgba(37,99,235,.55);}
     .hrn-hero-wash{position:absolute;right:-40px;top:-60px;width:230px;height:230px;
         border-radius:50%;background:rgba(255,255,255,.14);filter:blur(40px);}
+
+    /* ── Sidebar brand card ──────────────────────────────────────────
+       The /partner console frames its logo in an inset rounded card, which
+       reads far more finished than a bare wordmark. This is the control twin:
+       colour-agnostic (tinted from the panel's own --primary-500, so it stays
+       green here) and dark-mode aware. Injected on /control only. */
+    .fi-sidebar-header{
+        margin:10px 10px 6px;padding:12px;border-radius:16px;
+        border:1px solid var(--hrn-border);
+        background:linear-gradient(180deg,
+            color-mix(in srgb,var(--primary-500,#10b981) 9%,var(--hrn-surface)) 0%,
+            var(--hrn-surface) 90%);
+        box-shadow:var(--hrn-shadow);}
+    .dark .fi-sidebar-header{
+        background:linear-gradient(180deg,
+            color-mix(in srgb,var(--primary-500,#10b981) 14%,var(--hrn-surface)) 0%,
+            var(--hrn-surface) 90%);}
+
+    /* ── Sidebar footer: account identity card ───────────────────────
+       Markup lives in resources/views/filament/account-card.blade.php,
+       wired via a SIDEBAR_FOOTER render hook in AdminPanelProvider. */
+    .hrn-acct{display:flex;align-items:center;gap:8px;margin:8px;padding:9px 10px;
+        border-radius:13px;background:var(--hrn-track);
+        box-shadow:inset 0 0 0 1px var(--hrn-border);}
+    .hrn-acct-link{display:flex;align-items:center;gap:10px;flex:1;min-width:0;
+        text-decoration:none;border-radius:9px;}
+    .hrn-acct-av{width:34px;height:34px;border-radius:50%;flex:none;display:flex;
+        align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;
+        letter-spacing:.02em;overflow:hidden;}
+    .hrn-acct-av-img{object-fit:cover;display:block;}
+    .hrn-acct-meta{min-width:0;flex:1;display:flex;flex-direction:column;line-height:1.2;}
+    .hrn-acct-link:hover .hrn-acct-name{color:var(--primary-600,#059669);}
+    .hrn-acct-name{font-size:13px;font-weight:700;color:var(--hrn-ink);white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis;}
+    .hrn-acct-lane{font-size:11px;color:var(--hrn-ink-3);margin-top:1px;}
+    .hrn-acct-form{margin:0;flex:none;}
+    .hrn-acct-out{display:flex;align-items:center;justify-content:center;width:30px;height:30px;
+        border-radius:9px;color:var(--hrn-ink-3);background:transparent;border:0;cursor:pointer;
+        transition:background .15s,color .15s;}
+    .hrn-acct-out:hover{background:var(--hrn-border);color:var(--hrn-down);}
+    .hrn-acct-out svg{width:17px;height:17px;}
 </style>

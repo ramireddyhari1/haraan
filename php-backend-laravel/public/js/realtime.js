@@ -36,6 +36,13 @@
 
     var channel = client.subscribe('content');
 
+    // Track whether the visitor has entered anything on this page load. If they
+    // have (a form, a search, a checkout field), we must NOT auto-reload out from
+    // under them — we fall back to the manual "Refresh" nudge so nothing is lost.
+    var userTyped = false;
+    document.addEventListener('input', function () { userTyped = true; }, true);
+    document.addEventListener('change', function () { userTyped = true; }, true);
+
     // Debounce bursts (e.g. a branding save writes several rows).
     var timers = {};
     function schedule(domain, at) {
@@ -65,12 +72,73 @@
                 .catch(function () { /* ignore */ });
         });
 
-        // 3) Default UX: a non-disruptive "refresh" nudge, unless the page has
-        //    opted out (<body data-realtime-toast="off">) — e.g. because it
-        //    handles updates itself via the DOM event / tagged widgets.
-        if (document.body.getAttribute('data-realtime-toast') !== 'off') {
-            showToast();
+        // 3) Default UX: refresh the page automatically so admin/control changes
+        //    appear without the visitor doing anything. Pages can opt out with
+        //    <body data-realtime-toast="off"> (e.g. they refresh themselves via the
+        //    DOM event / tagged widgets above).
+        if (document.body.getAttribute('data-realtime-toast') === 'off') {
+            return;
         }
+        autoRefresh();
+    }
+
+    var reloading = false;
+    function doReload() {
+        if (reloading) return;
+        reloading = true;
+        window.location.reload();
+    }
+
+    // Is the element actually on screen? Most pages keep modal markup
+    // (role="dialog" / aria-modal) in the DOM but hidden until opened, so a bare
+    // selector match is not enough — we must confirm it's rendered.
+    function isShown(el) {
+        if (!el || el.getAttribute('aria-hidden') === 'true') return false;
+        var s = window.getComputedStyle(el);
+        if (s.display === 'none' || s.visibility === 'hidden') return false;
+        return el.getClientRects().length > 0;
+    }
+
+    // Reloading is unsafe while the visitor is actively working in a field or an
+    // open dialog — yanking the page would lose what they were doing.
+    function userIsBusy() {
+        var el = document.activeElement;
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+            return true;
+        }
+        if (document.querySelector('dialog[open]')) {
+            return true;
+        }
+        // Only a genuinely visible ARIA modal counts — hidden modal markup that
+        // merely sits in the DOM must not block the auto-refresh.
+        var modals = document.querySelectorAll('[aria-modal="true"], [role="dialog"]');
+        for (var i = 0; i < modals.length; i++) {
+            if (isShown(modals[i])) return true;
+        }
+        return false;
+    }
+
+    function autoRefresh() {
+        // Never reload a background tab (wasteful, and it may be a parked form) —
+        // wait until the visitor brings it forward, then re-decide.
+        if (document.visibilityState !== 'visible') {
+            document.addEventListener('visibilitychange', function onVis() {
+                if (document.visibilityState === 'visible') {
+                    document.removeEventListener('visibilitychange', onVis);
+                    autoRefresh();
+                }
+            });
+            return;
+        }
+
+        // If the visitor has typed/selected anything, or is mid-interaction, don't
+        // reload under them — offer the manual nudge instead.
+        if (userTyped || userIsBusy()) {
+            showToast();
+            return;
+        }
+
+        doReload();
     }
 
     function showToast() {

@@ -2,9 +2,9 @@
 
 @section('content')
 <section class="auth-shell" style="padding: 40px 0;">
-    <div class="auth-card" style="max-width: 580px; width: 100%; border: 1px solid rgba(13, 84, 60, 0.15); box-shadow: 0 20px 40px rgba(9,55,39,0.06);">
-        <div class="auth-header" style="background: linear-gradient(135deg, #093727 0%, #0d543c 100%); padding: 32px; border-radius: 12px 12px 0 0; color: #fff; text-align: center;">
-            <span style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #34d399; text-transform: uppercase;">Cricket Onboarding</span>
+    <div class="auth-card" style="max-width: 580px; width: 100%; border: 1px solid rgba(30, 58, 138, 0.15); box-shadow: 0 20px 40px rgba(23, 37, 84,0.06);">
+        <div class="auth-header" style="background: linear-gradient(135deg, #172554 0%, #1E3A8A 100%); padding: 32px; border-radius: 12px 12px 0 0; color: #fff; text-align: center;">
+            <span style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #60A5FA; text-transform: uppercase;">Cricket Onboarding</span>
             <h1 style="margin: 8px 0; font-size: 24px; font-weight: 900; color: #fff; border: none; padding: 0;">Permanent Cricket Identity</h1>
             <p style="color: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.5;">Complete your profile once to unlock your live stats, ranks, and district leaderboard eligibility.</p>
         </div>
@@ -14,9 +14,9 @@
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between;">
                 <div>
                     <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Player ID Preview</span>
-                    <strong id="id_preview" style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 20px; font-weight: 900; color: #0d543c; letter-spacing: 0.5px;">HRN{{ str_pad((string)$user->id, 5, '0', STR_PAD_LEFT) }}</strong>
+                    <strong id="id_preview" style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 20px; font-weight: 900; color: #1E3A8A; letter-spacing: 0.5px;">HRN{{ str_pad((string)$user->id, 5, '0', STR_PAD_LEFT) }}</strong>
                 </div>
-                <div style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: #10b981; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                <div style="background: rgba(37, 99, 235,0.1); border: 1px solid rgba(37, 99, 235,0.2); color: #2563EB; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
                     League Grade
                 </div>
             </div>
@@ -28,7 +28,7 @@
 
                 <!-- Name Input -->
                 <div class="field" style="margin-bottom: 20px;">
-                    <label for="name" style="font-weight: 800; font-size: 13px; color: #093727; display: block; margin-bottom: 8px;">Full Name</label>
+                    <label for="name" style="font-weight: 800; font-size: 13px; color: #172554; display: block; margin-bottom: 8px;">Full Name</label>
                     <input 
                         type="text" 
                         id="name" 
@@ -43,7 +43,7 @@
                 <!-- State & District Flex Row -->
                 <div style="display: flex; gap: 16px; margin-bottom: 20px;">
                     <div class="field" style="flex: 1;">
-                        <label for="state" style="font-weight: 800; font-size: 13px; color: #093727; display: block; margin-bottom: 8px;">State</label>
+                        <label for="state" style="font-weight: 800; font-size: 13px; color: #172554; display: block; margin-bottom: 8px;">State</label>
                         <input 
                             type="text" 
                             id="state" 
@@ -55,7 +55,7 @@
                         >
                     </div>
                     <div class="field" style="flex: 1;">
-                        <label for="district" style="font-weight: 800; font-size: 13px; color: #093727; display: block; margin-bottom: 8px;">District</label>
+                        <label for="district" style="font-weight: 800; font-size: 13px; color: #172554; display: block; margin-bottom: 8px;">District</label>
                         <input 
                             type="text" 
                             id="district" 
@@ -82,7 +82,7 @@
                 <!-- Playing Styles Flex Row -->
                 <div style="display: flex; gap: 16px; margin-bottom: 20px;">
                     <div class="field" style="flex: 1;">
-                        <label for="batting_style" style="font-weight: 800; font-size: 13px; color: #093727; display: block; margin-bottom: 8px;">Batting Style</label>
+                        <label for="batting_style" style="font-weight: 800; font-size: 13px; color: #172554; display: block; margin-bottom: 8px;">Batting Style</label>
                         <select id="batting_style" name="batting_style" required style="width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; font-weight: 700; background: #fff; height: 48px;">
                             <option value="">Select Batting Style</option>
                             <option value="Right-hand bat">Right-hand bat</option>
@@ -90,7 +90,7 @@
                         </select>
                     </div>
                     <div class="field" style="flex: 1;">
-                        <label for="bowling_style" style="font-weight: 800; font-size: 13px; color: #093727; display: block; margin-bottom: 8px;">Bowling Style</label>
+                        <label for="bowling_style" style="font-weight: 800; font-size: 13px; color: #172554; display: block; margin-bottom: 8px;">Bowling Style</label>
                         <select id="bowling_style" name="bowling_style" required style="width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; font-weight: 700; background: #fff; height: 48px;">
                             <option value="">Select Bowling Style</option>
                             <option value="Right-arm fast">Right-arm fast</option>
@@ -106,7 +106,7 @@
 
                 <!-- Photo Upload -->
                 <div class="field" style="margin-bottom: 30px;">
-                    <label for="photo" style="font-weight: 800; font-size: 13px; color: #093727; display: block; margin-bottom: 8px;">Profile Photo (Optional)</label>
+                    <label for="photo" style="font-weight: 800; font-size: 13px; color: #172554; display: block; margin-bottom: 8px;">Profile Photo (Optional)</label>
                     <input 
                         type="file" 
                         id="photo" 
@@ -117,7 +117,7 @@
                 </div>
 
                 <!-- Submit Button -->
-                <button type="submit" class="btn btn--solid btn--full btn--large" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; border: none; font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; height: 50px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);">
+                <button type="submit" class="btn btn--solid btn--full btn--large" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); color: #fff; border: none; font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; height: 50px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
                     Create Cricket Profile
                 </button>
             </form>
@@ -218,8 +218,8 @@
         const activeBtn = element.querySelector('button');
         if (activeBtn) {
             activeBtn.innerText = 'Selected ✅';
-            activeBtn.style.background = '#16a34a';
-            activeBtn.style.borderColor = '#16a34a';
+            activeBtn.style.background = '#2563EB';
+            activeBtn.style.borderColor = '#2563EB';
         }
 
         document.getElementById('claim_user_id').value = id;

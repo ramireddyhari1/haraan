@@ -9,6 +9,7 @@ use App\Filament\Widgets\Partner\PartnerEarningsStatsWidget;
 use BackedEnum;
 use Filament\Facades\Filament;
 use Filament\Pages\Page;
+use Illuminate\Contracts\View\View;
 
 /**
  * The partner's money home: collected / settled / pending KPIs plus a full
@@ -42,6 +43,12 @@ class PartnerEarnings extends Page
     public static function shouldRegisterNavigation(): bool
     {
         return static::canAccess();
+    }
+
+    /** Premium branded header — replaces Filament's bare page title. */
+    public function getHeader(): ?View
+    {
+        return view('filament.pages.partner.earnings-header');
     }
 
     protected function getHeaderWidgets(): array

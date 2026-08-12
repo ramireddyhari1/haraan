@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.haraan.app.ui.theme.HaraanColors
 
 object HaraanRadius {
     val Small = 12.dp     // Badges, Chips, minor elements
@@ -26,7 +27,7 @@ object HaraanRadius {
 //  Tinted toward midnight slate (0xFF0F172A) rather than pure black so it sits
 //  in the slate-on-light brand instead of muddying it.
 // ─────────────────────────────────────────────
-private val ShadowTint = Color(0xFF0F172A)
+private val ShadowTint = HaraanColors.TextPrimary
 
 fun Modifier.premiumCardShadow(
     radius: androidx.compose.ui.unit.Dp = HaraanRadius.Medium,

@@ -12,8 +12,8 @@
 	--accent: #0F172A;
 	--accent-ink: #ffffff;
 	--events: #2563EB;
-	--gamehub: #1B5E20;
-	--gamehub-cta: #00C853;
+	--gamehub: #1E3A8A;
+	--gamehub-cta: #2563EB;
 	--live: #D32F2F;
 }
 
@@ -71,15 +71,15 @@ a {
 	}
 }
 
-/* GameHub is green-themed (--gamehub-cta) — re-tint the same aurora emerald so
-   the glow matches the page identity instead of clashing brand-blue. Inherits
-   the fixed position + breathing animation from the body::before rule above. */
+/* Pulse runs on the same Haraan blue as Events — the second glow is a deeper
+   indigo-blue rather than the old emerald, so the lane reads as one brand.
+   Inherits the fixed position + breathing animation from body::before above. */
 @media (min-width: 1200px) {
 	body.aurora-hub::before {
 		background-image:
-			radial-gradient(1200px 640px at 28% -40%, rgba(0, 200, 83, 0.20), transparent 68%),
-			radial-gradient(1000px 560px at 102% -30%, rgba(16, 185, 129, 0.16), transparent 66%),
-			linear-gradient(180deg, #e7f6ee 0%, rgba(231, 246, 238, 0) 100%);
+			radial-gradient(1200px 640px at 28% -40%, rgba(37, 99, 235, 0.20), transparent 68%),
+			radial-gradient(1000px 560px at 102% -30%, rgba(30, 58, 138, 0.16), transparent 66%),
+			linear-gradient(180deg, #e8eefb 0%, rgba(232, 238, 251, 0) 100%);
 	}
 }
 
@@ -168,8 +168,10 @@ a {
 .topbar--events .brand__img {
 	filter: brightness(0) saturate(100%) invert(29%) sepia(94%) saturate(1728%) hue-rotate(213deg) brightness(97%) contrast(94%);
 }
+/* Pulse is the SAME Haraan blue as Events — one brand, two lanes — so it reuses
+   the identical filter chain rather than the old hue-rotate(93deg) green. */
 .topbar--gamehub .brand__img {
-	filter: brightness(0) saturate(100%) invert(20%) sepia(84%) saturate(560%) hue-rotate(93deg) brightness(94%) contrast(92%);
+	filter: brightness(0) saturate(100%) invert(29%) sepia(94%) saturate(1728%) hue-rotate(213deg) brightness(97%) contrast(94%);
 }
 
 .brand__text {
@@ -797,11 +799,11 @@ main.container {
 }
 .dbtn--gamehub {
 	background: #fff;
-	color: #16a34a;
-	border: 1.5px solid #dcfce7;
-	box-shadow: 0 8px 20px rgba(22, 163, 74, 0.10);
+	color: #2563EB;
+	border: 1.5px solid #dbe6fe;
+	box-shadow: 0 8px 20px rgba(37, 99, 235, 0.10);
 }
-.dbtn--gamehub:hover { border-color: #16a34a; }
+.dbtn--gamehub:hover { border-color: #1D4ED8; }
 .dhero__stats {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -992,7 +994,7 @@ main.container {
 }
 .dcat__txt strong { font-size: 14px; font-weight: 700; color: #0F172A; }
 .dcat__txt small { font-size: 12px; color: var(--muted-2); }
-.dcat--hub .dcat__ico { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
+.dcat--hub .dcat__ico { background: rgba(37, 99, 235, 0.12); color: #1D4ED8; }
 
 /* The desktop home is phone-hidden; the .mhome feed takes over ≤720px. */
 @media (max-width: 720px) {
@@ -1851,15 +1853,15 @@ main.container {
 	background: rgba(255, 255, 255, 0.5);
 }
 
-/* Give the desktop GameHub hero the app's signature green band identity
-   (the mobile hub leads with a full green hero). White copy on deep green;
-   the inner search card stays white and reads as a control on the band. */
+/* Give the desktop Pulse hero the app's signature band identity (the mobile hub
+   leads with a full-bleed hero). White copy on deep Haraan blue; the inner
+   search card stays white and reads as a control on the band. */
 .gamehub-page .gamehub-hero {
 	background:
-		radial-gradient(circle at top right, rgba(0, 200, 83, 0.28), transparent 46%),
-		linear-gradient(135deg, #1B5E20 0%, #123f18 100%);
+		radial-gradient(circle at top right, rgba(37, 99, 235, 0.28), transparent 46%),
+		linear-gradient(135deg, #1E3A8A 0%, #172554 100%);
 	border-color: transparent;
-	box-shadow: 0 24px 50px rgba(27, 94, 32, 0.26);
+	box-shadow: 0 24px 50px rgba(30, 58, 138, 0.26);
 }
 /* Chain both section classes so this beats the theme-override's own
    !important green heading rule on specificity, not just source order. */
@@ -2496,9 +2498,9 @@ main.container {
     top: 20px;
     right: 20px;
     z-index: 20;
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(15, 23, 42, 0.06);
     border: 0;
-    color: #fff;
+    color: #64748B;
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -2506,20 +2508,22 @@ main.container {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, color 0.2s;
 }
 
 .auth-modal__close:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(15, 23, 42, 0.1);
+    color: #0F172A;
 }
 
-/* Brand gradient — EventsBlue → GameHubGreen, the two lanes of the product
-   (same ramp as the mobile footer). Replaces an off-brand indigo→purple. */
+/* Match the standalone /login card head: a near-white wash with the blue→green
+   accent bar on top and a whisper-faint glow behind the brand (was a full
+   blue→green gradient block with white text). */
 .auth-modal__header {
-    background: linear-gradient(135deg, #1D4ED8 0%, #2563EB 38%, #00B15A 100%);
-    padding: 44px 40px 36px;
+    background: linear-gradient(180deg, #FAFCFF 0%, #FFFFFF 60%);
+    padding: 34px 40px 18px;
     text-align: center;
-    color: #fff;
+    color: #0F172A;
     position: relative;
     overflow: hidden;
 }
@@ -2527,28 +2531,51 @@ main.container {
 .auth-modal__header::before {
     content: '';
     position: absolute;
-    inset: 0;
-    background: url('data:image/svg+xml,<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" fill="white" opacity="0.1"/></svg>');
-    opacity: 0.1;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 2;
+    background: linear-gradient(90deg, #2563EB 0%, #60A5FA 100%);
 }
 
-/* The wordmark PNG is navy; invert it to white so it reads on the gradient.
-   It carries the brand name, so no separate <h2> heading. */
+.auth-modal__header::after {
+    content: '';
+    position: absolute;
+    top: -80px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    height: 200px;
+    border-radius: 50%;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(37, 99, 235, 0.06), transparent 72%);
+    filter: blur(12px);
+}
+
+/* Blue wordmark + handwritten "Login" tag, mirroring the /login card. */
+.auth-modal__logo {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+}
 .auth-modal__logo img {
     height: 30px;
     width: auto;
-    margin: 0 auto 14px;
     display: block;
-    filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
 }
-
-.auth-modal__logo p {
-    margin: 0 auto;
-    max-width: 30ch;
-    font-size: 14px;
-    line-height: 1.5;
-    opacity: 0.92;
-    font-weight: 500;
+.auth-modal__tag {
+    font-family: "Segoe Script", "Bradley Hand", "Snell Roundhand", "Brush Script MT", "Comic Sans MS", cursive;
+    font-size: 18px;
+    font-weight: 400;
+    color: #2563EB;
+    letter-spacing: .01em;
+    transform: rotate(-4deg);
+    line-height: 1;
 }
 
 .auth-modal__body {
@@ -2754,7 +2781,7 @@ main.container {
 /* =====================================================================
    Account screen (/profile) — the web twin of the app's AccountProfileScreen.
    Tokens are the app's, verbatim: Navy #07111F, NavyMid #102B52, BlueBright
-   #2563EB, Green #00B140, Text1/2/3, Stroke #E5E9F0. The app is a phone, so the
+   #2563EB, BlueDeep #1E3A8A, Text1/2/3, Stroke #E5E9F0. The app is a phone, so the
    column is capped and centred rather than stretched across a desktop.
    ===================================================================== */
 .aprof {
@@ -2814,7 +2841,7 @@ main.container {
     flex: 0 0 68px;
     border-radius: 50%;
     cursor: pointer;
-    background: linear-gradient(135deg, #2563EB, #00B140);
+    background: linear-gradient(135deg, #2563EB, #1E3A8A);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
 }
 
@@ -2987,7 +3014,7 @@ main.container {
 }
 
 .aprof-lane__icon--blue { background: #EAF1FE; color: #2563EB; }
-.aprof-lane__icon--green { background: #E7F7EE; color: #00B140; }
+.aprof-lane__icon--green { background: #E7ECFA; color: #1E3A8A; }
 
 .aprof-lane__label {
     margin-top: 14px;
@@ -3030,7 +3057,7 @@ main.container {
 }
 
 .aprof-lane__invite--blue { color: #2563EB; }
-.aprof-lane__invite--green { color: #00B140; }
+.aprof-lane__invite--green { color: #1E3A8A; }
 
 /* --- Standing --------------------------------------------------------- */
 .aprof-standing {
@@ -3302,7 +3329,7 @@ main.container {
 
 .aprof-booking__icon svg { width: 18px; height: 18px; }
 .aprof-booking__icon.is-event { background: #EAF1FE; color: #2563EB; }
-.aprof-booking__icon.is-venue { background: #E7F7EE; color: #00B140; }
+.aprof-booking__icon.is-venue { background: #E7ECFA; color: #1E3A8A; }
 
 .aprof-booking__text { flex: 1; min-width: 0; }
 
@@ -3415,12 +3442,12 @@ main.container {
 }
 
 .footer-hero-btn--primary {
-	background: #10b981;
+	background: #2563EB;
     color: #fff;
 }
 
 .footer-hero-btn--secondary {
-	background: #065f46;
+	background: #1E3A8A;
     color: #fff;
 }
 
@@ -3436,12 +3463,12 @@ body.mode-events .footer-hero-btn--secondary {
 }
 
 body.mode-gamehub .footer-hero-btn--primary {
-	background: #00C853; /* GameHub green */
+	background: #2563EB; /* Haraan blue */
 }
 body.mode-gamehub .footer-hero-btn--secondary {
 	background: #ffffff; /* white */
-	color: #00C853; /* green text */
-	border: 2px solid #00C853;
+	color: #2563EB; /* blue text */
+	border: 2px solid #2563EB;
 }
 
 /* Make icon circle match button fill or stroke appropriately */
@@ -3475,14 +3502,14 @@ body.mode-events .footer-hero-btn--secondary .icon {
 }
 
 body.mode-gamehub .footer-hero-btn--secondary .icon {
-	color: #00C853;
+	color: #2563EB;
 }
 
 /* Location is a secondary control: keep the label text neutral and let the
    mode accent live on the pin icon only, so search + the Events/GameHub
    switch remain the primary focal points. */
 body.mode-events .location-pill__pin { color: #2563EB; }
-body.mode-gamehub .location-pill__pin { color: #00C853; }
+body.mode-gamehub .location-pill__pin { color: #2563EB; }
 
 /* Events heading color */
 body.mode-events .section-shell__header h2 {
@@ -4043,9 +4070,9 @@ body.mode-events .section-shell__header h2 {
 .topbar.topbar--gamehub .location-pill__pin,
 .topbar.topbar--gamehub .topbar__util,
 .topbar.topbar--gamehub .topbar__account--placeholder {
-	color: #16a34a;
+	color: #2563EB;
 }
 .topbar.topbar--gamehub .topbar__util:hover {
-	background: rgba(22, 163, 74, 0.1);
-	color: #16a34a;
+	background: rgba(37, 99, 235, 0.1);
+	color: #2563EB;
 }

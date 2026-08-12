@@ -1,4 +1,5 @@
 @extends('site.layout')
+@section('body_class', 'feed-page')
 @section('content')
 
 {{-- ============================================================= --}}
@@ -10,11 +11,14 @@
 @endphp
 <div class="mhome">
     {{-- Centered brand lockup at the top of the feed (matches /events). --}}
-    <div class="mbrandmark" aria-hidden="true">
-        <div class="mbrandmark__dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-        <span>special</span>
-    </div>
+    <section class="mband">
+        <span class="mband__rule" aria-hidden="true"></span>
+        <span class="mband__glow" aria-hidden="true"></span>
+        <span class="mband__brand">
+            <img src="{{ asset('images/haraan-logo-white.png') }}" alt="Haraan">
+            <span class="mband__tag">Special</span>
+        </span>
+    </section>
     <div class="mhome__greet">
         <div>
             <p class="mhome__hi">Hello 👋</p>
@@ -42,7 +46,7 @@
                     <div class="mposter__text">
                         <p class="mposter__date">{{ optional($ev->date)->format('D, M j • g:i A') }}</p>
                         <h4>{{ $ev->title }}</h4>
-                        <p class="mposter__meta">📍 {{ $ev->venue }} · {{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
+                        <p class="mposter__meta">📍 {{ $ev->venue }} · {{ $ev->fromPrice() > 0 ? '₹'.number_format($ev->fromPrice()) : 'Free' }}</p>
                     </div>
                     <span class="mposter__book" aria-label="Book">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
@@ -79,7 +83,7 @@
                     <span class="mtrend__sold"><i>🔥</i>Trending</span>
                     <h5>{{ $ev->title }}</h5>
                 </div>
-                <p>{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}</p>
+                <p>{{ $ev->fromPrice() > 0 ? '₹'.number_format($ev->fromPrice()) : 'Free' }}</p>
             </a>
         @endforeach
     </div>
@@ -87,27 +91,43 @@
 
     {{-- Categories --}}
     <div class="mhome__head"><h3>Categories</h3></div>
+    {{-- Same chip row as /events. This block used to be three hardcoded cards with
+         emoji icons and invented counts — `?: 245` events and `?: 54` shows, which
+         is what it actually printed, since no event was categorised. Emoji also
+         re-render per OS and read as a placeholder. Real categories, no counts. --}}
+    @php
+        $mCatIcons = [
+            'music'     => '<path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle>',
+            'concerts'  => '<path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle>',
+            'comedy'    => '<path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line>',
+            'workshop'  => '<path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4l-2.6 2.6 2 2 2.6-2.6z"></path>',
+            'workshops' => '<path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4l-2.6 2.6 2 2 2.6-2.6z"></path>',
+            'sports'    => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 1 0 18M3 12h18"></path>',
+            'gamehub'   => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 1 0 18M3 12h18"></path>',
+            'default'   => '<path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H5a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"></path><line x1="14" y1="7" x2="14" y2="17" stroke-dasharray="1.5 2"></line>',
+        ];
+        // Only categories that actually have published events, busiest first.
+        $mCats = \App\Models\Event::query()
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->whereNotNull('category')->where('category', '!=', '')
+            ->selectRaw('category, count(*) as total')
+            ->groupBy('category')->orderByDesc('total')->limit(4)->get();
+    @endphp
     <div class="mhome__cats">
-        <a href="/events?category=Concerts" class="mcat mcat--blue">
-            <span class="mcat__ico">🎵</span>
-            <span class="mcat__txt">
-                <strong>Concerts</strong>
-                <small>{{ $catCount('Concerts') ?: 245 }} events</small>
-            </span>
+        <a href="/events" class="mcat">
+            <span class="mcat__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg></span>
+            <strong class="mcat__name">All events</strong>
         </a>
-        <a href="/events?category=Comedy" class="mcat mcat--blue">
-            <span class="mcat__ico">🎤</span>
-            <span class="mcat__txt">
-                <strong>Standup</strong>
-                <small>{{ $catCount('Comedy') ?: 54 }} shows</small>
-            </span>
-        </a>
-        <a href="/gamehub" class="mcat mcat--green">
-            <span class="mcat__ico">🏏</span>
-            <span class="mcat__txt">
-                <strong>GameHub</strong>
-                <small>Turf & slots</small>
-            </span>
+        @foreach($mCats as $row)
+            @php $mIco = $mCatIcons[strtolower((string) $row->category)] ?? $mCatIcons['default']; @endphp
+            <a href="/events?category={{ urlencode((string) $row->category) }}" class="mcat">
+                <span class="mcat__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mIco !!}</svg></span>
+                <strong class="mcat__name">{{ ucfirst(strtolower((string) $row->category)) }}</strong>
+            </a>
+        @endforeach
+        <a href="/gamehub" class="mcat">
+            <span class="mcat__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 1 0 18M3 12h18"></path></svg></span>
+            <strong class="mcat__name">Pulse</strong>
         </a>
     </div>
 
@@ -127,7 +147,8 @@
                 <p class="mcard__date">{{ optional($ev->date)->format('D, M j') }}</p>
                 <h4 class="mcard__title">{{ $ev->title }}</h4>
                 <p class="mcard__venue">📍 {{ $ev->venue }}</p>
-                <p class="mcard__price"><span>₹</span>{{ $ev->price ? number_format($ev->price) : '0' }}</p>
+                @php $mcp = $ev->fromPrice(); @endphp
+                <p class="mcard__price">@if($mcp > 0)<span>₹</span>{{ number_format($mcp) }}@else<span>Free</span>@endif</p>
             </a>
         @endforeach
     </div>
@@ -173,7 +194,7 @@
 
         <div class="dhero__actions">
             <a href="/events" class="dbtn dbtn--events">Browse events</a>
-            <a href="/gamehub" class="dbtn dbtn--gamehub">Open GameHub</a>
+            <a href="/gamehub" class="dbtn dbtn--gamehub">Open Pulse</a>
         </div>
 
         <div class="dhero__stats">
@@ -196,7 +217,9 @@
         @php
             $fimg   = $featured->heroImageUrl() ?? '/bv-white.png';
             $fwhen  = optional($featured->date)->format('D, M j • g:i A');
-            $fprice = $featured->price ? '₹'.number_format($featured->price).' onwards' : 'Free';
+            $fprice = $featured->fromPrice() > 0
+                ? '₹'.number_format($featured->fromPrice()).($featured->priceTierCount() > 1 ? ' onwards' : '')
+                : 'Free';
             $fvenue = trim((string) $featured->venue) ?: trim((string) $featured->location);
         @endphp
         <a class="dfeat" href="/events/{{ $featured->id }}" style="background-image:url('{{ $fimg }}')">
@@ -248,7 +271,7 @@
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16M12 4v16"></path><circle cx="12" cy="12" r="9"></circle></svg>
         </span>
         <span class="dcat__txt">
-            <strong>GameHub</strong>
+            <strong>Pulse</strong>
             <small>Turf &amp; courts</small>
         </span>
     </a>

@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\PartnerAccountResolver;
 use Illuminate\Http\Request;
 use Illuminate\Contracts\View\View;
 
@@ -30,16 +31,24 @@ final class AdminPartnersController extends Controller
             'partner_type' => ['nullable', 'string'],
         ]);
 
-        $partner = User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => bcrypt($request->input('password', 'partner123')),
-            'role' => 'PARTNER',
-            'status' => 'PENDING',
-            'partner_type' => $data['partner_type'] ?? null,
-        ]);
+        // A known email is upgraded in place instead of colliding with the unique
+        // index — see {@see \App\Support\PartnerAccountResolver}.
+        try {
+            [$partner, $upgraded] = PartnerAccountResolver::upgradeOrCreate([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'partner_type' => $data['partner_type'] ?? null,
+                'status' => 'PENDING',
+            ], (string) $request->input('password', 'partner123'));
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
 
-        return response()->json(['message' => 'Partner created', 'data' => $partner], 201);
+        return response()->json([
+            'message' => $upgraded ? 'Existing member upgraded to a partner' : 'Partner created',
+            'upgraded' => $upgraded,
+            'data' => $partner,
+        ], $upgraded ? 200 : 201);
     }
 
     public function edit(string $id): \Illuminate\Contracts\View\View

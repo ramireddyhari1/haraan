@@ -29,10 +29,59 @@ data class AchievementDto(
   val progress: String?,
 )
 
+/** Outcome of a live username availability check. */
+sealed class UsernameCheck {
+  object Available : UsernameCheck()
+  /** Unusable, with the server's specific reason (too short, reserved, taken…). */
+  data class Rejected(val reason: String) : UsernameCheck()
+  /** Couldn't reach the server — say nothing rather than claim it's taken. */
+  object Unknown : UsernameCheck()
+}
+
+/**
+ * One career figure — a real number with the word the sport actually uses for it.
+ *
+ * Modelled as a list rather than fixed fields because sports genuinely have
+ * different numbers of them: cricket has three, football three, badminton one.
+ * A sport with no per-player record contributes FEWER cells rather than a zero
+ * standing in for a stat nobody tracks.
+ */
+data class CareerStat(val label: String, val value: Int)
+
+data class SportCareer(val sport: String, val stats: List<CareerStat>)
+
+/**
+ * The follow graph as it applies to the viewer looking at this profile.
+ *
+ * [canFollow] is deliberately separate from [isFollowing]: a signed-out visitor and a
+ * player looking at their own profile both have `isFollowing = false`, but neither
+ * should be offered a Follow button, and for opposite reasons.
+ */
+/**
+ * How complete this profile is, measured against the player's OWN sport.
+ *
+ * [missing] carries KEYS, not sentences — the app owns the wording. The app used to
+ * work this out itself against cricket's fields, which is why a footballer was asked
+ * for a batting style and could never reach 100%.
+ */
+data class ProfileCompletion(val pct: Int, val missing: List<String>)
+
+data class SocialState(
+  val followersCount: Int,
+  val followingCount: Int,
+  val isFollowing: Boolean,
+  /** Do THEY follow ME — the other half of the mutual test that gates messaging. */
+  val followsMe: Boolean,
+  val isSelf: Boolean,
+  val canFollow: Boolean,
+)
+
 data class PlayerProfile(
   val id: Int,
   val playerId: String,
+  val username: String?,
   val name: String,
+  val bio: String?,
   val avatar: String?,
   val district: String?,
   val state: String?,
@@ -47,6 +96,19 @@ data class PlayerProfile(
   val careerMatches: Int,
   val careerRuns: Int,
   val careerWickets: Int,
+  /**
+   * Career in the player's OWN sport. The three fields above are cricket's — a
+   * footballer's profile was advertising runs and wickets that could only ever
+   * read zero. Null only for a server too old to send the block.
+   */
+  val sportCareer: SportCareer? = null,
+  /**
+   * Follower counts + whether the viewer already follows this player. Null only for a
+   * server too old to send the block — the follow UI hides rather than guessing.
+   */
+  val social: SocialState? = null,
+  /** Null only for a server too old to send it; the app then falls back to its own count. */
+  val completion: ProfileCompletion? = null,
   val profileComplete: Boolean,
   val recentMatches: List<RecentMatch>,
   val achievements: List<AchievementDto> = emptyList(),
@@ -60,6 +122,35 @@ data class PlayerProfile(
   val height: String? = null,
   val nationality: String? = null,
 )
+
+/**
+ * Thrown when the profile API answers with a non-2xx status. Carries the HTTP
+ * [code] so callers can tell "your session is gone" (401/403) apart from "the
+ * server is unhappy" — a distinction the ranked-access gate depends on. Still an
+ * IllegalStateException so existing catch sites keep working unchanged.
+ */
+class ProfileHttpException(val code: Int, message: String) : IllegalStateException(message)
+
+/**
+ * Answer to "can this user do a ranked action?" — deliberately four-valued.
+ *
+ * The important one is [Unavailable]: a timeout or a 500 is NOT the same thing as
+ * "this player has no profile", and must never route a fully set-up player into
+ * the profile-setup wizard.
+ */
+sealed class ProfileStatus {
+  /** Signed in and the ActionBoard profile is complete — let them through. */
+  object Complete : ProfileStatus()
+
+  /** Signed in, but the profile still needs setting up. */
+  object Incomplete : ProfileStatus()
+
+  /** No real session (signed out, or browsing as a guest) — needs login first. */
+  object NeedsLogin : ProfileStatus()
+
+  /** We could not find out. Show [message]; change nothing. */
+  data class Unavailable(val message: String) : ProfileStatus()
+}
 
 /**
  * Fetches the logged-in player's ActionBoard profile. Same HttpURLConnection +
@@ -82,7 +173,7 @@ class ProfileRepository(
       val stream = if (code >= 400) connection.errorStream else connection.inputStream
       val body = stream?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } } ?: ""
       if (code !in 200..299) {
-        throw IllegalStateException(parseError(body))
+        throw ProfileHttpException(code, parseError(body))
       }
       parseProfile(JSONObject(body))
     } finally {
@@ -111,12 +202,35 @@ class ProfileRepository(
       val stream = if (code >= 400) connection.errorStream else connection.inputStream
       val body = stream?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } } ?: ""
       if (code !in 200..299) {
-        throw IllegalStateException(parseError(body))
+        throw ProfileHttpException(code, parseError(body))
       }
       parseProfile(JSONObject(body))
     } finally {
       connection.disconnect()
     }
+  }
+
+  /**
+   * Turns the server's semantic career block into ordered, labelled cells.
+   *
+   * The server sends facts (`goals`, `wickets`); the wording lives here so the app
+   * controls how a stat reads without a deploy. A key the server omitted is a stat
+   * that sport does not record — it is skipped, never rendered as a zero.
+   */
+  private fun parseSportCareer(json: JSONObject?): SportCareer? {
+    if (json == null) return null
+    val sport = json.optString("sport", "cricket").ifBlank { "cricket" }
+
+    val order = when (sport.lowercase()) {
+      "football" -> listOf("matches" to "Matches", "goals" to "Goals", "assists" to "Assists")
+      "badminton" -> listOf("matches" to "Matches")
+      else -> listOf("matches" to "Matches", "runs" to "Runs", "wickets" to "Wickets")
+    }
+
+    val stats = order.mapNotNull { (key, label) ->
+      if (json.has(key)) CareerStat(label, json.optInt(key, 0)) else null
+    }
+    return SportCareer(sport = sport.lowercase(), stats = stats)
   }
 
   private fun parseProfile(json: JSONObject): PlayerProfile {
@@ -159,7 +273,9 @@ class ProfileRepository(
     return PlayerProfile(
       id = json.optInt("id", 0),
       playerId = json.optString("player_id", ""),
+      username = json.optString("username", null).cleanNull(),
       name = json.optString("name", ""),
+      bio = json.optString("bio", null).cleanNull(),
       avatar = json.optString("avatar", null).cleanNull(),
       district = json.optString("district", null).cleanNull(),
       state = json.optString("state", null).cleanNull(),
@@ -174,6 +290,24 @@ class ProfileRepository(
       careerMatches = json.optJSONObject("career")?.optInt("matches", 0) ?: 0,
       careerRuns = json.optJSONObject("career")?.optInt("runs", 0) ?: 0,
       careerWickets = json.optJSONObject("career")?.optInt("wickets", 0) ?: 0,
+      sportCareer = parseSportCareer(json.optJSONObject("sport_career")),
+      completion = json.optJSONObject("profile_completion")?.let { c ->
+        val arr = c.optJSONArray("missing")
+        ProfileCompletion(
+          pct = c.optInt("pct", 0),
+          missing = buildList { if (arr != null) for (i in 0 until arr.length()) add(arr.optString(i)) },
+        )
+      },
+      social = json.optJSONObject("social")?.let { s ->
+        SocialState(
+          followersCount = s.optInt("followers_count", 0),
+          followingCount = s.optInt("following_count", 0),
+          isFollowing = s.optBoolean("is_following", false),
+          followsMe = s.optBoolean("follows_me", false),
+          isSelf = s.optBoolean("is_self", false),
+          canFollow = s.optBoolean("can_follow", false),
+        )
+      },
       profileComplete = json.optBoolean("profile_complete", false),
       recentMatches = recent,
       achievements = achievements,
@@ -189,11 +323,73 @@ class ProfileRepository(
   }
 
   /**
-   * Lightweight gate check: is the player's ActionBoard profile complete?
-   * Returns false on any error (treated as "not ready").
+   * Gate check for ranked actions (create a match, open your player profile…).
+   *
+   * Never collapses to a bare boolean: the old `isProfileComplete` returned false
+   * on ANY failure, so a guest token, an expired session or a five-second timeout
+   * all looked exactly like "this player has no profile" — and dumped a fully
+   * set-up player into the setup wizard every time they tapped Create.
    */
-  suspend fun isProfileComplete(token: String): Boolean = withContext(Dispatchers.IO) {
-    runCatching { fetchMe(token).profileComplete }.getOrDefault(false)
+  suspend fun profileStatus(token: String?): ProfileStatus = withContext(Dispatchers.IO) {
+    if (!TokenStore.isSignedIn(token)) return@withContext ProfileStatus.NeedsLogin
+    try {
+      if (fetchMe(token!!).profileComplete) ProfileStatus.Complete else ProfileStatus.Incomplete
+    } catch (e: ProfileHttpException) {
+      // The session is gone (or was never real) → send them to login, not setup.
+      if (e.code == 401 || e.code == 403) ProfileStatus.NeedsLogin
+      else ProfileStatus.Unavailable(e.message ?: "Couldn't check your player profile.")
+    } catch (_: Exception) {
+      ProfileStatus.Unavailable("Couldn't reach Haraan. Check your connection and try again.")
+    }
+  }
+
+  /**
+   * Lightweight boolean view of [profileStatus] for callers that only care whether
+   * the player is good to go. Anything other than a confirmed complete profile is
+   * false, so do NOT use this to decide whether to show the setup wizard.
+   */
+  suspend fun isProfileComplete(token: String): Boolean =
+    profileStatus(token) is ProfileStatus.Complete
+
+  /**
+   * Is this handle free? Called as the player types, so failures are quiet: a dropped
+   * request returns [UsernameCheck.Unknown] and the field says nothing, rather than
+   * accusing a perfectly good handle of being taken. The save endpoint re-checks and is
+   * the real guarantee — two people can claim the same handle between keystrokes.
+   */
+  suspend fun checkUsername(token: String, username: String): UsernameCheck = withContext(Dispatchers.IO) {
+    val candidate = username.trim()
+    if (candidate.isEmpty()) return@withContext UsernameCheck.Unknown
+
+    val encoded = java.net.URLEncoder.encode(candidate, "UTF-8")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/username-available?username=$encoded")
+      .openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+
+    try {
+      val code = connection.responseCode
+      if (code !in 200..299) return@withContext UsernameCheck.Unknown
+      val body = connection.inputStream?.let {
+        BufferedReader(InputStreamReader(it)).use { r -> r.readText() }
+      } ?: return@withContext UsernameCheck.Unknown
+      val json = JSONObject(body)
+      if (json.optBoolean("available", false)) {
+        UsernameCheck.Available
+      } else {
+        UsernameCheck.Rejected(
+          json.optString("reason", null).cleanNull() ?: "That username can't be used.",
+        )
+      }
+    } catch (_: Exception) {
+      UsernameCheck.Unknown
+    } finally {
+      connection.disconnect()
+    }
   }
 
   /**
@@ -211,6 +407,10 @@ class ProfileRepository(
     birthPlace: String? = null,
     height: String? = null,
     nationality: String? = null,
+    username: String? = null,
+    // Instagram-style account privacy chosen at profile creation. Null = don't touch the
+    // server's current setting (older callers that never ask). true = private account.
+    isPrivate: Boolean? = null,
   ): Boolean = withContext(Dispatchers.IO) {
     val body = JSONObject()
       .put("name", name)
@@ -218,6 +418,8 @@ class ProfileRepository(
       .put("district", district)
       .put("primary_sport", primarySport)
       .put("sport_attributes", JSONObject(sportAttributes as Map<*, *>))
+    if (!username.isNullOrBlank()) body.put("username", username.trim())
+    if (isPrivate != null) body.put("is_private", isPrivate)
     if (!gender.isNullOrBlank()) body.put("gender", gender)
     if (!dateOfBirth.isNullOrBlank()) body.put("date_of_birth", dateOfBirth)
     if (!birthPlace.isNullOrBlank()) body.put("birth_place", birthPlace)
@@ -241,6 +443,32 @@ class ProfileRepository(
         throw IllegalStateException(parseError(err))
       }
       true
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * Inline edit of just the display name + bio (the profile's Edit button). Returns true on
+   * success. Lighter than [saveProfile], which needs the full setup payload.
+   */
+  suspend fun updateBasics(token: String, name: String, bio: String?): Boolean = withContext(Dispatchers.IO) {
+    val body = JSONObject().put("name", name.trim())
+    body.put("bio", bio?.trim() ?: "")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/profile/basics").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 15000
+      readTimeout = 15000
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+      connection.responseCode in 200..299
+    } catch (_: Exception) {
+      false
     } finally {
       connection.disconnect()
     }

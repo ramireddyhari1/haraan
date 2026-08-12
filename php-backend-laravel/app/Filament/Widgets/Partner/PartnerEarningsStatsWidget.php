@@ -9,8 +9,7 @@ use App\Filament\Resources\Venues\VenueResource;
 use App\Models\Booking;
 use App\Models\Payout;
 use Filament\Facades\Filament;
-use Filament\Widgets\StatsOverviewWidget;
-use Filament\Widgets\StatsOverviewWidget\Stat;
+use Filament\Widgets\Widget;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -19,10 +18,18 @@ use Illuminate\Support\Facades\DB;
  * settled to them, and what's still pending. Collected is derived from the
  * partner's own PAID bookings (always accurate); settled comes from the payouts
  * ledger; pending is the difference.
+ *
+ * Rebuilt as a premium fintech hero (self-contained Blade + inline CSS,
+ * theme-aware) — a big "Collected" figure with a settlement progress bar and
+ * two settled/pending tiles, the RazorpayX / Stripe balance feel.
  */
-class PartnerEarningsStatsWidget extends StatsOverviewWidget
+class PartnerEarningsStatsWidget extends Widget
 {
+    protected string $view = 'filament.widgets.partner.earnings-stats';
+
     protected static ?int $sort = -2;
+
+    protected int | string | array $columnSpan = 'full';
 
     protected static bool $isLazy = false;
 
@@ -49,34 +56,47 @@ class PartnerEarningsStatsWidget extends StatsOverviewWidget
         return $query;
     }
 
-    protected function getStats(): array
+    /**
+     * View-ready money summary.
+     *
+     * @return array<string, mixed>
+     */
+    public function getSummary(): array
     {
         $paid = fn (): Builder => $this->partnerBookings()->whereIn(DB::raw('lower(status)'), self::PAID);
 
         $collected = (float) $paid()->sum('total_amount');
         $collectedMonth = (float) (clone $paid())->where('created_at', '>=', now()->startOfMonth())->sum('total_amount');
 
-        // Settled = payouts against this partner's bookings that have been paid out.
         $settled = (float) Payout::query()
             ->whereIn('booking_id', $this->partnerBookings()->select('bookings.id'))
             ->whereIn(DB::raw('lower(status)'), self::SETTLED)
             ->sum('amount');
 
         $pending = max($collected - $settled, 0);
+        $pct = $collected > 0 ? (int) round($settled / $collected * 100) : 0;
 
         return [
-            Stat::make('Collected', '₹' . number_format($collected))
-                ->description('₹' . number_format($collectedMonth) . ' this month')
-                ->descriptionIcon('heroicon-m-banknotes')
-                ->color('success'),
-            Stat::make('Settled to you', '₹' . number_format($settled))
-                ->description('Paid out so far')
-                ->descriptionIcon('heroicon-m-check-circle')
-                ->color('info'),
-            Stat::make('Pending', '₹' . number_format($pending))
-                ->description('Awaiting settlement')
-                ->descriptionIcon('heroicon-m-clock')
-                ->color($pending > 0 ? 'warning' : 'gray'),
+            'collected'      => $this->inr($collected),
+            'collectedMonth' => $this->inr($collectedMonth),
+            'settled'        => $this->inr($settled),
+            'pending'        => $this->inr($pending),
+            'pct'            => min(100, max(0, $pct)),
+            'hasPending'     => $pending > 0,
         ];
+    }
+
+    /** ₹18,42,900 — Indian grouping, whole rupees. */
+    private function inr(float $n): string
+    {
+        $n = (int) round($n);
+        $str = (string) abs($n);
+        if (strlen($str) <= 3) {
+            return '₹' . $str;
+        }
+        $last3 = substr($str, -3);
+        $rest = preg_replace('/\B(?=(\d{2})+(?!\d))/', ',', substr($str, 0, -3));
+
+        return '₹' . $rest . ',' . $last3;
     }
 }

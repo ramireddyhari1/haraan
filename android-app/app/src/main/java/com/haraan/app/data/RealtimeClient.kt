@@ -30,6 +30,27 @@ object RealtimeClient {
     private var socket: WebSocket? = null
     private var reconnectAttempts = 0
 
+    // Extra channels subscribed at runtime (e.g. "match.{id}" while a match detail is
+    // open). Tracked so they're re-subscribed after a reconnect, not just on first open.
+    private val extraChannels = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    private fun subscribeFrame(channel: String) =
+        """{"event":"pusher:subscribe","data":{"channel":"$channel"}}"""
+
+    /** Subscribe to an additional channel now (and on every future reconnect). */
+    @Synchronized
+    fun subscribe(channel: String) {
+        if (channel.isBlank() || !extraChannels.add(channel)) return
+        socket?.send(subscribeFrame(channel))
+    }
+
+    /** Stop listening to an additional channel. */
+    @Synchronized
+    fun unsubscribe(channel: String) {
+        if (!extraChannels.remove(channel)) return
+        socket?.send("""{"event":"pusher:unsubscribe","data":{"channel":"$channel"}}""")
+    }
+
     @Synchronized
     fun start(context: Context, config: RealtimeConfig) {
         if (started || !config.enabled || config.key.isNullOrBlank() || config.host.isNullOrBlank()) {
@@ -56,7 +77,11 @@ object RealtimeClient {
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     reconnectAttempts = 0
-                    webSocket.send("""{"event":"pusher:subscribe","data":{"channel":"${config.channel}"}}""")
+                    webSocket.send(subscribeFrame(config.channel))
+                    // Re-subscribe to any runtime channels (match.{id}) after a reconnect.
+                    synchronized(extraChannels) {
+                        extraChannels.forEach { webSocket.send(subscribeFrame(it)) }
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -88,6 +113,15 @@ object RealtimeClient {
                         else -> ""
                     }
                     if (domain.isNotBlank()) dispatch(appContext, domain)
+                }
+                "match.updated" -> {
+                    val data = frame.opt("data")
+                    val id = when (data) {
+                        is JSONObject -> data.optString("id")
+                        is String -> JSONObject(data).optString("id")
+                        else -> ""
+                    }
+                    if (id.isNotBlank()) MatchRealtimeBus.emit(id)
                 }
             }
         } catch (_: Exception) {

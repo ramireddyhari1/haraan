@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -63,25 +65,38 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.haraan.app.data.UsernameCheck
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.haraan.app.ui.theme.HaraanColors
 
-private val Bg = Color(0xFFEBEBF0)
-private val Surface = Color(0xFFFFFFFF)
-private val Blue = Color(0xFF2563EB)
-private val Green = Color(0xFF16A34A)
-private val Text1 = Color(0xFF111827)
-private val Text2 = Color(0xFF5A5A6A)
-private val Text3 = Color(0xFF9A9AA8)
-private val Stroke = Color(0xFFE2E8F0)
-private val Track = Color(0xFFD9DCE3)
-private val BlueTint = Color(0xFFEFF4FF)
+// The canvas is WHITE and the inputs are filled — not the other way round. Previously
+// white fields sat on an #EBEBF0 canvas, so every control read as a separate floating
+// box and the screen looked like a bare form rather than a page. Filled-on-white gives
+// the fields a quiet grouped rhythm and lets the blue accents actually carry.
+private val Bg = HaraanColors.Surface
+private val Surface = HaraanColors.Surface
+private val FieldFill = HaraanColors.Background
+private val Blue = HaraanColors.EventsBlue
+private val Green = HaraanColors.Success
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Text3 = HaraanColors.TextMuted
+private val Stroke = HaraanColors.BorderLight
+private val Track = HaraanColors.BorderLight
+private val BlueTint = HaraanColors.AccentTint
+private val Disabled = HaraanColors.BorderLight
+private val DashRing = Color(0xFFC7D0DE)
 
 private val INDIAN_STATES = listOf(
     "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat",
@@ -316,12 +331,20 @@ fun PlayerProfileSetupScreen(
         name: String, state: String, district: String,
         primarySport: String, sportAttributes: Map<String, String>,
         gender: String, dateOfBirth: String, birthPlace: String, height: String, nationality: String,
-        photoUri: Uri?,
+        photoUri: Uri?, username: String, isPrivate: Boolean,
     ) -> Unit,
     onDone: () -> Unit,
+    // Live handle availability. Defaults to "can't tell", so any caller that doesn't wire
+    // it up still lets the player through — the server re-checks on save regardless.
+    checkUsername: suspend (String) -> UsernameCheck = { UsernameCheck.Unknown },
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    // Once they edit the handle themselves we stop auto-filling it from their name.
+    var usernameEdited by remember { mutableStateOf(false) }
+    var usernameState by remember { mutableStateOf<UsernameCheck?>(null) }
+    var checkingUsername by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf("") }
     var district by remember { mutableStateOf("") }
     // Cricket-first platform: preselect Cricket so its fields show immediately. Players can
@@ -335,6 +358,9 @@ fun PlayerProfileSetupScreen(
     var height by remember { mutableStateOf("") }
     var nationality by remember { mutableStateOf("Indian") }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
+    // Account privacy (Instagram-style). Default public — Haraan is a public-first product,
+    // and only a public account's photos appear on the social Home feed.
+    var isPrivate by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var step by remember { mutableIntStateOf(0) }
@@ -347,7 +373,36 @@ fun PlayerProfileSetupScreen(
     // fold, which turned that invented rule into a dead end.
     // Date of birth and gender stay required: they're two taps and they drive the
     // player card and age-group features, unlike height and nationality.
-    val step1Valid = name.isNotBlank() && gender.isNotBlank() && dobIso.isNotBlank()
+    // Offer a handle built from their name until they take over. Saves most players from
+    // inventing one — the whole field is friction they didn't ask for.
+    LaunchedEffect(name) {
+        if (!usernameEdited) username = suggestUsername(name)
+    }
+
+    // Debounced availability check. Deliberately NOT on every keystroke: the server call
+    // is a courtesy, and the save path re-checks.
+    LaunchedEffect(username) {
+        val candidate = username.trim()
+        if (candidate.isEmpty()) {
+            usernameState = null
+            checkingUsername = false
+            return@LaunchedEffect
+        }
+        usernameState = null
+        checkingUsername = true
+        delay(450)
+        usernameState = checkUsername(candidate)
+        checkingUsername = false
+    }
+
+    // A handle the server actively refused blocks Continue. "Unknown" (offline, timeout)
+    // does NOT: the player shouldn't be stranded by a flaky network, and the save call
+    // validates for real and reports back.
+    val usernameOk = username.isNotBlank() &&
+        !checkingUsername &&
+        usernameState !is UsernameCheck.Rejected
+
+    val step1Valid = name.isNotBlank() && gender.isNotBlank() && dobIso.isNotBlank() && usernameOk
     val step2Valid = state.isNotBlank() && district.isNotBlank()
     val step3Valid = primarySport.isNotBlank() &&
         SPORT_REQUIRED[primarySport].orEmpty().all { !sportAttrs[it].isNullOrBlank() }
@@ -368,6 +423,8 @@ fun PlayerProfileSetupScreen(
     val missingField: String? = when (step) {
         0 -> when {
             name.isBlank() -> "your name"
+            username.isBlank() -> "a username"
+            usernameState is UsernameCheck.Rejected -> "an available username"
             dobIso.isBlank() -> "your date of birth"
             gender.isBlank() -> "your gender"
             else -> null
@@ -418,13 +475,32 @@ fun PlayerProfileSetupScreen(
                     )
                 }
                 Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("Player profile", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("Required to create or play ranked matches", color = Text3, fontSize = 12.sp)
+                // One line, not a stacked title+subtitle: the step counter moves to a pill on
+                // the right, so the bar reads left-to-right in a single glance instead of
+                // stacking four different type sizes in the top 100dp.
+                Text(
+                    "Player profile",
+                    color = Text1,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(BlueTint)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        "${step + 1} of $TOTAL_STEPS",
+                        color = Blue,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
             StepProgress(current = step, total = TOTAL_STEPS)
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
         // Animated step body — slides in the direction of travel for a sense of momentum.
@@ -444,10 +520,12 @@ fun PlayerProfileSetupScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 18.dp),
             ) {
-                Text(title, color = Text1, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text(subtitle, color = Text2, fontSize = 14.sp)
-                Spacer(Modifier.height(22.dp))
+                // 26sp gives the page a real lead. At 22sp against 14sp/SemiBold field
+                // labels there was no dominant element and the screen read flat.
+                Text(title, color = Text1, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(5.dp))
+                Text(subtitle, color = Text2, fontSize = 14.5.sp)
+                Spacer(Modifier.height(26.dp))
 
                 when (s) {
                     0 -> {
@@ -460,6 +538,15 @@ fun PlayerProfileSetupScreen(
 
                         FieldLabel("Full name")
                         Field(name, { name = it }, "Your name")
+                        Spacer(Modifier.height(16.dp))
+
+                        FieldLabel("Username")
+                        UsernameField(
+                            value = username,
+                            onChange = { usernameEdited = true; username = it },
+                            checking = checkingUsername,
+                            status = usernameState,
+                        )
                         Spacer(Modifier.height(16.dp))
 
                         FieldLabel("Date of birth")
@@ -567,6 +654,31 @@ fun PlayerProfileSetupScreen(
                                 ChipWrap(HANDEDNESS, sportAttrs["hand"].orEmpty()) { sportAttrs["hand"] = it }
                             }
                         }
+
+                        // Account privacy — the last thing before "Create profile". Public
+                        // accounts have their photo posts surface on the social Home feed;
+                        // private accounts stay off it.
+                        Spacer(Modifier.height(24.dp))
+                        Text("Account privacy", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "You can change this later in Settings.",
+                            color = Text3,
+                            fontSize = 12.5.sp,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                        )
+                        PrivacyOption(
+                            title = "Public account",
+                            subtitle = "Your photo posts appear on the Home feed and anyone can view your profile.",
+                            selected = !isPrivate,
+                            onClick = { isPrivate = false },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        PrivacyOption(
+                            title = "Private account",
+                            subtitle = "Your posts stay off the public Home feed.",
+                            selected = isPrivate,
+                            onClick = { isPrivate = true },
+                        )
                     }
                 }
 
@@ -588,6 +700,11 @@ fun PlayerProfileSetupScreen(
             Modifier
                 .fillMaxWidth()
                 .background(Surface)
+                // The body is white now, so the footer needs its own hairline to read as a
+                // fixed bar rather than more page.
+                .drawBehind {
+                    drawLine(Stroke, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f)
+                }
                 .navigationBarsPadding()
                 .imePadding()
                 .padding(16.dp)
@@ -620,6 +737,7 @@ fun PlayerProfileSetupScreen(
                                     name.trim(), state, district.trim(),
                                     primarySport, sportAttrs.toMap(),
                                     gender, dobIso, birthPlace.trim(), height, nationality, photoUri,
+                                    username.trim(), isPrivate,
                                 )
                                 onDone()
                             } catch (e: Exception) {
@@ -635,8 +753,11 @@ fun PlayerProfileSetupScreen(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ctaColor, contentColor = Color.White,
-                    disabledContainerColor = ctaColor.copy(alpha = 0.35f),
-                    disabledContentColor = Color.White.copy(alpha = 0.7f),
+                    // Neutral grey when it isn't ready yet, NOT a 35%-alpha blue: a washed-out
+                    // version of the live colour reads as "this button is broken", whereas a
+                    // plainly inert control reads as "not yet" — which is the truth.
+                    disabledContainerColor = Disabled,
+                    disabledContentColor = Text3,
                 ),
             ) {
                 if (saving) {
@@ -653,28 +774,72 @@ fun PlayerProfileSetupScreen(
     }
 }
 
-/** Segmented progress: filled segments behind the current step, plus a "Step X of N" label. */
+/**
+ * Segmented progress. The "Step X of N" caption that used to hang under this now lives as
+ * a pill in the top bar, so the bar is purely a visual measure — it earns its space
+ * instead of restating a number twice. Segments animate so moving on feels like travel.
+ */
 @Composable
 private fun StepProgress(current: Int, total: Int) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-            repeat(total) { i ->
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (i <= current) Blue else Track),
-                )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+    ) {
+        repeat(total) { i ->
+            val fill by animateColorAsState(
+                if (i <= current) Blue else Track,
+                animationSpec = tween(320),
+                label = "stepFill",
+            )
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(fill),
+            )
+        }
+    }
+}
+
+/** One selectable privacy card (Public / Private) with a leading radio dot. */
+@Composable
+private fun PrivacyOption(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+                width = if (selected) 1.5.dp else 1.dp,
+                color = if (selected) Blue else Stroke,
+                shape = RoundedCornerShape(14.dp),
+            )
+            .background(if (selected) Blue.copy(alpha = 0.06f) else Surface, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .border(2.dp, if (selected) Blue else Track, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(Blue))
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Step ${current + 1} of $total",
-            color = Text2,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Text1, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = Text2, fontSize = 12.5.sp, modifier = Modifier.padding(top = 2.dp))
+        }
     }
 }
 
@@ -691,14 +856,45 @@ private fun AvatarPicker(photoUri: Uri?, initial: String, onPick: (Uri?) -> Unit
         launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
+    // The circle carries exactly ONE camera glyph. It used to show a camera inside the
+    // circle AND a camera badge on the corner — two identical icons 40dp apart, which is
+    // what made this block read as cluttered. Empty state = one centred glyph, no badge;
+    // once there's something to change, the badge appears and the inner glyph goes away.
+    val hasContent = photoUri != null || initial.isNotBlank()
+
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.BottomEnd) {
+            // Empty state gets a DASHED ring. A solid hairline the same value as the fill
+            // made a near-white disc on a white page — it read as a hole in the layout
+            // rather than something to tap. Dashes say "drop something here".
+            val isEmpty = photoUri == null && initial.isBlank()
             Box(
                 Modifier
-                    .size(108.dp)
+                    .size(104.dp)
                     .clip(CircleShape)
-                    .background(BlueTint)
-                    .border(2.dp, if (photoUri != null) Blue else Stroke, CircleShape)
+                    .background(if (photoUri != null) BlueTint else FieldFill)
+                    .then(
+                        if (isEmpty) {
+                            Modifier.drawBehind {
+                                drawCircle(
+                                    color = DashRing,
+                                    radius = size.minDimension / 2f - 1.dp.toPx(),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                        width = 1.5.dp.toPx(),
+                                        pathEffect = PathEffect.dashPathEffect(
+                                            floatArrayOf(9.dp.toPx(), 7.dp.toPx()), 0f,
+                                        ),
+                                    ),
+                                )
+                            }
+                        } else {
+                            Modifier.border(
+                                if (photoUri != null) 2.dp else 1.dp,
+                                if (photoUri != null) Blue else Stroke,
+                                CircleShape,
+                            )
+                        }
+                    )
                     .clickable(onClick = openPicker),
                 contentAlignment = Alignment.Center,
             ) {
@@ -710,35 +906,40 @@ private fun AvatarPicker(photoUri: Uri?, initial: String, onPick: (Uri?) -> Unit
                         modifier = Modifier.fillMaxSize().clip(CircleShape),
                     )
                     initial.isNotBlank() -> Text(
-                        initial.uppercase(), color = Blue, fontSize = 42.sp, fontWeight = FontWeight.Bold,
+                        initial.uppercase(), color = Blue, fontSize = 40.sp, fontWeight = FontWeight.Bold,
                     )
                     else -> Icon(
-                        Icons.Default.PhotoCamera, null, tint = Blue, modifier = Modifier.size(36.dp),
+                        Icons.Default.PhotoCamera, null, tint = Text3, modifier = Modifier.size(30.dp),
                     )
                 }
             }
-            // Camera badge — a clear, tappable affordance that this circle is editable.
-            Box(
-                Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Blue)
-                    .border(3.dp, Surface, CircleShape)
-                    .clickable(onClick = openPicker),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.PhotoCamera, "Add photo", tint = Color.White, modifier = Modifier.size(18.dp))
+            if (hasContent) {
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Blue)
+                        .border(3.dp, Surface, CircleShape)
+                        .clickable(onClick = openPicker),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.PhotoCamera, "Change photo",
+                        tint = Color.White, modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
             if (photoUri != null) "Tap to change photo" else "Add a profile photo",
             color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
         )
-        Text(
-            "Players with a photo get noticed first",
-            color = Text3, fontSize = 12.sp,
-        )
+        Spacer(Modifier.height(2.dp))
+        // Was "Players with a photo get noticed first" — a claim nothing in the product
+        // measures. Say the one thing that's true and actually reduces friction here:
+        // this field will not block them.
+        Text("Optional — you can add one later", color = Text3, fontSize = 12.sp)
     }
 }
 
@@ -755,8 +956,8 @@ private fun SportPicker(selected: String, onSelect: (String) -> Unit) {
                         Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSel) Blue else Surface)
-                            .border(1.dp, if (isSel) Blue else Stroke, RoundedCornerShape(14.dp))
+                            .background(if (isSel) Blue else FieldFill)
+                            .border(1.dp, if (isSel) Blue else Color.Transparent, RoundedCornerShape(14.dp))
                             .clickable { onSelect(sport.name) }
                             .padding(horizontal = 14.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -779,10 +980,89 @@ private fun SportPicker(selected: String, onSelect: (String) -> Unit) {
     }
 }
 
+// Labels sit a level BELOW the page title now (13sp, Text2). At 14sp/SemiBold/Text1 they
+// were the same visual weight as "Let's start with you", so the screen had no clear lead.
+/**
+ * Build a starting handle from the player's name: "Virat Kohli" -> "viratkohli".
+ * Mirrors the server's shape rules (lowercase, starts with a letter, <=20) so the
+ * suggestion is never something the server will immediately reject.
+ */
+private fun suggestUsername(name: String): String {
+    val cleaned = name.lowercase()
+        .filter { it.isLetterOrDigit() }
+        .dropWhile { !it.isLetter() }   // must start with a letter
+        .take(20)
+    return if (cleaned.length >= 3) cleaned else ""
+}
+
+/**
+ * Handle field with a fixed "@" and a live verdict underneath. The verdict is the point:
+ * a username that is silently rejected on submit is far worse than one checked as you
+ * type. Filters input to the server's alphabet so an invalid character can't be typed at
+ * all, rather than being scolded for it afterwards.
+ */
+@Composable
+private fun UsernameField(
+    value: String,
+    onChange: (String) -> Unit,
+    checking: Boolean,
+    status: UsernameCheck?,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(FieldFill)
+            .padding(start = 16.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("@", color = Text3, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        androidx.compose.foundation.text.BasicTextField(
+            value = value,
+            onValueChange = { raw ->
+                onChange(raw.lowercase().filter { it.isLetterOrDigit() || it == '.' || it == '_' }.take(20))
+            },
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            ),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Blue),
+            modifier = Modifier.weight(1f).padding(vertical = 17.dp, horizontal = 2.dp),
+            decorationBox = { inner ->
+                if (value.isEmpty()) {
+                    Text("yourname", color = Text3, fontSize = 15.sp)
+                }
+                inner()
+            },
+        )
+        when {
+            checking -> CircularProgressIndicator(
+                color = Text3, strokeWidth = 2.dp, modifier = Modifier.size(16.dp),
+            )
+            status is UsernameCheck.Available -> Icon(
+                Icons.Default.Check, "Available", tint = Green, modifier = Modifier.size(18.dp),
+            )
+            else -> Spacer(Modifier.size(18.dp))
+        }
+    }
+
+    val note: Pair<String, Color>? = when {
+        value.isBlank() -> "Players find you by this when adding you to a match" to Text3
+        checking -> null
+        status is UsernameCheck.Available -> "@$value is available" to Green
+        status is UsernameCheck.Rejected -> status.reason to Color(0xFFDC2626)
+        else -> null
+    }
+    if (note != null) {
+        Spacer(Modifier.height(6.dp))
+        Text(note.first, color = note.second, fontSize = 12.sp)
+    }
+}
+
 @Composable
 private fun FieldLabel(text: String) {
-    Text(text, color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(8.dp))
+    Text(text, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(7.dp))
 }
 
 @Composable
@@ -795,8 +1075,9 @@ private fun Field(value: String, onChange: (String) -> Unit, placeholder: String
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Blue, unfocusedBorderColor = Stroke,
-            focusedContainerColor = Surface, unfocusedContainerColor = Surface,
+            // Filled, not outlined-on-grey: the border only asserts itself on focus.
+            focusedBorderColor = Blue, unfocusedBorderColor = Color.Transparent,
+            focusedContainerColor = Surface, unfocusedContainerColor = FieldFill,
             focusedTextColor = Text1, unfocusedTextColor = Text1, cursorColor = Blue,
         ),
     )
@@ -810,10 +1091,9 @@ private fun DateField(display: String, placeholder: String, onPicked: (iso: Stri
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(12.dp))
+            .background(FieldFill)
             .clickable { open = true }
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 17.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -857,6 +1137,7 @@ private fun DateField(display: String, placeholder: String, onPicked: (iso: Stri
         )
         DatePickerDialog(
             onDismissRequest = { open = false },
+            shape = RoundedCornerShape(24.dp),
             colors = androidx.compose.material3.DatePickerDefaults.colors(containerColor = Color.White),
             confirmButton = {
                 TextButton(onClick = {
@@ -878,9 +1159,37 @@ private fun DateField(display: String, placeholder: String, onPicked: (iso: Stri
             // Stock Material3 renders this in its own purple-grey tonal palette, which
             // read as a different app dropped into the flow. Restate it in the screen's
             // own colours instead.
+            // Material's own header is the rest of the problem: it prints the literal
+            // placeholder "Selected date" in 24sp before you have picked anything, and
+            // hangs a pencil (keyboard-entry toggle) in the corner. Both are replaced —
+            // a real label, a headline that shows the actual date, and no mode toggle.
+            val headlineText = pickerState.selectedDateMillis?.let { millis ->
+                java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US)
+                    .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                    .format(java.util.Date(millis))
+            } ?: "Pick your birth date"
+
             DatePicker(
                 state = pickerState,
-                title = null,
+                showModeToggle = false,
+                title = {
+                    Text(
+                        "Date of birth",
+                        color = Text2,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp),
+                    )
+                },
+                headline = {
+                    Text(
+                        headlineText,
+                        color = if (pickerState.selectedDateMillis == null) Text3 else Text1,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
+                    )
+                },
                 colors = androidx.compose.material3.DatePickerDefaults.colors(
                     containerColor = Color.White,
                     titleContentColor = Text2,
@@ -915,10 +1224,9 @@ private fun Dropdown(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (enabled) Surface else Color(0xFFF1F2F6))
-                .border(1.dp, Stroke, RoundedCornerShape(12.dp))
+                .background(if (enabled) FieldFill else Disabled)
                 .clickable(enabled = enabled) { open = true }
-                .padding(horizontal = 16.dp, vertical = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 17.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -952,12 +1260,14 @@ private fun Dropdown(
  */
 @Composable
 private fun SegmentedChoice(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    // A real segmented control: one recessed track, the selection riding on top as a
+    // raised pill. The old version was a white box with a hard blue block in one cell,
+    // which read as three separate buttons rather than one either/or choice.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(12.dp))
+            .background(FieldFill)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -969,7 +1279,7 @@ private fun SegmentedChoice(options: List<String>, selected: String, onSelect: (
                     .clip(RoundedCornerShape(9.dp))
                     .background(if (isSel) Blue else Color.Transparent)
                     .clickable { onSelect(opt) }
-                    .padding(vertical = 11.dp),
+                    .padding(vertical = 12.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -996,8 +1306,8 @@ private fun ChipWrap(options: List<String>, selected: String, onSelect: (String)
                         Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSel) Blue else Surface)
-                            .border(1.dp, if (isSel) Blue else Stroke, RoundedCornerShape(12.dp))
+                            .background(if (isSel) Blue else FieldFill)
+                            .border(1.dp, if (isSel) Blue else Color.Transparent, RoundedCornerShape(12.dp))
                             .clickable { onSelect(opt) }
                             .padding(vertical = 13.dp),
                         horizontalArrangement = Arrangement.Center,

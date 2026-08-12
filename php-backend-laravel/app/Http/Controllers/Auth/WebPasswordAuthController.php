@@ -52,6 +52,14 @@ class WebPasswordAuthController extends Controller
                     'email' => 'Incorrect email or password. If you signed up with Google, use "Continue with Google" above.',
                 ]);
             }
+
+            // Partners run their business from the /partner console and sign in on
+            // its own branded page — this public login is for members only.
+            if ($user->hasRoleEither(['PARTNER'])) {
+                throw ValidationException::withMessages([
+                    'email' => 'Partner accounts sign in at haraan.app/partner/login.',
+                ]);
+            }
         } else {
             // Unknown email — create the account, same as the OTP flow auto-creates.
             // Use the typed name when the "Create new account" form supplied one,
@@ -75,13 +83,7 @@ class WebPasswordAuthController extends Controller
         Auth::login($user, true);
         $request->session()->regenerate();
 
-        // Partners (event hosts / venue owners) run their business from the /partner
-        // console, not the public site — drop them straight into their dashboard.
-        if ($user->hasRoleEither(['PARTNER'])) {
-            return redirect('/partner');
-        }
-
-        // Everyone else: straight to where they were headed — never via cricket
+        // Straight to where they were headed — never via cricket
         // onboarding, same as the OTP/Google flows (most web sign-ins are Events traffic).
         return redirect()->intended('/')->with('success', 'Logged in successfully.');
     }

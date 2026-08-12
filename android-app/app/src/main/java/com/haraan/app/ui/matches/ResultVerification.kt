@@ -33,15 +33,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import com.haraan.app.ui.theme.HaraanColors
 
-private val Surface = Color(0xFFFFFFFF)
-private val Blue = Color(0xFF2563EB)
-private val Green = Color(0xFF16A34A)
-private val Text1 = Color(0xFF111827)
-private val Text2 = Color(0xFF5A5A6A)
-private val Stroke = Color(0xFFE2E8F0)
-private val BlueTint = Color(0xFFEFF4FF)
-private val GreenTint = Color(0xFFE9F7EF)
+private val Surface = HaraanColors.Surface
+private val Blue = HaraanColors.EventsBlue
+private val Green = HaraanColors.Success
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Stroke = HaraanColors.BorderLight
+private val BlueTint = HaraanColors.AccentTint
+private val GreenTint = HaraanColors.SuccessTint
 
 private fun trustLabel(trust: String): String = when (trust.lowercase()) {
     "verified" -> "Verified"

@@ -50,7 +50,10 @@ Route::prefix('auth')->group(function (): void {
     // Email + password for the Android app — same semantics as the website's
     // /auth/password (unknown email signs up), but returns a JWT.
     Route::post('/password', [AuthController::class, 'passwordLogin'])->middleware('throttle:auth');
-    Route::post('/logout', [AuthController::class, 'logout']);
+    // Now behind auth.jwt: logout REVOKES the caller's sessions, so it has to know who
+    // is calling. A already-invalid token gets a 401, which is the honest answer —
+    // there is nothing left to revoke.
+    Route::middleware('auth.jwt')->post('/logout', [AuthController::class, 'logout']);
     Route::middleware('auth.jwt')->get('/me', [AuthController::class, 'me']);
 });
 
@@ -67,6 +70,20 @@ Route::prefix('auth/email')->controller(EmailAuthController::class)->group(funct
 
 // "Continue with Google" — the app posts a Google ID token; we verify it and log in.
 Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login'])->middleware('throttle:auth');
+
+// "Continue with phone" — WhatsApp (MSG91) first. `start` answers {channel} and the
+// app drives whichever it names; `verify` checks the code locally and returns a JWT.
+// Token-based twin of the website's /auth/whatsapp-otp/*. NOT the older
+// /api/auth/whatsapp/* — that one keys accounts differently; see PhoneOtpController.
+Route::prefix('auth/phone-otp')->controller(\App\Http\Controllers\Api\PhoneOtpController::class)->group(function (): void {
+    Route::post('/start', 'start')->middleware('throttle:otp');
+    Route::post('/verify', 'verify')->middleware('throttle:auth');
+});
+
+// The SMS fallback beneath it — the app posts a Firebase phone-auth ID token; we verify
+// it and log in (creating the account on first sign-in). Token-based twin of the
+// website's session-based /auth/firebase-phone.
+Route::post('/auth/firebase-phone', [\App\Http\Controllers\Api\FirebasePhoneAuthController::class, 'login'])->middleware('throttle:auth');
 
 // -------------------------------------------------------------------------
 //  Users (admin-only)
@@ -153,6 +170,15 @@ Route::middleware('auth.jwt')->prefix('account')->controller(\App\Http\Controlle
 });
 
 // -------------------------------------------------------------------------
+//  Account deletion, in-app half (Account → Privacy → Delete account).
+//  Google Play requires an in-app deletion path AND a public web URL; the web
+//  twin is Web\AccountDeletionController at /account/delete. Throttled because
+//  it is irreversible and there is no reason to call it twice.
+// -------------------------------------------------------------------------
+Route::middleware(['auth.jwt', 'throttle:6,60'])
+    ->delete('/account', [\App\Http\Controllers\Api\AccountController::class, 'destroy']);
+
+// -------------------------------------------------------------------------
 //  In-app support chat — user <-> admin. Backed by SupportController; the
 //  admin side lives in the Filament "Support" resource. Requires a signed-in
 //  user (JWT); the app opens the thread and polls it while the chat is open.
@@ -196,24 +222,122 @@ Route::middleware('auth.jwt.optional')->group(function (): void {
 Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::get('/me', [PlayersController::class, 'me']);
     Route::post('/profile', [PlayersController::class, 'saveProfile']);
+    // Inline name + bio edit (profile Edit button), lighter than the full /profile save.
+    Route::post('/profile/basics', [PlayersController::class, 'updateBasics']);
     Route::post('/avatar', [PlayersController::class, 'uploadAvatar']); // profile photo
     Route::get('/lookup', [PlayersController::class, 'lookup']);
+    // Squad building: find a teammate by handle or name instead of their Player ID.
+    // NB: '/find', not '/search' — `api/players/search` is already taken by the public
+    // website endpoint (PublicWebController@searchPlayers, registered earlier in this
+    // file), which has a different shape and no auth. Registering a second /search here
+    // silently loses: Laravel matches the first route, so this controller never ran.
+    Route::get('/find', [PlayersController::class, 'search']);
+    Route::get('/username-available', [PlayersController::class, 'usernameAvailable']);
+
+    // Photo posts (profile grid). Literal '/posts' registered here, before the catch-all
+    // {player}/* routes below, so it is never read as a {player} segment.
+    Route::post('/posts', [PlayersController::class, 'storePost']);
+    Route::post('/posts/{id}/caption', [PlayersController::class, 'updatePost'])->whereNumber('id');
+    Route::delete('/posts/{id}', [PlayersController::class, 'destroyPost'])->whereNumber('id');
+    // POST twin, same reason /{player}/unfollow has one: Android's HttpURLConnection has
+    // no dependable DELETE path, so the app calls this instead of the verb above.
+    Route::post('/posts/{id}/delete', [PlayersController::class, 'destroyPost'])->whereNumber('id');
+
+    // ❤ on the Home feed. Three segments, so never read as a {player} by the catch-all below.
+    Route::post('/posts/{id}/like', [PlayersController::class, 'likePost'])->whereNumber('id');
+    Route::delete('/posts/{id}/like', [PlayersController::class, 'unlikePost'])->whereNumber('id');
+    // POST twin — Android's HttpURLConnection has no dependable DELETE path.
+    Route::post('/posts/{id}/unlike', [PlayersController::class, 'unlikePost'])->whereNumber('id');
+
+    // Comments + saves (bookmarks) on a post.
+    Route::post('/posts/{id}/comments', [PlayersController::class, 'addComment'])->whereNumber('id');
+    Route::post('/posts/{id}/save', [PlayersController::class, 'savePost'])->whereNumber('id');
+    Route::delete('/posts/{id}/save', [PlayersController::class, 'unsavePost'])->whereNumber('id');
+    // POST twin for unsave — HttpURLConnection has no dependable DELETE path.
+    Route::post('/posts/{id}/unsave', [PlayersController::class, 'unsavePost'])->whereNumber('id');
+
+    // Social graph. {player} accepts an HRN id or an @handle (see resolvePlayer),
+    // so a deep link from a shared profile works without the client translating.
+    // Registered inside this literal-prefixed group so they never collide with the
+    // catch-all `players/{playerId}` below — the same trap that made
+    // `api/players/search` unreachable.
+    Route::post('/{player}/follow', [PlayersController::class, 'follow']);
+    Route::delete('/{player}/follow', [PlayersController::class, 'unfollow']);
+    // POST twin: Android's HttpURLConnection has no usable DELETE-with-body path,
+    // and the consumer app speaks the same dialect as the partner check-in route.
+    Route::post('/{player}/unfollow', [PlayersController::class, 'unfollow']);
+    Route::get('/{player}/followers', [PlayersController::class, 'followers']);
+    Route::get('/{player}/following', [PlayersController::class, 'following']);
+});
+
+// -------------------------------------------------------------------------
+//  Direct messages between players. Separate from /support, which is the
+//  player <-> admin desk and cannot represent two players talking.
+//  Gated on mutual follow inside DirectMessageService.
+// -------------------------------------------------------------------------
+Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
+    Route::get('/', [\App\Http\Controllers\Api\DirectMessageController::class, 'index']);
+    // Mutual follows — the honest contents of a "start chat / add to group" picker.
+    Route::get('/eligible', [\App\Http\Controllers\Api\DirectMessageController::class, 'eligible']);
+    // Group creation. Registered before /{id}/* so "group" is never read as an id.
+    Route::post('/group', [\App\Http\Controllers\Api\DirectMessageController::class, 'group']);
+    Route::post('/with/{playerId}', [\App\Http\Controllers\Api\DirectMessageController::class, 'with']);
+    Route::get('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'messages'])->whereNumber('id');
+    Route::post('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'send'])->whereNumber('id');
+    Route::post('/{id}/leave', [\App\Http\Controllers\Api\DirectMessageController::class, 'leave'])->whereNumber('id');
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
 // Registered after the literal /players/* routes above so it never shadows them.
-Route::get('players/{playerId}', [PlayersController::class, 'show']);
+//
+// OPTIONAL auth, not none: a guest must still be able to open a shared profile, but a
+// signed-in viewer needs `auth_user` populated or `social.is_following` is always false
+// and the Follow button opens in the wrong state for everyone you already follow.
+Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);
+
+// Posts are public — a guest opening a shared profile sees the grid, same as the profile
+// itself. OPTIONAL auth, not none: the owner viewing their own grid needs `auth_user` set
+// or every cell comes back mine=false and the delete affordance disappears.
+// Two segments, so it can never shadow (or be shadowed by) the literal /players/* routes
+// or the single-segment players/{playerId} above.
+Route::middleware('auth.jwt.optional')->get('players/{player}/posts', [PlayersController::class, 'posts']);
+
+// The Instagram-style Home feed: recent posts from public accounts + a stories strip.
+// OPTIONAL auth so a guest can browse; a signed-in viewer gets `liked`/`mine` populated.
+// Literal 'posts/feed' — two segments, registered after the /players/* group, so it never
+// collides with players/{playerId} or players/{player}/posts.
+Route::middleware('auth.jwt.optional')->get('posts/feed', [PlayersController::class, 'feed']);
+
+// A post's comment thread (public, read-only). Optional auth. Two segments after `posts`.
+Route::middleware('auth.jwt.optional')->get('posts/{id}/comments', [PlayersController::class, 'comments'])->whereNumber('id');
 
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {
     Route::post('/', [MatchesController::class, 'store']);
+    // The creator's not-yet-started matches (future kick-offs + skipped-toss ones),
+    // for the app's Scheduled tab. Literal segment, so never read as a {id}.
+    Route::get('/scheduled', [MatchesController::class, 'scheduled']);
     Route::post('/{id}/team-logo', [MatchesController::class, 'uploadTeamLogo']); // custom team crest
     Route::post('/{id}/complete', [MatchesController::class, 'complete']);
     Route::post('/{id}/confirm', [MatchesController::class, 'confirm']);   // captain confirm → Medium
     Route::post('/{id}/verify', [MatchesController::class, 'verify']);     // organizer/venue → High/Verified
     Route::post('/{id}/dispute', [MatchesController::class, 'dispute']);   // reputation penalty
     Route::post('/{id}/score-action', [MatchesController::class, 'scoreAction']);
+
+    // Football / badminton scoring. Deliberately separate from /score-action:
+    // cricket keeps its per-ball pipeline, and recordEvent refuses cricket, so a
+    // cricket score can never be moved by two competing mechanisms.
+    // The client posts WHAT HAPPENED; the server derives the scoreline.
+    Route::post('/{id}/events', [MatchesController::class, 'recordEvent']);
+    Route::post('/{id}/events/undo', [MatchesController::class, 'undoEvent']);
+    // Match-stat tallies (shots, corners, fouls…) — inc/dec by one. Never scoring.
+    Route::post('/{id}/stat', [MatchesController::class, 'adjustStat']);
+    Route::post('/{id}/sport-state', [MatchesController::class, 'updateSportState']);
 });
+
+// Timeline read — signed in, but not creator-gated: anyone who can see the match
+// can see how it unfolded.
+Route::middleware('auth.jwt')->get('/matches/{id}/events', [MatchesController::class, 'events']);
 
 // -------------------------------------------------------------------------
 //  Leaderboards (public, read-only)
@@ -301,3 +425,40 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::delete('/staff/{id}', 'deleteStaff')->whereNumber('id');
         });
     });
+
+// Razorpay billing webhook — subscription lifecycle and prepaid credit grants.
+// Unauthenticated by necessity; the HMAC signature check in the controller is
+// the authentication, and it fails closed.
+Route::post('/webhooks/razorpay', [\App\Http\Controllers\Api\RazorpayWebhookController::class, 'handle'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.razorpay');
+
+// Meta / Instagram webhook. GET is the one-time subscription handshake; POST
+// carries message events, signed with the app secret. Both fail closed.
+// One callback URL for the whole Meta app: Instagram DMs arrive as
+// entry[].messaging[], WhatsApp Cloud as entry[].changes[] — same signature.
+Route::get('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify'])
+    ->name('webhooks.meta.verify');
+Route::post('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
+    ->middleware('throttle:240,1')
+    ->name('webhooks.meta');
+
+// Alias kept so a callback already pointed here doesn't break.
+Route::get('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify']);
+Route::post('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
+    ->middleware('throttle:240,1');
+
+// MSG91 inbound WhatsApp, when MSG91 is the BSP instead of Meta. Same destination
+// (InboundMessages), different envelope. MSG91 signs nothing, so a shared secret in
+// a request header is the authentication — configured in the panel under the
+// number's Action menu → Webhook — and it fails closed.
+Route::post('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'handle'])
+    ->middleware('throttle:240,1')
+    ->name('webhooks.msg91.whatsapp');
+
+// GET is a reachability check only — it carries no data and does nothing. It
+// exists because a provider validating the URL (or a human pasting it into a
+// browser) otherwise gets a 405, which reads as a broken endpoint.
+Route::get('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'ping'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.msg91.whatsapp.ping');

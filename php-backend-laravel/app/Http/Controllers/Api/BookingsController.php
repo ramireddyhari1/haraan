@@ -88,6 +88,7 @@ final class BookingsController extends Controller
                 $request->orderLines(),
                 $request->validated('couponCode'),
                 $request->contact(),
+                eventSlotId: $request->eventSlotId(),
             )->load('ticketType');
 
             BookingNotifier::dispatch($legacy->first());
@@ -104,6 +105,7 @@ final class BookingsController extends Controller
             $request->orderLines(),
             $request->validated('couponCode'),
             $request->contact(),
+            eventSlotId: $request->eventSlotId(),
             reserve: true,
         )->load('ticketType');
 
@@ -246,35 +248,53 @@ final class BookingsController extends Controller
     }
 
     /**
-     * Validate a coupon code for the checkout screen (preview only — the discount is
-     * re-applied authoritatively on booking). Returns the flat ₹ amount it takes off.
+     * Quote a coupon for the app's checkout screen (preview only — the discount is
+     * re-applied authoritatively on booking). Returns the ₹ amount it takes off.
+     *
+     * Runs {@see BookingService::resolveCoupon()}, the same resolver the booking itself
+     * uses, so the amount shown on the order summary is the amount charged. It used to
+     * decide this here with its own subset of the rules, which drifted two ways:
+     * a percentage coupon quoted with no cart returned its raw `discount` (a 20%-off
+     * code previewed as "₹20 off"), and the per-customer cap wasn't checked at all, so
+     * an already-used code previewed a discount the booking then refused.
+     *
+     * `subtotal` is the ticket subtotal on screen. The convenience fee is added here
+     * rather than trusted from the client, since it only affects the clamp that keeps
+     * an order from going below ₹0.
      */
     public function validateCoupon(Request $request): JsonResponse
     {
-        $code    = trim((string) $request->input('code'));
-        $eventId = $request->filled('eventId') ? (int) $request->input('eventId') : null;
-        $coupon  = \App\Models\Coupon::findByCode($code);
+        $authUser = $request->attributes->get('auth_user');
 
-        if ($coupon === null || ! $coupon->isRedeemable()) {
-            return response()->json([
-                'valid'   => false,
-                'message' => 'This code isn’t valid.',
-            ]);
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        // A coupon scoped to another event must not preview a discount here.
-        if (! $coupon->appliesToEvent($eventId)) {
+        $code     = trim((string) $request->input('code'));
+        $eventId  = $request->filled('eventId') ? (int) $request->input('eventId') : 0;
+        $subtotal = max(0.0, (float) $request->input('subtotal', 0));
+        // Null, not 0, when the client didn't say — a minimum-tickets coupon must not be
+        // refused on a count nobody sent.
+        $tickets  = $request->filled('tickets') ? max(0, (int) $request->input('tickets')) : null;
+
+        $event = $eventId > 0 ? Event::query()->find($eventId) : null;
+        $fee   = $event !== null ? $event->convenienceFeeFor($subtotal) : 0.0;
+
+        $resolved = $this->bookings->resolveCoupon($authUser, $eventId, $code, $subtotal, $fee, $tickets);
+
+        if ($resolved['coupon'] === null) {
             return response()->json([
                 'valid'   => false,
-                'message' => 'This code isn’t valid for this event.',
+                'message' => $resolved['message'],
             ]);
         }
 
         return response()->json([
             'valid'    => true,
-            'code'     => $coupon->code,
-            'discount' => (float) $coupon->discount,
-            'message'  => 'Coupon applied.',
+            'code'     => $resolved['coupon']->code,
+            'type'     => $resolved['coupon']->type,
+            'discount' => $resolved['discount'],
+            'message'  => $resolved['message'],
         ]);
     }
 

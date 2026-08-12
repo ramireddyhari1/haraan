@@ -54,6 +54,17 @@ object TokenStore {
     }
   }
 
+  /**
+   * The stored token, but ONLY for a real signed-in session — a guest gets null.
+   *
+   * Prefer this over [getToken] anywhere the token is about to be sent to the API.
+   * `getToken(ctx)` returns the non-blank [GUEST_TOKEN] for guests, so the natural
+   * `?: return` / `isNullOrBlank()` guards silently let them through to a
+   * guaranteed 401; this returns null so those same guards do the right thing,
+   * and it keeps Kotlin's smart-cast to non-null after the check.
+   */
+  fun getSignedInToken(context: Context): String? = getToken(context)?.takeIf { isSignedIn(it) }
+
   fun getToken(context: Context): String? {
     return try {
       val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)

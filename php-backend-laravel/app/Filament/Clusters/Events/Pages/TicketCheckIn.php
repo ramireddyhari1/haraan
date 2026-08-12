@@ -42,6 +42,13 @@ class TicketCheckIn extends Page
     /** Recent scan results shown on the page: [{name, event, detail, ok}]. */
     public array $recent = [];
 
+    /** Live session tally shown on the gate console. */
+    public int $admitted = 0;   // people newly let in this session
+
+    public int $repeats = 0;    // tickets already checked in
+
+    public int $rejected = 0;   // unknown / wrong-event / failed
+
     /** Guards against the camera firing the same code many times a second. */
     public ?string $lastCode = null;
 
@@ -140,6 +147,7 @@ class TicketCheckIn extends Page
             // Event lock: refuse tickets that belong to a different event.
             if ($this->event !== null && (int) $booking->event_id !== $this->event) {
                 $wrong = $booking->event?->title ?? 'another event';
+                $this->rejected++;
                 $this->pushResult($booking->user?->name ?? 'Ticket', $wrong, "Not for “{$this->lockedTitle}”", false);
                 Notification::make()
                     ->title('Wrong event')
@@ -157,15 +165,18 @@ class TicketCheckIn extends Page
             $eventTitle = $updated->event?->title ?? 'Event';
 
             if ($newlyIn > 0) {
+                $this->admitted += $newlyIn;
                 $detail = "Checked in {$newlyIn} of {$updated->quantity}";
                 $this->pushResult($name, $eventTitle, $detail, true);
                 Notification::make()->title("✓ {$name} checked in")->body($detail)->success()->send();
             } else {
+                $this->repeats++;
                 $detail = "Already checked in ({$updated->checked_in_count}/{$updated->quantity})";
                 $this->pushResult($name, $eventTitle, $detail, false);
                 Notification::make()->title('Already checked in')->body("{$name} — {$eventTitle}")->warning()->send();
             }
         } catch (HttpException $e) {
+            $this->rejected++;
             $msg = $e->getMessage() ?: 'Check-in failed';
             $this->pushResult('Unknown ticket', '', $msg, false);
             Notification::make()->title('Check-in failed')->body($msg)->danger()->send();
@@ -183,5 +194,8 @@ class TicketCheckIn extends Page
         ]);
 
         $this->recent = array_slice($this->recent, 0, 15);
+
+        // Drive the on-screen flash + beep + haptic feedback on the gate device.
+        $this->dispatch('scan-feedback', ok: $ok, name: $name, detail: $detail);
     }
 }

@@ -289,14 +289,28 @@ class BookingRepository(
   )
 
   /**
-   * Validate a coupon for the checkout preview. The discount is a flat ₹ amount off.
-   * `eventId` scopes the check so an event-specific coupon is rejected on other events.
+   * Validate a coupon for the checkout preview. The discount comes back as the ₹ amount
+   * off, already resolved against this cart. `eventId` scopes the check so an
+   * event-specific coupon is rejected on other events.
+   *
+   * [subtotal] is the ticket subtotal on the summary screen and is NOT optional in
+   * practice: without it the server has no cart to price a percentage coupon against,
+   * and a 20%-off code comes back as "₹20 off" — a number the booking then won't honour.
    */
-  suspend fun validateCoupon(token: String, code: String, eventId: Int? = null): CouponResult = withContext(Dispatchers.IO) {
+  suspend fun validateCoupon(
+    token: String,
+    code: String,
+    eventId: Int? = null,
+    subtotal: Double = 0.0,
+    tickets: Int = 0,
+  ): CouponResult = withContext(Dispatchers.IO) {
     try {
       val body = JSONObject().apply {
         put("code", code)
         if (eventId != null && eventId > 0) put("eventId", eventId)
+        if (subtotal > 0.0) put("subtotal", subtotal)
+        // Coupons can require a minimum number of tickets, not just a minimum spend.
+        if (tickets > 0) put("tickets", tickets)
       }
       val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/validate-coupon").openConnection() as HttpURLConnection).apply {
         requestMethod = "POST"

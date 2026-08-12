@@ -7,8 +7,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\TemplateResolver;
 use App\Services\WhatsAppService;
 use App\Support\JwtService;
+use App\Support\MessageContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -19,8 +21,10 @@ final class WhatsAppAuthController extends Controller
 {
     private const OTP_TTL_SECONDS = 300;
 
-    public function __construct(private readonly WhatsAppService $whatsappService)
-    {
+    public function __construct(
+        private readonly WhatsAppService $whatsappService,
+        private readonly TemplateResolver $templates,
+    ) {
     }
 
     public function requestOtp(Request $request): JsonResponse
@@ -57,8 +61,7 @@ final class WhatsAppAuthController extends Controller
             'user_id' => $user->id,
         ], self::OTP_TTL_SECONDS);
 
-        $message = "Your Haraan login code is: *{$otp}*\n\nThis code will expire in 5 minutes.";
-        $sent = $this->whatsappService->sendMessage($phone, $message);
+        $sent = $this->sendOtp($phone, $otp);
 
         // Local dev has no WhatsApp bridge, so a send failure must not block sign-up. The
         // session stays valid and the master code 000000 (see verifyOtp) lets you log in.
@@ -108,13 +111,43 @@ final class WhatsAppAuthController extends Controller
 
         return response()->json([
             'message' => 'Login successful via WhatsApp.',
-            'token' => JwtService::issue([
-                'sub' => $user->id,
-                'phone' => $user->phone,
-                'role' => $user->role,
-            ], (string) config('app.jwt_secret')),
+            'token' => JwtService::issueForUser($user, (string) config('app.jwt_secret')),
             'user' => new UserResource($user),
         ]);
+    }
+
+    /**
+     * Put the code on the wire.
+     *
+     * A login OTP is the one message guaranteed to reach someone who has never
+     * messaged us — that's what logging in for the first time means — so it is
+     * always outside the 24-hour window and an approved AUTHENTICATION template is
+     * the only send WhatsApp will deliver. The free-text fallback exists for the
+     * local bridge and for the window that a returning user's support chat may have
+     * opened; it is not the path to rely on in production.
+     */
+    private function sendOtp(string $phone, string $otp): bool
+    {
+        // Platform-owned and authentication-category: a login is Haraan's own
+        // traffic, and must never be billed to whichever partner they last booked.
+        $context = MessageContext::platform(MessageContext::AUTHENTICATION, 'auth.login_otp');
+        $route = $this->templates->resolve('auth.login_otp', 'whatsapp', $phone);
+
+        if ($route['mode'] === TemplateResolver::MODE_TEMPLATE) {
+            return $this->whatsappService->sendOtpTemplate(
+                $phone,
+                (string) $route['name'],
+                $otp,
+                $context,
+                (string) $route['language'],
+            );
+        }
+
+        return $this->whatsappService->sendMessage(
+            $phone,
+            "Your Haraan login code is: *{$otp}*\n\nThis code will expire in 5 minutes.",
+            $context,
+        );
     }
 
     private function cacheKey(string $verificationToken): string

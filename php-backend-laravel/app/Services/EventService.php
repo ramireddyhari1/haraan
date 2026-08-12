@@ -27,6 +27,10 @@ final class EventService
     public function getFeed(int $limit = 6): Collection
     {
         $events = Event::query()
+            // Cards price off the tiers (Event::fromPrice()) — eager-load or it's
+            // one query per card.
+            ->with('ticketTypes')
+            ->notFinished()
             ->where('status', 'published')
             ->orderByDesc('date')
             ->take($limit)
@@ -53,6 +57,8 @@ final class EventService
         // column is inspected the same way the map below reads it. When nothing
         // qualifies this returns empty and the view hides the whole carousel.
         $events = Event::query()
+            ->with('ticketTypes')
+            ->notFinished()
             ->where('status', 'published')
             ->orderByDesc('date')
             ->get()

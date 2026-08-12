@@ -181,11 +181,7 @@ final class EmailAuthController extends Controller
 
     private function issueToken(User $user): string
     {
-        return JwtService::issue([
-            'sub' => $user->id,
-            'email' => $user->email,
-            'role' => $user->role,
-        ], (string) config('app.jwt_secret'));
+        return JwtService::issueForUser($user, (string) config('app.jwt_secret'));
     }
 
     private function cacheKey(string $verificationToken): string

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Filament\Widgets\Partner\PartnerEarningsStatsWidget;
 use App\Filament\Widgets\Partner\PartnerKpiHeroWidget;
 use App\Filament\Widgets\Partner\PartnerNeedsAttentionWidget;
 use App\Filament\Widgets\Partner\PartnerOrganizerScoreWidget;
@@ -13,6 +14,10 @@ use App\Filament\Widgets\Partner\PartnerRecentBookingsWidget;
 use App\Filament\Widgets\Partner\PartnerFunnelWidget;
 use App\Filament\Widgets\Partner\PartnerRevenueTrendWidget;
 use App\Filament\Widgets\Partner\PartnerTrafficSourcesWidget;
+use App\Filament\Widgets\Venue\VenueMoneyHealthWidget;
+use App\Filament\Widgets\Venue\VenuePeakHoursWidget;
+use App\Filament\Widgets\Venue\VenueTodayWidget;
+use App\Filament\Widgets\Venue\VenueUpcomingWidget;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
@@ -127,6 +132,14 @@ class Dashboard extends BaseDashboard
             return parent::getWidgets();
         }
 
+        // The venue lane gets its own home. Until now it inherited the event
+        // host's widget list, ten of whose twelve widgets self-gate on
+        // partner_type === 'event' — so a venue owner signed in and landed on a
+        // near-empty dashboard. The events lane below is unchanged.
+        if (auth()->user()?->partner_type !== 'event') {
+            return $this->venueWidgets();
+        }
+
         return [
             PartnerQuickActionsWidget::class,
             // Premium "money hero" (dominant revenue + supporting KPIs), lane-aware
@@ -151,6 +164,32 @@ class Dashboard extends BaseDashboard
             PartnerOrganizerScoreWidget::class,
             PartnerPeakHoursWidget::class,
             PartnerRecentBookingsWidget::class,
+        ];
+    }
+
+    /**
+     * The GameHub venue owner's home.
+     *
+     * Ordered the way an owner actually reads the day: what happened today, then
+     * where the money is leaking, then the earnings/settlement hero they already
+     * had, then when the venue sells and who is walking in next.
+     *
+     * Every widget here self-gates via ScopesToVenueLane::canView(), so an event
+     * host can never see one even if this list is reached by another path.
+     *
+     * @return array<int, class-string>
+     */
+    private function venueWidgets(): array
+    {
+        return [
+            PartnerQuickActionsWidget::class,
+            VenueTodayWidget::class,
+            VenueMoneyHealthWidget::class,
+            // Already venue-visible before this change — kept, and now sitting
+            // under real KPIs instead of alone on an empty page.
+            PartnerEarningsStatsWidget::class,
+            VenuePeakHoursWidget::class,
+            VenueUpcomingWidget::class,
         ];
     }
 }

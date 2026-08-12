@@ -1,4 +1,5 @@
 @extends('site.layout')
+@section('body_class', 'feed-page')
 @section('content')
 @php
     $activeCategory = request()->query('category', 'All');
@@ -26,13 +27,24 @@
 {{-- MOBILE APP-STYLE EVENTS HOME (mirrors the Android app; ≤720px) --}}
 {{-- ============================================================= --}}
 <div class="mhome">
-    {{-- Centered brand lockup between the tabs and the feed (user-placed;
-         replaces the old top strip so the wordmark appears exactly once). --}}
-    <div class="mbrandmark" aria-hidden="true">
-        <div class="mbrandmark__dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-        <span>special</span>
-    </div>
+    {{-- The brand band. This slot has been reworked twice: first it was the wordmark
+         plus "special" in script inside a field of twinkling dots (ornamental), then
+         a quiet hairline masthead (plain). Both failed for the same underlying
+         reason — it was `aria-hidden` decoration sitting in the most valuable space
+         on the page, saying nothing and going nowhere.
+
+         So it now carries its weight: a dark full-bleed band (rhythm against the
+         white feed), the brand, one TRUE line about what follows, and a real
+         action. The line is only claimed when there are curated picks to back it —
+         `for_you` is an admin-set placement, so "hand-picked" is a fact, not copy. --}}
+    <section class="mband">
+        <span class="mband__rule" aria-hidden="true"></span>
+        <span class="mband__glow" aria-hidden="true"></span>
+        <span class="mband__brand">
+            <img src="{{ asset('images/haraan-logo-white.png') }}" alt="Haraan">
+            <span class="mband__tag">Special</span>
+        </span>
+    </section>
 
     {{-- The app's feed opens with the sponsored slot (AdSpaceBanner), NOT a greeting —
          the header already says hello, and a second "Hello 👋 / Discover in <city>" was
@@ -80,7 +92,10 @@
                     ]);
                     $whenLine = implode(' • ', $whenParts);
                     // Mirrors EventRepository.formatPrice(): "₹249 onwards" / "Free".
-                    $priceLabel = ($ev->price > 0) ? '₹' . number_format((float) $ev->price) . ' onwards' : 'Free';
+                    $priceFrom  = $ev->fromPrice();
+                    $priceLabel = $priceFrom > 0
+                        ? '₹' . number_format($priceFrom) . ($ev->priceTierCount() > 1 ? ' onwards' : '')
+                        : 'Free';
                     // Mirrors the app: venue, falling back to location.
                     $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
                 @endphp
@@ -184,8 +199,10 @@
                 <span class="mcat__ico">
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $icon !!}</svg>
                 </span>
+                {{-- No count. "1 Event" told buyers how little there is, and it
+                     disagreed with "4 Total" beside it. A filter chip's job is to
+                     name the filter. --}}
                 <strong class="mcat__name">{{ $c['title'] }}</strong>
-                <small class="mcat__stat">{{ $c['stat'] }}</small>
             </a>
         @endforeach
     </div>
@@ -202,7 +219,8 @@
             @php
                 $img = $ev->heroImageUrl() ?? '/bv-white.png';
                 $soon = optional($ev->date)->between(now(), now()->addDays(7)) ?? false;
-                $hasOnwards = $ev->price > 0;
+                $mFrom      = $ev->fromPrice();
+                $hasOnwards = $mFrom > 0 && $ev->priceTierCount() > 1;
             @endphp
             <a class="mcard" href="/events/{{ $ev->id }}">
                 <div class="mcard__img" style="background-image:url('{{ $img }}')">
@@ -211,7 +229,7 @@
                 <p class="mcard__date">{{ optional($ev->date)->format('D, j M') }}</p>
                 <h4 class="mcard__title">{{ $ev->title }}</h4>
                 <p class="mcard__venue">{{ $ev->venue }}</p>
-                <p class="mcard__price">{{ $ev->price ? '₹'.number_format($ev->price) : 'Free' }}@if($hasOnwards)<span> onwards</span>@endif</p>
+                <p class="mcard__price">{{ $mFrom > 0 ? '₹'.number_format($mFrom) : 'Free' }}@if($hasOnwards)<span> onwards</span>@endif</p>
             </a>
         @endforeach
     </div>
@@ -226,7 +244,7 @@
         <div class="banner-track" id="bannerTrack">
             @foreach($bannerEvents as $index => $event)
                 <div class="banner-item">
-                    {{-- "Haraan special" lockup (the mobile .mbrandmark). Lives inside
+                    {{-- "Haraan special" lockup (the feed band's twin). Lives inside
                          each slide's top-left corner, so it moves with the banner. --}}
                     <div class="banner-brand" aria-hidden="true">
                         <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
@@ -321,7 +339,8 @@
                     </div>
                     <h3 class="trend-card__title">{{ $ev->title }}</h3>
                     <p class="trend-card__venue">{{ $ev->venue }}</p>
-                    <p class="trend-card__price">{{ $ev->price ? '₹'.number_format($ev->price).' onwards' : 'Free' }}</p>
+                    @php $tFrom = $ev->fromPrice(); @endphp
+                    <p class="trend-card__price">{{ $tFrom > 0 ? '₹'.number_format($tFrom).($ev->priceTierCount() > 1 ? ' onwards' : '') : 'Free' }}</p>
                 </a>
             @endforeach
         </div>
@@ -375,7 +394,8 @@
                     <div class="event-list-card__content">
                         <h3 class="event-list-card__title">{{ $event->title }}</h3>
                         <p class="event-list-card__venue">{{ $event->venue }}</p>
-                        <p class="event-list-card__price">₹{{ number_format((float) $event->price) }} <span>onwards</span></p>
+                        @php $lFrom = $event->fromPrice(); $lOnwards = $event->priceTierCount() > 1; @endphp
+                        <p class="event-list-card__price">{{ $lFrom > 0 ? '₹'.number_format($lFrom) : 'Free' }}@if($lFrom > 0 && $lOnwards) <span>onwards</span>@endif</p>
                     </div>
                 </a>
             @empty

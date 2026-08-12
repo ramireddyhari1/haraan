@@ -22,9 +22,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.haraan.app.ui.matches.*
+import com.haraan.app.ui.theme.HaraanColors
 
-private val MiBlue = Color(0xFF1F6FE5)
-private val CskGold = Color(0xFFF5A623)
+private val MiBlue = HaraanColors.EventsBlue
+private val CskGold = HaraanColors.RatingGold
 
 @Composable
 fun GraphsTab(state: MatchUiState, modifier: Modifier = Modifier) {

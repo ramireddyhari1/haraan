@@ -13,7 +13,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateIntAsState
@@ -41,6 +43,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -58,6 +62,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Apartment
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -71,6 +76,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Campaign
@@ -113,6 +122,14 @@ import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Scoreboard
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Scoreboard
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.SportsTennis
 import androidx.compose.material.icons.outlined.SportsFootball
 import androidx.compose.material.icons.filled.Stadium
@@ -133,6 +150,13 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -140,8 +164,11 @@ import androidx.compose.material3.ripple
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -165,12 +192,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -226,6 +258,8 @@ import com.haraan.app.ui.components.HaraanCard
 import com.haraan.app.ui.components.HaraanImage
 import com.haraan.app.ui.animations.pressScale
 import com.haraan.app.ui.animations.haraanShimmer
+import com.haraan.app.ui.pressable
+import androidx.compose.material.icons.filled.ChatBubble
 
 private val Maroon = Color(0xFF7A1D2A)
 private val DeepMaroon = Color(0xFF4D1019)
@@ -238,23 +272,23 @@ private val AccentBlue = Color(0xFF7FB8D8)
 
 private val LightBackground = Color(0xFFF5F5F5)
 private val LightCard = Color.White
-private val LightPrimaryText = Color(0xFF111827)
-private val LightSecondaryText = Color(0xFF6B7280)
-private val LightMutedText = Color(0xFF9CA3AF)
-private val LightDivider = Color(0xFFEEF2F7)
-private val LightAccentBlue = Color(0xFF2563EB)
-private val LightNavIndicator = Color(0xFFF1F5F9)
+private val LightPrimaryText = HaraanColors.TextPrimary
+private val LightSecondaryText = HaraanColors.TextSecondary
+private val LightMutedText = HaraanColors.TextMuted
+private val LightDivider = HaraanColors.Hairline
+private val LightAccentBlue = HaraanColors.EventsBlue
+private val LightNavIndicator = HaraanColors.Field
 
 // Premium Light/Hybrid Color Palette
-private val Midnight = Color(0xFFF8FAFC)        // Slate 50 background
-private val MidnightAlt = Color(0xFFF1F5F9)     // Slate 100 card backgrounds
-private val CardTint = Color(0xFFFFFFFF)        // Card container color
-private val CardStroke = Color(0xFFE2E8F0)      // Slate 200 borders
+private val Midnight = HaraanColors.Background        // Slate 50 background
+private val MidnightAlt = HaraanColors.Field     // Slate 100 card backgrounds
+private val CardTint = HaraanColors.Surface        // Card container color
+private val CardStroke = HaraanColors.BorderLight      // Slate 200 borders
 private val MIBlue = Color(0xFF0F62FE)
-private val MIGreen = Color(0xFF00C853)
-private val AccentWhite = Color(0xFFFFFFFF)
-private val BorderGray = Color(0xFFE2E8F0)
-private val TextMuted = Color(0xFF64748B)       // Slate 500 secondary text
+private val MIGreen = HaraanColors.EventsBlue
+private val AccentWhite = HaraanColors.Surface
+private val BorderGray = HaraanColors.BorderLight
+private val TextMuted = HaraanColors.TextSecondary       // Slate 500 secondary text
 private val UnifiedCornerRadius = 20.dp
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,6 +337,8 @@ fun MainScreen(
   
   var cachedToken by remember { mutableStateOf<String?>(null) }
   var hasCheckedCache by remember { mutableStateOf(false) }
+  // Incremented on every account switch to force a full rebuild of the signed-in shell.
+  var sessionEpoch by remember { mutableStateOf(0) }
 
   LaunchedEffect(Unit) {
     cachedToken = com.haraan.app.data.TokenStore.getToken(context)
@@ -323,16 +359,28 @@ fun MainScreen(
 
   if (isUserLoggedIn) {
     val activeToken = cachedToken ?: loginState.token ?: ""
-    MainAppContainer(
-      token = activeToken,
-      onItemClick = onItemClick,
-      onLogout = {
-        com.haraan.app.data.TokenStore.saveToken(context, "")
-        cachedToken = null
-        viewModel.onPhoneChanged("")
-        viewModel.onOtpChanged("")
-      }
-    )
+    // Rebuilt from scratch whenever the active account changes. The container holds a
+    // large amount of per-session state in `remember` (feeds, profiles, chat threads,
+    // gate results); keying it means a switch discards all of it at once rather than
+    // relying on every screen to notice the account moved.
+    androidx.compose.runtime.key(sessionEpoch) {
+      MainAppContainer(
+        token = activeToken,
+        onItemClick = onItemClick,
+        onLogout = {
+          com.haraan.app.data.TokenStore.saveToken(context, "")
+          cachedToken = null
+          viewModel.onPhoneChanged("")
+          viewModel.onOtpChanged("")
+        },
+        onSessionChanged = {
+          // Re-read rather than trusting a passed-in value: AccountStore is the thing
+          // that just wrote the active slot, so it is the authority on what it now holds.
+          cachedToken = com.haraan.app.data.TokenStore.getToken(context)
+          sessionEpoch++
+        },
+      )
+    }
   } else {
     com.haraan.app.ui.LoginRoute(
       onSkipClick = {
@@ -342,6 +390,8 @@ fun MainScreen(
       onLoginSuccess = { token ->
         com.haraan.app.data.TokenStore.saveToken(context, token)
         cachedToken = token
+        // Register this device for push now that there's a real session.
+        com.haraan.app.push.PushRegistrar.syncToken(context)
       },
       modifier = Modifier.fillMaxSize()
     )
@@ -438,7 +488,15 @@ private data class TabInfo(val title: String, val icon: androidx.compose.ui.grap
 internal fun MainAppContainer(
   token: String,
   onItemClick: (NavKey) -> Unit,
-  onLogout: () -> Unit
+  onLogout: () -> Unit,
+  /**
+   * The active account changed underneath us (switched, added, or signed out into
+   * another one). The caller tears this whole container down and rebuilds it — see the
+   * `key(sessionEpoch)` at the call site. Nothing here tries to surgically refresh the
+   * dozens of caches inside; discarding them all is the only way to be sure none of the
+   * previous account's data survives under the new account's name.
+   */
+  onSessionChanged: () -> Unit = {},
 ) {
   val localContext = LocalContext.current
   // Saveable so returning from a pushed screen (e.g. Match Details) lands back on the
@@ -452,11 +510,28 @@ internal fun MainAppContainer(
   // Common account profile (shared by Events + GameHub) + linked cricket profile.
   var showAccountProfile by remember { mutableStateOf(false) }
   var showCricketProfile by remember { mutableStateOf(false) }
+  // A ranked player opened from GameHub's "Top players near you" rail (null = none).
+  var gameHubPlayerId by remember { mutableStateOf<String?>(null) }
   // Header utility icons: bell → notifications, calendar → the account's bookings.
   // Shared by both the Events and GameHub headers so the icons work wherever they appear.
   var showNotifications by remember { mutableStateOf(false) }
   // The booking whose entry-pass QR is currently open (null = none). Set from booking taps.
   var ticketPass by remember { mutableStateOf<com.haraan.app.data.BookingLite?>(null) }
+
+  // Route a deep link from a tapped push into the right place. Held in DeepLinkState
+  // by MainActivity; applied here since this composable owns the tab + inbox state.
+  // A link tapped while signed out lands here once the user reaches this screen.
+  val pendingDeepLink by com.haraan.app.push.DeepLinkState.pending.collectAsState()
+  LaunchedEffect(pendingDeepLink) {
+    val link = pendingDeepLink ?: return@LaunchedEffect
+    when (com.haraan.app.push.DeepLinks.parse(link)) {
+      com.haraan.app.push.DeepLinkTarget.Inbox -> { selectedTab = 0; showNotifications = true }
+      com.haraan.app.push.DeepLinkTarget.Events -> { selectedTab = 0; activeSubTab = "Events" }
+      com.haraan.app.push.DeepLinkTarget.GameHub -> { selectedTab = 0; activeSubTab = "GameHub" }
+      null -> {} // unknown link: just bring the app to the foreground
+    }
+    com.haraan.app.push.DeepLinkState.consume()
+  }
   val accountRepository = remember { com.haraan.app.data.AccountRepository() }
   val playerProfileRepository = remember { com.haraan.app.data.ProfileRepository() }
 
@@ -484,8 +559,9 @@ internal fun MainAppContainer(
   }
   var showLocationSheet by remember { mutableStateOf(false) }
   com.haraan.app.ui.DismissOnBack(showLocationSheet) { showLocationSheet = false }
-  // Search radius for nearby content; 0 == "Any distance". (Phase 3)
-  var searchRadiusKm by remember { mutableStateOf(10) }
+  // Search radius for nearby content; 0 == "Any distance". Default 30 km so GameHub
+  // venues show what's genuinely near the user out of the box.
+  var searchRadiusKm by remember { mutableStateOf(30) }
   // Pull the latest city catalog (cities.json) once so the picker + normaliser are current.
   LaunchedEffect(Unit) { runCatching { locationRepository.refreshCatalog() } }
 
@@ -524,8 +600,14 @@ internal fun MainAppContainer(
       onRadiusChange = { searchRadiusKm = it },
       onUseCurrentLocation = { requestCurrentLocation() },
       onSelectCity = { option ->
-        locationState = locationRepository.selectCity(option)
+        // Show the city immediately, then upgrade it with Google-geocoded coordinates
+        // so distance-based sorting (events) and the 30 km venue filter work for a
+        // manually-picked city too — not just a GPS fix.
+        locationState = locationRepository.selectCityQuick(option)
         showLocationSheet = false
+        locationScope.launch {
+          locationState = locationRepository.selectCity(option)
+        }
       },
       onDismiss = { showLocationSheet = false },
       popularCities = locationRepository.popularCities(),
@@ -594,7 +676,11 @@ internal fun MainAppContainer(
         onHomeClick = {
           showActionBoardDetail = false
           activeSubTab = "GameHub"
-        }
+        },
+        onOpenChat = { onItemClick(com.haraan.app.SupportChat) },
+        // The account switcher lives on the self-profile tab, which this screen owns.
+        onSignedOutCompletely = onLogout,
+        onSessionChanged = onSessionChanged,
       )
     } else {
       val isGameHubTab = (selectedTab == 0 && activeSubTab == "GameHub")
@@ -865,6 +951,8 @@ internal fun MainAppContainer(
               EventsTabScreen(
                 searchQuery = searchQuery,
                 currentCity = (locationState as? com.haraan.app.data.LocationState.Resolved)?.city?.trim().orEmpty(),
+                userLat = (locationState as? com.haraan.app.data.LocationState.Resolved)?.latitude,
+                userLng = (locationState as? com.haraan.app.data.LocationState.Resolved)?.longitude,
                 onEventClick = { event ->
                   onItemClick(
                     EventDetail(
@@ -914,6 +1002,7 @@ internal fun MainAppContainer(
                     )
                   )
                 },
+                onPlayerClick = { id -> gameHubPlayerId = id },
                 userName = accountName,
                 avatarUrl = accountAvatar
               )
@@ -931,6 +1020,7 @@ internal fun MainAppContainer(
     com.haraan.app.ui.DismissOnBack(ticketPass != null) { ticketPass = null }
     com.haraan.app.ui.DismissOnBack(showNotifications && ticketPass == null) { showNotifications = false }
     com.haraan.app.ui.DismissOnBack(showCricketProfile && ticketPass == null) { showCricketProfile = false }
+    com.haraan.app.ui.DismissOnBack(gameHubPlayerId != null && ticketPass == null) { gameHubPlayerId = null }
 
     if (showAccountProfile) {
       com.haraan.app.ui.profile.AccountProfileScreen(
@@ -955,6 +1045,24 @@ internal fun MainAppContainer(
       com.haraan.app.ui.profile.PlayerProfileScreen(
         onBack = { showCricketProfile = false },
         fetchProfile = { playerProfileRepository.fetchMe(token) },
+        // Own profile — so the empty state speaks in second person. No create-match
+        // CTA here: this scope has no handle on the ActionBoard wizard.
+        isSelf = true,
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // A player tapped in GameHub's "Top players near you" rail opens the SAME real
+    // profile screen as the leaderboard — loaded by their Player ID, never a mock.
+    gameHubPlayerId?.let { playerId ->
+      com.haraan.app.ui.profile.PlayerProfileScreen(
+        onBack = { gameHubPlayerId = null },
+        fetchProfile = { playerProfileRepository.fetchPlayer(token, playerId) },
+        // Follow straight from the profile — the follow API was only reachable from a
+        // search row before this.
+        onToggleFollow = { follow ->
+          com.haraan.app.data.PlayerRepository().setFollowing(token.orEmpty(), playerId, follow)
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -979,6 +1087,8 @@ internal fun MainAppContainer(
 private fun EventsTabScreen(
   searchQuery: String,
   currentCity: String = "",
+  userLat: Double? = null,
+  userLng: Double? = null,
   onEventClick: (EventItem) -> Unit
 ) {
   var selectedCategory by remember { mutableStateOf("All") }
@@ -1062,7 +1172,7 @@ private fun EventsTabScreen(
       val fetched = runCatching { eventRepo.getEvents() }.getOrNull().orEmpty()
       if (fetched.isNotEmpty()) {
         eventsData = fetched.map {
-          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast, it.rating, it.placements, it.city)
+          EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast, it.rating, it.placements, it.city, it.latitude, it.longitude, it.soldOut)
         }
       }
     }
@@ -1081,64 +1191,43 @@ private fun EventsTabScreen(
     }
     matchesSearch && matchesCategory
   }.let { list ->
-    // Local-first: float events in the user's city to the top (stable — original
-    // order preserved within each group). Still shows every event. No-op when the
-    // user hasn't set a location.
-    if (currentCity.isBlank()) list
-    else list.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
-  }
-
-  // Sponsored ad from the Filament admin (GET /api/ads?placement=events);
-  // falls back to the bundled sample creative if unset/unreachable.
-  val liveAd by produceState(initialValue = sampleChatGptAd) {
-    val ads = runCatching { com.haraan.app.data.ContentRepository().getAds("events") }.getOrNull()
-    ads?.firstOrNull()?.let { a ->
-      // Build from the real ad rather than .copy()ing the sample: an admin ad with an
-      // empty field must not inherit the sample advertiser's copy or, worse, its
-      // click-through URL. Absent fields stay empty and the UI omits them.
-      value = AdCreative(
-        advertiser = a.sponsor ?: a.title,
-        tagline = a.subtitle.orEmpty(),
-        headline = a.title,
-        ctaLabel = a.ctaText ?: "Learn more",
-        clickUrl = a.ctaUrl.orEmpty(),
-        logoRes = sampleChatGptAd.logoRes,
-        imageUrl = a.image.orEmpty(),
-        promptText = a.title,
-      )
+    // Location-wise ordering — every event stays visible, nothing is filtered out.
+    //  1. With a location fix (GPS or a Google-geocoded chosen city), sort by real
+    //     km distance from the user to each event's venue coordinates. Events the
+    //     host never pinned (no lat/lng) sink to the end, city-first.
+    //  2. No fix at all → old behaviour: float the chosen city to the top.
+    when {
+      userLat != null && userLng != null -> {
+        val (pinned, unpinned) = list.partition { it.latitude != null && it.longitude != null }
+        val nearest = pinned.sortedBy { haversineKm(userLat, userLng, it.latitude!!, it.longitude!!) }
+        val rest = if (currentCity.isBlank()) unpinned
+          else unpinned.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
+        nearest + rest
+      }
+      currentCity.isBlank() -> list
+      else -> list.sortedByDescending { it.city.equals(currentCity, ignoreCase = true) }
     }
   }
 
   val feedListState = rememberLazyListState()
-  // How far the ad (list item 0) has scrolled toward the top edge, 0f..1f.
-  // While item 0 is still visible we map its scroll offset over its own height;
-  // once it's scrolled past, the fold stays fully committed at 1f.
-  var adHeightPx by remember { mutableStateOf(0) }
-  val foldProgress by remember {
-    derivedStateOf {
-      if (feedListState.firstVisibleItemIndex > 0) 1f
-      else if (adHeightPx <= 0) 0f
-      else (feedListState.firstVisibleItemScrollOffset.toFloat() / adHeightPx).coerceIn(0f, 1f)
-    }
-  }
 
   androidx.compose.foundation.lazy.LazyColumn(
     state = feedListState,
     modifier = Modifier
       .fillMaxSize()
       .background(HaraanColors.Background),
-    verticalArrangement = Arrangement.spacedBy(16.dp)
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+    // No edge stretch on the feed. Android 12+'s overscroll is a RenderEffect that
+    // warps every pixel in the container, and the Trending rail's oversized rank
+    // glyphs smear badly when the list is pulled past its top. The list now stops
+    // cleanly at both ends instead.
+    overscrollEffect = null
   ) {
-    // 1. Sponsored ad slot (replaces the greeting header).
+    // 1. "Haraan special" band — the feed's opening slab, in the slot the
+    //    sponsored ad used to hold. The most valuable space on the feed now
+    //    carries our own brand rather than someone else's.
     item {
-      AdSpaceBanner(
-        creative = liveAd,
-        modifier = Modifier
-          .padding(horizontal = 16.dp, vertical = 12.dp)
-          .onGloballyPositioned { adHeightPx = it.size.height },
-        foldProgress = foldProgress,
-        onImpression = { android.util.Log.d("Ad", "impression: ${it.advertiser}") }
-      )
+      HaraanSpecialBand(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp))
     }
 
     // Per-rail placement: an event shows in a rail when its admin-set `placements`
@@ -1152,7 +1241,10 @@ private fun EventsTabScreen(
     // 2. Hero Section: "Featured For You" with Infinite 3D Loop Pager
     item {
       SectionHeader(
-        title = "For You"
+        title = "For You",
+        // Bond to the "Haraan special" band directly above — the default 12dp top plus the
+        // band's spacing left a dead gap here (flagged in review).
+        topPadding = 0.dp
       )
     }
 
@@ -1359,7 +1451,10 @@ private data class EventItem(
   val isFillingFast: Boolean = false,
   val rating: Double = 0.0,
   val placements: List<String> = emptyList(),
-  val city: String = ""
+  val city: String = "",
+  val latitude: Double? = null,
+  val longitude: Double? = null,
+  val soldOut: Boolean = false
 )
 
 // Category-aware blurb so the detail page reads about THIS event instead of one
@@ -1410,8 +1505,39 @@ private fun EventListCard(
         modifier = Modifier.fillMaxSize()
       )
 
+      // Sold-out events get a dim scrim so the card reads as unavailable at a glance.
+      if (event.soldOut) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+        )
+      }
+
+      // Sold-out badge wins over "filling fast" — a closed event can't be filling.
+      if (event.soldOut) {
+        Box(
+          modifier = Modifier
+            .padding(10.dp)
+            .background(
+              color = Color(0xFFDC2626), // red — sales closed
+              shape = RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .align(Alignment.TopStart)
+        ) {
+          Text(
+            text = "SOLD OUT",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            letterSpacing = 0.5.sp
+          )
+        }
+      }
+
       // High-End Frosted Dark Badge (Sleek, minimalist, premium app execution)
-      if (event.isFillingFast) {
+      if (event.isFillingFast && !event.soldOut) {
         Box(
           modifier = Modifier
             .padding(10.dp)
@@ -1554,13 +1680,16 @@ private fun GameHubTabScreen(
   locationState: com.haraan.app.data.LocationState,
   showLocationSheet: Boolean,
   onLocationClick: () -> Unit,
-  searchRadiusKm: Int = 10,
+  searchRadiusKm: Int = 30,
   onLocateClick: () -> Unit = {},
   onMatchClick: (String) -> Unit = {},
   onVenueClick: (VenueItem) -> Unit = {},
   onSupportClick: () -> Unit = {},
   onNotificationsClick: () -> Unit = {},
   onCalendarClick: () -> Unit = {},
+  // Opens a ranked player's profile by their Player ID (HRN…) — used by the
+  // "Top players near you" rail.
+  onPlayerClick: (String) -> Unit = {},
   userName: String = "",
   avatarUrl: String = ""
 ) {
@@ -1589,10 +1718,10 @@ private fun GameHubTabScreen(
   // Phase 0 — server-driven home layout (GET /api/home/layout). Empty/failed fetch keeps the
   // built-in order, so the screen is unchanged offline or against an old backend.
   var remoteBlocks by remember { mutableStateOf<List<com.haraan.app.data.HomeBlock>>(emptyList()) }
-  // Curated feed (For You / Trending) + home ad strip — only rendered when the remote layout
-  // includes a feed_section / ad_strip block, so they cost nothing when those blocks are absent.
+  // Curated feed (Trending) — only rendered when the remote layout includes a feed_section
+  // block, so it costs nothing when that block is absent. (The home ad strip that used to
+  // load alongside it is gone: GameHub's sponsored slot is now the ranked-players rail.)
   var feedSections by remember { mutableStateOf<Map<String, List<com.haraan.app.data.FeedCard>>>(emptyMap()) }
-  var homeAds by remember { mutableStateOf<List<com.haraan.app.data.AdItem>>(emptyList()) }
   // Loaders hoisted so three refresh triggers can share them: the initial load, the
   // Reverb push (admin/content edits), and AutoRefresh (screen re-focus / app foreground
   // / periodic tick). remember{} keeps one instance each; they capture the MutableState
@@ -1631,21 +1760,17 @@ private fun GameHubTabScreen(
   val loadFeed: suspend () -> Unit = remember {
     { feedSections = runCatching { contentRepo.getFeed() }.getOrDefault(emptyMap()) }
   }
-  val loadAds: suspend () -> Unit = remember {
-    { homeAds = runCatching { contentRepo.getAds("home") }.getOrDefault(emptyList()) }
-  }
   LaunchedEffect(Unit) {
     loadVenues()
     loadLayout()
     loadFeed()
-    loadAds()
     loadLive()
     // Live: re-pull when /control pushes a change over Reverb. `config` (incl. the
     // server_driven_home flag) is refreshed globally by RealtimeClient, which recomposes us.
-    // Feed/ads don't broadcast their own domain, so we refresh them alongside the layout.
+    // The feed doesn't broadcast its own domain, so we refresh it alongside the layout.
     com.haraan.app.data.RealtimeBus.updates.collect { domain ->
       when (domain) {
-        "home" -> { loadLayout(); loadFeed(); loadAds() }
+        "home" -> { loadLayout(); loadFeed() }
         "venues" -> loadVenues()
         // Keep the ActionBoard live score fresh when a match/score is broadcast.
         "matches", "live" -> loadLive()
@@ -1703,56 +1828,35 @@ private fun GameHubTabScreen(
   androidx.compose.foundation.lazy.LazyColumn(
     modifier = Modifier
       .fillMaxSize()
-      // Cooler/deeper slate than the old slate-50 (0xFFF8FAFC). The white cards were
-      // near-invisible against that — this gives them a surface to lift off so the page
-      // reads as distinct cards, not one merged sheet.
-      .background(Color(0xFFE9EEF4)),
+      // Soft, clean off-white canvas so white cards lift with just a whisper of a shadow —
+      // the premium "content floats on light" look, not a heavy slate slab.
+      .background(Color(0xFFF5F6F8)),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // 1. Dark Green Header Section (edge-to-edge)
+    // 1. Header — a clean, light app bar (greeting · search · Events/GameHub switch). The old
+    // saturated green gradient band + faint watermark monogram read as templated/AI; a white
+    // hero with a strong type hierarchy, green used only as an accent, and a hairline seam is
+    // the calmer, premium look (Airbnb/Linear/Playo territory).
     item {
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          // Clip the whole node so every draw layer (incl. the sheen below) respects
-          // the rounded bottom — otherwise the rectangular drawBehind squares it off.
-          .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-          // Vertical gradient gives the hero depth instead of a flat green fill.
-          .background(
-            brush = Brush.verticalGradient(
-              colors = listOf(Color(0xFF0F3D15), Color(0xFF1B5E20), Color(0xFF227A2B))
-            ),
-            shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
-          )
-          // Top sheen — a soft radial highlight so the header reads as a lit surface
-          // with depth, not a flat green slab.
+          .background(Color.White)
+          // Hairline seam so the white hero separates cleanly from the light content canvas
+          // below without a heavy band or shadow.
           .drawBehind {
-            drawRect(
-              Brush.radialGradient(
-                colors = listOf(Color.White.copy(alpha = 0.10f), Color.Transparent),
-                center = Offset(size.width * 0.5f, 0f),
-                radius = size.width * 0.95f
-              )
+            drawLine(
+              color = Color(0xFFECEEF2),
+              start = Offset(0f, size.height),
+              end = Offset(size.width, size.height),
+              strokeWidth = 1f
             )
           }
       ) {
-        // Brand watermark — giant faint "H" monogram bleeding off the top-right corner.
-        // Identity-as-texture: kills the empty feel without competing with content.
-        Image(
-          painter = painterResource(id = com.haraan.app.R.drawable.haraan_copy),
-          contentDescription = null,
-          contentScale = ContentScale.Fit,
-          colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White),
-          modifier = Modifier
-            .align(Alignment.TopEnd)
-            .offset(x = 58.dp, y = (-44).dp)
-            .size(210.dp)
-            .alpha(0.11f)
-        )
       Column(
         modifier = Modifier
           .statusBarsPadding()
-          .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp) // Tightened hero so the first venue card peeks above the fold (8pt grid)
+          .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp)
       ) {
         // Personalized greeting header (avatar + name + location + utility icons) on the
         // dark hero. Replaces the old location-pill / bell / profile row.
@@ -1760,7 +1864,7 @@ private fun GameHubTabScreen(
           name = userName,
           avatarUrl = avatarUrl,
           locationState = locationState,
-          onDark = true,
+          onDark = false,
           onAvatarClick = onProfileClick,
           onLocationClick = onLocationClick,
           onChatClick = onSupportClick,
@@ -1824,6 +1928,7 @@ private fun GameHubTabScreen(
         GameHubSegmentedSwitch(
           selectedTab = activeSubTab,
           onTabSelected = onTabSelected,
+          onLight = true,
         )
 
         // Hero ends after the switch — the dense ActionBoard moved out of the green band
@@ -1850,16 +1955,30 @@ private fun GameHubTabScreen(
     val useRemoteLayout = com.haraan.app.data.RemoteConfigStore.isEnabled("server_driven_home") &&
       remoteBlocks.isNotEmpty()
     val orderedBlocks: List<com.haraan.app.data.HomeBlock> =
-      if (useRemoteLayout) remoteBlocks
-      else listOf("actionboard", "leaderboard", "sports_chips", "venues")
-        .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) }
-    // The seam-straddle (overlapAbove) only makes sense when ActionBoard is the very first block,
-    // touching the hero. When the chips lead, a negative top offset overlaps them — so off then.
-    val actionBoardIsFirst = orderedBlocks.firstOrNull()?.type == "actionboard"
-    // ActionBoard matches are cricket today (LiveMatchRow has no sport field yet), so the sport
-    // filter treats them as Cricket: a non-cricket selection shows the honest empty state. Swap
-    // for a real per-match sport filter once the backend tags matches with a sport.
-    val actionBoardMatches = if (selectedSport == "All" || selectedSport == "Cricket") liveMatches else emptyList()
+      (if (useRemoteLayout) remoteBlocks
+      else listOf("actionboard", "leaderboard", "sports_chips", "venues", "top_players")
+        .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) })
+        // The "For You" curated rail was cut — it duplicated the Events "For You" and added
+        // clutter without pulling its weight on GameHub. Drop any for_you feed_section from
+        // either the remote or built-in layout so it never renders here.
+        .filterNot { it.type == "feed_section" && (it.config["section"] ?: "for_you") == "for_you" }
+        // The sponsored ad strip is retired on GameHub — the slot carries real ranked
+        // players from the viewer's own district instead. Swapped IN PLACE rather than
+        // dropped, so the section keeps whatever position /control gave the ad strip.
+        .map { if (it.type == "ad_strip") it.copy(type = "top_players", title = null) else it }
+        // A remote layout that never had an ad_strip would otherwise lose the section
+        // entirely. Append it — it self-hides when there's no ranked player to show,
+        // so an appended block costs nothing when the board is empty.
+        .let { blocks ->
+          if (blocks.any { it.type == "top_players" }) blocks
+          else blocks + com.haraan.app.data.HomeBlock(id = "top_players", type = "top_players", title = null)
+        }
+    // Real per-sport filter now that /api/live-matches tags each row (it defaults to
+    // cricket, so matches created before the column existed still show). This used to
+    // be hard-coded to hand back an empty list for anything but cricket, which made
+    // the Badminton and Football boards permanently empty by construction.
+    val actionBoardMatches = if (selectedSport == "All") liveMatches
+      else liveMatches.filter { it.sport.equals(selectedSport, ignoreCase = true) }
 
     val homeBlocks: Map<String, androidx.compose.foundation.lazy.LazyListScope.() -> Unit> = mapOf(
     "actionboard" to {
@@ -1877,7 +1996,8 @@ private fun GameHubTabScreen(
         modifier = Modifier
           .fillMaxWidth()
           .padding(horizontal = 16.dp)
-          .then(if (actionBoardIsFirst) Modifier.overlapAbove(32.dp) else Modifier) // seam straddle only when first
+          // No green seam to straddle on the light hero — the card sits on the canvas with the
+          // list's normal 16dp gap below the header.
           .graphicsLayer { scaleX = abScale; scaleY = abScale }
           .premiumCardShadow(radius = UnifiedCornerRadius)
           .clickable(interactionSource = abInteraction, indication = null) { onActionBoardClick() },
@@ -2143,18 +2263,11 @@ private fun GameHubTabScreen(
             }
           }
         }
-        "ad_strip" -> {
-          val ads = homeAds.filter { it.placement == (block.config["placement"] ?: "home") }
-          if (ads.isNotEmpty()) {
-            item {
-              androidx.compose.foundation.lazy.LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-              ) {
-                items(ads.size) { i -> AdStripCard(ad = ads[i]) }
-              }
-            }
+        "top_players" -> {
+          item {
+            val boardDistrict = (locationState as? com.haraan.app.data.LocationState.Resolved)
+              ?.let { it.district.ifBlank { it.city } }
+            TopPlayersNearYouSection(district = boardDistrict, onPlayerClick = onPlayerClick)
           }
         }
         else -> homeBlocks[block.type]?.invoke(this)
@@ -2205,9 +2318,9 @@ private fun GameHubVenuesSkeleton() {
         colors = CardDefaults.cardColors(containerColor = Color.White),
       ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-          Box(Modifier.fillMaxWidth().height(120.dp).haraanShimmer())
+          Box(Modifier.fillMaxWidth().height(140.dp).haraanShimmer())
           Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
           ) {
             Box(Modifier.fillMaxWidth(0.7f).height(14.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
@@ -2735,12 +2848,15 @@ private fun ActionboardLiveTeamRow(
 private fun GameHubSegmentedSwitch(
   selectedTab: String,
   onTabSelected: (String) -> Unit,
-  modifier: Modifier = Modifier
+  modifier: Modifier = Modifier,
+  // Light hero variant: a neutral track with a white active pill and dark text, instead of
+  // the translucent-white-on-green treatment used on the old dark hero band.
+  onLight: Boolean = false,
 ) {
-  val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
-  val containerBg = Color.White.copy(alpha = 0.15f)
+  val tabs = listOf("Events" to "Events", "GameHub" to "Pulse")
+  val containerBg = if (onLight) Color(0xFFEDEFF3) else Color.White.copy(alpha = 0.15f)
   val activeBg = Color.White
-  
+
   BoxWithConstraints(
     modifier = modifier
       .fillMaxWidth()
@@ -2786,7 +2902,11 @@ private fun GameHubSegmentedSwitch(
           ) {
             Text(
               text = label,
-              color = if (isSelected) Color(0xFF1B5E20) else Color.White.copy(alpha = 0.75f),
+              color = when {
+                isSelected -> Color(0xFF1E3A8A)
+                onLight -> HaraanColors.TextSecondary
+                else -> Color.White.copy(alpha = 0.75f)
+              },
               fontSize = 13.sp,
               fontWeight = FontWeight.Bold
             )
@@ -2838,10 +2958,14 @@ private fun PopularArenaCard(
     // No border — the soft shadow alone separates the card (one unified card language).
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+      // Clean photo hero. No floating category pill or "Tonight" badge slapped on top —
+      // the image just carries the venue. Identity (sport), quality (rating) and
+      // availability live in the typographic block below, where hierarchy + spacing do
+      // the work. This is the single biggest change away from the "template" look.
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(120.dp)
+          .height(140.dp)
           .background(rememberShimmerBrush())
       ) {
         AsyncImage(
@@ -2850,126 +2974,92 @@ private fun PopularArenaCard(
           contentScale = ContentScale.Crop,
           modifier = Modifier.fillMaxSize()
         )
-        // Scrim for badge/rating legibility
-        Box(
-          modifier = Modifier
-            .fillMaxSize()
-            .background(
-              Brush.verticalGradient(
-                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.30f)),
-                startY = 70f
-              )
-            )
-        )
-        // Category badge (top-left)
-        Box(
-          modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(8.dp)
-            .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-          Text(
-            text = venue.category,
-            color = HaraanColors.GameHubDeep,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp
-          )
-        }
-        // Available-tonight badge (top-right)
-        if (venue.availableTonight) {
-          Row(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .padding(8.dp)
-              .background(HaraanColors.GameHubDeep, RoundedCornerShape(8.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(modifier = Modifier.size(5.dp).background(Color(0xFF7CFFB0), CircleShape))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(text = "Tonight", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
-          }
-        }
-        // Rating (bottom-left over scrim)
-        Row(
-          modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Text(text = "★", color = Color(0xFFFFC107), fontSize = 12.sp)
-          Spacer(modifier = Modifier.width(3.dp))
-          Text(text = venue.rating, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-        }
       }
 
-      Column(modifier = Modifier.padding(HaraanSpacing.Compact)) {
-        Text(
-          text = venue.title,
-          color = HaraanColors.TextPrimary,
-          fontWeight = FontWeight.Bold,
-          fontSize = 14.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-          text = venue.tagline,
-          color = HaraanColors.TextSecondary,
-          fontSize = 11.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(8.dp))
+      Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp)) {
+        // Title + rating share the first line — the two things the eye scans first, weighted
+        // so the name leads and the rating is a quiet gold anchor on the right (Airbnb pattern).
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = venue.title,
+            color = HaraanColors.TextPrimary,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+          )
+          val ratingValue = venue.rating.toFloatOrNull()
+          if (ratingValue != null && ratingValue > 0f) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = "★", color = HaraanColors.RatingGold, fontSize = 13.sp)
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = venue.rating,
+              color = HaraanColors.TextPrimary,
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Secondary line — the sport(s) you can play + the room detail, in one quiet muted row.
+        // Replaces the loud category pill that used to sit on the image.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          if (venue.sports.isNotEmpty()) {
+            VenueSportsIcons(sports = venue.sports)
+            Spacer(modifier = Modifier.width(7.dp))
+          }
+          Text(
+            text = venue.tagline,
+            color = HaraanColors.TextSecondary,
+            style = HaraanTypography.BodyMedium.copy(fontSize = 13.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Price is the commitment signal (strong ink). Distance is quiet metadata — plain
+        // text, no slate pill, so nothing competes with the price for attention.
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.Bottom) {
-              Text(
-                text = "₹${venue.price}",
-                color = HaraanColors.TextPrimary,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 15.sp
-              )
-              Text(
-                text = "/hr",
-                color = HaraanColors.TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(bottom = 2.dp)
-              )
-            }
-            // Sports playable here — fills the gap between price and distance. Two icons max,
-            // then a "+N" pill, so a multi-sport turf reads at a glance without crowding.
-            if (venue.sports.isNotEmpty()) {
-              Spacer(modifier = Modifier.width(8.dp))
-              VenueSportsIcons(sports = venue.sports)
-            }
+          Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+              text = "₹${venue.price}",
+              color = HaraanColors.TextPrimary,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 16.sp
+            )
+            Text(
+              text = " /hr",
+              color = HaraanColors.TextMuted,
+              fontSize = 12.sp,
+              modifier = Modifier.padding(bottom = 1.dp)
+            )
           }
           if (venue.distance.isNotBlank()) {
-            // Neutral slate chip — distance is metadata, not an accent. (Was brand-blue,
-            // which competed with green/red/gold for attention.)
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(Color(0xFFF1F5F9))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
               Icon(
                 imageVector = Icons.Default.LocationOn,
                 contentDescription = null,
-                tint = HaraanColors.TextSecondary,
-                modifier = Modifier.size(11.dp)
+                tint = HaraanColors.TextMuted,
+                modifier = Modifier.size(12.dp)
               )
               Spacer(modifier = Modifier.width(3.dp))
               Text(
                 text = venue.distance,
                 color = HaraanColors.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                // Never wrap — a wrapped "2.4 km" made this card taller than its neighbours.
                 maxLines = 1,
                 softWrap = false
               )
@@ -2998,8 +3088,10 @@ private fun VenueSportsIcons(sports: List<String>) {
       Icon(
         imageVector = venueSportIcon(sport),
         contentDescription = sport,
-        tint = HaraanColors.GameHubDeep,
-        modifier = Modifier.size(16.dp)
+        // Neutral slate, not brand green — the sport is metadata here, not an accent, so it
+        // stays quiet and lets the rating (gold) and price (ink) carry the hierarchy.
+        tint = HaraanColors.TextSecondary,
+        modifier = Modifier.size(15.dp)
       )
     }
     if (extra > 0) {
@@ -3097,6 +3189,8 @@ private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
     // No border — unified shadow-based card language.
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+      // Clean photo — no badges, no scrim, no overlaid tagline. Everything reads in the
+      // structured block below.
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -3109,96 +3203,74 @@ private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
           contentScale = ContentScale.Crop,
           modifier = Modifier.fillMaxSize()
         )
-        // Top + bottom scrim for badge / tagline legibility
-        Box(
-          modifier = Modifier
-            .fillMaxSize()
-            .background(
-              Brush.verticalGradient(
-                colors = listOf(
-                  Color.Black.copy(alpha = 0.18f),
-                  Color.Transparent,
-                  Color.Black.copy(alpha = 0.40f)
-                )
-              )
-            )
-        )
-        // Category badge (top-left)
-        Box(
-          modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(10.dp)
-            .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-          Text(text = venue.category, color = HaraanColors.GameHubDeep, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-        }
-        // Available-tonight badge (top-right)
-        if (venue.availableTonight) {
-          Row(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .padding(10.dp)
-              .background(HaraanColors.GameHubDeep, RoundedCornerShape(8.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(modifier = Modifier.size(5.dp).background(Color(0xFF7CFFB0), CircleShape))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(text = "Available tonight", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
-          }
-        }
-        // Tagline (bottom-left over scrim)
-        Text(
-          text = venue.tagline,
-          color = Color.White,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 12.sp,
-          modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)
-        )
       }
 
       Column(modifier = Modifier.padding(HaraanSpacing.Medium)) {
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+          verticalAlignment = Alignment.Top
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
               text = venue.title,
               color = HaraanColors.TextPrimary,
               fontWeight = FontWeight.Bold,
-              fontSize = 16.sp
+              fontSize = 16.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(3.dp))
+            // Sport + room detail, quiet and muted (replaces the pill + image-overlay tagline).
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(
-                imageVector = Icons.Default.LocationOn,
-                contentDescription = null,
-                tint = HaraanColors.TextMuted,
-                modifier = Modifier.size(13.dp)
-              )
-              Spacer(modifier = Modifier.width(2.dp))
+              if (venue.sports.isNotEmpty()) {
+                VenueSportsIcons(sports = venue.sports)
+                Spacer(modifier = Modifier.width(7.dp))
+              }
               Text(
-                text = "${venue.location} • ${venue.distance}",
+                text = venue.tagline,
                 color = HaraanColors.TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+          val ratingValue = venue.rating.toFloatOrNull()
+          if (ratingValue != null && ratingValue > 0f) {
+            Spacer(modifier = Modifier.width(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(text = "★", color = HaraanColors.RatingGold, fontSize = 14.sp)
+              Spacer(modifier = Modifier.width(3.dp))
+              Text(
+                text = venue.rating,
+                color = HaraanColors.TextPrimary,
+                fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
               )
             }
           }
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = "★", color = Color(0xFFFFB000), fontSize = 14.sp)
-            Spacer(modifier = Modifier.width(2.dp))
-            Text(
-              text = venue.rating,
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
-            )
-          }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        // Location + distance — quiet metadata line.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.LocationOn,
+            contentDescription = null,
+            tint = HaraanColors.TextMuted,
+            modifier = Modifier.size(13.dp)
+          )
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(
+            text = listOf(venue.location, venue.distance).filter { it.isNotBlank() }.joinToString(" • "),
+            color = HaraanColors.TextSecondary,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
@@ -3435,8 +3507,14 @@ private fun DistrictActionBoardScreen(
   onMatchClick: (String) -> Unit,
   onHomeClick: () -> Unit,
   onJoinByCode: (String) -> Unit = {},
+  onOpenChat: () -> Unit = {},
+  onSignedOutCompletely: () -> Unit = {},
+  onSessionChanged: () -> Unit = {},
 ) {
-  CrexMatchesScreen(onBack, onMatchClick, onHomeClick, onJoinByCode)
+  CrexMatchesScreen(
+    onBack, onMatchClick, onHomeClick, onJoinByCode, onOpenChat,
+    onSignedOutCompletely, onSessionChanged,
+  )
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -3446,6 +3524,11 @@ private fun CrexMatchesScreen(
   onMatchClick: (String) -> Unit,
   onHomeClick: () -> Unit,
   onJoinByCode: (String) -> Unit = {},
+  onOpenChat: () -> Unit = {},
+  /** The last account on the device signed out — the app must return to the login wall. */
+  onSignedOutCompletely: () -> Unit = {},
+  /** A different account is now active; the caller rebuilds the signed-in shell. */
+  onSessionChanged: () -> Unit = {},
 ) {
   val view = LocalView.current
 
@@ -3458,48 +3541,126 @@ private fun CrexMatchesScreen(
   }
 
   val bg = LightBackground
-  var selectedSport by remember { mutableStateOf("Cricket") }
+  // "All" now, not "Cricket": sport is a filter and the honest default is everything.
+  var selectedSport by remember { mutableStateOf("All") }
   var selectedTab by remember { mutableStateOf(0) }
+  // Alerts open as a sheet over the board, the same one the header bell used.
+  var showAlerts by remember { mutableStateOf(false) }
+  // Player-to-player DMs. `showChatList` is the destination; `openThread` is the one
+  // conversation on top of it. `showNewGroup` is the group-create flow; `chatReload` is
+  // bumped after create/leave so the list re-fetches without a manual round trip.
+  var showChatList by remember { mutableStateOf(false) }
+  var showNewGroup by remember { mutableStateOf(false) }
+  var chatReload by remember { mutableStateOf(0) }
+  var openThread by remember { mutableStateOf<com.haraan.app.data.ChatThread?>(null) }
+  val dmRepository = remember { com.haraan.app.data.DirectMessageRepository() }
   var showCreateWizard by remember { mutableStateOf(false) }
+  // Which follower/following list is open, if any: (playerId, relation, display name).
+  // The endpoints shipped with the original follow work and nothing ever opened them.
+  var followList by remember {
+    mutableStateOf<Triple<String, com.haraan.app.ui.social.FollowRelation, String>?>(null)
+  }
   var isCreatingMatch by remember { mutableStateOf(false) }
   // Holds the share code after a private match is created (drives the share dialog).
   var createdJoinCode by remember { mutableStateOf<String?>(null) }
+  // The creator's not-yet-started matches, for the Scheduled tab. null = still loading.
+  // `scheduledReload` is bumped after creating a scheduled match (or starting one) to
+  // re-fetch without a manual pull.
+  var scheduledMatches by remember { mutableStateOf<List<com.haraan.app.data.ScheduledMatch>?>(null) }
+  var scheduledReload by remember { mutableStateOf(0) }
   // After a match is created, drive the toss flow (coin flip → bat/bowl → opening lineup → start).
   var tossSetup by remember { mutableStateOf<com.haraan.app.ui.matches.TossSetup?>(null) }
+  // Football's counterpart to tossSetup — set after creating a football match, which
+  // has no toss to run.
+  var footballSetup by remember { mutableStateOf<com.haraan.app.ui.matches.FootballScorerSetup?>(null) }
+  var badmintonSetup by remember { mutableStateOf<com.haraan.app.ui.matches.BadmintonScorerSetup?>(null) }
   // Drives the "Join private match by code" dialog.
   var showJoinDialog by remember { mutableStateOf(false) }
+  // Player directory search — opened from the header's search field.
+  var showPlayerSearch by remember { mutableStateOf(false) }
+  // A player opened FROM search. Layered over it, so backing out returns to the
+  // results rather than dumping the user on the board.
+  var searchedPlayerId by remember { mutableStateOf<String?>(null) }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val matchRepository = remember { com.haraan.app.data.MatchRepository() }
   val playerRepository = remember { com.haraan.app.data.PlayerRepository() }
   val profileRepository = remember { com.haraan.app.data.ProfileRepository() }
   val accountRepository = remember { com.haraan.app.data.AccountRepository() }
+  val authRepository = remember { com.haraan.app.data.HaraanAuthRepository() }
   var showMenu by remember { mutableStateOf(false) }
   var showSettings by remember { mutableStateOf(false) }
   var showProfile by remember { mutableStateOf(false) }
+  // The Instagram-style social Home feed — a bottom-bar destination opened by the Home
+  // button. Renders inside the scaffold (bar stays visible), the same way Chat/Player do.
+  var showHomeFeed by remember { mutableStateOf(false) }
+  // Create-a-post flow: the picked images awaiting review + caption + Share (empty = not
+  // composing). Bumping feedReload after a post re-fetches the Home feed so it appears on top.
+  var pendingPostUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+  var feedReload by remember { mutableStateOf(0) }
+
+  // Tint the actual status bar blue (with white icons) while the Home feed is open, so the
+  // blue header runs edge-to-edge to the very top. Runs AFTER the transparent-reset SideEffect
+  // above, so it wins; reverts to transparent + dark icons when the feed closes.
+  SideEffect {
+    val activity = view.context as? Activity ?: return@SideEffect
+    val window = activity.window
+    window.statusBarColor = if (showHomeFeed) HaraanColors.EventsBlue.toArgb() else android.graphics.Color.TRANSPARENT
+    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !showHomeFeed
+  }
+
+  // ── Multi-account switcher ────────────────────────────────────────────────────
+  // The roster is state, not a read-through to AccountStore, so the sheet re-renders
+  // the moment an account is added or removed.
+  var accounts by remember { mutableStateOf(com.haraan.app.data.AccountStore.accounts(context)) }
+  var showAccounts by remember { mutableStateOf(false) }
+  var switchingAccount by remember { mutableStateOf(false) }
+  // Set while the "Add account" login is on screen. The existing session stays active
+  // and untouched behind it, so cancelling leaves the user exactly where they were.
+  var addingAccount by remember { mutableStateOf(false) }
   var selectedLeaderboardPlayer by remember { mutableStateOf<LeaderboardPlayer?>(null) }
   val listState = rememberLazyListState()
+
+  // Photo picker for creating a post: pick up to 10 images, then open the compose screen
+  // (review/crop + caption) rather than uploading blind.
+  val postPicker = rememberLauncherForActivityResult(
+    ActivityResultContracts.PickMultipleVisualMedia(10),
+  ) { uris -> if (uris.isNotEmpty()) pendingPostUris = uris }
 
   // Back closes whatever is open here, topmost first. The create wizard is NOT listed:
   // it owns Back itself so it can step backwards through the form instead of discarding
   // a half-built match. Everything else is a simple dismiss.
+  //
+  // Registered FIRST (lowest priority) so the overlay handlers below win while something is
+  // open; when nothing is, this returns to Pulse — the system back now does what the old
+  // header back arrow did, so that button could be removed.
+  com.haraan.app.ui.DismissOnBack(true) { onBack() }
+  com.haraan.app.ui.DismissOnBack(pendingPostUris.isNotEmpty()) { pendingPostUris = emptyList() }
   com.haraan.app.ui.DismissOnBack(selectedLeaderboardPlayer != null) { selectedLeaderboardPlayer = null }
   com.haraan.app.ui.DismissOnBack(showJoinDialog) { showJoinDialog = false }
   com.haraan.app.ui.DismissOnBack(showSettings) { showSettings = false }
+  // Back cancels adding an account; the session underneath is untouched either way.
+  com.haraan.app.ui.DismissOnBack(addingAccount) { addingAccount = false }
+  // Not while a switch is in flight — backing out mid-write would leave the sheet's idea
+  // of the active account out of step with the token slot.
+  com.haraan.app.ui.DismissOnBack(showAccounts && !switchingAccount) { showAccounts = false }
   com.haraan.app.ui.DismissOnBack(showProfile) { showProfile = false }
+  // Hardware back from the Home feed returns to the board (Matches), like the Chat tab does.
+  com.haraan.app.ui.DismissOnBack(showHomeFeed) { showHomeFeed = false }
   com.haraan.app.ui.DismissOnBack(showMenu && !showSettings && !showProfile) { showMenu = false }
 
   // Real GameHub live feed — null = still loading. Any failure yields an empty list,
   // so the screen falls back to its demo leagues and never shows an error.
   // The token scopes the feed to the viewer's district (+ FEATURED); admins get all.
   var liveFeed by remember { mutableStateOf<List<com.haraan.app.data.LiveMatchRow>?>(null) }
+  val locationRepo = remember { com.haraan.app.data.LocationRepository(context) }
   val loadLiveFeed: suspend () -> Unit = remember {
     {
       val token = com.haraan.app.data.TokenStore.getToken(context)
-      // Rank by where the device already knows it is. Deliberately the *cached* fix,
-      // never a fresh detect: opening the scores tab must not throw a permission
-      // prompt at anyone. No cache → the server ranks by profile district instead.
-      val here = com.haraan.app.data.LocationRepository(context).cached()
+      // Rank by the device's cached fix — a real GPS fix or a Google-geocoded chosen
+      // city. It's kept current by the one-shot detect below (web parity), so the feed
+      // sorts by true km distance. No cache → the server ranks by profile district.
+      val here = locationRepo.cached()
         as? com.haraan.app.data.LocationState.Resolved
       // On refresh, keep the last good feed if a fetch fails rather than flashing back
       // to the demo leagues; only the initial null shows the loading state.
@@ -3519,28 +3680,100 @@ private fun CrexMatchesScreen(
   // foreground and every 20s while visible; paused entirely in the background.
   AutoRefresh(intervalMs = 20_000L) { loadLiveFeed() }
 
+  // Location-wise sorting, mirroring the website's ActionBoard: grab one precise device
+  // fix so "Matches near you" ranks by real distance, then re-sort. We only reach for a
+  // fix when we have no coordinates yet (a fresh GPS detect OR a geocoded chosen city) —
+  // exactly how the web guards on its hb_geo cookie — so this never re-prompts or burns a
+  // GPS read on every visit. If permission isn't granted, ask once; if denied, the server
+  // falls back to the profile district and the feed still renders.
+  val geoPermissionLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+  ) { grants ->
+    if (grants.values.any { it }) scope.launch { locationRepo.detectCurrent(); loadLiveFeed() }
+  }
+  LaunchedEffect(Unit) {
+    val hasCoords = (locationRepo.cached() as? com.haraan.app.data.LocationState.Resolved)
+      ?.latitude != null
+    if (hasCoords) return@LaunchedEffect
+    if (locationRepo.hasPermission()) {
+      locationRepo.detectCurrent()
+      loadLiveFeed()
+    } else {
+      geoPermissionLauncher.launch(
+        arrayOf(
+          android.Manifest.permission.ACCESS_FINE_LOCATION,
+          android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+      )
+    }
+  }
+
   // District Home snapshot — lazily loaded the first time the District tab opens.
   // null = not loaded / unavailable (guest or no district set); the card hides itself then.
   val districtRepository = remember { com.haraan.app.data.DistrictRepository() }
   var districtSummary by remember { mutableStateOf<com.haraan.app.data.DistrictSummary?>(null) }
   LaunchedEffect(selectedTab) {
-    if ((selectedTab == 2 || selectedTab == 3) && districtSummary == null) {
+    // District (3) / State (4) leaderboards share the same district summary.
+    if ((selectedTab == 3 || selectedTab == 4) && districtSummary == null) {
       val token = com.haraan.app.data.TokenStore.getToken(context)
       districtSummary = districtRepository.fetchSummary(token)
+    }
+  }
+
+  // Scheduled tab (2): load the creator's not-yet-started matches. Re-fetches when the
+  // tab is opened and whenever `scheduledReload` bumps (after creating/starting one).
+  LaunchedEffect(selectedTab, scheduledReload) {
+    if (selectedTab == 2) {
+      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+      scheduledMatches = if (token == null) emptyList()
+        else runCatching { matchRepository.getScheduledMatches(token) }.getOrDefault(emptyList())
+    }
+  }
+
+  // Start a scheduled match: cricket runs the toss (same flow as right after create),
+  // which flips it Live. Football/badminton open the match itself — their scoring
+  // starts there, and reconstructing their scorer setup from a list row isn't wired.
+  fun startScheduledMatch(m: com.haraan.app.data.ScheduledMatch) {
+    if (m.sport.equals("cricket", ignoreCase = true)) {
+      tossSetup = com.haraan.app.ui.matches.TossSetup(
+        matchId = m.id,
+        teamA = m.teamA,
+        teamB = m.teamB,
+        squadA = m.squadA,
+        squadB = m.squadB,
+        isPrivate = m.isPrivate,
+        joinCode = m.joinCode,
+        teamAEmblem = m.teamAEmblem.ifBlank { null },
+        teamBEmblem = m.teamBEmblem.ifBlank { null },
+        teamAPhoto = null,
+        teamBPhoto = null,
+      )
+    } else {
+      onMatchClick(m.id)
     }
   }
 
   // Ranked-access gate: 0 = none, 1 = needs login, 2 = needs profile.
   var gateStep by remember { mutableStateOf(0) }
   var pendingRankedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-  val requireRankedAccess: (() -> Unit) -> Unit = remember {
-    { action ->
+  // Once we've confirmed this session has a complete player profile, remember it:
+  // a player who already has a profile goes straight to Create Match on every later
+  // tap, with no network round-trip and no chance of a blip re-showing the wizard.
+  var profileReady by remember { mutableStateOf(false) }
+  val requireRankedAccess: (() -> Unit) -> Unit = { action ->
+    if (profileReady) {
+      action()
+    } else {
       scope.launch {
         val token = com.haraan.app.data.TokenStore.getToken(context)
-        when {
-          token.isNullOrBlank() -> { pendingRankedAction = action; gateStep = 1 }
-          !profileRepository.isProfileComplete(token) -> { pendingRankedAction = action; gateStep = 2 }
-          else -> action()
+        when (val status = profileRepository.profileStatus(token)) {
+          is com.haraan.app.data.ProfileStatus.Complete -> { profileReady = true; action() }
+          is com.haraan.app.data.ProfileStatus.Incomplete -> { pendingRankedAction = action; gateStep = 2 }
+          is com.haraan.app.data.ProfileStatus.NeedsLogin -> { pendingRankedAction = action; gateStep = 1 }
+          // Couldn't check — say so and leave them where they are. Never assume
+          // "no profile" from a network failure.
+          is com.haraan.app.data.ProfileStatus.Unavailable ->
+            Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
         }
       }
     }
@@ -3552,22 +3785,39 @@ private fun CrexMatchesScreen(
     contentWindowInsets = WindowInsets(0),
     bottomBar = {
       CrexBottomBar(
-        selectedSport = selectedSport,
-        onSportSelected = { selectedSport = it },
-        onHomeClick = onHomeClick,
+        // Home (social feed), Chat and Player all render inside this scaffold as tabs, so
+        // the active slot follows whichever is up; otherwise the board (Matches) is showing.
+        current = if (showHomeFeed) "Home" else if (showProfile) "Player" else if (showChatList) "Chat" else "Matches",
+        // Home now opens the Instagram-style social feed (it used to jump back to Pulse —
+        // that affordance moved to the header's back arrow). Just another in-scaffold tab.
+        onHomeClick = { showChatList = false; showProfile = false; showHomeFeed = true },
+        // Switching tabs is just clearing the other flags — same scaffold, no nav.
+        onMatchesClick = { showChatList = false; showProfile = false; showHomeFeed = false; scope.launch { listState.animateScrollToItem(0) } },
+        onChatClick = { showProfile = false; showHomeFeed = false; requireRankedAccess { showChatList = true } },
+        onAlertsClick = { showAlerts = true },
         // Gate the profile behind sign-in + a completed player profile: an un-set-up
         // user is routed to login / profile setup instead of an empty profile screen.
-        onOthersClick = { requireRankedAccess { showProfile = true } }
+        onOthersClick = { showChatList = false; showHomeFeed = false; requireRankedAccess { showProfile = true } },
+        // The active account's photo + name, so the Player tab shows a real face (or the
+        // name's initial when there's no photo). Keyed on `accounts` so it refreshes when a
+        // profile loads or the user switches accounts.
+        avatarUrl = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.avatar },
+        avatarName = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.name },
       )
     }
   ) { padding ->
-    val currentBg = if (selectedTab >= 2) T.BgPage else bg
+    // Leaderboard tabs (District 3 / State 4) use the page bg; Live/Finished/Scheduled
+    // keep the board bg.
+    val currentBg = if (selectedTab >= 3) T.BgPage else bg
     Box(
       modifier = Modifier
         .fillMaxSize()
         .statusBarsPadding()
         .background(currentBg)
-        .padding(padding)
+        // Only reserve the TOP inset, not the bottom bar's — the feed then fills to the
+        // screen bottom and scrolls UNDER the floating bar, so match cards show behind it
+        // (the list's own bottom contentPadding keeps the last card clear of the bar).
+        .padding(top = padding.calculateTopPadding())
     ) {
       Column(modifier = Modifier.fillMaxSize()) {
         // Fixed app bar that lifts (frost + elevation) as the list scrolls beneath it —
@@ -3583,12 +3833,26 @@ private fun CrexMatchesScreen(
             .padding(horizontal = 16.dp)
             .padding(top = 12.dp, bottom = 2.dp)
         ) {
-          CrexHeaderSection(onBack, onCreateMatch = { requireRankedAccess { showCreateWizard = true } }, onJoinByCode = { showJoinDialog = true })
+          CrexHeaderSection(
+            onCreateMatch = { requireRankedAccess { showCreateWizard = true } },
+            onJoinByCode = { showJoinDialog = true },
+            onSearch = { showPlayerSearch = true },
+          )
           // Live/Finished/District/State board strip — back up top, directly under the header.
           CrexTabsSection(
             selectedTab = selectedTab,
             onTabSelected = { selectedTab = it }
           )
+          // Sport is a FILTER over the list, not a destination — it used to occupy
+          // three primary nav slots. Shown only on Live/Finished: District and State
+          // are leaderboards that do not filter by sport, and a chip row that did
+          // nothing there would be a dead control.
+          if (selectedTab <= 1) {
+            SportFilterRow(
+              selected = selectedSport,
+              onSelected = { selectedSport = it },
+            )
+          }
         }
 
       LazyColumn(
@@ -3597,43 +3861,61 @@ private fun CrexMatchesScreen(
         contentPadding = PaddingValues(
           start = 16.dp,
           end = 16.dp,
-          top = 4.dp,
-          bottom = 100.dp
+          top = 0.dp,
+          // Clears the floating bar (56dp) + its margins + the system nav inset, so the last
+          // card can scroll fully clear of the bar while the rest passes behind it.
+          bottom = 116.dp
         )
       ) {
         if (selectedTab == 0) {
           // ── LIVE: in-progress matches first, then what's coming up ──
-          when (selectedSport) {
-            "Cricket" -> {
-              // ONE list, already ranked by the server: starred → nearest → live →
-              // freshest. Splitting it into sections was the thing making curation
-              // and locality compete for the same slot; the ⭐ on the card carries
-              // "an admin picked this" without costing a heading.
-              when {
-                liveFeed == null -> item { GameHubFeedSkeleton() }
-                liveFeed!!.isEmpty() -> item {
-                  Box(modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                    Text("No matches yet", color = Color(0xFF94A3B8), fontSize = 13.sp)
-                  }
-                }
-                else -> {
-                  item { CrexLeagueTitle("Matches near you") }
-                  item { LiveFeedGroup(rows = liveFeed!!, onMatchClick = onMatchClick) }
-                  item { Spacer(modifier = Modifier.height(8.dp)) }
-                }
-              }
-            }
+          //
+          // Sport is a FILTER over the one ranked feed, not a switch. This used to be
+          // `when (selectedSport) { "Cricket" -> feed; else -> empty }`, which was only
+          // ever right because the bottom bar defaulted to Cricket — the moment sport
+          // became a filter with an "All" default, every match vanished.
+          val sportFeed = liveFeed?.let { rows ->
+            if (selectedSport == "All") rows
+            else rows.filter { it.sport.equals(selectedSport, ignoreCase = true) }
+          }
+          // ONE list, already ranked by the server: starred → nearest → live →
+          // freshest. The ⭐ on the card carries "an admin picked this" without
+          // costing a heading.
+          when {
+            sportFeed == null -> item { GameHubFeedSkeleton() }
+            sportFeed.isEmpty() -> item { CrexTabEmpty(emptyLiveLabel(selectedSport)) }
             else -> {
-              // Only Cricket has a real live feed today. Other sports show an honest
-              // empty state instead of fabricated pro fixtures.
-              item { CrexTabEmpty("No live $selectedSport matches yet") }
+              item { CrexLeagueTitle("Matches near you") }
+              item { LiveFeedGroup(rows = sportFeed, onMatchClick = onMatchClick) }
+              item { Spacer(modifier = Modifier.height(8.dp)) }
             }
           }
         } else if (selectedTab == 1) {
           // ── FINISHED: completed results only. No real finished-match feed is wired
           // yet, so every sport shows an honest empty state (no demo results). ──
-          item { CrexTabEmpty("No finished $selectedSport matches yet") }
+          item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
         } else if (selectedTab == 2) {
+          // ── SCHEDULED: the creator's own not-yet-started matches (future kick-offs
+          // + play-now matches whose toss was skipped). Tap "Start" to run the toss. ──
+          val scheduled = scheduledMatches
+          when {
+            scheduled == null -> item { GameHubFeedSkeleton() }
+            scheduled.isEmpty() -> item {
+              CrexTabEmpty("No scheduled matches. Create one and pick \"Schedule\" to see it here.")
+            }
+            else -> {
+              item { CrexLeagueTitle("Your scheduled matches") }
+              items(scheduled, key = { it.id }) { m ->
+                ScheduledMatchCard(
+                  match = m,
+                  onStart = { startScheduledMatch(m) },
+                  onOpen = { onMatchClick(m.id) },
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+              }
+            }
+          }
+        } else if (selectedTab == 3) {
           districtSummary?.let { summary ->
             item { DistrictHomeCard(summary) }
             item { Spacer(modifier = Modifier.height(4.dp)) }
@@ -3645,7 +3927,7 @@ private fun CrexMatchesScreen(
               onPlayerClick = { selectedLeaderboardPlayer = it },
             )
           }
-        } else if (selectedTab == 3) {
+        } else if (selectedTab == 4) {
           item {
             CrexLeaderboardSection(
               isStateBoard = true,
@@ -3655,6 +3937,94 @@ private fun CrexMatchesScreen(
           }
         }
       }
+      }
+
+      // Chat is a bottom-bar destination, so its list renders INSIDE the scaffold body:
+      // the bottom bar stays visible (Chat active) and there is no back arrow. Drawn last
+      // in this Box so it sits over the board, above the bar. A single conversation is
+      // still a pushed screen with its own back button, rendered outside the scaffold.
+      if (showChatList) {
+        com.haraan.app.ui.social.ChatListScreen(
+          load = {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token == null) com.haraan.app.data.DirectMessageRepository.ThreadsResult.Failed
+            else dmRepository.threads(token)
+          },
+          onOpenThread = { openThread = it },
+          onNewGroup = { requireRankedAccess { showNewGroup = true } },
+          // Hardware back from the Chat tab returns to the board.
+          onClose = { showChatList = false },
+          showBack = false,
+          reloadKey = chatReload,
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+
+      // Home feed as a bottom-bar tab: the Instagram-style social feed, rendered inside the
+      // scaffold body so the bar stays visible (Home active). Drawn over the board.
+      if (showHomeFeed) {
+        HomeFeedScreen(
+          repository = playerRepository,
+          tokenProvider = { com.haraan.app.data.TokenStore.getToken(context) },
+          onOpenPlayer = { pid -> searchedPlayerId = pid },
+          // The + "New" bubble now opens the real create-post flow (pick → preview + caption),
+          // gated behind a complete ranked profile.
+          onCreatePost = { requireRankedAccess { postPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) } },
+          reloadKey = feedReload,
+          // Universal ActionBoard exit: leave the feed AND return to Pulse, and reset the
+          // feed flag so re-entry lands on Matches (the chosen default) rather than here.
+          onBack = { showHomeFeed = false; onBack() },
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+
+      // Player profile as a bottom-bar tab: rendered inside the scaffold body so the bar
+      // stays visible (Player active) and there's no "Player Profile" back bar. Another
+      // player's profile (from search / a leaderboard) stays a pushed screen, below.
+      if (showProfile) {
+        com.haraan.app.ui.profile.PlayerProfileScreen(
+          onBack = { showProfile = false },
+          fetchProfile = {
+            val token = com.haraan.app.data.TokenStore.getToken(context)
+              ?: throw IllegalStateException("Please sign in to view your profile.")
+            profileRepository.fetchMe(token)
+          },
+          isSelf = true,
+          showTopBar = false,
+          onOpenAccounts = { showAccounts = true },
+          // An app that was signed in BEFORE the switcher existed has a live token and an
+          // empty roster. Adopting it here — the moment we know whose profile that token
+          // belongs to — is what stops the sheet claiming there are no accounts while the
+          // user is plainly signed in. Idempotent, so running on every load is fine.
+          onProfileLoaded = { profile ->
+            com.haraan.app.data.AccountStore.adoptExistingSessionIfNeeded(context, profile)
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+          },
+          onCreateMatch = {
+            showProfile = false
+            requireRankedAccess { showCreateWizard = true }
+          },
+          onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+          onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+          onMessage = { pid, name ->
+            scope.launch {
+              val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+              when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+                is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                  openThread = com.haraan.app.data.ChatThread(
+                    id = r.conversationId, playerId = pid, name = name,
+                    username = null, avatar = null, lastMessage = null,
+                    lastMessageAt = null, unreadCount = 0,
+                  )
+                is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                  Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+                else ->
+                  Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+              }
+            }
+          },
+          modifier = Modifier.fillMaxSize(),
+        )
       }
     }
   }
@@ -3668,8 +4038,11 @@ private fun CrexMatchesScreen(
             isCreatingMatch = true
             scope.launch {
               try {
-                val token = com.haraan.app.data.TokenStore.getToken(context)
-                if (token.isNullOrBlank()) {
+                // getSignedInToken, not getToken: a guest's "skipped_guest" token is
+                // non-blank. The ranked-access gate should already have caught this;
+                // this is the backstop.
+                val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                if (token == null) {
                   Toast.makeText(context, "Please sign in to create a match.", Toast.LENGTH_LONG).show()
                 } else {
                   val emblems = com.haraan.app.ui.matches.create.teamEmblems
@@ -3679,6 +4052,10 @@ private fun CrexMatchesScreen(
                     matchType = draft.type.serverValue,
                     overs = draft.overs,
                     ball = draft.ball.serverValue,
+                    // The sport's own format, as chosen on the Rules step. Lands in
+                    // `sport_state.format` so the scorer reopens on the real numbers
+                    // instead of the 45-minute / best-of-3 defaults it used to assume.
+                    format = draft.format.toServerMap(),
                     playersPerSide = draft.playersPerSide,
                     venue = draft.venue,
                     locality = draft.locality,
@@ -3694,13 +4071,67 @@ private fun CrexMatchesScreen(
                     latitude = draft.latitude,
                     longitude = draft.longitude,
                     district = draft.locationDistrict,
+                    // Future kick-off as ISO-8601 (with offset), or null for "play now".
+                    // SimpleDateFormat, not java.time: minSdk 24 has no Instant without
+                    // desugaring, and this string is all the server needs.
+                    scheduledAtIso = draft.scheduledAt?.let { millis ->
+                      java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
+                        .format(java.util.Date(millis))
+                    },
                   )
                   // Upload any custom team crests now that the match (and its id) exist.
                   // A failed upload doesn't fail the whole creation — the emblem stands in.
                   uploadTeamLogoIfPresent(context, matchRepository, token, result.matchId, "home", draft.teamAPhoto)
                   uploadTeamLogoIfPresent(context, matchRepository, token, result.matchId, "away", draft.teamBPhoto)
                   showCreateWizard = false
-                  // Straight into the toss: coin flip → bat/bowl → opening lineup → start.
+
+                  // Scheduled for later → don't run the toss/scorer now. The match waits
+                  // in the Scheduled tab until the creator starts it. Applies to every
+                  // sport; land the user on that tab so they can see it queued.
+                  if (draft.scheduledAt != null) {
+                    Toast.makeText(context, "Match scheduled — start it from the Scheduled tab.", Toast.LENGTH_LONG).show()
+                    if (result.isPrivate && result.joinCode.isNotBlank()) createdJoinCode = result.joinCode
+                    selectedTab = 2
+                    scheduledReload++
+                    return@launch
+                  }
+
+                  // Football has no toss and no innings — it goes straight to the goal
+                  // scorer. Cricket keeps coin flip → bat/bowl → opening lineup → start.
+                  if (draft.sport.equals("badminton", ignoreCase = true)) {
+                    badmintonSetup = com.haraan.app.ui.matches.BadmintonScorerSetup(
+                      matchId = result.matchId.toString(),
+                      teamA = draft.teamA,
+                      teamB = draft.teamB,
+                      bestOf = draft.bestOf,
+                      formatLabel = draft.formatLabel,
+                      isPrivate = result.isPrivate,
+                      joinCode = result.joinCode,
+                    )
+                    return@launch
+                  }
+
+                  if (draft.sport.equals("football", ignoreCase = true)) {
+                    footballSetup = com.haraan.app.ui.matches.FootballScorerSetup(
+                      matchId = result.matchId.toString(),
+                      teamA = draft.teamA,
+                      teamB = draft.teamB,
+                      teamAEmblem = emblems.getOrNull(draft.teamAEmblem)?.key ?: "",
+                      teamBEmblem = emblems.getOrNull(draft.teamBEmblem)?.key ?: "",
+                      formatLabel = "${draft.formatLabel} · ${draft.playersPerSide}-a-side",
+                      // The clock runs on the half length the creator actually chose,
+                      // not the 45-minute default no gully match plays.
+                      halfLengthMin = draft.halfLengthMin,
+                      isPrivate = result.isPrivate,
+                      joinCode = result.joinCode,
+                      // Squads travel with the setup so a goal can be attributed to a
+                      // player instead of going down as an anonymous tally.
+                      squadA = draft.squadA.toList(),
+                      squadB = draft.squadB.toList(),
+                    )
+                    return@launch
+                  }
+
                   // The share code (private) is surfaced after the toss, not before.
                   tossSetup = com.haraan.app.ui.matches.TossSetup(
                     matchId = result.matchId.toString(),
@@ -3724,14 +4155,92 @@ private fun CrexMatchesScreen(
             }
           }
         },
-        lookupPlayer = { playerId ->
-          val token = com.haraan.app.data.TokenStore.getToken(context)
-          if (token.isNullOrBlank()) null else playerRepository.lookup(token, playerId)
+        // Both use getSignedInToken rather than a null/blank check: a guest's
+        // "skipped_guest" token is non-blank, so the old checks sent a doomed
+        // authenticated request instead of degrading quietly.
+        searchPlayers = { query ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else playerRepository.search(token, query)
         },
         loadBookings = {
-          val token = com.haraan.app.data.TokenStore.getToken(context)
-          if (token.isNullOrBlank()) emptyList() else accountRepository.fetchBookings(token)
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else accountRepository.fetchBookings(token)
         },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Football scorer. Every tap records an EVENT — the server counts the goals and
+    // hands back the scoreline, so the tally on screen can't drift from the match's
+    // own timeline. `null` back means the call failed; the screen keeps its
+    // optimistic value rather than snapping backwards mid-match.
+    footballSetup?.let { setup ->
+      com.haraan.app.ui.matches.FootballScorerScreen(
+        setup = setup,
+        onGoal = { side, player, _, minute ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else matchRepository.recordMatchEvent(
+            token = token,
+            matchId = setup.matchId,
+            kind = "goal",
+            side = side,
+            minute = minute,
+            playerName = player,
+          )
+        },
+        onCard = { side, player, kind, minute ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else matchRepository.recordMatchEvent(
+            token = token,
+            matchId = setup.matchId,
+            kind = kind,
+            side = side,
+            minute = minute,
+            playerName = player,
+          )
+        },
+        onUndoGoal = { side ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else matchRepository.undoMatchEvent(token, setup.matchId, side)
+        },
+        onStat = { kind, side, inc ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.adjustStat(token, setup.matchId, kind, side, inc)
+        },
+        finishMatch = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.completeMatch(token, setup.matchId)
+        },
+        onDone = { footballSetup = null },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Badminton: games won are the durable result, so each completed game is pushed
+    // as a `point` event for that side and the server counts the games.
+    badmintonSetup?.let { setup ->
+      com.haraan.app.ui.matches.BadmintonScorerScreen(
+        setup = setup,
+        pushGames = { side, _ ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) {
+            matchRepository.recordMatchEvent(
+              token = token,
+              matchId = setup.matchId,
+              kind = "point",
+              side = side,
+              detail = "game",
+            )
+          }
+        },
+        finishMatch = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.completeMatch(token, setup.matchId)
+        },
+        onDone = { badmintonSetup = null },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -3748,9 +4257,18 @@ private fun CrexMatchesScreen(
         teamAPhoto = setup.teamAPhoto,
         teamBPhoto = setup.teamBPhoto,
         onStarted = {
+          val startedId = setup.matchId
+          val startedPrivate = setup.isPrivate
+          val startedCode = setup.joinCode
           tossSetup = null
-          // Private match → now surface the share code so the group can follow it.
-          if (setup.isPrivate && setup.joinCode.isNotBlank()) createdJoinCode = setup.joinCode
+          // Started from the Scheduled tab? It's Live now — drop it from that list.
+          scheduledReload++
+          // The match is now Live — open its detail screen so the creator lands on the
+          // scorer/scoreboard instead of being dropped back on the list.
+          onMatchClick(startedId)
+          // Private match → surface the share code so the group can follow it. Shown after
+          // the detail screen is pushed; the dialog rides on top of it.
+          if (startedPrivate && startedCode.isNotBlank()) createdJoinCode = startedCode
         },
         onCancel = {
           tossSetup = null
@@ -3777,6 +4295,66 @@ private fun CrexMatchesScreen(
       )
     }
 
+    // Full-screen so the keyboard and a long result list get the whole viewport,
+    // rather than fighting the board behind a half-height sheet.
+    if (showPlayerSearch) {
+      com.haraan.app.ui.social.PlayerSearchScreen(
+        onClose = { showPlayerSearch = false },
+        // Opens the same real profile the leaderboard uses — no second, lesser
+        // profile card for people who arrived via search.
+        onOpenPlayer = { playerId -> searchedPlayerId = playerId },
+      )
+    }
+
+    // Compose-a-post: review/crop + caption + Share for the picked image(s).
+    if (pendingPostUris.isNotEmpty()) {
+      com.haraan.app.ui.social.CreatePostScreen(
+        imageUris = pendingPostUris,
+        onClose = { pendingPostUris = emptyList() },
+        onPosted = {
+          pendingPostUris = emptyList()
+          // Re-fetch the Home feed so the new post shows on top; jump to the feed tab.
+          feedReload += 1
+          showChatList = false; showProfile = false; showHomeFeed = true
+        },
+      )
+    }
+
+    searchedPlayerId?.let { playerId ->
+      com.haraan.app.ui.profile.PlayerProfileScreen(
+        onBack = { searchedPlayerId = null },
+        fetchProfile = {
+          val token = com.haraan.app.data.TokenStore.getToken(context)
+          profileRepository.fetchPlayer(token, playerId)
+        },
+        onToggleFollow = { follow ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setFollowing(token, playerId, follow)
+        },
+        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        onMessage = { pid, name ->
+          scope.launch {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                openThread = com.haraan.app.data.ChatThread(
+                  id = r.conversationId, playerId = pid, name = name,
+                  username = null, avatar = null, lastMessage = null,
+                  lastMessageAt = null, unreadCount = 0,
+                )
+              // Say WHY rather than doing nothing — the rule is not obvious.
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+              else ->
+                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+            }
+          }
+        },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
     if (showMenu) {
       com.haraan.app.ui.profile.ActionMenuScreen(
         onClose = { showMenu = false },
@@ -3784,9 +4362,32 @@ private fun CrexMatchesScreen(
         onLeaderboards = { showMenu = false; selectedTab = 2 },
         onSettings = { showMenu = false; showSettings = true },
         onSignOut = {
-          com.haraan.app.data.TokenStore.clearToken(context)
-          showMenu = false
-          Toast.makeText(context, "Signed out.", Toast.LENGTH_SHORT).show()
+          // Signs out the ACTIVE account only and falls through to the next one on the
+          // device — it no longer wipes every account just because one was signed out.
+          // Reaching the login wall now means the last account is gone.
+          val active = com.haraan.app.data.AccountStore.active(context)
+          scope.launch {
+            if (active != null) runCatching { authRepository.logout(active.token) }
+            val fallback = if (active != null) {
+              com.haraan.app.data.AccountStore.remove(context, active.playerId)
+            } else {
+              com.haraan.app.data.AccountStore.clearAll(context); null
+            }
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+            // Drop the cached gate result with the session, or the next Create tap
+            // would sail past a login that is no longer there.
+            profileReady = false
+            showMenu = false
+            if (fallback == null) {
+              com.haraan.app.data.TokenStore.clearToken(context)
+              Toast.makeText(context, "Signed out.", Toast.LENGTH_SHORT).show()
+              onSignedOutCompletely()
+            } else {
+              com.haraan.app.push.PushRegistrar.syncToken(context)
+              Toast.makeText(context, "Now signed in as ${fallback.handleOrId}.", Toast.LENGTH_SHORT).show()
+              onSessionChanged()
+            }
+          }
         },
         fetchProfile = {
           val token = com.haraan.app.data.TokenStore.getToken(context)
@@ -3804,6 +4405,124 @@ private fun CrexMatchesScreen(
       )
     }
 
+    // ── Account switcher ──────────────────────────────────────────────────────
+    if (showAccounts) {
+      com.haraan.app.ui.profile.AccountSwitcherSheet(
+        accounts = accounts,
+        activePlayerId = com.haraan.app.data.AccountStore.active(context)?.playerId,
+        canAdd = !com.haraan.app.data.AccountStore.isFull(context),
+        switching = switchingAccount,
+        onDismiss = { if (!switchingAccount) showAccounts = false },
+        onAdd = {
+          showAccounts = false
+          addingAccount = true
+        },
+        onSwitch = { target ->
+          switchingAccount = true
+          scope.launch {
+            // Make it active FIRST, then prove the token still works, because every
+            // repository reads the session from TokenStore rather than taking it as an
+            // argument — there is no way to make an authenticated call "as" an account
+            // that isn't the active one.
+            com.haraan.app.data.AccountStore.switchTo(context, target.playerId)
+            val ok = runCatching { profileRepository.fetchMe(target.token) }.isSuccess
+
+            if (ok) {
+              // Re-point this device's push registration at the new account. The backend
+              // keys a device row by its FCM token, so this hands notifications over;
+              // the previous account stops getting them here, by design.
+              com.haraan.app.push.PushRegistrar.syncToken(context)
+              switchingAccount = false
+              showAccounts = false
+              onSessionChanged()
+            } else {
+              // A stored token can die while it sits here — the account was signed out on
+              // another device, or it simply expired. Drop the dead entry and say so,
+              // instead of switching into a session that 401s on every screen.
+              val fallback = com.haraan.app.data.AccountStore.remove(context, target.playerId)
+              accounts = com.haraan.app.data.AccountStore.accounts(context)
+              switchingAccount = false
+              showAccounts = false
+              Toast.makeText(
+                context,
+                "${target.handleOrId} was signed out. Add the account again to use it.",
+                Toast.LENGTH_LONG,
+              ).show()
+              if (fallback == null) onSignedOutCompletely() else onSessionChanged()
+            }
+          }
+        },
+        onSignOut = { target ->
+          switchingAccount = true
+          scope.launch {
+            // Revoke server-side before forgetting locally: once the token is gone from
+            // the device there is nothing left to authenticate the logout call with.
+            runCatching { authRepository.logout(target.token) }
+            val fallback = com.haraan.app.data.AccountStore.remove(context, target.playerId)
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+            switchingAccount = false
+            showAccounts = false
+            if (fallback == null) {
+              // That was the last account — back to the login wall.
+              onSignedOutCompletely()
+            } else {
+              com.haraan.app.push.PushRegistrar.syncToken(context)
+              Toast.makeText(context, "Now signed in as ${fallback.handleOrId}.", Toast.LENGTH_SHORT).show()
+              onSessionChanged()
+            }
+          }
+        },
+      )
+    }
+
+    // "Add account" — a full sign-in rendered OVER the running app. The current session
+    // stays active the whole time, so backing out of this returns to it untouched.
+    if (addingAccount) {
+      com.haraan.app.ui.LoginRoute(
+        onSkipClick = { addingAccount = false },
+        onLoginSuccess = { newToken ->
+          scope.launch {
+            val profile = runCatching { profileRepository.fetchMe(newToken) }.getOrNull()
+            if (profile == null) {
+              // Never store a token we could not resolve to a player: it would sit in the
+              // switcher as a nameless row that fails the moment it is tapped.
+              addingAccount = false
+              Toast.makeText(context, "Couldn't finish adding that account.", Toast.LENGTH_LONG).show()
+              return@launch
+            }
+            val added = com.haraan.app.data.AccountStore.upsertAndActivate(
+              context,
+              com.haraan.app.data.StoredAccount(
+                playerId = profile.playerId,
+                name = profile.name,
+                username = profile.username,
+                avatar = profile.avatar,
+                token = newToken,
+              ),
+            )
+            if (added is com.haraan.app.data.AddAccountResult.RosterFull) {
+              // The sheet greys out "Add account" when full, so this is the race where the
+              // roster filled while this sign-in was in flight. The store refused, leaving
+              // the current session intact — say so rather than pretending it worked.
+              addingAccount = false
+              Toast.makeText(
+                context,
+                "You can only keep ${com.haraan.app.data.AccountStore.MAX_ACCOUNTS} accounts on this device. " +
+                  "Remove one, then add ${profile.username?.let { "@$it" } ?: profile.playerId}.",
+                Toast.LENGTH_LONG,
+              ).show()
+              return@launch
+            }
+            accounts = com.haraan.app.data.AccountStore.accounts(context)
+            com.haraan.app.push.PushRegistrar.syncToken(context)
+            addingAccount = false
+            onSessionChanged()
+          }
+        },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
     selectedLeaderboardPlayer?.let { player ->
       // Tapping any leaderboard player opens the SAME real profile screen used by
       // "Others" in the bottom bar — just loaded for that player by their Player ID.
@@ -3814,18 +4533,113 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getToken(context)
           profileRepository.fetchPlayer(token, player.playerId)
         },
+        onToggleFollow = { follow ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setFollowing(token, player.playerId, follow)
+        },
+        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        onMessage = { pid, name ->
+          scope.launch {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready ->
+                openThread = com.haraan.app.data.ChatThread(
+                  id = r.conversationId, playerId = pid, name = name,
+                  username = null, avatar = null, lastMessage = null,
+                  lastMessageAt = null, unreadCount = 0,
+                )
+              // Say WHY rather than doing nothing — the rule is not obvious.
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+              else ->
+                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+            }
+          }
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
 
-    if (showProfile) {
-      com.haraan.app.ui.profile.PlayerProfileScreen(
-        onBack = { showProfile = false },
-        fetchProfile = {
-          val token = com.haraan.app.data.TokenStore.getToken(context)
-            ?: throw IllegalStateException("Please sign in to view your profile.")
-          profileRepository.fetchMe(token)
+    // Self profile now renders inside the scaffold body (see above) so it keeps the
+    // bottom bar and drops the top back bar. Messages list does the same. A single open
+    // conversation stays a pushed screen with a back button.
+    openThread?.let { thread ->
+      com.haraan.app.ui.social.ChatThreadScreen(
+        title = thread.name,
+        avatar = thread.avatar,
+        isGroup = thread.isGroup,
+        subtitle = if (thread.isGroup && thread.memberCount > 0) "${thread.memberCount} members" else null,
+        load = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.messages(token, thread.id)
         },
+        send = { body ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.send(token, thread.id, body)
+        },
+        // Only groups can be left; leaving refreshes the list so the row disappears.
+        onLeave = if (thread.isGroup) {
+          {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            val ok = token != null && dmRepository.leaveGroup(token, thread.id)
+            if (ok) chatReload++
+            ok
+          }
+        } else null,
+        onClose = { openThread = null },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Group-create flow, opened from the New group button on the Chat tab. On success we
+    // bump the reload key so the list shows the new group, and open it straight away.
+    if (showNewGroup) {
+      com.haraan.app.ui.social.NewGroupScreen(
+        loadCandidates = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.eligibleMembers(token)
+        },
+        create = { title, ids ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.GroupResult.Failed
+          else dmRepository.createGroup(token, title, ids)
+        },
+        onCreated = { thread ->
+          showNewGroup = false
+          chatReload++
+          openThread = thread
+        },
+        onClose = { showNewGroup = false },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Alerts — the same inbox the header bell opened, now a primary destination.
+    if (showAlerts) {
+      NotificationsSheet(onDismiss = { showAlerts = false })
+    }
+
+    // Follower / following list, opened from a profile's counts. MUST come after the
+    // profile overlays: later children of a Box draw on top, and rendered earlier this
+    // sat behind the very profile it was opened from -- present in the semantics tree
+    // (so uiautomator saw its header) but invisible on screen.
+    followList?.let { (listPlayerId, relation, listName) ->
+      com.haraan.app.ui.social.FollowListScreen(
+        playerId = listPlayerId,
+        relation = relation,
+        playerName = listName,
+        token = com.haraan.app.data.TokenStore.getToken(context),
+        load = { pid, rel ->
+          playerRepository.followList(com.haraan.app.data.TokenStore.getToken(context), pid, rel)
+        },
+        onToggleFollow = { pid, follow ->
+          val t = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (t == null) null else playerRepository.setFollowing(t, pid, follow)
+        },
+        // Tapping a row opens that player's profile on top of the list.
+        onOpenPlayer = { pid -> searchedPlayerId = pid },
+        onClose = { followList = null },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -3836,12 +4650,23 @@ private fun CrexMatchesScreen(
         onSkipClick = { gateStep = 0; pendingRankedAction = null },
         onLoginSuccess = { token ->
           com.haraan.app.data.TokenStore.saveToken(context, token)
+          com.haraan.app.push.PushRegistrar.syncToken(context)
           scope.launch {
-            if (profileRepository.isProfileComplete(token)) {
-              gateStep = 0
-              val a = pendingRankedAction; pendingRankedAction = null; a?.invoke()
-            } else {
-              gateStep = 2
+            // A returning player who already has a profile must land on the action
+            // they asked for, not on the setup wizard.
+            when (val status = profileRepository.profileStatus(token)) {
+              is com.haraan.app.data.ProfileStatus.Complete -> {
+                profileReady = true
+                gateStep = 0
+                val a = pendingRankedAction; pendingRankedAction = null; a?.invoke()
+              }
+              is com.haraan.app.data.ProfileStatus.Incomplete -> gateStep = 2
+              is com.haraan.app.data.ProfileStatus.NeedsLogin -> gateStep = 1
+              is com.haraan.app.data.ProfileStatus.Unavailable -> {
+                gateStep = 0
+                pendingRankedAction = null
+                Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
+              }
             }
           }
         },
@@ -3852,20 +4677,40 @@ private fun CrexMatchesScreen(
     if (gateStep == 2) {
       com.haraan.app.ui.profile.PlayerProfileSetupScreen(
         onClose = { gateStep = 0; pendingRankedAction = null },
-        onSave = { name, st, district, primarySport, sportAttributes, gender, dob, birthPlace, height, nationality, photoUri ->
+        onSave = { name, st, district, primarySport, sportAttributes, gender, dob, birthPlace, height, nationality, photoUri, username, isPrivate ->
           val token = com.haraan.app.data.TokenStore.getToken(context)
             ?: throw IllegalStateException("Please sign in again.")
           profileRepository.saveProfile(
             token, name, st, district, primarySport, sportAttributes,
-            gender, dob, birthPlace, height, nationality,
+            gender, dob, birthPlace, height, nationality, username,
+            isPrivate = isPrivate,
           )
           uploadAvatarIfPresent(context, profileRepository, token, photoUri)
         },
+        checkUsername = { candidate ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.UsernameCheck.Unknown
+          else profileRepository.checkUsername(token, candidate)
+        },
         onDone = {
+          // They just created the profile — from here on Create goes straight through.
+          profileReady = true
           gateStep = 0
           val a = pendingRankedAction; pendingRankedAction = null; a?.invoke()
         },
         modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // Paint the status-bar region blue while the Home feed is open, so the feed's blue header
+    // runs edge-to-edge to the very top. Drawn last (on top) over the app's light background;
+    // the SideEffect above turns the status-bar icons white to match.
+    if (showHomeFeed) {
+      Box(
+        Modifier
+          .fillMaxWidth()
+          .windowInsetsTopHeight(WindowInsets.statusBars)
+          .background(HaraanColors.EventsBlue),
       )
     }
   }
@@ -4018,72 +4863,787 @@ private fun JoinByCodeDialog(onDismiss: () -> Unit, onJoin: (String) -> Unit) {
   )
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Home feed — the Instagram-style social feed behind the bottom bar's Home button.
+//  A stories strip of recent public posters over a vertical feed of photo posts with
+//  likes. Reads the public feed (/api/posts/feed); like/unlike are optimistic and
+//  settle from the server's authoritative count.
+// ═══════════════════════════════════════════════════════════════════════════════
 @Composable
-private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onJoinByCode: () -> Unit = {}) {
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(top = 8.dp, bottom = 12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(10.dp)
+private fun HomeFeedScreen(
+  repository: com.haraan.app.data.PlayerRepository,
+  tokenProvider: () -> String?,
+  onOpenPlayer: (String) -> Unit,
+  onCreatePost: () -> Unit,
+  onBack: () -> Unit,
+  reloadKey: Int = 0,
+  modifier: Modifier = Modifier,
+) {
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
+  var feed by remember { mutableStateOf<com.haraan.app.data.HomeFeed?>(null) }
+  var loading by remember { mutableStateOf(true) }
+  var posts by remember { mutableStateOf<List<com.haraan.app.data.FeedPost>>(emptyList()) }
+  // The post whose comment thread is open (null = closed).
+  var commentPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+  // Owner actions: the post being edited (caption) / confirmed for delete.
+  var editPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+  var deletePost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+
+  val reload: suspend () -> Unit = {
+    loading = feed == null
+    val result = repository.homeFeed(tokenProvider())
+    if (result != null) {
+      feed = result
+      posts = result.posts
+    }
+    loading = false
+  }
+  LaunchedEffect(reloadKey) { reload() }
+
+  Box(modifier = modifier.background(Color.White)) {
+    when {
+      loading && feed == null -> {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          androidx.compose.material3.CircularProgressIndicator(color = HaraanColors.EventsBlue)
+        }
+      }
+      posts.isEmpty() && (feed?.stories.isNullOrEmpty()) -> {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(32.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          Icon(
+            imageVector = Icons.Outlined.FavoriteBorder,
+            contentDescription = null,
+            tint = HaraanColors.TextMuted,
+            modifier = Modifier.size(48.dp),
+          )
+          Spacer(Modifier.height(12.dp))
+          Text(
+            "No posts yet",
+            color = HaraanColors.TextPrimary,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+          )
+          Spacer(Modifier.height(6.dp))
+          Text(
+            "Photos from public players show up here. Be the first to post.",
+            color = HaraanColors.TextSecondary,
+            style = HaraanTypography.BodyMedium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          )
+          Spacer(Modifier.height(16.dp))
+          HaraanButton(
+            text = "Create a post",
+            onClick = onCreatePost,
+            containerColor = HaraanColors.EventsBlue,
+          )
+        }
+      }
+      else -> {
+        LazyColumn(
+          modifier = Modifier.fillMaxSize(),
+          contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+          // Brand top bar: a BLUE header with the WHITE Haraan logo + BETA, and soft rounded
+          // bottom corners so the white feed tucks under it. No back button — system back
+          // returns to the board.
+          item {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+                .background(HaraanColors.EventsBlue)
+                .padding(top = 14.dp, bottom = 16.dp),
+              contentAlignment = Alignment.Center,
+            ) {
+              Row(verticalAlignment = Alignment.Top) {
+                Image(
+                  painter = painterResource(id = com.haraan.app.R.drawable.haraan_wordmark),
+                  contentDescription = "Haraan",
+                  contentScale = ContentScale.Fit,
+                  colorFilter = ColorFilter.tint(Color.White),
+                  modifier = Modifier.height(30.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                  text = "BETA",
+                  color = Color.White,
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  letterSpacing = 0.6.sp,
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Color.White.copy(alpha = 0.22f))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
+              }
+            }
+          }
+          // Stories strip
+          feed?.stories?.takeIf { it.isNotEmpty() }?.let { stories ->
+            item {
+              LazyRow(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+              ) {
+                item { StoryBubble(story = null, onClick = onCreatePost) }
+                items(stories) { story ->
+                  StoryBubble(
+                    story = story,
+                    onClick = { story.playerId?.let(onOpenPlayer) },
+                  )
+                }
+              }
+            }
+            item {
+              androidx.compose.material3.HorizontalDivider(
+                color = HaraanColors.BorderLight,
+                thickness = 1.dp,
+                modifier = Modifier.padding(top = 4.dp),
+              )
+            }
+          }
+          // Post feed
+          items(posts, key = { it.id }) { post ->
+            FeedPostCard(
+              post = post,
+              onOpenAuthor = { post.authorPlayerId?.let(onOpenPlayer) },
+              onToggleLike = {
+                val token = tokenProvider()
+                if (token.isNullOrBlank()) return@FeedPostCard
+                // Optimistic flip, settle from the server's authoritative count.
+                val target = !post.liked
+                posts = posts.map {
+                  if (it.id == post.id) it.copy(
+                    liked = target,
+                    likeCount = (it.likeCount + if (target) 1 else -1).coerceAtLeast(0),
+                  ) else it
+                }
+                scope.launch {
+                  val res = repository.setLike(token, post.id, target)
+                  if (res != null) {
+                    posts = posts.map {
+                      if (it.id == post.id) it.copy(liked = res.first, likeCount = res.second) else it
+                    }
+                  } else {
+                    // Roll back on failure.
+                    posts = posts.map {
+                      if (it.id == post.id) it.copy(
+                        liked = post.liked,
+                        likeCount = post.likeCount,
+                      ) else it
+                    }
+                  }
+                }
+              },
+              onComment = { commentPost = post },
+              onShare = {
+                val who = post.authorUsername?.let { "@$it" } ?: post.authorName
+                val text = "Check out $who's post on Haraan — https://haraan.app"
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                  type = "text/plain"
+                  putExtra(android.content.Intent.EXTRA_TEXT, text)
+                }
+                context.startActivity(android.content.Intent.createChooser(send, "Share post"))
+              },
+              onToggleSave = {
+                val token = tokenProvider()
+                if (token.isNullOrBlank()) return@FeedPostCard
+                val target = !post.saved
+                posts = posts.map { if (it.id == post.id) it.copy(saved = target) else it }
+                scope.launch {
+                  val ok = repository.setSave(token, post.id, target)
+                  if (!ok) posts = posts.map { if (it.id == post.id) it.copy(saved = post.saved) else it }
+                }
+              },
+              onEditCaption = { editPost = post },
+              onDelete = { deletePost = post },
+            )
+          }
+        }
+      }
+    }
+  }
+
+  commentPost?.let { cp ->
+    CommentSheet(
+      post = cp,
+      repository = repository,
+      tokenProvider = tokenProvider,
+      onOpenPlayer = onOpenPlayer,
+      onDismiss = { commentPost = null },
+      onCommentAdded = {
+        posts = posts.map { if (it.id == cp.id) it.copy(commentCount = it.commentCount + 1) else it }
+      },
+    )
+  }
+
+  // Edit caption dialog.
+  editPost?.let { ep ->
+    var text by remember(ep.id) { mutableStateOf(ep.caption ?: "") }
+    androidx.compose.material3.AlertDialog(
+      onDismissRequest = { editPost = null },
+      title = { Text("Edit caption", fontWeight = FontWeight.Bold) },
+      text = {
+        OutlinedTextField(
+          value = text,
+          onValueChange = { if (it.length <= 300) text = it },
+          placeholder = { Text("Write a caption…", color = HaraanColors.TextMuted) },
+          modifier = Modifier.fillMaxWidth(),
+          minLines = 2,
+          shape = RoundedCornerShape(12.dp),
+        )
+      },
+      confirmButton = {
+        androidx.compose.material3.TextButton(onClick = {
+          val token = tokenProvider()
+          if (!token.isNullOrBlank()) {
+            val newCap = text.trim().ifBlank { null }
+            posts = posts.map { if (it.id == ep.id) it.copy(caption = newCap) else it }
+            scope.launch { repository.updateCaption(token, ep.id, newCap) }
+          }
+          editPost = null
+        }) { Text("Save", color = HaraanColors.EventsBlue, fontWeight = FontWeight.Bold) }
+      },
+      dismissButton = {
+        androidx.compose.material3.TextButton(onClick = { editPost = null }) { Text("Cancel", color = HaraanColors.TextSecondary) }
+      },
+      containerColor = Color.White,
+    )
+  }
+
+  // Delete confirmation.
+  deletePost?.let { dp ->
+    androidx.compose.material3.AlertDialog(
+      onDismissRequest = { deletePost = null },
+      title = { Text("Delete this post?", fontWeight = FontWeight.Bold) },
+      text = { Text("This removes the photo(s) and can't be undone.", color = HaraanColors.TextSecondary) },
+      confirmButton = {
+        androidx.compose.material3.TextButton(onClick = {
+          val token = tokenProvider()
+          if (!token.isNullOrBlank()) {
+            posts = posts.filterNot { it.id == dp.id }
+            scope.launch { repository.deletePost(token, dp.id) }
+          }
+          deletePost = null
+        }) { Text("Delete", color = HaraanColors.LiveRed, fontWeight = FontWeight.Bold) }
+      },
+      dismissButton = {
+        androidx.compose.material3.TextButton(onClick = { deletePost = null }) { Text("Cancel", color = HaraanColors.TextSecondary) }
+      },
+      containerColor = Color.White,
+    )
+  }
+}
+
+/** One story bubble: a gradient-ringed avatar. `story == null` is the leading "New" ＋ bubble. */
+@Composable
+private fun StoryBubble(
+  story: com.haraan.app.data.FeedStory?,
+  onClick: () -> Unit,
+) {
+  Column(
+    horizontalAlignment = Alignment.CenterHorizontally,
+    modifier = Modifier.width(68.dp).clickable(onClick = onClick),
   ) {
     Box(
       modifier = Modifier
-        .size(36.dp)
-        .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9)),
-      contentAlignment = Alignment.Center
+        .size(64.dp)
+        .clip(CircleShape)
+        .background(
+          if (story == null) androidx.compose.ui.graphics.SolidColor(HaraanColors.Field)
+          else Brush.linearGradient(listOf(HaraanColors.EventsBlue, HaraanColors.GameHubGreen))
+        )
+        .padding(2.5.dp),
+      contentAlignment = Alignment.Center,
     ) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .clip(CircleShape)
+          .background(Color.White)
+          .padding(2.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (story == null) {
+          Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "New post",
+            tint = HaraanColors.EventsBlue,
+            modifier = Modifier.size(26.dp),
+          )
+        } else {
+          val avatar = com.haraan.app.data.ApiConfig.mediaUrl(story.avatar)
+          if (avatar != null) {
+            HaraanImage(
+              model = avatar,
+              contentDescription = story.name,
+              modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+          } else {
+            Box(
+              modifier = Modifier.fillMaxSize().clip(CircleShape).background(HaraanColors.Field),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                story.name.take(1).uppercase(),
+                color = HaraanColors.TextSecondary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+              )
+            }
+          }
+        }
+      }
+    }
+    Spacer(Modifier.height(5.dp))
+    Text(
+      text = if (story == null) "New" else (story.username?.let { "@$it" } ?: story.name),
+      color = HaraanColors.TextSecondary,
+      fontSize = 11.sp,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+  }
+}
+
+/** One post card: author row, photo, like control + count, caption. */
+@Composable
+private fun FeedPostCard(
+  post: com.haraan.app.data.FeedPost,
+  onOpenAuthor: () -> Unit,
+  onToggleLike: () -> Unit,
+  onComment: () -> Unit = {},
+  onShare: () -> Unit = {},
+  onToggleSave: () -> Unit = {},
+  onEditCaption: () -> Unit = {},
+  onDelete: () -> Unit = {},
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+  Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+    // Author row
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clickable(onClick = onOpenAuthor)
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      val avatar = com.haraan.app.data.ApiConfig.mediaUrl(post.authorAvatar)
+      Box(
+        modifier = Modifier.size(38.dp).clip(CircleShape).background(HaraanColors.Field),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (avatar != null) {
+          HaraanImage(model = avatar, contentDescription = post.authorName, modifier = Modifier.fillMaxSize().clip(CircleShape))
+        } else {
+          Text(post.authorName.take(1).uppercase(), color = HaraanColors.TextSecondary, fontWeight = FontWeight.Bold)
+        }
+      }
+      Spacer(Modifier.width(10.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          post.authorName,
+          color = HaraanColors.TextPrimary,
+          style = HaraanTypography.TitleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        post.authorUsername?.let {
+          Text("@$it", color = HaraanColors.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+      }
+      // Overflow menu: the owner can edit the caption or delete; anyone can share.
+      Box {
+        Icon(
+          imageVector = Icons.Filled.MoreVert,
+          contentDescription = "Post options",
+          tint = HaraanColors.TextSecondary,
+          modifier = Modifier
+            .clip(CircleShape)
+            .clickable { menuOpen = true }
+            .padding(6.dp)
+            .size(22.dp),
+        )
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+          if (post.mine) {
+            DropdownMenuItem(
+              text = { Text("Edit caption") },
+              onClick = { menuOpen = false; onEditCaption() },
+            )
+            DropdownMenuItem(
+              text = { Text("Delete", color = HaraanColors.LiveRed) },
+              onClick = { menuOpen = false; onDelete() },
+            )
+          } else {
+            DropdownMenuItem(
+              text = { Text("Share") },
+              onClick = { menuOpen = false; onShare() },
+            )
+          }
+        }
+      }
+    }
+    // Photo(s) — square, edge to edge. Multiple images render a swipeable carousel with dots.
+    if (post.images.size > 1) {
+      val postPager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { post.images.size })
+      Box(modifier = Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.pager.HorizontalPager(state = postPager) { page ->
+          HaraanImage(
+            model = com.haraan.app.data.ApiConfig.mediaUrl(post.images[page]),
+            contentDescription = post.caption ?: "Post by ${post.authorName}",
+            modifier = Modifier
+              .fillMaxWidth()
+              .aspectRatio(1f)
+              .background(HaraanColors.Field),
+          )
+        }
+        // "1/3" counter chip, top-right.
+        Text(
+          text = "${postPager.currentPage + 1}/${post.images.size}",
+          color = Color.White,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(10.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+        // Page dots along the bottom.
+        Row(
+          modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+          horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+          repeat(post.images.size) { i ->
+            val on = i == postPager.currentPage
+            Box(
+              modifier = Modifier
+                .size(if (on) 6.dp else 5.dp)
+                .clip(CircleShape)
+                .background(if (on) Color.White else Color.White.copy(alpha = 0.5f)),
+            )
+          }
+        }
+      }
+    } else {
+      HaraanImage(
+        model = com.haraan.app.data.ApiConfig.mediaUrl(post.image),
+        contentDescription = post.caption ?: "Post by ${post.authorName}",
+        modifier = Modifier
+          .fillMaxWidth()
+          .aspectRatio(1f)
+          .background(HaraanColors.Field),
+      )
+    }
+    // Actions — Instagram layout: like · comment · share on the left, save (bookmark) right.
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      PostActionIcon(
+        icon = if (post.liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+        desc = if (post.liked) "Unlike" else "Like",
+        tint = if (post.liked) HaraanColors.LiveRed else HaraanColors.TextPrimary,
+        onClick = onToggleLike,
+      )
+      PostActionIcon(icon = Icons.Outlined.ChatBubbleOutline, desc = "Comment", tint = HaraanColors.TextPrimary, onClick = onComment)
+      PostActionIcon(icon = Icons.AutoMirrored.Rounded.Send, desc = "Share", tint = HaraanColors.TextPrimary, onClick = onShare)
+      Spacer(Modifier.weight(1f))
+      PostActionIcon(
+        icon = if (post.saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+        desc = if (post.saved) "Unsave" else "Save",
+        tint = HaraanColors.TextPrimary,
+        onClick = onToggleSave,
+      )
+    }
+    // Like count
+    if (post.likeCount > 0) {
+      Text(
+        text = if (post.likeCount == 1) "1 like" else "${post.likeCount} likes",
+        color = HaraanColors.TextPrimary,
+        style = HaraanTypography.TitleMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+        modifier = Modifier.padding(start = 16.dp, top = 2.dp),
+      )
+    }
+    // Caption
+    if (!post.caption.isNullOrBlank()) {
+      Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+          text = buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+              append(post.authorUsername?.let { "@$it " } ?: (post.authorName + " "))
+            }
+            append(post.caption)
+          },
+          color = HaraanColors.TextPrimary,
+          style = HaraanTypography.BodyMedium.copy(fontSize = 13.5.sp),
+        )
+      }
+    }
+    // Comment count — tap to open the thread.
+    if (post.commentCount > 0) {
+      Text(
+        text = if (post.commentCount == 1) "View 1 comment" else "View all ${post.commentCount} comments",
+        color = HaraanColors.TextMuted,
+        fontSize = 13.sp,
+        modifier = Modifier
+          .clickable(onClick = onComment)
+          .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
+      )
+    }
+    Spacer(Modifier.height(8.dp))
+  }
+}
+
+/** One tappable action icon in a post's action row (like/comment/share/save). */
+@Composable
+private fun PostActionIcon(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  desc: String,
+  tint: Color,
+  onClick: () -> Unit,
+  rotate: Float = 0f,
+) {
+  Icon(
+    imageVector = icon,
+    contentDescription = desc,
+    tint = tint,
+    modifier = Modifier
+      .clip(CircleShape)
+      .clickable(onClick = onClick)
+      .padding(7.dp)
+      .size(27.dp)
+      .then(if (rotate != 0f) Modifier.graphicsLayer { rotationZ = rotate } else Modifier),
+  )
+}
+
+// The comment thread for a post: a scrollable list + an input row pinned to the bottom.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommentSheet(
+  post: com.haraan.app.data.FeedPost,
+  repository: com.haraan.app.data.PlayerRepository,
+  tokenProvider: () -> String?,
+  onOpenPlayer: (String) -> Unit,
+  onDismiss: () -> Unit,
+  onCommentAdded: () -> Unit,
+) {
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val scope = rememberCoroutineScope()
+  var comments by remember { mutableStateOf<List<com.haraan.app.data.FeedComment>?>(null) }
+  var input by remember { mutableStateOf("") }
+  var sending by remember { mutableStateOf(false) }
+
+  LaunchedEffect(post.id) { comments = repository.postComments(tokenProvider(), post.id) }
+
+  ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Color.White) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .fillMaxHeight(0.86f)
+        .navigationBarsPadding()
+        .imePadding(),
+    ) {
+      Text(
+        "Comments",
+        color = HaraanColors.TextPrimary,
+        style = HaraanTypography.TitleMedium.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+      )
+      androidx.compose.material3.HorizontalDivider(color = HaraanColors.BorderLight, thickness = 1.dp)
+
+      Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        val list = comments
+        when {
+          list == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(color = HaraanColors.EventsBlue, modifier = Modifier.size(26.dp))
+          }
+          list.isEmpty() -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text("No comments yet", color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("Be the first to comment.", color = HaraanColors.TextSecondary, fontSize = 13.sp)
+          }
+          else -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+            items(list, key = { it.id }) { c -> CommentRow(c, onOpenPlayer) }
+          }
+        }
+      }
+
+      androidx.compose.material3.HorizontalDivider(color = HaraanColors.BorderLight, thickness = 1.dp)
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        OutlinedTextField(
+          value = input,
+          onValueChange = { if (it.length <= 500) input = it },
+          placeholder = { Text("Add a comment…", color = HaraanColors.TextMuted) },
+          modifier = Modifier.weight(1f),
+          shape = RoundedCornerShape(22.dp),
+          maxLines = 4,
+          enabled = !sending,
+        )
+        Spacer(Modifier.width(8.dp))
+        val canSend = input.isNotBlank() && !sending
+        Text(
+          text = "Post",
+          color = if (canSend) HaraanColors.EventsBlue else HaraanColors.TextMuted,
+          fontSize = 15.sp,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = canSend) {
+              val token = tokenProvider() ?: return@clickable
+              sending = true
+              scope.launch {
+                val created = repository.addComment(token, post.id, input.trim())
+                sending = false
+                if (created != null) {
+                  comments = (comments ?: emptyList()) + created
+                  input = ""
+                  onCommentAdded()
+                }
+              }
+            }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+      }
+    }
+  }
+}
+
+/** One comment: avatar, name/handle + body. */
+@Composable
+private fun CommentRow(c: com.haraan.app.data.FeedComment, onOpenPlayer: (String) -> Unit) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable { c.authorPlayerId?.let(onOpenPlayer) }
+      .padding(horizontal = 16.dp, vertical = 8.dp),
+  ) {
+    val avatar = com.haraan.app.data.ApiConfig.mediaUrl(c.authorAvatar)
+    Box(
+      modifier = Modifier.size(34.dp).clip(CircleShape).background(HaraanColors.Field),
+      contentAlignment = Alignment.Center,
+    ) {
+      if (avatar != null) {
+        HaraanImage(model = avatar, contentDescription = c.authorName, modifier = Modifier.fillMaxSize().clip(CircleShape))
+      } else {
+        Text(c.authorName.take(1).uppercase(), color = HaraanColors.TextSecondary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+      }
+    }
+    Spacer(Modifier.width(10.dp))
+    Text(
+      text = buildAnnotatedString {
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+          append(c.authorUsername?.let { "@$it " } ?: (c.authorName + " "))
+        }
+        append(c.body)
+      },
+      color = HaraanColors.TextPrimary,
+      style = HaraanTypography.BodyMedium.copy(fontSize = 13.5.sp),
+      modifier = Modifier.weight(1f),
+    )
+  }
+}
+
+@Composable
+private fun CrexHeaderSection(
+  onCreateMatch: () -> Unit,
+  onJoinByCode: () -> Unit = {},
+  onSearch: () -> Unit = {},
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(top = 6.dp, bottom = 10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    // Brand: the H monogram + a BETA badge. Back-to-Pulse now lives on the system/phone
+    // back button (handled by DismissOnBack), so no in-header arrow is needed.
+    Row(verticalAlignment = Alignment.Top) {
       Image(
         painter = painterResource(id = com.haraan.app.R.drawable.haraan_copy),
-        contentDescription = "Haraan logo",
-        modifier = Modifier.size(22.dp),
+        contentDescription = "Haraan",
         contentScale = ContentScale.Fit,
-        colorFilter = ColorFilter.tint(LightAccentBlue)
+        colorFilter = ColorFilter.tint(HaraanColors.EventsBlue),
+        modifier = Modifier.size(30.dp),
+      )
+      Spacer(modifier = Modifier.width(4.dp))
+      Text(
+        text = "BETA",
+        color = HaraanColors.EventsBlue,
+        fontSize = 8.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier
+          .clip(RoundedCornerShape(4.dp))
+          .background(HaraanColors.EventsBlue.copy(alpha = 0.12f))
+          .padding(horizontal = 4.dp, vertical = 1.dp),
       )
     }
 
-    // Wordmark — gives the bar a branded identity instead of a lone icon button.
-    Text(
-      text = "Haraan",
-      fontSize = 18.sp,
-      fontWeight = FontWeight.ExtraBold,
-      color = LightPrimaryText,
-      letterSpacing = (-0.5).sp,
-    )
-
-    Spacer(modifier = Modifier.weight(1f))
-
-    // Search demoted to an icon — on a leaderboard it's secondary, so this declutters the
-    // header (brand left, actions right) and lets the board breathe.
-    Box(
+    // The wordmark used to sit here, repeating a brand the user already knows they
+    // are inside, next to a search icon that did nothing. The space now carries the
+    // one thing this screen was missing: finding people. Tapping opens the full
+    // search screen — an inline field here would fight the keyboard with the board
+    // behind it.
+    Row(
       modifier = Modifier
-        .size(38.dp)
+        .weight(1f)
+        .height(38.dp)
+        // Soft shadow so the control floats off the page — the physical lift the flat white
+        // fields were missing.
+        .shadow(3.dp, RoundedCornerShape(12.dp), clip = false, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.10f))
         .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9)),
-      contentAlignment = Alignment.Center
+        .background(Color.White)
+        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
+        .clickable(onClick = onSearch)
+        .padding(horizontal = 12.dp),
+      verticalAlignment = Alignment.CenterVertically
     ) {
       Icon(
         imageVector = Icons.Default.Search,
-        contentDescription = "Search",
-        tint = LightSecondaryText,
-        modifier = Modifier.size(18.dp)
+        contentDescription = null,
+        tint = Color(0xFF64748B),
+        modifier = Modifier.size(17.dp)
+      )
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = "Search players",
+        fontSize = 13.5.sp,
+        color = Color(0xFF64748B),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
 
-    // Join a private match by its share code.
+    Spacer(modifier = Modifier.width(2.dp))
+
+    // Join a private match by its share code. Same white-surface + border treatment so it
+    // reads as a real button, not a faint smudge.
     Box(
       modifier = Modifier
         .size(38.dp)
+        .shadow(3.dp, RoundedCornerShape(12.dp), clip = false, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.10f))
         .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF1F5F9))
+        .background(Color.White)
+        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
         .clickable(onClick = onJoinByCode),
       contentAlignment = Alignment.Center
     ) {
       Icon(
         imageVector = Icons.Default.Login,
         contentDescription = "Join by code",
-        tint = LightSecondaryText,
+        tint = Color(0xFF475569),
         modifier = Modifier.size(18.dp)
       )
     }
@@ -4096,7 +5656,9 @@ private fun CrexHeaderSection(onBack: () -> Unit, onCreateMatch: () -> Unit, onJ
       colors = ButtonDefaults.buttonColors(
         containerColor = LightAccentBlue,
         contentColor = Color.White
-      )
+      ),
+      // A real lift on the primary CTA — presses down on tap for tactile feedback.
+      elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp, pressedElevation = 1.dp),
     ) {
       Icon(
         imageVector = Icons.Default.Add,
@@ -4121,6 +5683,7 @@ private fun CrexTabsSection(
   val tabs = listOf(
     TabItem("Live", Icons.Default.PlayArrow),
     TabItem("Finished", Icons.Default.CheckCircle),
+    TabItem("Scheduled", Icons.Default.Event),
     TabItem("District", Icons.Default.Apartment),
     TabItem("State", Icons.Default.AccountBalance)
   )
@@ -4150,19 +5713,34 @@ private fun CrexTabsSection(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.Center
         ) {
-          Box(contentAlignment = Alignment.TopEnd) {
-            Icon(
-              imageVector = tab.icon,
-              contentDescription = null,
-              tint = tabColor,
-              modifier = Modifier.size(17.dp)
-            )
-            if (tab.title == "Live") {
-              LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
+          // The active tab's icon sits in a soft blue chip — a physical highlight that lifts
+          // the current tab out of the flat row.
+          val chipBg by androidx.compose.animation.animateColorAsState(
+            targetValue = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
+            animationSpec = tween(200),
+            label = "tabChip",
+          )
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+              .size(width = 40.dp, height = 28.dp)
+              .clip(RoundedCornerShape(9.dp))
+              .background(chipBg),
+          ) {
+            Box(contentAlignment = Alignment.TopEnd) {
+              Icon(
+                imageVector = tab.icon,
+                contentDescription = null,
+                tint = tabColor,
+                modifier = Modifier.size(17.dp)
+              )
+              if (tab.title == "Live") {
+                LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
+              }
             }
           }
 
-          Spacer(modifier = Modifier.height(5.dp))
+          Spacer(modifier = Modifier.height(4.dp))
 
           Text(
             text = tab.title,
@@ -4806,7 +6384,7 @@ private fun DistrictHomeCard(summary: com.haraan.app.data.DistrictSummary) {
 
       // Snapshot tiles.
       Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        DistrictStatTile(Modifier.weight(1f), summary.liveMatches.toString(), "Live", Color(0xFF00C853))
+        DistrictStatTile(Modifier.weight(1f), summary.liveMatches.toString(), "Live", Color(0xFF2563EB))
         DistrictStatTile(Modifier.weight(1f), summary.players.toString(), "Players", T.Text1)
         DistrictStatTile(Modifier.weight(1f), summary.totalMatches.toString(), "Matches", T.Text1)
       }
@@ -5869,7 +7447,9 @@ private fun CrexLeagueTitle(title: String) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(top = 10.dp, bottom = 10.dp),
+      // Bond to the sport-filter chips directly above; the old 10dp top plus the chip row's
+      // own bottom padding left a dead gap here (flagged in review).
+      .padding(top = 0.dp, bottom = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
@@ -5893,6 +7473,113 @@ private fun CrexLeagueTitle(title: String) {
       fontSize = 12.sp,
       fontWeight = FontWeight.SemiBold,
     )
+  }
+}
+
+/**
+ * One row in the Scheduled tab: a match the creator hasn't started yet. Shows the two
+ * sides with their crests, the kick-off time (or "Ready to start" for a play-now match
+ * whose toss was skipped), and a Start button that runs the toss/opens the match. The
+ * whole card opens the match detail; the Start button is the primary action.
+ */
+@Composable
+private fun ScheduledMatchCard(
+  match: com.haraan.app.data.ScheduledMatch,
+  onStart: () -> Unit,
+  onOpen: () -> Unit,
+) {
+  val blue = HaraanColors.EventsBlue
+  val green = HaraanColors.Success
+  // Parse the ISO kick-off into a friendly label; null (play-now, toss skipped) reads
+  // as "Ready to start". A parse failure degrades to the raw absence rather than crashing.
+  val whenLabel = remember(match.scheduledAtIso) {
+    val iso = match.scheduledAtIso
+    if (iso.isNullOrBlank()) "Ready to start"
+    else runCatching {
+      val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(iso)
+      java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(parsed!!)
+    }.getOrDefault("Scheduled")
+  }
+  val isReady = match.scheduledAtIso.isNullOrBlank()
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(16.dp))
+      .background(Color.White)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
+      .clickable(onClick = onOpen)
+      .padding(14.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      ScheduledCrest(match.teamAEmblem, blue, match.teamA)
+      Spacer(Modifier.width(8.dp))
+      Text(
+        match.teamA.ifBlank { "Team A" },
+        color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+        maxLines = 1, modifier = Modifier.weight(1f),
+      )
+      Text("vs", color = HaraanColors.TextMuted, fontSize = 12.sp)
+      Text(
+        match.teamB.ifBlank { "Team B" },
+        color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+        maxLines = 1, textAlign = TextAlign.End, modifier = Modifier.weight(1f),
+      )
+      Spacer(Modifier.width(8.dp))
+      ScheduledCrest(match.teamBEmblem, Color(0xFFF59E0B), match.teamB)
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        if (isReady) Icons.Default.PlayArrow else Icons.Default.Event,
+        contentDescription = null,
+        tint = if (isReady) green else blue,
+        modifier = Modifier.size(16.dp),
+      )
+      Spacer(Modifier.width(6.dp))
+      Text(
+        whenLabel,
+        color = if (isReady) green else HaraanColors.TextSecondary,
+        fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.weight(1f),
+      )
+      if (match.isPrivate) {
+        Text("Private", color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(10.dp))
+      }
+      // Start is a commit action → green (per the app's CTA colour rules).
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(10.dp))
+          .background(green)
+          .clickable(onClick = onStart)
+          .padding(horizontal = 16.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text("Start", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+      }
+    }
+  }
+}
+
+/** A small circular team crest for the Scheduled card: emblem drawable, else the initial. */
+@Composable
+private fun ScheduledCrest(emblem: String, accent: Color, name: String) {
+  val res = emblem.takeIf { it.isNotBlank() }?.let { com.haraan.app.ui.matches.create.emblemDrawableFor(it) }
+  if (res != null) {
+    androidx.compose.foundation.Image(
+      painter = painterResource(res),
+      contentDescription = name,
+      contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+      modifier = Modifier.size(30.dp).clip(CircleShape),
+    )
+  } else {
+    Box(
+      modifier = Modifier.size(30.dp).clip(CircleShape).background(accent),
+      contentAlignment = Alignment.Center,
+    ) {
+      Text(name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+    }
   }
 }
 
@@ -6136,15 +7823,14 @@ private fun MatchLiveContent(
       // Location — the local-identity signal: the most specific place we have (village/
       // locality, else a real venue) + the stamped district, with the bare "Custom Match"
       // placeholder dropped. Hidden when we have nothing.
-      val locationText = run {
-        val place = locality.takeIf { it.isNotBlank() }
-          ?: venue.takeIf { it.isNotBlank() && !it.equals("Custom Match", ignoreCase = true) }
-        // Append the measured distance when we actually have one — it's the single
-        // most useful thing on this line for deciding whether to walk over.
-        val far = distanceKm?.let { if (it < 1.0) "under 1 km" else "${"%.1f".format(it)} km" }
-        listOfNotNull(place, district.takeIf { it.isNotBlank() }, far).joinToString(" · ")
-      }
-      if (locationText.isNotBlank()) {
+      val place = locality.takeIf { it.isNotBlank() }
+        ?: venue.takeIf { it.isNotBlank() && !it.equals("Custom Match", ignoreCase = true) }
+      // The measured distance is the single most useful thing on this line for
+      // deciding whether to walk over, so it must ALWAYS show — never be the bit
+      // that gets ellipsised away when the place name runs long.
+      val far = distanceKm?.let { if (it < 1.0) "under 1 km" else "${"%.1f".format(it)} km" }
+      val placeText = listOfNotNull(place, district.takeIf { it.isNotBlank() }).joinToString(" · ")
+      if (placeText.isNotBlank() || far != null) {
         Box(Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFCBD5E1)))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
           Icon(
@@ -6154,7 +7840,28 @@ private fun MatchLiveContent(
             modifier = Modifier.size(12.dp),
           )
           Spacer(Modifier.width(3.dp))
-          Text(locationText, color = Color(0xFF94A3B8), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          // Place + district ellipsise (weight, fill=false) so they yield space…
+          if (placeText.isNotBlank()) {
+            Text(
+              placeText,
+              color = Color(0xFF94A3B8),
+              fontSize = 11.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f, fill = false),
+            )
+          }
+          // …while the distance keeps its intrinsic width and is never clipped. A
+          // touch darker + semibold so it reads as the primary signal on the line.
+          if (far != null) {
+            Text(
+              (if (placeText.isNotBlank()) " · " else "") + far,
+              color = Color(0xFF475569),
+              fontSize = 11.sp,
+              fontWeight = FontWeight.SemiBold,
+              maxLines = 1,
+            )
+          }
         }
       } else {
         Spacer(Modifier.weight(1f))
@@ -6235,15 +7942,17 @@ private fun LiveFeedGroup(
   rows: List<com.haraan.app.data.LiveMatchRow>,
   onMatchClick: (String) -> Unit,
 ) {
-  MatchGroup {
-    rows.forEachIndexed { i, m ->
-      if (i > 0) MatchGroupDivider()
+  // Each match in its own floating card with space between them — the old single grouped
+  // surface with inset hairlines read as one crammed, "mixed" block (flagged by the user).
+  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    rows.forEach { m ->
       // Put the batting side on top (first-innings team leads the card). The top row is
       // then always the batting one, so battingTeam = 1 for the laid-out order.
       val battingSecond = m.battingTeam == 2
       // Compact codes (KP, PP) instead of long stored names, matching the hero card.
       val code1 = com.haraan.app.ui.matches.teamShortCode(m.team1)
       val code2 = com.haraan.app.ui.matches.teamShortCode(m.team2)
+      MatchGroup {
       MatchLiveContent(
         modifier = Modifier.fillMaxWidth(),
         onClick = { onMatchClick(m.id) },
@@ -6267,12 +7976,13 @@ private fun LiveFeedGroup(
         isFeatured = m.isFeatured,
         distanceKm = m.distanceKm,
       )
+      }
     }
   }
 }
 
-// One grouped surface for a league's matches — rows separated by inset hairlines,
-// instead of a stack of separate floating cards.
+// One floating card surface for a single match (or, in other callers, a small group).
+// Live groups sit highest in the GameHub depth hierarchy.
 @Composable
 private fun MatchGroup(content: @Composable () -> Unit) {
   Card(
@@ -6292,11 +8002,6 @@ private fun MatchGroup(content: @Composable () -> Unit) {
   ) {
     Column { content() }
   }
-}
-
-@Composable
-private fun MatchGroupDivider() {
-  Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(Color(0xFFEEF0F4)))
 }
 
 // Shimmer skeleton shown while the real live feed loads — a premium stand-in for a
@@ -6697,21 +8402,127 @@ private fun CrexUpcomingMatchCard(
   }
 }
 
+/**
+ * Empty-state wording for the board. The filter value must not leak into the
+ * sentence: with the "All" chip active the old string read "No live All matches yet".
+ */
+private fun emptyLiveLabel(sport: String): String =
+  if (sport == "All") "No live matches right now" else "No live $sport matches right now"
+
+private fun emptyFinishedLabel(sport: String): String =
+  if (sport == "All") "No finished matches yet" else "No finished $sport matches yet"
+
+/**
+ * Sport filter for the board. Was three slots in the PRIMARY navigation, which made
+ * "which sport" a place you go rather than a lens on one list — and pushed Chat and
+ * Alerts out of reach behind header icons.
+ *
+ * "All" leads because the honest default is everything; a player who only cares about
+ * one sport picks it once and the list obeys inside whichever tab they are on.
+ */
+@Composable
+private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
+  val sports = listOf(
+    "All" to null,
+    "Cricket" to Icons.Filled.SportsCricket,
+    "Football" to Icons.Filled.SportsFootball,
+    "Badminton" to Icons.Filled.SportsTennis,
+  )
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .horizontalScroll(rememberScrollState())
+      // Asymmetric: normal breathing above (under the Live/Finished tabs); a little room
+      // below for the chips' soft shadow while the "Matches near you" title stays close.
+      .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+    horizontalArrangement = Arrangement.spacedBy(9.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    sports.forEach { (label, icon) ->
+      val isSel = label == selected
+      // Animated fill + a soft lift so the chips feel like physical, tappable objects rather
+      // than flat outlines: selected chips carry a blue-tinted glow, idle chips a faint
+      // neutral shadow that separates them from the light page.
+      val chipBg by animateColorAsState(
+        targetValue = if (isSel) HaraanColors.EventsBlue else Color.White,
+        animationSpec = tween(180),
+        label = "chipBg",
+      )
+      Row(
+        modifier = Modifier
+          .shadow(
+            elevation = if (isSel) 6.dp else 2.dp,
+            shape = RoundedCornerShape(50),
+            clip = false,
+            ambientColor = if (isSel) HaraanColors.EventsBlue.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.05f),
+            spotColor = if (isSel) HaraanColors.EventsBlue.copy(alpha = 0.55f) else Color.Black.copy(alpha = 0.10f),
+          )
+          .clip(RoundedCornerShape(50))
+          .background(chipBg)
+          .border(
+            1.dp,
+            if (isSel) Color.Transparent else HaraanColors.BorderLight,
+            RoundedCornerShape(50),
+          )
+          .pressable { onSelected(label) }
+          .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (icon != null) {
+          Icon(
+            icon,
+            contentDescription = null,
+            // Brand-tinted sport icons give each chip a spot of life when idle; white on select.
+            tint = if (isSel) Color.White else HaraanColors.EventsBlue,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(Modifier.width(6.dp))
+        }
+        Text(
+          label,
+          color = if (isSel) Color.White else HaraanColors.TextPrimary,
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+        )
+      }
+    }
+  }
+}
+
 @Composable
 private fun CrexBottomBar(
-  selectedSport: String,
-  onSportSelected: (String) -> Unit,
+  /** The destination currently on screen — "Matches" while the board is up. */
+  current: String,
   onHomeClick: () -> Unit,
-  onOthersClick: () -> Unit = {}
+  onMatchesClick: () -> Unit = {},
+  onChatClick: () -> Unit = {},
+  onAlertsClick: () -> Unit = {},
+  onOthersClick: () -> Unit = {},
+  /** The signed-in player's avatar; rendered as the Player tab so it carries a real face. */
+  avatarUrl: String? = null,
+  /** The player's name — its initial is shown when there's no photo (matches the profile). */
+  avatarName: String? = null,
 ) {
-  // (label, filled icon, outlined icon) — outline when idle, filled when active, one
-  // coherent family; "Player" opens the player's own profile (Person metaphor).
+  // Primary navigation — DESTINATIONS, not filters.
+  //
+  // Three of these five slots used to be sports (Cricket / Badminton / Football),
+  // which made the app's top-level structure "which sport am I looking at" and left
+  // Chat and Alerts buried behind header icons. Sport is a filter over one list, not
+  // a place you go, so it moved into the board as a chip row; the freed slots now
+  // carry the things a player actually returns for.
+  //
+  // (label, active icon, idle icon) — softer Rounded family when active, geometric Outlined
+  // when idle, for a cohesive, modern set. Matches uses a sport-neutral Scoreboard (the board
+  // is multi-sport and score-led) rather than the old cricket bat, which was both
+  // cricket-specific and muddy at this size.
   val items = listOf(
-    Triple("Home", Icons.Filled.Home, Icons.Outlined.Home),
-    Triple("Cricket", Icons.Filled.SportsCricket, Icons.Outlined.SportsCricket),
-    Triple("Badminton", Icons.Filled.SportsTennis, Icons.Outlined.SportsTennis),
-    Triple("Football", Icons.Filled.SportsFootball, Icons.Outlined.SportsFootball),
-    Triple("Player", Icons.Filled.Person, Icons.Outlined.Person),
+    Triple("Home", Icons.Rounded.Home, Icons.Outlined.Home),
+    Triple("Matches", Icons.Rounded.Scoreboard, Icons.Outlined.Scoreboard),
+    // Telegram-style paper-plane for Chat (Send glyph) instead of a speech bubble.
+    Triple("Chat", Icons.AutoMirrored.Rounded.Send, Icons.Outlined.ChatBubbleOutline),
+    // A ringing bell (with sound waves) — more character/presence than a plain flat bell.
+    Triple("Alerts", Icons.Rounded.NotificationsActive, Icons.Outlined.Notifications),
+    Triple("Player", Icons.Rounded.Person, Icons.Outlined.Person),
   )
 
   // Deliberately NOT Material3's NavigationBar: its item internals carry padding
@@ -6720,7 +8531,14 @@ private fun CrexBottomBar(
   // Row owns the vertical rhythm instead, so the content is genuinely centred in
   // whatever HaraanBottomBar.Height says.
   val selectedColor = Color(0xFF2563EB)
-  val idleColor = Color(0xFF9AA0AC)
+  // A solid slate, not a washed-out light grey — idle icons are FILLED (below) so this reads
+  // as real weight rather than a faint outline. This is what gives the bar physical presence.
+  val idleColor = Color(0xFF5B6472)
+
+  // The Chat paper-plane flies for ~2s ONLY when its tab is tapped, then settles at rest.
+  // A one-shot Animatable driven from the click handler below, not an always-on loop.
+  val navScope = rememberCoroutineScope()
+  val chatFly = remember { Animatable(0f) }
 
   Row(
     modifier = Modifier
@@ -6742,8 +8560,8 @@ private fun CrexBottomBar(
       .clip(RoundedCornerShape(26.dp)),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    items.forEach { (label, filledIcon, outlinedIcon) ->
-      val isSelected = label == selectedSport
+    items.forEach { (label, filledIcon, _) ->
+      val isSelected = label == current
       // Springy scale + lift on the active icon — the bit of motion that reads premium.
       val sel by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0f,
@@ -6762,8 +8580,31 @@ private fun CrexBottomBar(
           ) {
             when (label) {
               "Home" -> onHomeClick()
-              "Player" -> onOthersClick()
-              else -> onSportSelected(label)
+              "Matches" -> onMatchesClick()
+              "Chat" -> {
+                // A ~2s "flying" gesture that DECAYS to rest: the plane surges up-right, then
+                // each swing gets smaller and every segment is eased, so it settles softly
+                // instead of the loop halting abruptly.
+                navScope.launch {
+                  chatFly.snapTo(0f)
+                  chatFly.animateTo(
+                    targetValue = 0f,
+                    animationSpec = keyframes {
+                      durationMillis = 2000
+                      0f at 0 with FastOutSlowInEasing
+                      1f at 260 with FastOutSlowInEasing
+                      0.10f at 640 with FastOutSlowInEasing
+                      0.55f at 1020 with FastOutSlowInEasing
+                      0.06f at 1400 with FastOutSlowInEasing
+                      0.24f at 1720 with FastOutSlowInEasing
+                      0f at 2000 with FastOutSlowInEasing
+                    },
+                  )
+                }
+                onChatClick()
+              }
+              "Alerts" -> onAlertsClick()
+              else -> onOthersClick()
             }
           },
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -6772,25 +8613,72 @@ private fun CrexBottomBar(
         // Selection pill sized to the icon, so it can never crowd the label.
         Box(
           modifier = Modifier
-            .size(width = 40.dp, height = 24.dp)
+            .size(width = 46.dp, height = 26.dp)
             .background(
               color = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
-              shape = RoundedCornerShape(12.dp)
+              shape = RoundedCornerShape(13.dp)
             ),
           contentAlignment = Alignment.Center,
         ) {
-          Icon(
-            imageVector = if (isSelected) filledIcon else outlinedIcon,
-            contentDescription = label,
-            tint = if (isSelected) selectedColor else idleColor,
-            modifier = Modifier
-              .size(20.dp)
-              .graphicsLayer {
-                val s = 1f + 0.14f * sel
-                scaleX = s
-                scaleY = s
+          val iconScale = Modifier.graphicsLayer {
+            val s = 1f + 0.14f * sel
+            scaleX = s
+            scaleY = s
+            if (label == "Chat") {
+              // Tilt the paper plane so its nose points up-and-forward (Telegram-style).
+              rotationZ = -25f
+              // Flies up-and-to-the-right while the tap-triggered animation runs, then rests.
+              translationX = chatFly.value * 5.dp.toPx()
+              translationY = -chatFly.value * 5.dp.toPx()
+            }
+          }
+          if (label == "Player") {
+            // The Player tab carries the user's identity. The initial is always drawn; a
+            // real photo (when present) is overlaid on top — so a missing or broken avatar
+            // shows the initial (like the profile) rather than an empty circle. A ring marks
+            // it active.
+            val photo = avatarUrl?.let { com.haraan.app.data.ApiConfig.mediaUrl(it) }
+            Box(
+              modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(HaraanColors.Field, CircleShape)
+                .border(
+                  width = if (isSelected) 2.dp else 1.5.dp,
+                  color = if (isSelected) selectedColor else Color(0xFFCBD2DC),
+                  shape = CircleShape,
+                )
+                .then(iconScale),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = avatarName?.trim()?.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                color = if (isSelected) selectedColor else idleColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+              )
+              if (!photo.isNullOrBlank()) {
+                AsyncImage(
+                  model = photo,
+                  contentDescription = "Player",
+                  contentScale = ContentScale.Crop,
+                  modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
               }
-          )
+            }
+          } else {
+            Icon(
+              // Always the FILLED (Rounded) glyph — even when idle — so every tab has real
+              // body and weight. The old outline-when-idle read as thin and washed out; only
+              // colour + the pill + a scale lift now separate active from idle.
+              imageVector = filledIcon,
+              contentDescription = label,
+              tint = if (isSelected) selectedColor else idleColor,
+              modifier = Modifier
+                .size(23.dp)
+                .then(iconScale)
+            )
+          }
         }
         Spacer(Modifier.height(2.dp))
         Text(
@@ -6822,6 +8710,154 @@ private data class TalentRow(val name: String, val role: String, val stars: Int,
 
 private data class StatCardRow(val label: String, val value: String, val accentColor: Color)
 
+
+// "Haraan special" band — a 1:1 port of the website's mobile feed band
+// (`.mband` in site-mobile-overrides.css), so the app and the mobile site open
+// their feed with the same object. Values track the web band; change both together.
+//
+// FLAT fill, deliberately: the colour is the exact Events-tab blue and it must
+// never become a colour gradient — that drifts off-brand. All the depth comes
+// from the four overlays below (hairline, masked line grid, diagonal sheen,
+// glow), which is also why the whole thing is one Canvas rather than a stack of
+// Boxes. It carries the lockup alone — no strapline, no CTA.
+@Composable
+private fun HaraanSpecialBand(modifier: Modifier = Modifier) {
+  val fill = Color(0xFF2563EB)
+  val shape = RoundedCornerShape(20.dp)
+  val glowTint = Color(0xFFDBEAFE)
+
+  Box(
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(shape)
+      .background(fill)
+      // A defined edge — premium surfaces have one; a borderless slab floats.
+      .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
+  ) {
+    Canvas(modifier = Modifier.matchParentSize()) {
+      val w = size.width
+      val h = size.height
+
+      // Line grid, 26dp cells — the same device as the venue-map texture card on
+      // the event page, so the pattern belongs to the existing language.
+      val cell = 26.dp.toPx()
+      val grid = Color.White.copy(alpha = 0.16f)
+      var x = 0f
+      while (x <= w) {
+        drawLine(grid, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
+        x += cell
+      }
+      var y = 0f
+      while (y <= h) {
+        drawLine(grid, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        y += cell
+      }
+      // …masked away from the centre so it never fights the wordmark. The web
+      // hides it with a radial mask-image; on an opaque surface painting the fill
+      // back over the middle is the same result, and Compose has no mask.
+      val maskRadius = kotlin.math.hypot(w / 2f, h / 2f)
+      drawRect(
+        brush = Brush.radialGradient(
+          colorStops = arrayOf(0f to fill, 0.06f to fill, 0.58f to Color.Transparent),
+          center = Offset(w / 2f, h / 2f),
+          radius = maskRadius
+        )
+      )
+
+      // Soft light source above the lockup so the fill isn't one dead plane. A
+      // pale blue — white overlays lift #2563EB without shifting its hue.
+      //
+      // Weaker than the web's 0.30: on the page the band is one of several blue
+      // surfaces, but here it sits 20dp under the Events pill in the SAME blue, and
+      // at 0.30 the lifted centre read as a second, lighter colour beside it. Keep
+      // it low enough that the fill and the pill stay one blue.
+      val glowRadius = 170.dp.toPx()
+      drawRect(
+        brush = Brush.radialGradient(
+          colorStops = arrayOf(
+            0f to glowTint.copy(alpha = 0.10f),
+            0.44f to glowTint.copy(alpha = 0.04f),
+            0.72f to Color.Transparent
+          ),
+          center = Offset(w / 2f, -10.dp.toPx()),
+          radius = glowRadius
+        )
+      )
+
+      // One diagonal sheen off the top-left, the way a real surface catches
+      // light. Kept faint — on ink it only has to suggest a plane.
+      drawRect(
+        brush = Brush.linearGradient(
+          colorStops = arrayOf(
+            0f to Color.White.copy(alpha = 0.07f),
+            0.30f to Color.White.copy(alpha = 0.02f),
+            0.56f to Color.Transparent
+          ),
+          start = Offset.Zero,
+          end = Offset(w * 0.62f, h)
+        )
+      )
+
+      // Hairline along the top edge — the same device as the mobile footer. Light
+      // on the blue fill: a blue rule on a blue surface is invisible.
+      drawRect(
+        brush = Brush.horizontalGradient(
+          colorStops = arrayOf(
+            0f to Color.Transparent,
+            0.24f to Color.White.copy(alpha = 0.30f),
+            0.52f to Color.White.copy(alpha = 0.62f),
+            0.78f to Color.White.copy(alpha = 0.30f),
+            1f to Color.Transparent
+          ),
+          startX = 0f,
+          endX = w
+        ),
+        size = Size(w, 2.dp.toPx())
+      )
+    }
+
+    Row(
+      modifier = Modifier
+        .align(Alignment.Center)
+        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 21.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      // Ships white, so no colour filter — a tinted PNG loses its edge quality at
+      // this size and the white asset already exists.
+      Image(
+        painter = painterResource(id = com.haraan.app.R.drawable.haraan_logo_white),
+        contentDescription = "Haraan",
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.height(21.dp)
+      )
+      Spacer(modifier = Modifier.width(11.dp))
+      // Hairline rule between wordmark and tag: the lockup convention that makes a
+      // qualifier read as part of the mark instead of a sticker beside it.
+      Box(
+        modifier = Modifier
+          .width(1.dp)
+          .height(15.dp)
+          .background(
+            Brush.verticalGradient(
+              listOf(Color.Transparent, Color.White.copy(alpha = 0.28f), Color.Transparent)
+            )
+          )
+      )
+      Spacer(modifier = Modifier.width(11.dp))
+      // Sized and weighted to sit as the wordmark's qualifier. Tracking is the
+      // web's 0.16em resolved against 9.5sp — wide-spaced micro-caps read cheap.
+      Text(
+        text = "SPECIAL",
+        color = Color.White.copy(alpha = 0.86f),
+        fontSize = 9.5.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.52.sp,
+        lineHeight = 9.5.sp,
+        modifier = Modifier.padding(top = 1.dp)
+      )
+    }
+  }
+}
 
 // One ad creative — drives the native slot. Swap these fields (or rotate a list of
 // them) to serve different campaigns through the same layout. An empty [imageUrl]
@@ -7537,6 +9573,169 @@ private fun LeaderboardHomeWidget(district: String?) {
   }
 }
 
+// "Top players near you" — the real ranked board for the viewer's own district,
+// standing in the slot the sponsored ad strip used to hold on GameHub.
+//
+// Two rules this section must keep:
+//  1. It never invents a player. The board is GET /api/leaderboards/{scope}; when
+//     nothing comes back the section removes itself rather than render placeholders.
+//  2. It never claims "near you" about data that isn't. A district with no ranked
+//     players falls back to the all-India board AND retitles itself to say so.
+@Composable
+private fun TopPlayersNearYouSection(
+  district: String?,
+  onPlayerClick: (String) -> Unit,
+) {
+  // `null` while in flight: the section renders nothing until it knows, so the
+  // feed never flashes an empty rail that then fills in.
+  // second = true when these rows really are the viewer's district.
+  val board by androidx.compose.runtime.produceState<Pair<List<com.haraan.app.data.LeaderboardRow>, Boolean>?>(
+    initialValue = null, key1 = district
+  ) {
+    val repo = com.haraan.app.data.LeaderboardRepository()
+    val local = if (district.isNullOrBlank()) emptyList()
+    else runCatching { repo.fetchBoard("district", district, limit = 10) }.getOrDefault(emptyList())
+    value = if (local.isNotEmpty()) local to true
+    else runCatching { repo.fetchBoard("india", null, limit = 10) }.getOrDefault(emptyList()) to false
+  }
+
+  val rows = board?.first.orEmpty()
+  val isNearby = board?.second == true
+  if (rows.isEmpty()) return
+
+  Column(modifier = Modifier.fillMaxWidth()) {
+    GameHubSectionHeader(
+      title = if (isNearby) "Top players near you" else "Top ranked players",
+      subtitle = if (isNearby) "$district • ranked this month" else "Across India • ranked this month",
+    )
+    androidx.compose.foundation.lazy.LazyRow(
+      contentPadding = PaddingValues(horizontal = 16.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp)
+    ) {
+      items(rows.size) { i ->
+        val row = rows[i]
+        TopPlayerCard(
+          row = row,
+          // Seed rows without a Player ID can't open a profile; the card stays
+          // inert rather than pushing a screen that would fail to load.
+          onClick = { row.playerId.takeIf { it.isNotBlank() }?.let(onPlayerClick) }
+        )
+      }
+    }
+  }
+}
+
+// One player in the "Top players near you" rail.
+@Composable
+private fun TopPlayerCard(
+  row: com.haraan.app.data.LeaderboardRow,
+  onClick: () -> Unit,
+) {
+  val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+  val pressed by interaction.collectIsPressedAsState()
+  val scale by animateFloatAsState(
+    targetValue = if (pressed) 0.96f else 1f,
+    animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+    label = "topPlayerPress"
+  )
+  // Medals for the podium, one neutral blue chip for everyone else — the top three
+  // read at a glance without inventing a hierarchy among ranks 4-10.
+  val (chipBg, chipFg) = when (row.rank) {
+    1 -> Color(0xFFFEF3C7) to Color(0xFF92400E)
+    2 -> Color(0xFFF1F5F9) to Color(0xFF475569)
+    3 -> Color(0xFFFDE8D7) to Color(0xFF9A3412)
+    else -> Color(0xFFEFF6FF) to HaraanColors.GameHubDeep
+  }
+
+  Card(
+    modifier = Modifier
+      .width(148.dp)
+      .graphicsLayer { scaleX = scale; scaleY = scale }
+      .premiumCardShadow(radius = UnifiedCornerRadius)
+      .clickable(interactionSource = interaction, indication = null) { onClick() },
+    shape = RoundedCornerShape(UnifiedCornerRadius),
+    colors = CardDefaults.cardColors(containerColor = HaraanColors.Surface),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+      Row(modifier = Modifier.fillMaxWidth()) {
+        Surface(color = chipBg, shape = RoundedCornerShape(999.dp)) {
+          Text(
+            text = "#${row.rank}",
+            color = chipFg,
+            style = HaraanTypography.LabelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      Box(
+        modifier = Modifier
+          .size(56.dp)
+          .clip(CircleShape)
+          .background(Color(0xFFEFF6FF)),
+        contentAlignment = Alignment.Center
+      ) {
+        val avatar = com.haraan.app.data.ApiConfig.mediaUrl(row.avatar)
+        // A URL is not a picture: rows carry avatar paths whose file is missing, and
+        // AsyncImage draws NOTHING on failure — an empty circle, seen on device.
+        // Track the error and fall through to the initial.
+        var avatarFailed by remember(avatar) { mutableStateOf(false) }
+        if (!avatar.isNullOrBlank() && !avatarFailed) {
+          AsyncImage(
+            model = avatar,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onError = { avatarFailed = true },
+            modifier = Modifier.fillMaxSize().clip(CircleShape)
+          )
+        } else {
+          // Initial, not a stock silhouette — a real name is better identification
+          // than a generic avatar, and it can't be mistaken for a photo we have.
+          Text(
+            text = row.name.trim().take(1).uppercase().ifBlank { "?" },
+            color = HaraanColors.GameHubDeep,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      Text(
+        text = row.name.ifBlank { "Unnamed player" },
+        color = HaraanColors.TextPrimary,
+        style = HaraanTypography.TitleMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+      )
+      Spacer(modifier = Modifier.height(3.dp))
+      Text(
+        text = "%,d XP".format(row.xp),
+        color = HaraanColors.GameHubDeep,
+        style = HaraanTypography.LabelSmall.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold)
+      )
+      Text(
+        text = if (row.matches == 1) "1 match" else "${row.matches} matches",
+        color = HaraanColors.TextSecondary,
+        style = HaraanTypography.BodyMedium.copy(fontSize = 11.sp),
+        maxLines = 1
+      )
+    }
+  }
+}
+
 @Composable
 private fun TrendingRowSection(
   events: List<EventItem>,
@@ -7545,7 +9744,12 @@ private fun TrendingRowSection(
   LazyRow(
     contentPadding = PaddingValues(start = 36.dp, end = 24.dp),
     horizontalArrangement = Arrangement.spacedBy(32.dp),
-    modifier = Modifier.fillMaxWidth()
+    modifier = Modifier.fillMaxWidth(),
+    // The rail's own edge effect is orientation-agnostic — it pulls the top/bottom
+    // edges from any vertical component of a drag that lands on these cards, which
+    // stretched the rank numbers while the feed underneath was scrolling. The rail
+    // keeps its fling; it just no longer draws a stretch.
+    overscrollEffect = null
   ) {
     itemsIndexed(events) { index, event ->
       Box(
@@ -7667,7 +9871,7 @@ fun PremiumSegmentedSwitch(
     onTabSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val tabs = listOf("Events" to "Events", "GameHub" to "GameHub")
+    val tabs = listOf("Events" to "Events", "GameHub" to "Pulse")
     
     // --- COLOR PALETTE ALIGNED WITH YOUR SCREENSHOT ---
     val containerBg = Color(0xFFF1F5F9)       // Clean, soft capsule background
@@ -7675,13 +9879,11 @@ fun PremiumSegmentedSwitch(
     val activeText = Color.White               // Crisp white text for readability on the blue gradient
     val inactiveText = Color(0xFF64748B)       // Muted slate gray for unselected states
 
-    // The beautiful onwards blue gradient
-    val activeGradient = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFF3B82F6), // Slightly lighter onwards blue
-            LightAccentBlue    // Onwards blue color (Color(0xFF2563EB))
-        )
-    )
+    // Flat brand blue — the exact fill of the "Haraan special" band directly below
+    // it. This used to be a #3B82F6 → #2563EB vertical gradient, which put two
+    // different blues within 20dp of each other and read as a mismatch. One value,
+    // one blue: never reintroduce a gradient here without changing the band too.
+    val activeGradient = SolidColor(LightAccentBlue) // Color(0xFF2563EB)
 
     BoxWithConstraints(
         modifier = modifier
@@ -7714,10 +9916,14 @@ fun PremiumSegmentedSwitch(
                     .offset(x = indicatorOffset)
                     .width(tabWidth)
                     .fillMaxHeight()
+                    // Soft drop shadow makes the active choice pop forward visually.
+                    // MUST come before the fill: chained after `background()` its
+                    // layer painted the ambient shadow OVER the pill, multiplying the
+                    // blue down to #1D4EB9 — which is why this no longer matched the
+                    // band. Shadow first, then clip, then fill.
+                    .shadow(1.dp, RoundedCornerShape(22.dp))
                     .clip(RoundedCornerShape(22.dp))
                     .background(activeGradient)
-                    // Soft drop shadow makes the active choice pop forward visually
-                    .shadow(1.dp, RoundedCornerShape(22.dp)) 
             )
 
             // --- INTERACTIVE LABELS LAYER ---

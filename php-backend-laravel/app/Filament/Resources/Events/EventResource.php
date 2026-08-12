@@ -12,6 +12,7 @@ use App\Filament\Resources\Events\Tables\EventsTable;
 use App\Filament\Concerns\ScopesToOrganization;
 use App\Models\Event;
 use BackedEnum;
+use Filament\Facades\Filament;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -28,6 +29,27 @@ class EventResource extends Resource
     protected static ?string $cluster = \App\Filament\Clusters\Events\EventsCluster::class;
 
     protected static ?int $navigationSort = 1;
+
+    /**
+     * Pending-review count as a nav badge — the "these are waiting on you" signal
+     * so partner-submitted events surface in /control the moment they land. Only
+     * on the admin panel; partners don't review, so it stays off /partner.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        if (Filament::getCurrentPanel()?->getId() !== 'control') {
+            return null;
+        }
+
+        $count = Event::whereRaw('lower(status) = ?', ['pending'])->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
 
     public static function canAccess(): bool
     {
@@ -79,10 +101,12 @@ class EventResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            // Ticket tiers (Kid/Adult/Couple/… ) for the event — add, edit prices, delete.
-            TicketTypesRelationManager::class,
-        ];
+        // Ticket tiers are now authored in the Ticket Studio inside the edit form (see
+        // EventForm::ticketsStep + EditEvent reconciliation). Keeping the relation manager
+        // here too would be a second, conflicting tier editor on the same page — the
+        // studio hydrates at page load and reconciles on save, so it would overwrite any
+        // change the relation manager wrote. So it's retired from the edit page.
+        return [];
     }
 
     public static function getPages(): array
@@ -93,6 +117,8 @@ class EventResource extends Resource
             // Clicking an event name opens this read-only analytics dashboard (see EventsTable
             // ->recordUrl); editing is a deliberate, separate action via the Edit button.
             'analytics' => EventAnalytics::route('/{record}/analytics'),
+            // Partner desk "register an attendee + take payment" flow (see EventRegister).
+            'register' => \App\Filament\Resources\Events\Pages\EventRegister::route('/{record}/register'),
             'edit' => EditEvent::route('/{record}/edit'),
         ];
     }

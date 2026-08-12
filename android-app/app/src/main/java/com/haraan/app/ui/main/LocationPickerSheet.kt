@@ -27,10 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.haraan.app.data.CityOption
 import com.haraan.app.data.LocationState
+import com.haraan.app.ui.theme.HaraanColors
 
 // 0 == "Any distance".
-private val radiusOptions = listOf(2, 5, 10, 25, 0)
-private val accent = Color(0xFF2563EB)
+private val radiusOptions = listOf(5, 10, 30, 50, 0)
+private val accent = HaraanColors.EventsBlue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

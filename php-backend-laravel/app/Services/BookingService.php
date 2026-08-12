@@ -7,17 +7,22 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Coupon;
 use App\Models\Event;
+use App\Models\EventSlot;
 use App\Models\TicketType;
 use App\Models\User;
 use App\Models\Venue;
+use App\Models\VenueBlock;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
 use App\Support\ContactPrefill;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -38,8 +43,18 @@ final class BookingService
      * seat returns to the pool for the next person — see {@see releaseExpired()}
      * and the scheduled `bookings:release-expired` sweep. Keep short so an
      * abandoned checkout doesn't strand inventory; long enough to finish paying.
+     *
+     * "Long enough to finish paying" is the load-bearing half, and one minute was
+     * not it. A UPI collect request has to travel to the payer's bank app, wait for
+     * a human to open it and approve, and travel back; card 3-D Secure adds an OTP
+     * screen. Sixty seconds routinely lapses mid-payment, and the every-minute sweep
+     * would then expire the hold while the charge went through — money taken against
+     * a booking marked EXPIRED, invisible in every report. Fifteen minutes matches
+     * what the desk-registration flow already pushed its own holds out to.
      */
-    public const RESERVATION_HOLD_MINUTES = 1;
+    public const RESERVATION_HOLD_MINUTES = 15;
+
+    public function __construct(private readonly RazorpayGateway $razorpay) {}
 
     /**
      * Create a new confirmed booking inside a DB transaction.
@@ -74,6 +89,7 @@ final class BookingService
             (int) $data['eventId'],
             $lines,
             $data['couponCode'] ?? null,
+            eventSlotId: isset($data['eventSlotId']) ? (int) $data['eventSlotId'] : null,
         )->first();
     }
 
@@ -96,7 +112,7 @@ final class BookingService
      *         Who the ticket is for, captured at checkout. Optional so older callers
      *         (and venue bookings) keep working; stored on every row of the order.
      */
-    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], bool $reserve = false): Collection
+    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], ?int $eventSlotId = null, bool $reserve = false): Collection
     {
         // Reserve mode holds inventory in a PENDING row until payment confirms. Sweep any
         // holds that were never paid first, so their seats are back in the pool for this order.
@@ -133,15 +149,47 @@ final class BookingService
             'attendee_phone' => self::clean($contact['phone'] ?? null) ?? (trim((string) $user->phone) ?: null),
         ];
 
-        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee, $reserve): Collection {
+        return DB::transaction(function () use ($user, $eventId, $normalised, $totalTickets, $couponCode, $attendee, $eventSlotId, $reserve): Collection {
             $event = Event::query()->lockForUpdate()->find($eventId);
 
             if ($event === null) {
                 throw new NotFoundHttpException('Event not found');
             }
 
+            // Host's manual "Sold out" override closes sales regardless of slot count.
+            if ($event->is_sold_out) {
+                throw new ConflictHttpException('This event is sold out');
+            }
+
             if ($event->available_slots < $totalTickets) {
                 throw new ConflictHttpException('Not enough seats available');
+            }
+
+            // Resolve the session ("time slot") this order is for. When the event runs
+            // across several sessions one must be chosen; a single-session event defaults
+            // to its sole slot so per-session inventory stays accurate everywhere.
+            $slot     = null;
+            $slotIds  = $event->slots()->orderBy('sort')->orderBy('id')->pluck('id');
+            $slotCount = $slotIds->count();
+
+            if ($eventSlotId !== null) {
+                /** @var EventSlot|null $slot */
+                $slot = EventSlot::query()->lockForUpdate()->where('event_id', $event->id)->find($eventSlotId);
+
+                if ($slot === null) {
+                    throw new NotFoundHttpException('Session not found');
+                }
+            } elseif ($slotCount > 1) {
+                throw new ConflictHttpException('Please choose a session');
+            } elseif ($slotCount === 1) {
+                $slot = EventSlot::query()->lockForUpdate()->find($slotIds->first());
+            }
+
+            if ($slot !== null) {
+                $slotLeft = $slot->remaining();
+                if ($slotLeft !== null && $slotLeft < $totalTickets) {
+                    throw new ConflictHttpException("Only {$slotLeft} left for “{$slot->displayLabel()}”");
+                }
             }
 
             // Eloquent's collection, not collect(): callers relation-load the result
@@ -171,9 +219,24 @@ final class BookingService
                         throw new ConflictHttpException("“{$tier->name}” is not on sale right now");
                     }
 
+                    // Sequential release: a later-phase tier can't be bought until every
+                    // earlier phase has sold out (see Event::phaseReleased()).
+                    if (! $event->phaseReleased((int) $tier->release_phase)) {
+                        throw new ConflictHttpException("“{$tier->name}” isn’t on sale yet");
+                    }
+
                     $remaining = $tier->remaining();
                     if ($remaining !== null && $remaining < $qty) {
                         throw new ConflictHttpException("Only {$remaining} left for “{$tier->name}”");
+                    }
+
+                    // Bulk-booking bounds: a tier may set a min/max per order.
+                    ['min' => $minQty, 'max' => $maxQty] = $tier->orderBounds();
+                    if ($qty < $minQty) {
+                        throw new ConflictHttpException("Buy at least {$minQty} of “{$tier->name}”");
+                    }
+                    if ($qty > $maxQty) {
+                        throw new ConflictHttpException("At most {$maxQty} of “{$tier->name}” per order");
                     }
 
                     // Price the whole line at the tier's live phase price. Inventory
@@ -195,8 +258,16 @@ final class BookingService
                     'user_id'        => $user->id,
                     'event_id'       => $event->id,
                     'ticket_type_id' => $tier?->id,
+                    'event_slot_id'  => $slot?->id,
                     ...$attendee,
                 ]));
+            }
+
+            // Advance the session's own sold count so per-session inventory tracks
+            // alongside the tier and event totals.
+            if ($slot !== null) {
+                $slot->sold += $totalTickets;
+                $slot->save();
             }
 
             // Host-set convenience fee on the ticket subtotal — charged once for the
@@ -204,17 +275,16 @@ final class BookingService
             $subtotal = (float) $bookings->sum('total_amount');
             $fee      = $event->convenienceFeeFor($subtotal);
 
-            // Coupon: a redeemable code takes a flat ₹ amount off the payable total
-            // (never below zero). Applied once for the order and its use is counted.
-            $discount = 0.0;
-            $coupon   = Coupon::findByCode($couponCode);
-            if ($coupon !== null && $coupon->isRedeemable() && $coupon->appliesToEvent($event->id)) {
-                $discount = min((float) $coupon->discount, $subtotal + $fee);
-                // A reserved (unpaid) order must not yet burn a coupon use — that's counted
-                // on confirmation, so an abandoned checkout doesn't consume the code.
-                if (! $reserve) {
-                    $coupon->increment('uses');
-                }
+            // Coupon: a redeemable code takes an amount off the payable total (never below
+            // zero). Same resolution the checkout preview ran, re-done here on the prices
+            // this transaction actually wrote — the preview is a quote, this is the charge.
+            $applied  = $this->resolveCoupon($user, $event->id, $couponCode, $subtotal, $fee, $totalTickets);
+            $discount = $applied['discount'];
+
+            // A reserved (unpaid) order must not yet burn a coupon use — that's counted
+            // on confirmation, so an abandoned checkout doesn't consume the code.
+            if ($applied['coupon'] !== null && ! $reserve) {
+                $applied['coupon']->increment('uses');
             }
 
             if ($fee > 0 || $discount > 0) {
@@ -229,6 +299,75 @@ final class BookingService
 
             return $bookings;
         });
+    }
+
+    /**
+     * Decide whether a code applies to an order, and for how much.
+     *
+     * The single place that answers that question: checkout calls it to preview a
+     * discount the moment the buyer hits Apply, and {@see createOrder()} calls it
+     * again to apply the discount for real. Sharing it is the point — a preview that
+     * disagreed with the charge would be worse than no preview at all.
+     *
+     * `coupon` is non-null only when the code is genuinely usable (that's the caller's
+     * cue to count a use); otherwise `message` says why not, in words meant for the buyer.
+     * The discount never exceeds the payable total, so an order can't go below ₹0.
+     *
+     * @return array{coupon: Coupon|null, discount: float, message: string}
+     */
+    public function resolveCoupon(User $user, int $eventId, ?string $code, float $subtotal, float $fee = 0.0, ?int $tickets = null): array
+    {
+        $reject = static fn (string $message): array => ['coupon' => null, 'discount' => 0.0, 'message' => $message];
+
+        $coupon = Coupon::findByCode($code);
+
+        if ($coupon === null || ! $coupon->isRedeemable()) {
+            return $reject('This code isn’t valid.');
+        }
+
+        if (! $coupon->appliesToEvent($eventId)) {
+            return $reject('This code isn’t valid for this event.');
+        }
+
+        if (! $coupon->meetsMinOrder($subtotal)) {
+            return $reject('Applies on orders over ₹' . number_format((float) $coupon->min_order) . '.');
+        }
+
+        if (! $coupon->meetsMinTickets($tickets)) {
+            return $reject('Applies on ' . (int) $coupon->min_tickets . ' tickets or more.');
+        }
+
+        if (! $this->couponWithinPerCustomerLimit($coupon, (int) $user->id)) {
+            return $reject('You’ve already used this code.');
+        }
+
+        return [
+            'coupon'   => $coupon,
+            'discount' => round(min($coupon->discountFor($subtotal), $subtotal + $fee), 2),
+            'message'  => 'Coupon applied.',
+        ];
+    }
+
+    /**
+     * Whether this user is still under the coupon's per-customer usage cap (null = unlimited).
+     *
+     * One discounted booking row is written per order (the discount lives on the first row of
+     * an order), so counting this user's discounted rows for this code counts their prior orders
+     * that actually used it.
+     */
+    private function couponWithinPerCustomerLimit(Coupon $coupon, int $userId): bool
+    {
+        if ($coupon->per_customer_limit === null) {
+            return true;
+        }
+
+        $used = Booking::query()
+            ->where('user_id', $userId)
+            ->whereRaw('lower(coupon_code) = ?', [strtolower((string) $coupon->code)])
+            ->where('discount', '>', 0)
+            ->count();
+
+        return $used < (int) $coupon->per_customer_limit;
     }
 
     /**
@@ -292,8 +431,19 @@ final class BookingService
             $alreadyConfirmed = strtoupper((string) $bookings->first()->status) === 'CONFIRMED';
 
             foreach ($bookings as $booking) {
-                if (strtoupper((string) $booking->status) === 'CONFIRMED') {
+                $was = strtoupper((string) $booking->status);
+
+                if ($was === 'CONFIRMED') {
                     continue;
+                }
+
+                // A row that is no longer PENDING had its hold released and its seats
+                // handed back to the pool (EXPIRED / CANCELLED). Confirming it without
+                // taking that inventory again would sell the same seat twice over: the
+                // sell-through and "Bookings x / y" figures read the event's slot counts,
+                // so a paid ticket would show revenue and no seat sold.
+                if ($was !== 'PENDING') {
+                    $this->reclaimInventory($booking);
                 }
 
                 $booking->status = 'CONFIRMED';
@@ -354,17 +504,15 @@ final class BookingService
      */
     public function releaseExpired(int $eventId): void
     {
-        $ids = Booking::query()
-            ->where('event_id', $eventId)
-            ->whereRaw('upper(status) = ?', ['PENDING'])
-            ->whereNotNull('reserved_until')
-            ->where('reserved_until', '<', now())
-            ->pluck('id')
-            ->all();
-
-        if ($ids !== []) {
-            $this->releaseBookings($ids);
-        }
+        $this->settleLapsedHolds(
+            Booking::query()
+                ->where('event_id', $eventId)
+                ->whereRaw('upper(status) = ?', ['PENDING'])
+                ->whereNotNull('reserved_until')
+                ->where('reserved_until', '<', now())
+                ->pluck('id')
+                ->all(),
+        );
     }
 
     /**
@@ -379,20 +527,152 @@ final class BookingService
      */
     public function releaseAllExpired(): int
     {
-        $ids = Booking::query()
-            ->whereRaw('upper(status) = ?', ['PENDING'])
-            ->whereNotNull('reserved_until')
-            ->where('reserved_until', '<', now())
-            ->pluck('id')
-            ->all();
+        return $this->settleLapsedHolds(
+            Booking::query()
+                ->whereRaw('upper(status) = ?', ['PENDING'])
+                ->whereNotNull('reserved_until')
+                ->where('reserved_until', '<', now())
+                ->pluck('id')
+                ->all(),
+        );
+    }
 
-        if ($ids === []) {
+    /**
+     * Decide what a lapsed hold actually is, then act: an abandoned checkout is released,
+     * a hold whose payment went through anyway is CONFIRMED.
+     *
+     * A lapsed hold is not proof nobody paid. The buyer's browser can die between Razorpay
+     * capturing the money and our confirm callback firing, and the hold then looks exactly
+     * like an abandoned one. Expiring it loses a paid ticket: the customer is charged, gets
+     * nothing, and the order never appears in the host's analytics because every report
+     * counts only confirmed/paid rows. So any hold that got as far as a gateway order is
+     * checked against Razorpay before it is written off.
+     *
+     * Fails SAFE in both directions. If Razorpay can't be reached we keep the hold and try
+     * again on the next sweep (a minute later) rather than guess "unpaid" — stranding a seat
+     * briefly is recoverable, expiring a paid ticket is not.
+     *
+     * @param  list<int>  $bookingIds
+     * @return int  how many holds were actually released
+     */
+    private function settleLapsedHolds(array $bookingIds): int
+    {
+        if ($bookingIds === []) {
             return 0;
         }
 
-        $this->releaseBookings($ids);
+        /** @var array<string, list<int>> $byOrder */
+        $byOrder = [];
+        $neverCharged = [];
 
-        return count($ids);
+        foreach (Booking::query()->whereIn('id', $bookingIds)->get(['id', 'razorpay_order_id']) as $row) {
+            $orderId = trim((string) $row->razorpay_order_id);
+
+            // No gateway order — checkout never reached payment, so nothing can have been
+            // charged and the seats go straight back.
+            if ($orderId === '') {
+                $neverCharged[] = (int) $row->id;
+
+                continue;
+            }
+
+            $byOrder[$orderId][] = (int) $row->id;
+        }
+
+        $released = 0;
+
+        if ($neverCharged !== []) {
+            $this->releaseBookings($neverCharged);
+            $released += count($neverCharged);
+        }
+
+        foreach ($byOrder as $orderId => $ids) {
+            try {
+                $paymentId = $this->razorpay->capturedPaymentFor($orderId);
+            } catch (RuntimeException $e) {
+                // "Don't know" — leave the hold standing and re-ask next sweep.
+                Log::warning("Could not check Razorpay order {$orderId} before expiring its hold: " . $e->getMessage());
+
+                continue;
+            }
+
+            if ($paymentId !== null) {
+                $this->confirmReservation($ids, $paymentId);
+
+                Log::warning("Razorpay order {$orderId} was paid but never confirmed by the client; confirmed booking(s) " . implode(', ', $ids) . ' from the sweep.');
+
+                BookingNotifier::dispatch(Booking::query()->find($ids[0]));
+
+                continue;
+            }
+
+            $this->releaseBookings($ids);
+            $released += count($ids);
+        }
+
+        return $released;
+    }
+
+    /**
+     * Find orders Razorpay says were paid but that never became tickets, and (optionally) put
+     * them right.
+     *
+     * The sweep only ever looks at PENDING holds, so it cannot reach an order that a previous
+     * build already wrote off as EXPIRED — those rows are settled as far as the system is
+     * concerned, and settled wrongly: the buyer was charged, has no ticket, and the host's
+     * reports have never counted the sale. This is the one-off repair for that backlog, and a
+     * reconciliation any host can re-run afterwards.
+     *
+     * Reports by default and changes nothing until $apply is true, because the failure mode of
+     * getting this wrong is issuing tickets nobody paid for.
+     *
+     * @return list<array{order: string, bookings: list<int>, payment: ?string, action: string}>
+     */
+    public function reconcileUnconfirmedPayments(int $sinceDays = 30, bool $apply = false): array
+    {
+        $rows = Booking::query()
+            ->whereNotNull('razorpay_order_id')
+            ->whereNotIn(DB::raw('upper(status)'), ['CONFIRMED', 'CANCELLED', 'REFUNDED'])
+            ->where('created_at', '>=', now()->subDays(max(1, $sinceDays)))
+            ->get(['id', 'razorpay_order_id']);
+
+        /** @var array<string, list<int>> $byOrder */
+        $byOrder = [];
+
+        foreach ($rows as $row) {
+            $byOrder[trim((string) $row->razorpay_order_id)][] = (int) $row->id;
+        }
+
+        $found = [];
+
+        foreach ($byOrder as $orderId => $ids) {
+            try {
+                $paymentId = $this->razorpay->capturedPaymentFor($orderId);
+            } catch (RuntimeException $e) {
+                $found[] = ['order' => $orderId, 'bookings' => $ids, 'payment' => null, 'action' => 'unreachable'];
+
+                continue;
+            }
+
+            if ($paymentId === null) {
+                continue;
+            }
+
+            if (! $apply) {
+                $found[] = ['order' => $orderId, 'bookings' => $ids, 'payment' => $paymentId, 'action' => 'would confirm'];
+
+                continue;
+            }
+
+            $this->confirmReservation($ids, $paymentId);
+            BookingNotifier::dispatch(Booking::query()->find($ids[0]));
+
+            Log::warning("Reconciled paid-but-unconfirmed Razorpay order {$orderId} → booking(s) " . implode(', ', $ids) . '.');
+
+            $found[] = ['order' => $orderId, 'bookings' => $ids, 'payment' => $paymentId, 'action' => 'confirmed'];
+        }
+
+        return $found;
     }
 
     /**
@@ -408,6 +688,15 @@ final class BookingService
 
             foreach ($bookings as $booking) {
                 if (strtoupper((string) $booking->status) !== 'PENDING') {
+                    continue;
+                }
+
+                // Never expire a row that carries a payment id. Nothing should route a paid
+                // booking here — but this is the one path that can turn a customer's money
+                // into a cancelled ticket, so it refuses rather than trusts its callers.
+                if (trim((string) $booking->razorpay_payment_id) !== '') {
+                    Log::error("Refused to expire booking {$booking->id}: it has payment {$booking->razorpay_payment_id} against it.");
+
                     continue;
                 }
 
@@ -428,6 +717,14 @@ final class BookingService
                     }
                 }
 
+                if ($booking->event_slot_id !== null) {
+                    $slot = EventSlot::query()->lockForUpdate()->find($booking->event_slot_id);
+                    if ($slot !== null) {
+                        $slot->sold = max(0, (int) $slot->sold - (int) $booking->quantity);
+                        $slot->save();
+                    }
+                }
+
                 $booking->status = 'EXPIRED';
                 $booking->reserved_until = null;
                 $booking->save();
@@ -435,6 +732,62 @@ final class BookingService
         });
     }
 
+    /**
+     * Take back the inventory a released booking had handed to the pool, for a row that is
+     * being confirmed after its hold already lapsed. The exact inverse of what
+     * {@see releaseBookings()} gave back: the event's available slots, the tier's sold count,
+     * and the session's sold count.
+     *
+     * Runs inside the caller's transaction ({@see confirmReservation()}) and locks the same
+     * rows, so a concurrent buyer can't slip between the check and the write.
+     *
+     * The seats may be gone — someone else can have bought them while the hold was lapsed.
+     * The booking is confirmed anyway: the money is taken, and a customer holding a paid
+     * ticket must have a ticket. Available slots floor at zero and the oversell is logged
+     * loudly, because that is a real-world problem for the host to resolve at the door, not
+     * something to hide by quietly dropping the order.
+     */
+    private function reclaimInventory(Booking $booking): void
+    {
+        $qty = (int) $booking->quantity;
+
+        if ($qty < 1) {
+            return;
+        }
+
+        if ($booking->event_id !== null) {
+            $event = Event::query()->lockForUpdate()->find($booking->event_id);
+
+            if ($event !== null) {
+                $left = (int) $event->available_slots;
+
+                if ($left < $qty) {
+                    Log::error("Booking {$booking->id} confirmed after its hold lapsed, but event {$event->id} only had {$left} of {$qty} seat(s) left — the event is oversold.");
+                }
+
+                $event->available_slots = max(0, $left - $qty);
+                $event->save();
+            }
+        }
+
+        if ($booking->ticket_type_id !== null) {
+            $tier = TicketType::query()->lockForUpdate()->find($booking->ticket_type_id);
+
+            if ($tier !== null) {
+                $tier->sold = (int) $tier->sold + $qty;
+                $tier->save();
+            }
+        }
+
+        if ($booking->event_slot_id !== null) {
+            $slot = EventSlot::query()->lockForUpdate()->find($booking->event_slot_id);
+
+            if ($slot !== null) {
+                $slot->sold = (int) $slot->sold + $qty;
+                $slot->save();
+            }
+        }
+    }
 
     /**
      * Create a confirmed venue booking for a customer (online / app).
@@ -575,7 +928,7 @@ final class BookingService
             $startHm = $startMin !== null ? $this->minutesToHm($startMin) : null;
             $endHm = $endMin !== null ? $this->minutesToHm($endMin) : null;
 
-            $this->assertWindowFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
+            $this->assertCourtHourFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
 
             return Booking::query()->create([
                 'quantity'       => 1,
@@ -611,7 +964,65 @@ final class BookingService
      *
      * @throws ConflictHttpException  When the window (or slot) is already taken.
      */
-    private function assertWindowFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    private function assertCourtHourFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    {
+        $this->assertNoBookingOverlap($venueId, $courtId, $slotId, $date, $startMin, $endMin);
+        $this->assertNoBlockOverlap($venueId, $courtId, $date, $startMin, $endMin);
+    }
+
+    /**
+     * Reject the reservation if a non-booking block already owns this court-hour —
+     * maintenance, a holiday, an academy batch, a tournament hold, a private hire.
+     *
+     * Three rules, kept in PHP because they read better than the SQL would:
+     * a block with no court covers every court; a block with no time window covers
+     * the whole day; a block with a weekday applies only on that weekday inside its
+     * date range (the range + weekday narrowing happens in scopeApplyingOn).
+     *
+     * @throws ConflictHttpException  When a block covers the requested window.
+     */
+    private function assertNoBlockOverlap(int $venueId, ?int $courtId, string $date, ?int $startMin, ?int $endMin): void
+    {
+        $day = Carbon::parse($date);
+
+        $blocks = VenueBlock::query()->applyingOn($venueId, $day)->get();
+
+        foreach ($blocks as $block) {
+            if (! $block->coversCourt($courtId)) {
+                continue;
+            }
+
+            // Whole-day block, or a booking with no window we can reason about:
+            // refuse rather than risk a clash we can't see.
+            if ($block->isAllDay() || $startMin === null || $endMin === null) {
+                throw new ConflictHttpException(
+                    sprintf('That court is unavailable on this date (%s)', $block->label()),
+                );
+            }
+
+            $bs = $this->timeToMinutes($block->start_time);
+            $be = $this->timeToMinutes($block->end_time);
+
+            if ($bs === null || $be === null) {
+                throw new ConflictHttpException(
+                    sprintf('That court is unavailable on this date (%s)', $block->label()),
+                );
+            }
+
+            if ($startMin < $be && $endMin > $bs) {
+                throw new ConflictHttpException(
+                    sprintf('That court is unavailable at this time (%s)', $block->label()),
+                );
+            }
+        }
+    }
+
+    /**
+     * Reject the reservation if it clashes with another booking on the same court.
+     *
+     * @throws ConflictHttpException  When the window (or slot) is already taken.
+     */
+    private function assertNoBookingOverlap(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
     {
         if ($courtId !== null) {
             $existing = Booking::query()
@@ -619,8 +1030,7 @@ final class BookingService
                 ->where('venue_id', $venueId)
                 ->where('venue_court_id', $courtId)
                 ->whereDate('slot_date', $date)
-                // Filament-created bookings store lowercase 'confirmed'; match case-insensitively.
-                ->whereRaw('lower(status) = ?', ['confirmed'])
+                ->where(fn ($q) => $this->occupyingStatuses($q))
                 ->get(['start_time', 'end_time']);
 
             foreach ($existing as $b) {
@@ -647,13 +1057,34 @@ final class BookingService
                 ->where('venue_id', $venueId)
                 ->where('venue_slot_id', $slotId)
                 ->whereDate('slot_date', $date)
-                ->whereRaw('lower(status) = ?', ['confirmed'])
+                ->where(fn ($q) => $this->occupyingStatuses($q))
                 ->exists();
 
             if ($taken) {
                 throw new ConflictHttpException('That slot is already booked for this date');
             }
         }
+    }
+
+    /**
+     * Bookings that physically hold their court-hour.
+     *
+     * Occupancy is a question about LIFECYCLE, never about money — an unpaid
+     * booking and one with a ₹500 advance both still own the slot. `payment_status`
+     * must never appear in this predicate; that is the mistake that would let a
+     * venue sell the same 7pm Saturday twice. Live holds (a PENDING row inside its
+     * `reserved_until` window) count too; expired ones release the slot.
+     *
+     * Filament-created bookings store lowercase 'confirmed', so match case-insensitively.
+     */
+    private function occupyingStatuses(Builder $query): Builder
+    {
+        return $query
+            ->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed', 'checked_in'])
+            ->orWhere(fn (Builder $hold) => $hold
+                ->whereRaw('lower(status) = ?', ['pending'])
+                ->whereNotNull('reserved_until')
+                ->where('reserved_until', '>', now()));
     }
 
     /** Human-readable booking label, e.g. "Court 1 · Today · 7:00 PM – 8:00 PM". */
@@ -725,6 +1156,22 @@ final class BookingService
             if ($event !== null) {
                 $event->available_slots += (int) $booking->quantity;
                 $event->save();
+            }
+
+            if ($booking->ticket_type_id !== null) {
+                $tier = TicketType::query()->lockForUpdate()->find($booking->ticket_type_id);
+                if ($tier !== null) {
+                    $tier->sold = max(0, (int) $tier->sold - (int) $booking->quantity);
+                    $tier->save();
+                }
+            }
+
+            if ($booking->event_slot_id !== null) {
+                $slot = EventSlot::query()->lockForUpdate()->find($booking->event_slot_id);
+                if ($slot !== null) {
+                    $slot->sold = max(0, (int) $slot->sold - (int) $booking->quantity);
+                    $slot->save();
+                }
             }
 
             $booking->status = 'CANCELLED';

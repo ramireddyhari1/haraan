@@ -26,6 +26,7 @@ import com.haraan.app.ui.components.AutoRefresh
 import com.haraan.app.ui.matches.tabs.InfoTab
 import com.haraan.app.ui.matches.tabs.CommentaryTab
 import com.haraan.app.ui.matches.tabs.LiveTab
+import com.haraan.app.ui.matches.tabs.MvpTab
 import com.haraan.app.ui.matches.tabs.ScorecardTab
 import kotlinx.coroutines.launch
 
@@ -47,6 +48,25 @@ fun MatchDetailsScreen(
     LaunchedEffect(matchId, joinCode) {
         val token = com.haraan.app.data.TokenStore.getToken(loadContext)
         viewModel.load(id = matchId, code = joinCode, token = token)
+    }
+
+    // Realtime push: subscribe to this match's channel while the screen is open, and
+    // refetch the instant a "match.updated" arrives — the WebSocket path that makes the
+    // score tick up the moment the scorer taps, not on the 12s poll below (kept as a
+    // fallback for when the socket is down). Public matches only (a channel needs the id).
+    if (matchId.isNotBlank()) {
+        androidx.compose.runtime.DisposableEffect(matchId) {
+            com.haraan.app.data.RealtimeClient.subscribe("match.$matchId")
+            onDispose { com.haraan.app.data.RealtimeClient.unsubscribe("match.$matchId") }
+        }
+        LaunchedEffect(matchId, joinCode) {
+            com.haraan.app.data.MatchRealtimeBus.updates.collect { id ->
+                if (id == matchId) {
+                    val token = com.haraan.app.data.TokenStore.getToken(loadContext)
+                    viewModel.refresh(id = matchId, code = joinCode, token = token)
+                }
+            }
+        }
     }
 
     // Live auto-refresh — ticks the score every 12s while the match is live, AND re-pulls
@@ -84,6 +104,13 @@ fun MatchDetailsScreen(
             Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
                 Text("No match data available", color = Color.Gray, fontSize = 16.sp)
             }
+        }
+        is MatchScreenState.Success if state.data.sport.equals("football", ignoreCase = true) -> {
+            // Football gets its own screen. The five tabs below are cricket's — Info,
+            // Commentary, Live, Scorecard, MVP only mean anything for a ball-by-ball
+            // sport, and a football match rendered through them showed a scorecard
+            // with every number blank.
+            FootballMatchScreen(state = state.data, onBack = onBack, modifier = modifier)
         }
         is MatchScreenState.Success -> {
             // Open on Commentary by default (index 1 in tabsList).
@@ -141,6 +168,7 @@ fun MatchDetailsScreen(
                                 1 -> CommentaryTab(state = state.data)
                                 2 -> LiveTab(state = state.data, ads = liveAds)
                                 3 -> ScorecardTab(state = state.data)
+                                4 -> MvpTab(state = state.data)
                             }
                         }
                     }

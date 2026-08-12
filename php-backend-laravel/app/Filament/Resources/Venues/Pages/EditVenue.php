@@ -44,4 +44,14 @@ class EditVenue extends EditRecord
         $this->record->update(['hours' => $this->record->displayHours()]);
         $this->record->regenerateSlotsFromHours();
     }
+
+    /**
+     * After saving, return to the venues list. Filament's default keeps you on the
+     * edit page, so "Save changes" only flashed a toast and looked like it did
+     * nothing — the user expects to be taken back to the venues page.
+     */
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
+    }
 }

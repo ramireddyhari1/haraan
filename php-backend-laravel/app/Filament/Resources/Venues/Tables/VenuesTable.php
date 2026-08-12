@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Venues\Tables;
 
 use App\Filament\Resources\Venues\Pages\CreateVenue;
+use App\Filament\Resources\Venues\VenueResource;
 use App\Models\Venue;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
@@ -109,17 +110,25 @@ class VenuesTable
                 TernaryFilter::make('is_bookable')->label('Bookable'),
                 TernaryFilter::make('is_active')->label('Live'),
             ])
-            // First-run state for a new venue-owner partner — mirror the events list.
+            // First-run state. A partner cannot create a listing (VenueResource::canCreate),
+            // so pointing them at a "add your first venue" button they aren't allowed to
+            // press would be a dead end — tell them who does it instead.
             ->emptyStateIcon('heroicon-o-building-storefront')
-            ->emptyStateHeading('No venues yet')
-            ->emptyStateDescription('Add your first turf or venue to start taking bookings and listing it in the app.')
-            ->emptyStateActions([
-                Action::make('createFirstVenue')
-                    ->label('Add your first venue')
-                    ->icon('heroicon-m-plus')
-                    ->button()
-                    ->url(fn (): string => CreateVenue::getUrl()),
-            ])
+            ->emptyStateHeading(fn (): string => VenueResource::canCreate()
+                ? 'No venues yet'
+                : 'No venue assigned to you yet')
+            ->emptyStateDescription(fn (): string => VenueResource::canCreate()
+                ? 'Add your first turf or venue to start taking bookings and listing it in the app.'
+                : 'The Haraan team sets up your venue and assigns it to this account. Once that is done it appears here and you can manage its hours, pricing and bookings. Contact support if you are expecting one.')
+            ->emptyStateActions(array_values(array_filter([
+                VenueResource::canCreate()
+                    ? Action::make('createFirstVenue')
+                        ->label('Add your first venue')
+                        ->icon('heroicon-m-plus')
+                        ->button()
+                        ->url(fn (): string => CreateVenue::getUrl())
+                    : null,
+            ])))
             ->recordActions([
                 EditAction::make(),
             ])

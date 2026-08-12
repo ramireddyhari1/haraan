@@ -12,15 +12,77 @@ final class Coupon extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['event_id','code','discount','max_uses','uses','active'];
+    protected $fillable = [
+        'event_id', 'code', 'type', 'discount', 'max_discount', 'min_order', 'min_tickets',
+        'max_uses', 'per_customer_limit', 'uses', 'active', 'expires_at', 'multi_event',
+        'eligibility', 'phone_numbers', 'restrict_dates', 'valid_dates', 'restrict_times', 'valid_times',
+    ];
 
     protected $casts = [
-        'event_id' => 'integer',
-        'discount' => 'float',
-        'max_uses' => 'integer',
-        'uses' => 'integer',
-        'active' => 'boolean',
+        'event_id'           => 'integer',
+        'discount'           => 'float',
+        'max_discount'       => 'float',
+        'min_order'          => 'float',
+        'min_tickets'        => 'integer',
+        'max_uses'           => 'integer',
+        'per_customer_limit' => 'integer',
+        'uses'               => 'integer',
+        'active'             => 'boolean',
+        'expires_at'         => 'datetime',
+        'multi_event'        => 'boolean',
+        'phone_numbers'      => 'array',
+        'restrict_dates'     => 'boolean',
+        'valid_dates'        => 'array',
+        'restrict_times'     => 'boolean',
+        'valid_times'        => 'array',
     ];
+
+    /** True once the coupon has an expiry that is now in the past. */
+    public function isExpired(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->isPast();
+    }
+
+    /** The order subtotal must reach this coupon's minimum (0 / null = no minimum). */
+    public function meetsMinOrder(float $subtotal): bool
+    {
+        return $subtotal >= (float) ($this->min_order ?? 0);
+    }
+
+    /**
+     * The order must carry at least this many tickets (0 / null = no minimum).
+     *
+     * Separate from {@see meetsMinOrder()} on purpose: "spend ₹500" and "buy 2 tickets"
+     * are different offers, and a host who wants the second one gets no help from the
+     * first. A null ticket count means the caller can't say — treat it as satisfied
+     * rather than block a coupon on a number nobody supplied.
+     */
+    public function meetsMinTickets(?int $tickets): bool
+    {
+        $required = (int) ($this->min_tickets ?? 0);
+
+        return $required <= 1 || $tickets === null || $tickets >= $required;
+    }
+
+    /**
+     * The ₹ amount this coupon takes off a given ticket subtotal, honouring its type:
+     * a fixed coupon is its flat `discount`; a percentage coupon is `discount`% of the
+     * subtotal, capped at `max_discount` when one is set. Never negative. The caller
+     * still clamps this to the payable total so a coupon can't make an order go below ₹0.
+     */
+    public function discountFor(float $subtotal): float
+    {
+        if ($this->type === 'percent') {
+            $amount = $subtotal * ((float) $this->discount / 100);
+            if ($this->max_discount !== null && (float) $this->max_discount > 0) {
+                $amount = min($amount, (float) $this->max_discount);
+            }
+        } else {
+            $amount = (float) $this->discount;
+        }
+
+        return round(max(0, $amount), 2);
+    }
 
     /** The event this coupon is scoped to; null = global (works on any event). */
     public function event(): BelongsTo
@@ -49,10 +111,10 @@ final class Coupon extends Model
         return self::query()->whereRaw('lower(code) = ?', [strtolower($code)])->first();
     }
 
-    /** True when this coupon is active and hasn't exhausted its usage cap. */
+    /** True when this coupon is active, not expired, and hasn't exhausted its usage cap. */
     public function isRedeemable(): bool
     {
-        if (! $this->active) {
+        if (! $this->active || $this->isExpired()) {
             return false;
         }
 

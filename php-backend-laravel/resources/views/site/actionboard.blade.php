@@ -1,6 +1,7 @@
 @extends('site.layout')
 
 @section('content')
+@include('site.partials.match-helpers')
 @php
     $featuredMatch = $activeMatch ?? ($matches[0] ?? null);
     $liveMatches = array_values(array_filter($matches, fn ($match) => strcasecmp($match['status'], 'Live') === 0));
@@ -188,22 +189,21 @@
     {{-- Fixed app bar — lifts (shadow) as the list scrolls beneath it. --}}
     <div class="mab__bar" id="mabBar">
         <div class="mab__head">
-            <span class="mab__logo"><img src="{{ asset('images/haraan-mark.png') }}" alt="" onerror="this.style.display='none'"></span>
-            <span class="mab__word">Haraan</span>
-            <span class="mab__sp"></span>
-            <a class="mab__ic" href="/search" aria-label="Search">
+            <span class="mab__logo" role="img" aria-label="Haraan"></span>
+            <a class="mab__search" href="/search" aria-label="Search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.2" y2="16.2"></line></svg>
+                <span>Search matches, players…</span>
             </a>
-            <button class="mab__ic" type="button" onclick="mabJoinByCode()" aria-label="Join by code">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
-            </button>
-            @auth
-                <a class="mab__create" href="{{ route('site.gamehub.actionboard.create') }}">
-            @else
-                <a class="mab__create" href="#" onclick="event.preventDefault();var b=document.getElementById('loginBtn');if(b)b.click();">
-            @endauth
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                Create
+            {{-- App-only actions (join-by-code / create) are removed from the mobile
+                 web bar; the one CTA left is "get the app". --}}
+            <a class="mab__get" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#60A5FA" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
+                    <path fill="#3DDCFF" d="M17.7 9.1 5.6 2l9 8.7z"/>
+                    <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
+                    <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
+                </svg>
+                <span>Get the app</span>
             </a>
         </div>
 
@@ -247,6 +247,8 @@
                                 $s1 = $swap ? $m['score2'] : $m['score1']; $s2 = $swap ? $m['score1'] : $m['score2'];
                                 $o1 = $swap ? $m['overs2'] : $m['overs1']; $o2 = $swap ? $m['overs1'] : $m['overs2'];
                                 $c1 = $abCode($t1); $c2 = $abCode($t2);
+                                $icon1 = hrn_team_icon($swap ? ($m['team2Logo'] ?? '') : ($m['team1Logo'] ?? ''), $swap ? ($m['team2Emblem'] ?? '') : ($m['team1Emblem'] ?? ''));
+                                $icon2 = hrn_team_icon($swap ? ($m['team1Logo'] ?? '') : ($m['team2Logo'] ?? ''), $swap ? ($m['team1Emblem'] ?? '') : ($m['team2Emblem'] ?? ''));
                                 $yet2 = $abYetToBat($s2, $o2);
                                 $place = $m['locality'] !== '' ? $m['locality'] : (strcasecmp($m['venue'], 'Custom Match') !== 0 ? $m['venue'] : '');
                                 $loc = implode(' · ', array_filter([$place, $m['district']]));
@@ -291,12 +293,12 @@
                                 <div class="mab__mbody">
                                     <div class="mab__mteams">
                                         <div class="mab__trow">
-                                            <span class="mab__tlogo" style="background: {{ $abColor($t1) }}">{{ mb_substr($c1, 0, 3) }}</span>
+                                            <span class="mab__tlogo {{ $icon1 !== '' ? 'has-img' : '' }}" style="background: {{ $icon1 !== '' ? '#fff' : $abColor($t1) }}">@if($icon1 !== '')<img src="{{ $icon1 }}" alt="{{ $c1 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c1,0,3) }}'))">@else{{ mb_substr($c1, 0, 3) }}@endif</span>
                                             <span class="mab__tname is-bat">{{ $c1 }}</span>
                                             <span class="mab__tscore is-bat">{{ $s1 }}@if ($o1 !== '')<small>{{ $o1 }}</small>@endif</span>
                                         </div>
                                         <div class="mab__trow">
-                                            <span class="mab__tlogo is-dim" style="background: {{ $abColor($t2) }}">{{ mb_substr($c2, 0, 3) }}</span>
+                                            <span class="mab__tlogo is-dim {{ $icon2 !== '' ? 'has-img' : '' }}" style="background: {{ $icon2 !== '' ? '#fff' : $abColor($t2) }}">@if($icon2 !== '')<img src="{{ $icon2 }}" alt="{{ $c2 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c2,0,3) }}'))">@else{{ mb_substr($c2, 0, 3) }}@endif</span>
                                             <span class="mab__tname is-dim">{{ $c2 }}</span>
                                             @if ($yet2)
                                                 <span class="mab__tyet">Yet to bat</span>
@@ -346,7 +348,7 @@
                             @endif
                         </div>
                         <div class="mab__dtiles">
-                            <div class="mab__dtile"><b style="color:#00C853">{{ $abSummary['liveMatches'] }}</b><span>Live</span></div>
+                            <div class="mab__dtile"><b style="color:#2563EB">{{ $abSummary['liveMatches'] }}</b><span>Live</span></div>
                             <div class="mab__dtile"><b>{{ $abSummary['players'] }}</b><span>Players</span></div>
                             <div class="mab__dtile"><b>{{ $abSummary['totalMatches'] }}</b><span>Matches</span></div>
                         </div>
@@ -436,23 +438,23 @@
     {{-- Floating bottom bar — the app's CrexBottomBar. --}}
     <nav class="mab__nav" aria-label="ActionBoard">
         <a class="mab__navi" href="{{ route('site.gamehub') }}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"></path></svg>
             Home
         </a>
         <button class="mab__navi is-on" type="button" data-sport="Cricket" onclick="mabSport('Cricket', this)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.05,12.81L6.56,4.32c-0.39-0.39-1.02-0.39-1.41,0L2.32,7.15c-0.39,0.39-0.39,1.02,0,1.41l8.49,8.49c0.39,0.39,1.02,0.39,1.41,0l2.83-2.83C15.44,13.83,15.44,13.2,15.05,12.81z"></path><rect x="16.17" y="16.17" width="2" height="6" transform="matrix(0.7071 -0.7071 0.7071 0.7071 -8.5264 17.7562)"></rect><circle cx="18.5" cy="5.5" r="3.5"></circle></svg>
             Cricket
         </button>
         <button class="mab__navi" type="button" data-sport="Badminton" onclick="mabSport('Badminton', this)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="9.5" cy="9.5" rx="6.2" ry="5.2" transform="rotate(-45 9.5 9.5)"></ellipse><path d="M13.5 13.5 20 20"></path></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.52,2.49c-2.34-2.34-6.62-1.87-9.55,1.06c-1.6,1.6-2.52,3.87-2.54,5.46c-0.02,1.58,0.26,3.89-1.35,5.5l-4.24,4.24l1.42,1.42l4.24-4.24c1.61-1.61,3.92-1.33,5.5-1.35s3.86-0.94,5.46-2.54C21.38,9.11,21.86,4.83,19.52,2.49z M10.32,11.68c-1.53-1.53-1.05-4.61,1.06-6.72s5.18-2.59,6.72-1.06c1.53,1.53,1.05,4.61-1.06,6.72S11.86,13.21,10.32,11.68z"></path><path d="M18,17c0.53,0,1.04,0.21,1.41,0.59c0.78,0.78,0.78,2.05,0,2.83C19.04,20.79,18.53,21,18,21s-1.04-0.21-1.41-0.59c-0.78-0.78-0.78-2.05,0-2.83C16.96,17.21,17.47,17,18,17 M18,15c-1.02,0-2.05,0.39-2.83,1.17c-1.56,1.56-1.56,4.09,0,5.66C15.95,22.61,16.98,23,18,23s2.05-0.39,2.83-1.17c1.56-1.56,1.56-4.09,0-5.66C20.05,15.39,19.02,15,18,15L18,15z"></path></svg>
             Badminton
         </button>
         <button class="mab__navi" type="button" data-sport="Football" onclick="mabSport('Football', this)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.02,15.62c-0.08,2.42,0.32,4.34,0.67,4.69s2.28,0.76,4.69,0.67L3.02,15.62z"></path><path d="M13.08,3.28C10.75,3.7,8.29,4.62,6.46,6.46s-2.76,4.29-3.18,6.62l7.63,7.63c2.34-0.41,4.79-1.34,6.62-3.18s2.76-4.29,3.18-6.62L13.08,3.28z M9.9,15.5l-1.4-1.4l5.6-5.6l1.4,1.4L9.9,15.5z"></path><path d="M20.98,8.38c0.08-2.42-0.32-4.34-0.67-4.69s-2.28-0.76-4.69-0.67L20.98,8.38z"></path></svg>
             Football
         </button>
         <a class="mab__navi" href="/profile">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"></circle><path d="M5 20a7 7 0 0 1 14 0"></path></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg>
             Player
         </a>
     </nav>
@@ -1254,7 +1256,7 @@ main.container {
     border-radius: 4px;
 }
 .scrollbar-custom::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 210, 106, 0.5);
+    background: rgba(37, 99, 235, 0.5);
 }
 
 /* Desktop Header Navigation (DO NOT CHANGE - REMAINS DARK) */
@@ -1290,15 +1292,15 @@ main.container {
 .logo-pulse {
     width: 10px;
     height: 10px;
-    background: #00D26A;
+    background: #2563EB;
     border-radius: 50%;
-    box-shadow: 0 0 0 3px rgba(0, 210, 106, 0.25);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
     animation: livePulseDot 2s infinite ease-in-out;
 }
 @keyframes livePulseDot {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 210, 106, 0.5); }
-    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(0, 210, 106, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 210, 106, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.5); }
+    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
 
 .desktop-menu {
@@ -1319,7 +1321,7 @@ main.container {
     background: rgba(255, 255, 255, 0.05);
 }
 .menu-link.font-accent {
-    color: #00D26A;
+    color: #2563EB;
 }
 
 .header-actions {
@@ -1342,24 +1344,24 @@ main.container {
     background: rgba(255, 255, 255, 0.12);
 }
 .btn-create-match {
-    background: linear-gradient(135deg, #00D26A 0%, #22C55E 100%);
+    background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
     color: #000000;
     font-weight: 800;
     padding: 9px 18px;
     border-radius: 8px;
     font-size: 13px;
     text-decoration: none;
-    box-shadow: 0 4px 12px rgba(0, 210, 106, 0.2);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
     transition: all 0.25s ease;
 }
 .btn-create-match:hover {
     transform: translateY(-1.5px);
-    box-shadow: 0 6px 16px rgba(0, 210, 106, 0.35);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
 }
 .player-badge {
-    background: rgba(0, 210, 106, 0.08);
-    border: 1px solid rgba(0, 210, 106, 0.18);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    color: #2563EB;
     padding: 6px 12px;
     border-radius: 20px;
     font-size: 12px;
@@ -1398,7 +1400,7 @@ main.container {
     transition: all 0.2s ease;
 }
 .nav-tab.active {
-    color: #00D26A;
+    color: #1E3A8A;
 }
 .tab-icon {
     width: 22px;
@@ -1481,7 +1483,7 @@ main.container {
 }
 .status-tab.active {
     background: #FFFFFF;
-    color: #00D26A;
+    color: #1E3A8A;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 .badge-live-dot {
@@ -1515,12 +1517,12 @@ main.container {
 }
 .sidebar-match-card:hover {
     background: #F8FAFC;
-    border-color: rgba(0, 210, 106, 0.4);
+    border-color: rgba(37, 99, 235, 0.4);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 .sidebar-match-card.live {
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
 }
 .card-meta {
     display: flex;
@@ -1534,7 +1536,7 @@ main.container {
     text-transform: uppercase;
 }
 .live-tag {
-    color: #00D26A;
+    color: #2563EB;
     font-weight: 800;
     display: flex;
     align-items: center;
@@ -1543,7 +1545,7 @@ main.container {
 .live-pulse-dot {
     width: 6px;
     height: 6px;
-    background: #00D26A;
+    background: #2563EB;
     border-radius: 50%;
     animation: livePulseDot 1s infinite ease-in-out;
 }
@@ -1586,7 +1588,7 @@ main.container {
     font-weight: 800;
 }
 .batting-active .runs-wkts {
-    color: #00D26A !important; /* Active batting team score in emerald green */
+    color: #2563EB !important; /* Active batting team score in emerald green */
 }
 .overs-str {
     color: #64748B !important; /* Muted grey for overs */
@@ -1666,7 +1668,7 @@ main.container {
 }
 .carousel-match-card:hover {
     background: #F8FAFC;
-    border-color: #00D26A;
+    border-color: #2563EB;
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 .carousel-card-header {
@@ -1681,9 +1683,9 @@ main.container {
     text-transform: uppercase;
 }
 .live-pill {
-    background: rgba(0, 210, 106, 0.08);
-    color: #00D26A;
-    border: 1px solid rgba(0, 210, 106, 0.2);
+    background: rgba(37, 99, 235, 0.08);
+    color: #2563EB;
+    border: 1px solid rgba(37, 99, 235, 0.2);
     padding: 2px 6px;
     border-radius: 4px;
     font-weight: 800;
@@ -1758,7 +1760,7 @@ main.container {
 .hero-kicker {
     font-size: 11px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
     letter-spacing: 1px;
 }
 .live-indicator-glow {
@@ -1808,7 +1810,7 @@ main.container {
     color: #0F172A;
 }
 .hero-team-details.batting-active .score-display .runs-wkts {
-    color: #00D26A !important; /* Active batting team score in emerald green */
+    color: #2563EB !important; /* Active batting team score in emerald green */
 }
 .score-display .overs-str {
     font-size: 12px;
@@ -1853,7 +1855,7 @@ main.container {
 .equation-txt {
     font-size: 13px;
     font-weight: 700;
-    color: #00D26A;
+    color: #2563EB;
 }
 .btn-open-match {
     background: #F1F5F9;
@@ -1867,9 +1869,9 @@ main.container {
     transition: all 0.2s ease;
 }
 .btn-open-match:hover {
-    background: #00D26A;
+    background: #2563EB;
     color: #000000;
-    border-color: #00D26A;
+    border-color: #2563EB;
 }
 
 /* Unique Feature: District Cricket Module Dashboard */
@@ -1896,7 +1898,7 @@ main.container {
 .district-icon {
     width: 20px;
     height: 20px;
-    color: #00D26A;
+    color: #2563EB;
 }
 .district-header h3 {
     font-size: 15px;
@@ -1907,9 +1909,9 @@ main.container {
     letter-spacing: 0.5px;
 }
 .badge-district-accent {
-    background: rgba(0, 210, 106, 0.08);
-    border: 1px solid rgba(0, 210, 106, 0.18);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    color: #2563EB;
     font-size: 10px;
     font-weight: 800;
     padding: 3px 8px;
@@ -1940,7 +1942,7 @@ main.container {
 }
 .dist-tab-btn.active {
     background: #FFFFFF;
-    color: #00D26A;
+    color: #1E3A8A;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
@@ -1986,10 +1988,10 @@ main.container {
     background: #F1F5F9;
     color: #64748B;
 }
-.rank-pos.num-1 { background: rgba(0, 210, 106, 0.15); color: #00D26a; }
+.rank-pos.num-1 { background: rgba(37, 99, 235, 0.15); color: #2563EB; }
 .rank-pos.num-2 { background: rgba(59, 130, 246, 0.15); color: #2563EB; }
 .rank-pos.num-3 { background: rgba(245, 158, 11, 0.15); color: #D97706; }
-.text-green { color: #00D26A !important; font-weight: 750; }
+.text-green { color: #2563EB !important; font-weight: 750; }
 
 .local-tournaments-list {
     display: flex;
@@ -2012,7 +2014,7 @@ main.container {
     padding: 3px 6px;
     border-radius: 4px;
 }
-.t-badge.active { background: rgba(0, 210, 106, 0.08); color: #00D26A; }
+.t-badge.active { background: rgba(37, 99, 235, 0.08); color: #2563EB; }
 .t-badge.upcoming { background: #F1F5F9; color: #64748B; }
 .t-details h4 {
     font-size: 13px;
@@ -2050,7 +2052,7 @@ main.container {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    border: 1.5px solid rgba(0, 210, 106, 0.3);
+    border: 1.5px solid rgba(37, 99, 235, 0.3);
 }
 .talent-info h4 {
     font-size: 13px;
@@ -2092,7 +2094,7 @@ main.container {
 .stat-box .val {
     font-size: 18px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
 }
 
 /* Editorial Highlights News Section */
@@ -2110,7 +2112,7 @@ main.container {
     text-transform: uppercase;
     color: #0F172A;
     margin: 0 0 16px;
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
     padding-left: 8px;
 }
 .news-masonry {
@@ -2136,7 +2138,7 @@ main.container {
     position: absolute;
     top: 10px;
     left: 10px;
-    background: #00D26A;
+    background: #2563EB;
     color: #000000;
     font-size: 9px;
     font-weight: 900;
@@ -2186,7 +2188,7 @@ main.container {
     margin-bottom: 6px;
     display: block;
 }
-.text-accent { color: #00D26A; }
+.text-accent { color: #2563EB; }
 .stack-news-item h4 {
     font-size: 13px;
     font-weight: 800;
@@ -2276,7 +2278,7 @@ main.container {
 }
 .rank-tab-btn.active {
     background: #FFFFFF;
-    color: #00D26A;
+    color: #1E3A8A;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 .rank-sub-panel {
@@ -2299,8 +2301,8 @@ main.container {
     height: 18px;
     font-size: 10px;
     font-weight: 900;
-    color: #00D26A;
-    background: rgba(0, 210, 106, 0.08);
+    color: #2563EB;
+    background: rgba(37, 99, 235, 0.08);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2322,7 +2324,7 @@ main.container {
     margin-left: auto;
     font-size: 11px;
     font-weight: 800;
-    color: #00D26A;
+    color: #2563EB;
 }
 
 /* Sponsor ad banner */
@@ -2350,7 +2352,7 @@ main.container {
 .ad-content h4 {
     font-size: 13px;
     font-weight: 900;
-    color: #00D26A;
+    color: #2563EB;
     margin: 0 0 6px;
     letter-spacing: 0.5px;
 }
@@ -2372,7 +2374,7 @@ main.container {
     transition: all 0.2s ease;
 }
 .ad-mock-btn:hover {
-    background: #00D26A;
+    background: #2563EB;
     color: #000000;
 }
 
@@ -2391,7 +2393,7 @@ main.container {
     box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 .match-list-item.live {
-    border-left: 3px solid #00D26A;
+    border-left: 3px solid #2563EB;
     background: #FAFEFA;
 }
 .item-header {
@@ -2465,8 +2467,8 @@ main.container {
     margin: 0;
 }
 .active-badge {
-    background: rgba(0, 210, 106, 0.08);
-    color: #00D26A;
+    background: rgba(37, 99, 235, 0.08);
+    color: #2563EB;
     font-size: 9px;
     font-weight: 800;
     padding: 2px 6px;
@@ -2508,8 +2510,8 @@ main.container {
 }
 .btn-create-match-block {
     display: block;
-    background: #00D26A;
-    color: #000000;
+    background: #1E3A8A;
+    color: #FFFFFF;
     font-weight: 850;
     text-align: center;
     padding: 10px;
@@ -2717,26 +2719,37 @@ main.container {
     .mab.is-board .mab__bar { background: #EBEBF0; }
     .mab__bar.is-lifted { box-shadow: 0 4px 14px rgba(15, 23, 42, .10); }
     .mab__head { display: flex; align-items: center; gap: 8px; padding: 8px 0 12px; min-width: 0; }
+    /* Blue "H" mark only (no wordmark). The navy PNG is used as a mask over a blue
+       fill, so the icon is a crisp brand-blue regardless of the source colour. */
     .mab__logo {
-        width: 36px; height: 36px; border-radius: 12px; background: #F1F5F9;
-        display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+        width: 26px; height: 32px; flex: 0 0 auto; background-color: #2563EB;
+        -webkit-mask: url("{{ asset('images/haraan-mark.png') }}") center / contain no-repeat;
+        mask: url("{{ asset('images/haraan-mark.png') }}") center / contain no-repeat;
     }
-    .mab__logo img { width: 22px; height: 22px; object-fit: contain; }
-    .mab__word { font-size: 18px; font-weight: 800; letter-spacing: -.5px; color: #111827; white-space: nowrap; }
     .mab__sp { flex: 1; min-width: 0; }
+    /* Full-width search bar filling the gap between the logo and the app CTA. */
+    .mab__search {
+        flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px;
+        height: 38px; padding: 0 14px; border-radius: 19px;
+        background: #F1F5FA; border: 1px solid #E4EAF1; color: #94A0B0;
+        text-decoration: none; font-size: 13px; overflow: hidden; white-space: nowrap;
+    }
+    .mab__search svg { width: 18px; height: 18px; flex: 0 0 auto; }
+    .mab__search span { overflow: hidden; text-overflow: ellipsis; }
+    .mab__search:hover { background: #E9EFF6; }
     .mab__ic {
         width: 38px; height: 38px; border-radius: 12px; background: #F1F5F9; border: 0;
         display: inline-flex; align-items: center; justify-content: center;
         color: #6B7280; cursor: pointer; flex: 0 0 auto; padding: 0; text-decoration: none;
     }
     .mab__ic svg { width: 18px; height: 18px; }
-    .mab__create {
-        height: 38px; border-radius: 22px; background: #2563EB; color: #fff;
-        display: inline-flex; align-items: center; gap: 4px; padding: 0 12px;
-        font-size: 13px; font-weight: 700; text-decoration: none; flex: 0 0 auto;
+    .mab__get {
+        height: 38px; border-radius: 22px; background: #111827; color: #fff;
+        display: inline-flex; align-items: center; gap: 6px; padding: 0 14px;
+        font-size: 12.5px; font-weight: 700; text-decoration: none; flex: 0 0 auto;
         white-space: nowrap;
     }
-    .mab__create svg { width: 16px; height: 16px; }
+    .mab__get svg { width: 16px; height: 16px; }
 
     /* ── Tabs strip (CrexTabsSection) ────────────────────────────────── */
     .mab__tabs { position: relative; display: flex; padding-bottom: 0; }
@@ -2778,18 +2791,24 @@ main.container {
     .mab__ltxt { flex: 1; font-size: 15px; font-weight: 800; letter-spacing: -.4px; color: #0F172A; }
     .mab__lsee { font-size: 12px; font-weight: 600; color: #2563EB; }
 
-    /* Match group (MatchGroup) — one surface, rows split by inset hairlines */
+    /* Match group — a plain stack; each match is its own separate card (with a gap)
+       rather than rows merged into one surface. */
     .mab__group {
-        background: #fff; border-radius: 14px; margin-bottom: 8px;
-        border: 1px solid #D9DFEA;
-        border-top-color: #F3F6FA; /* lit bevel: lighter top, darker bottom */
-        box-shadow: 0 8px 16px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .08);
-        overflow: hidden;
+        background: transparent; border: 0; box-shadow: none; border-radius: 0;
+        margin-bottom: 8px; overflow: visible;
+        display: flex; flex-direction: column; gap: 10px;
     }
+    .mab__group .mab__gdiv { display: none; } /* separate cards → no inter-row hairline */
     .mab__gdiv { height: 1px; background: #EEF0F4; margin: 0 14px; }
 
-    /* Match row (MatchLiveContent) */
-    .mab__match { display: block; text-decoration: none; color: inherit; }
+    /* Match card (MatchLiveContent) */
+    .mab__match {
+        display: block; text-decoration: none; color: inherit;
+        background: #fff; border-radius: 14px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .06);
+        overflow: hidden;
+    }
     .mab__match:active { transform: scale(.98); transition: transform .12s ease; }
     .mab__mctx { display: flex; align-items: center; gap: 6px; padding: 9px 14px; min-width: 0; }
     .mab__beacon {
@@ -2827,7 +2846,11 @@ main.container {
         color: #fff; font-size: 10px; font-weight: 800;
         border: 1px solid rgba(15, 23, 42, .1); margin-right: 10px;
     }
+    .mab__tlogo { overflow: hidden; }
+    .mab__tlogo img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
     .mab__tlogo.is-dim { opacity: .4; }
+    /* A real crest image must stay clearly visible — the .4 dim is only for monogram tiles. */
+    .mab__tlogo.is-dim.has-img { opacity: 1; }
     .mab__tname { flex: 1; font-size: 16px; font-weight: 600; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .mab__tname.is-bat { font-weight: 800; }
     .mab__tname.is-dim, .mab__tscore.is-dim { color: #B0BAC8; }
@@ -2841,7 +2864,7 @@ main.container {
     .mab__tyet { font-size: 13px; font-weight: 500; color: #B0BAC8; }
     .mab__vdiv { width: 1px; height: 60px; background: #F0F2F5; margin: 0 14px; flex: 0 0 auto; }
     .mab__mstat { width: 90px; flex: 0 0 auto; text-align: center; }
-    .mab__mstat b { display: block; font-size: 13px; font-weight: 800; color: #15803D; }
+    .mab__mstat b { display: block; font-size: 13px; font-weight: 800; color: #1D4ED8; }
     .mab__mstat span { display: block; margin-top: 3px; font-size: 11px; line-height: 15px; color: #94A3B8; }
 
     /* ── District Home card (DistrictHomeCard) ───────────────────────── */
@@ -2877,7 +2900,7 @@ main.container {
     .mab__phead { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 10px; }
     .mab__phead b { display: block; font-size: 13px; font-weight: 700; letter-spacing: -.2px; color: #0A0A0A; }
     .mab__pfresh { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 9.5px; font-weight: 500; color: #9A9AA8; }
-    .mab__pfresh i { width: 5px; height: 5px; border-radius: 50%; background: #12824A; }
+    .mab__pfresh i { width: 5px; height: 5px; border-radius: 50%; background: #2563EB; }
     .mab__pcount { font-size: 10.5px; font-weight: 500; color: #9A9AA8; }
     .mab__phair { height: 1px; background: #F2F2F5; }
     .mab__pslots { display: flex; align-items: flex-end; padding: 20px 8px 0; }
@@ -3043,6 +3066,26 @@ main.container {
             requestAnimationFrame(step);
         });
     }
+})();
+
+// Location-wise sorting: grab one precise device fix so "Matches near you" ranks by
+// real distance. Ask once (never nag), store a rounded lat/lng cookie, then reload so
+// the server re-sorts. If denied/unavailable, the server falls back to the chosen
+// city (geocoded via Google Maps) or district/state names.
+(function () {
+    try {
+        if (document.cookie.indexOf('hb_geo=') !== -1) return;
+        if (localStorage.getItem('hb_geo_asked') === '1') return;
+        if (!navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition(function (pos) {
+            localStorage.setItem('hb_geo_asked', '1');
+            var lat = pos.coords.latitude.toFixed(3), lng = pos.coords.longitude.toFixed(3);
+            document.cookie = 'hb_geo=' + lat + ',' + lng + ';path=/;max-age=86400;SameSite=Lax';
+            location.reload();
+        }, function () {
+            localStorage.setItem('hb_geo_asked', '1');
+        }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 });
+    } catch (e) {}
 })();
 </script>
 @endsection

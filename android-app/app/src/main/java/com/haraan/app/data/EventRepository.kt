@@ -51,6 +51,18 @@ data class LineupArtist(
     val imageUrl: String,
 )
 
+/**
+ * One photo of the venue from its Google Maps listing, for the "Venue ambiance" rail.
+ *
+ * [credit] is the contributor Google names for the shot. It is NOT decoration —
+ * Google's terms require the attribution to be shown wherever the photo is, so
+ * don't drop it from the UI.
+ */
+data class VenuePhoto(
+    val url: String,
+    val credit: String,
+)
+
 /** Detail payload for one event: sellable tiers plus the admin-authored "know before you go" content. */
 data class EventDetailInfo(
     val ticketTypes: List<EventTicketType> = emptyList(),
@@ -62,10 +74,24 @@ data class EventDetailInfo(
     val description: String = "", // the admin's real event description (Overview)
     val city: String = "",       // e.g. "Hyderabad" — shown beside the date line
     val mapLink: String = "",    // pasted Google Maps link; drives "Directions"
+    val latitude: Double? = null,  // venue coords when the host set them (drives the map preview)
+    val longitude: Double? = null,
     val feeType: String = "none", // convenience fee: none | flat | percent
     val feeValue: Double = 0.0,   // ₹ amount (flat) or % of subtotal (percent)
     val rating: Double = 0.0,     // aggregate rating; 0 = unrated (hide the star)
     val ratingsCount: Int = 0,    // how many people rated it
+    val soldOut: Boolean = false, // host closed sales (manual override) or no slots left
+    // Venue photos from Google; empty is normal (no listing, too few photos, or an
+    // admin hid this venue) and the rail simply isn't drawn.
+    val venuePhotos: List<VenuePhoto> = emptyList(),
+    // Who is really running the event, resolved server-side. Blank name means the
+    // server didn't say, and the section falls back to whatever the card carried.
+    val organiserName: String = "",
+    val organiserLogo: String = "",
+    val organiserTagline: String = "",
+    val organiserVerified: Boolean = false,
+    val organiserEvents: Int = 0,
+    val organiserFollowers: Int = 0,
 )
 
 /** Browse-card shape for an event, sourced from the real API rather than sample data. */
@@ -81,6 +107,9 @@ data class EventApiItem(
     val rating: Double,      // 0 = unrated (card hides the star badge)
     val placements: List<String>, // curated rails: for_you | trending | nearby
     val city: String,        // e.g. "Kadapa" — used to float local events first
+    val latitude: Double? = null,  // venue coords (host-set) — drives real distance sort
+    val longitude: Double? = null,
+    val soldOut: Boolean = false,  // host closed sales (manual override) or no slots left
 )
 
 /**
@@ -123,6 +152,9 @@ class EventRepository(
                     (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
                 }.orEmpty(),
                 city = o.optString("city").takeIf { it.isNotBlank() && it != "null" } ?: "",
+                latitude = if (o.isNull("latitude")) null else o.optDouble("latitude").takeIf { !it.isNaN() },
+                longitude = if (o.isNull("longitude")) null else o.optDouble("longitude").takeIf { !it.isNaN() },
+                soldOut = o.optBoolean("soldOut", false),
             )
         }
     }
@@ -212,6 +244,19 @@ class EventRepository(
             }
         }.orEmpty()
 
+        // Absent on older servers that predate the field — .orEmpty() keeps the
+        // rail off rather than breaking the screen.
+        val venuePhotos = d.optJSONArray("venuePhotos")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val url = o.optString("url")
+                if (url.isBlank()) return@mapNotNull null
+                VenuePhoto(url = url, credit = o.optString("credit"))
+            }
+        }.orEmpty()
+
+        val organiser = d.optJSONObject("organiser")
+
         val fullDate = formatFullDate(d.optString("date"), d.optString("time"))
 
         val fee = d.optJSONObject("convenienceFee")
@@ -226,10 +271,22 @@ class EventRepository(
             description = d.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: "",
             city = d.optString("city").takeIf { it.isNotBlank() && it != "null" } ?: "",
             mapLink = d.optString("mapLink").takeIf { it.isNotBlank() && it != "null" } ?: "",
+            latitude = if (d.isNull("latitude")) null else d.optDouble("latitude").takeIf { !it.isNaN() },
+            longitude = if (d.isNull("longitude")) null else d.optDouble("longitude").takeIf { !it.isNaN() },
             feeType = fee?.optString("type", "none") ?: "none",
             feeValue = fee?.optDouble("value", 0.0) ?: 0.0,
             rating = if (d.isNull("rating")) 0.0 else d.optDouble("rating", 0.0),
             ratingsCount = d.optInt("ratingsCount", 0),
+            soldOut = d.optBoolean("soldOut", false),
+            venuePhotos = venuePhotos,
+            organiserName = organiser?.optString("name").orEmpty(),
+            // org.json turns a JSON null into the literal string "null" here, so
+            // both of these have to screen for it (same idiom as the fields above).
+            organiserLogo = organiser?.optString("logo").takeIf { it != "null" }.orEmpty(),
+            organiserTagline = organiser?.optString("tagline").takeIf { it != "null" }.orEmpty(),
+            organiserVerified = organiser?.optBoolean("verified", false) ?: false,
+            organiserEvents = organiser?.optInt("events", 0) ?: 0,
+            organiserFollowers = organiser?.optInt("followers", 0) ?: 0,
         )
     }
 

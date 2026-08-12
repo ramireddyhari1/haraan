@@ -6,8 +6,6 @@
     $cover = $profile->coverUrl();
     $logo = $profile->logoUrl();
     $init = strtoupper(mb_substr(trim($profile->display_name), 0, 1)) ?: 'H';
-    $ogImg = $cover ?: $logo;
-    $desc = \Illuminate\Support\Str::limit(strip_tags($profile->tagline ?: $profile->about), 160);
     $socials = collect([
         ['k' => 'instagram', 'label' => 'Instagram', 'url' => $profile->social('instagram')],
         ['k' => 'x', 'label' => 'X', 'url' => $profile->social('x')],
@@ -17,13 +15,9 @@
     ])->filter(fn ($s) => filled($s['url']));
 @endphp
 
-@push('head')
-    <meta property="og:type" content="profile">
-    <meta property="og:title" content="{{ $profile->display_name }}">
-    <meta property="og:description" content="{{ $desc }}">
-    @if ($ogImg)<meta property="og:image" content="{{ $ogImg }}">@endif
-    <meta name="description" content="{{ $desc }}">
-@endpush
+{{-- Search + social metadata comes from PublicWebController::hostSeo(), like the
+     event and venue pages. It used to be assembled here, which silently shadowed
+     the controller's version — keep it in one place. --}}
 
 @section('content')
 <div class="host-page">

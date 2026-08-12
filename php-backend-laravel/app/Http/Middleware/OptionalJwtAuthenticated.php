@@ -29,7 +29,12 @@ final class OptionalJwtAuthenticated
 
             if ($payload !== null && isset($payload['sub'])) {
                 $user = User::query()->find($payload['sub']);
-                if ($user !== null) {
+                // Revoked tokens must fall through to "guest" here rather than being
+                // ignored: this middleware is what decides whether a viewer is the OWNER
+                // of what they are looking at (posts `mine`, `social.is_following`), so a
+                // revoked session that still resolved to a user would keep owner
+                // affordances on a public page.
+                if ($user !== null && JwtService::versionMatches($payload, $user)) {
                     Auth::setUser($user);
                     $request->attributes->set('auth_user', $user);
                     $user->touchLastSeen();

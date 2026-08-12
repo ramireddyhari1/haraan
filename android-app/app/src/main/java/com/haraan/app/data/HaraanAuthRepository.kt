@@ -187,6 +187,82 @@ class HaraanAuthRepository(
     }
 
   /**
+   * Step 1 of "Continue with phone": ask the backend to send the code over WhatsApp
+   * (MSG91). Returns the WhatsApp session token when it went out, or `null` meaning
+   * "use the SMS path" — the caller then runs the Firebase flow.
+   *
+   * This never throws for a routing answer. The backend deliberately reports `sms`
+   * for EVERY reason WhatsApp couldn't be used (unapproved template, no credentials,
+   * number not on WhatsApp, provider outage), because a login is the one message
+   * with nothing behind it: if it doesn't arrive, the person cannot get in. A
+   * transport failure reaching the backend at all is treated the same way — fall
+   * back rather than strand the user.
+   */
+  suspend fun phoneOtpStart(e164: String): String? = withContext(Dispatchers.IO) {
+    val response = runCatching {
+      postJson(path = "/api/auth/phone-otp/start", jsonBody = JSONObject().put("phone", e164))
+    }.getOrNull() ?: return@withContext null
+
+    if (response.code !in 200..299) return@withContext null
+
+    val json = runCatching { JSONObject(response.body) }.getOrNull() ?: return@withContext null
+    if (json.optString("channel") != "whatsapp") return@withContext null
+    json.optString("token").takeIf { it.isNotBlank() }
+  }
+
+  /**
+   * Step 2 of the WhatsApp path: confirm the typed code against the session from
+   * [phoneOtpStart] and exchange it for an app JWT. Errors here ARE surfaced — by
+   * this point the user has a code in hand, so "that code is not right" is real
+   * feedback, not a routing decision.
+   */
+  suspend fun phoneOtpVerify(token: String, code: String, name: String? = null): VerifyOtpResult =
+    withContext(Dispatchers.IO) {
+      val body = JSONObject().put("token", token).put("code", code)
+      if (!name.isNullOrBlank()) body.put("name", name.trim())
+
+      val response = postJson(path = "/api/auth/phone-otp/verify", jsonBody = body)
+
+      if (response.code !in 200..299) {
+        throw IllegalStateException(parseErrorMessage(response.body, "Phone sign-in failed. Please try again."))
+      }
+
+      val json = JSONObject(response.body)
+      val user = json.getJSONObject("user")
+      VerifyOtpResult(
+        token = json.getString("token"),
+        userName = user.optString("name", "Haraan user"),
+        message = json.optString("message", "Welcome to Haraan!"),
+      )
+    }
+
+  /**
+   * "Continue with phone": exchange a Firebase phone-auth ID token (from [PhoneAuthHelper])
+   * for an app JWT. The backend verifies the token with Firebase and finds-or-creates the
+   * account by the verified E.164 number, matching the website's phone login. [name] is only
+   * used when creating a brand-new account.
+   */
+  suspend fun firebasePhoneLogin(idToken: String, name: String? = null): VerifyOtpResult =
+    withContext(Dispatchers.IO) {
+      val body = JSONObject().put("id_token", idToken)
+      if (!name.isNullOrBlank()) body.put("name", name.trim())
+
+      val response = postJson(path = "/api/auth/firebase-phone", jsonBody = body)
+
+      if (response.code !in 200..299) {
+        throw IllegalStateException(parseErrorMessage(response.body, "Phone sign-in failed. Please try again."))
+      }
+
+      val json = JSONObject(response.body)
+      val user = json.getJSONObject("user")
+      VerifyOtpResult(
+        token = json.getString("token"),
+        userName = user.optString("name", "Haraan user"),
+        message = json.optString("message", "Welcome to Haraan!"),
+      )
+    }
+
+  /**
    * "Continue with Google": exchange a Google ID token (from Credential Manager) for an app
    * JWT. The backend verifies the token with Google and creates the account on first sign-in,
    * so there's no separate profile step — the name comes from the Google account.
@@ -205,6 +281,38 @@ class HaraanAuthRepository(
       userName = user.optString("name", "Haraan user"),
       message = json.optString("message", "Welcome to Haraan!"),
     )
+  }
+
+  /**
+   * End [token]'s session on the SERVER, not just on this device.
+   *
+   * The backend bumps the account's token_version, which invalidates every token that
+   * account holds — including on its other devices. That is the only revocation these
+   * stateless JWTs allow, and it is why the sign-out confirmation says so out loud.
+   *
+   * Returns false when the call didn't land. Callers still forget the token locally in
+   * that case: leaving an account the user asked to remove sitting in the switcher is
+   * worse than leaving a token alive on the server until it expires.
+   */
+  suspend fun logout(token: String): Boolean = withContext(Dispatchers.IO) {
+    val connection = (URL(baseUrl.trimEnd('/') + "/api/auth/logout").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 15000
+      readTimeout = 15000
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      connection.outputStream.use { it.write("{}".toByteArray()) }
+      // 401 counts as done: the session was already dead, which is the desired end state.
+      connection.responseCode in 200..299 || connection.responseCode == 401
+    } catch (_: Exception) {
+      false
+    } finally {
+      connection.disconnect()
+    }
   }
 
   private fun postJson(path: String, jsonBody: JSONObject): HttpResult {

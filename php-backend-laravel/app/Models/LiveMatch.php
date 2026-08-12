@@ -47,6 +47,9 @@ class LiveMatch extends Model
         'bowler' => 'array',
         'over_summary' => 'array',
         'timeline' => 'array',
+        // Per-sport score shape — badminton games/serve, football half/clock.
+        // See the create_match_events migration.
+        'sport_state' => 'array',
         'home_squad' => 'array',
         'away_squad' => 'array',
 
@@ -59,6 +62,8 @@ class LiveMatch extends Model
         'verification_deadline' => 'datetime',
         'verified_at' => 'datetime',
         'featured_at' => 'datetime',
+        // Future kick-off time when the creator scheduled the match; NULL = play now.
+        'scheduled_at' => 'datetime',
     ];
 
     /** Owning organization unit (district/venue). Nullable; scoping not yet enabled. */

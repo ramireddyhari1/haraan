@@ -33,7 +33,9 @@ final class TicketType extends Model
 
     protected $fillable = [
         'event_id',
+        'event_slot_id',
         'name',
+        'description',
         'kind',
         'price',
         'admits',
@@ -42,6 +44,11 @@ final class TicketType extends Model
         'capacity',
         'sold',
         'sort',
+        'visible',
+        'release_phase',
+        'bulk_booking',
+        'min_per_order',
+        'max_per_order',
         'sales_start',
         'sales_end',
     ];
@@ -57,9 +64,45 @@ final class TicketType extends Model
             'capacity'       => 'integer',
             'sold'           => 'integer',
             'sort'           => 'integer',
+            'visible'        => 'boolean',
+            'release_phase'  => 'integer',
+            'bulk_booking'   => 'boolean',
+            'min_per_order'  => 'integer',
+            'max_per_order'  => 'integer',
             'sales_start'    => 'datetime',
             'sales_end'      => 'datetime',
         ];
+    }
+
+    /**
+     * How many of this tier a single order may buy: 1..N. Defaults to a broad cap
+     * so ordinary tiers are unconstrained; a bulk-booking tier narrows it to the
+     * host's min/max. `null` from either bound falls back to a sane default.
+     *
+     * @return array{min: int, max: int}
+     */
+    public function orderBounds(): array
+    {
+        $min = $this->bulk_booking ? max(1, (int) ($this->min_per_order ?? 1)) : 1;
+        $max = $this->bulk_booking && $this->max_per_order !== null
+            ? max($min, (int) $this->max_per_order)
+            : 25;
+
+        return ['min' => $min, 'max' => $max];
+    }
+
+    /**
+     * Whether the host shows this tier to buyers.
+     *
+     * Always read visibility through this — never `$tier->visible` — from inside
+     * another Eloquent model. `visible` is also Eloquent's own protected property
+     * (the serialization whitelist), and PHP resolves a protected member declared
+     * on a shared ancestor directly, so code in Event/Booking/etc. silently reads
+     * that empty array instead of the column and every tier looks hidden.
+     */
+    public function isVisible(): bool
+    {
+        return (bool) $this->getAttribute('visible');
     }
 
     /** Remaining tickets for this tier, or null when capacity is unlimited. */
@@ -194,6 +237,12 @@ final class TicketType extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    /** The session this tier belongs to, or null when it applies to every slot. */
+    public function slot(): BelongsTo
+    {
+        return $this->belongsTo(EventSlot::class, 'event_slot_id');
     }
 
     public function bookings(): HasMany

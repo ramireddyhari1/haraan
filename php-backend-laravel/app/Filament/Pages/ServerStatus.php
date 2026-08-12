@@ -292,20 +292,20 @@ class ServerStatus extends Page
 
     private function bridgeCard(): array
     {
-        // WhatsApp now goes through Twilio (the self-hosted bridge is gone) — report config
+        // WhatsApp goes through Meta's Cloud API — report config
         // health rather than pinging a local service.
         $configured = app(\App\Services\WhatsAppService::class)->isConfigured();
         $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
-        $from = (string) config('services.whatsapp.from');
+        $from = (string) config('services.whatsapp.phone_number_id');
 
         if ($configured && $enabled) {
-            return $this->card('WhatsApp (Twilio)', 'Live', 'Sending from ' . ($from ?: 'configured sender'), 'heroicon-o-chat-bubble-left-right', 'ok');
+            return $this->card('WhatsApp (Meta)', 'Live', 'Phone number id ' . ($from ?: 'configured'), 'heroicon-o-chat-bubble-left-right', 'ok');
         }
         if ($configured) {
-            return $this->card('WhatsApp (Twilio)', 'Disabled', 'Credentials set · TWILIO_WHATSAPP_ENABLED is off', 'heroicon-o-chat-bubble-left-right', 'warn');
+            return $this->card('WhatsApp (Meta)', 'Disabled', 'Credentials set · META_WHATSAPP_ENABLED is off', 'heroicon-o-chat-bubble-left-right', 'warn');
         }
 
-        return $this->card('WhatsApp (Twilio)', 'Not configured', 'Set Twilio SID / key / sender', 'heroicon-o-chat-bubble-left-right', 'idle');
+        return $this->card('WhatsApp (Meta)', 'Not configured', 'Set META_WHATSAPP_PHONE_NUMBER_ID + token', 'heroicon-o-chat-bubble-left-right', 'idle');
     }
 
     // ---------------------------------------------------------------------

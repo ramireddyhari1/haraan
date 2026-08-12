@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Jobs\SendNotificationPush;
 use App\Models\Concerns\BroadcastsContentChanges;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 
 /**
  * A broadcast notification composed by the admin/Haraan team and shown in the
@@ -64,6 +66,7 @@ class Notification extends Model
         'status',
         'scheduled_at',
         'sent_at',
+        'pushed_at',
         'created_by',
     ];
 
@@ -72,6 +75,7 @@ class Notification extends Model
         return [
             'scheduled_at' => 'datetime',
             'sent_at'      => 'datetime',
+            'pushed_at'    => 'datetime',
         ];
     }
 
@@ -95,6 +99,13 @@ class Notification extends Model
                 && in_array($n->audience_type, self::ACTIVITY_AUDIENCE_TYPES, true)
                 && ! $n->recipients()->exists()) {
                 $n->snapshotActivityRecipients();
+            }
+
+            // Fan the background FCM push out to the audience's devices — exactly once,
+            // the moment it becomes sent (pushed_at is null until the job stamps it).
+            // Runs AFTER the recipient snapshot above so activity segments resolve.
+            if ($n->status === 'sent' && $n->pushed_at === null) {
+                SendNotificationPush::dispatch($n->id);
             }
         });
     }
@@ -162,6 +173,29 @@ class Notification extends Model
         $reads = $this->reads_count ?? $this->reads()->count();
 
         return round(min($reads, $reach) / $reach * 100, 1);
+    }
+
+    /**
+     * The user ids this notification targets, for fanning out background push.
+     * Mirrors reach()/scopeForUser: activity segments read the frozen recipient
+     * snapshot; static segments resolve their audience live.
+     *
+     * @return Collection<int,int>
+     */
+    public function audienceUserIds(): Collection
+    {
+        if (in_array($this->audience_type, self::ACTIVITY_AUDIENCE_TYPES, true)) {
+            return $this->recipients()->pluck('user_id');
+        }
+
+        return match ($this->audience_type) {
+            'all'      => User::query()->pluck('id'),
+            'user'     => collect($this->audience_value !== null ? [(int) $this->audience_value] : []),
+            'district' => User::where('district', $this->audience_value)->pluck('id'),
+            'state'    => User::where('state', $this->audience_value)->pluck('id'),
+            'sport'    => User::where('primary_sport', $this->audience_value)->pluck('id'),
+            default    => collect(),
+        };
     }
 
     /** The User query for this notification's activity segment. */

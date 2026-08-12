@@ -34,10 +34,11 @@ import com.haraan.app.ui.matches.CommentaryLine
 import com.haraan.app.ui.matches.CrexColors
 import com.haraan.app.ui.matches.MatchUiState
 import com.haraan.app.ui.matches.RecentOver
+import com.haraan.app.ui.theme.HaraanColors
 
 // SIX → green, FOUR → blue, WICKET → solid red. Dots/singles stay neutral grey.
-private val SixGreen = Color(0xFF16A34A)
-private val FourBlue = Color(0xFF2563EB)
+private val SixGreen = HaraanColors.Success
+private val FourBlue = HaraanColors.EventsBlue
 
 @Composable
 fun BallCircle(ball: String) {

@@ -16,7 +16,9 @@
 
     <div class="hrn-authbrand__inner">
         <div class="hrn-authbrand__top">
-            <span class="hrn-authbrand__wordmark">haraan</span>
+            <img class="hrn-authbrand__logo"
+                 src="{{ asset('images/haraan-logo-white.png') }}"
+                 alt="haraan" width="1680" height="445">
             <span class="hrn-authbrand__pill">PARTNER</span>
         </div>
 
@@ -65,12 +67,21 @@
     </div>
 </div>
 
+{{-- Blue Haraan logo + handwritten "Partner" tag, top-right of the form column. --}}
+<div class="hrn-authbrand-rbrand">
+    <img class="hrn-authbrand-rlogo"
+         src="{{ asset('images/haraan-logo-blue.png') }}"
+         alt="haraan" width="1680" height="445">
+    <span class="hrn-authbrand-rtag">Partner</span>
+</div>
+
 <style>
     /* ---------------------------------------------------------------------
        SPLIT SHELL — turn Filament's centred .fi-simple-layout into a
        two-column brand|form grid, only on partner auth pages (:has scope).
     --------------------------------------------------------------------- */
     .fi-simple-layout:has(.hrn-authbrand) {
+        position: relative;
         display: grid;
         grid-template-columns: 1.05fr 0.95fr;
         min-height: 100dvh;
@@ -79,6 +90,35 @@
         align-items: stretch;
         background: var(--hrn-form-bg, #f7f8fb);
     }
+
+    /* Blue wordmark + handwritten tag, pinned top-right of the light form column. */
+    .hrn-authbrand-rbrand {
+        position: absolute;
+        top: clamp(1.5rem, 3vw, 2.4rem);
+        right: clamp(1.5rem, 3vw, 3rem);
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.1rem;
+    }
+    .hrn-authbrand-rlogo {
+        height: 2.3rem;
+        width: auto;
+        display: block;
+    }
+    .hrn-authbrand-rtag {
+        font-family: "Segoe Script", "Bradley Hand", "Snell Roundhand",
+                     "Brush Script MT", cursive;
+        font-size: 1.2rem;
+        font-weight: 400;
+        line-height: 1;
+        color: #2f6bff;
+        padding-right: 0.2rem;
+        transform: rotate(-4deg);
+    }
+    .dark .hrn-authbrand-rbrand,
+    :root.dark .hrn-authbrand-rbrand { opacity: 0.95; }
 
     .fi-simple-layout:has(.hrn-authbrand) .fi-simple-main-ctn {
         display: flex;
@@ -201,8 +241,8 @@
     }
 
     .hrn-authbrand__top { display: flex; align-items: center; gap: 0.7rem; }
-    .hrn-authbrand__wordmark {
-        font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; color: #fff;
+    .hrn-authbrand__logo {
+        height: 1.9rem; width: auto; display: block;
     }
     .hrn-authbrand__pill {
         font-size: 0.62rem; font-weight: 800; letter-spacing: 0.16em;
@@ -281,24 +321,63 @@
             flex-direction: column;
             min-height: 100dvh;
         }
-        .hrn-authbrand { min-height: auto; }
-        .hrn-authbrand__inner {
-            padding: 1.6rem 1.4rem 1.9rem;
-            gap: 0.9rem;
+        /* Brand band: tight, rounded off at the bottom so the form tucks under it. */
+        .hrn-authbrand {
+            min-height: auto;
+            border-radius: 0 0 1.75rem 1.75rem;
+            box-shadow: 0 18px 40px -24px rgba(10, 23, 56, 0.9);
         }
-        .hrn-authbrand__headline { font-size: 1.7rem; margin-bottom: 0.6rem; }
-        .hrn-authbrand__sub { font-size: 0.9rem; }
+        .hrn-authbrand-rbrand { display: none; }   /* band already shows the logo */
+        .hrn-authbrand__inner {
+            padding: 1.5rem 1.5rem 1.9rem;
+            gap: 0.55rem;
+        }
+        .hrn-authbrand__top { margin-bottom: 0.35rem; }
+        .hrn-authbrand__logo { height: 1.75rem; }
+        .hrn-authbrand__mid { margin-top: 0; }     /* flow top-down, no auto push */
+        .hrn-authbrand__headline {
+            font-size: 1.75rem; line-height: 1.12;
+            margin: 0.35rem 0 0.55rem;
+        }
+        .hrn-authbrand__sub {
+            font-size: 0.9rem; line-height: 1.5;
+            color: rgba(224, 232, 255, 0.82);
+        }
         .hrn-authbrand__mock { display: none; }         /* keep the band tight */
         .hrn-authbrand__foot { display: none; }
-        .hrn-authbrand__chips { margin-top: 1.1rem; }
+        .hrn-authbrand__chips { margin-top: 1.05rem; gap: 0.5rem; }
+
+        /* Form tucks directly under the band (no big centred dead-space). */
         .fi-simple-layout:has(.hrn-authbrand) .fi-simple-main-ctn {
             flex: 1;
-            padding: 2rem 1.25rem 2.5rem;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 2rem 1.35rem 2.5rem;
+        }
+        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
+            max-width: 26rem;
+            margin: 0 auto;
+        }
+        /* Give the sign-in form a real card on mobile so it reads as premium. */
+        .fi-simple-layout:has(.hrn-authbrand) .fi-simple-page {
+            background: #fff;
+            border: 1px solid rgba(15, 23, 42, 0.07);
+            border-radius: 1.25rem;
+            box-shadow: 0 24px 50px -30px rgba(15, 23, 42, 0.35);
+            padding: 1.75rem 1.5rem;
+            gap: 1.5rem;
+        }
+        .dark .fi-simple-layout:has(.hrn-authbrand) .fi-simple-page,
+        :root.dark .fi-simple-layout:has(.hrn-authbrand) .fi-simple-page {
+            background: #131a2a;
+            border-color: rgba(255, 255, 255, 0.08);
         }
     }
 
     @media (max-width: 480px) {
-        .hrn-authbrand__headline { font-size: 1.45rem; }
+        .hrn-authbrand__inner { padding: 1.35rem 1.35rem 1.75rem; }
+        .hrn-authbrand__headline { font-size: 1.55rem; }
+        .hrn-authbrand__sub { font-size: 0.86rem; }
         .hrn-authbrand__chips li { font-size: 0.76rem; padding: 0.42rem 0.7rem; }
     }
 

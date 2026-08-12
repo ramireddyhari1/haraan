@@ -182,13 +182,48 @@ fun EventDetailScreen(
 
                 Spacer(modifier = Modifier.height(HaraanSpacing.Large))
 
-                // Organizer — who's running / selling the event (hides if unknown)
-                EventOrganizerSection(
-                    organizer = event.organizer,
-                    subtitle = event.organizerSubtitle
+                // Venue map preview — Static Maps card with a pin + Directions. Hides
+                // itself when no coordinates resolve (no key / place can't be located).
+                EventVenueMap(
+                    venue = event.venue,
+                    mapLink = detail.mapLink,
+                    latitude = detail.latitude,
+                    longitude = detail.longitude
                 )
 
-                if (event.organizer.isNotBlank()) {
+                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+
+                // Venue ambiance — photos of the place itself, from its Google
+                // listing. Below the map on purpose (map places it, photos show
+                // it), matching the website. Hides itself when empty.
+                if (detail.venuePhotos.isNotEmpty()) {
+                    EventVenueAmbianceSection(
+                        photos = detail.venuePhotos,
+                        venueName = event.venue
+                    )
+                    Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                }
+
+                // Organizer — who's running / selling the event (hides if unknown)
+                // Prefer the organiser the SERVER resolved (live host profile, else
+                // the partner account). The nav-key values are a hardcoded caption
+                // ("Haraan Events / Verified ticketing partner") and only stand in
+                // for sample/offline events the API never answered for.
+                val organiserName = detail.organiserName.ifBlank { event.organizer }
+                EventOrganizerSection(
+                    organizer = organiserName,
+                    subtitle = if (detail.organiserName.isNotBlank()) {
+                        detail.organiserTagline
+                    } else {
+                        event.organizerSubtitle
+                    },
+                    logoUrl = detail.organiserLogo,
+                    verified = detail.organiserVerified,
+                    otherEvents = detail.organiserEvents,
+                    followers = detail.organiserFollowers
+                )
+
+                if (organiserName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(HaraanSpacing.Large))
                 }
 
@@ -198,10 +233,9 @@ fun EventDetailScreen(
                     Spacer(modifier = Modifier.height(HaraanSpacing.Large))
                 }
 
-                // Venue — name, address & a working "Get directions" action
-                EventVenueSection(venue = event.venue, mapLink = detail.mapLink)
-
-                Spacer(modifier = Modifier.height(HaraanSpacing.Large))
+                // (Venue is now shown by the EventVenueMap card above the Organizer —
+                // it carries the venue name, address and Directions, so the plain
+                // text venue section here was a duplicate and has been removed.)
 
                 // Good to Know — admin-authored attribute grid (hides when empty)
                 if (detail.goodToKnow.isNotEmpty()) {
@@ -229,6 +263,7 @@ fun EventDetailScreen(
             barRise = barRise,
             eventId = eventIdInt,
             ticketTypes = ticketTypes,
+            soldOut = detail.soldOut,
             onCheckout = { lines ->
                 onCheckout(
                     OrderSummary(

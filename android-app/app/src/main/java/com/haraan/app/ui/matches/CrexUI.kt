@@ -33,7 +33,7 @@ object CrexColors {
     val Surface         = Color(0xFFFFFFFF) // Pure white cards (was 0xFF1C2229)
     val SurfaceElevated = Color(0xFFFFFFFF) 
     val Border          = Color(0xFFE2E8F0) // Clean divider borders (was 0x1AFFFFFF)
-    val AccentGreen     = Color(0xFF00C853) // Haraan Green/Mint
+    val AccentGreen     = Color(0xFF2563EB) // Haraan Green/Mint
     val AccentYellow    = Color(0xFFF59E0B) // Gold/Amber
     val AccentRed       = Color(0xFFEF4444) // Red/Coral
     val AccentBlue      = Color(0xFF2563EB) // Brand blue

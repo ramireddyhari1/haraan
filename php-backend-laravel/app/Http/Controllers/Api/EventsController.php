@@ -45,7 +45,12 @@ final class EventsController extends Controller
         $city = trim((string) $request->query('city', '')) ?: CityResolver::selected();
 
         $query = Event::query()
-            ->with('partner.hostProfile')
+            // ticketTypes: the card price comes from the tiers via Event::fromPrice(),
+            // so without this the list is one extra query per event.
+            ->with(['partner.hostProfile', 'slots', 'ticketTypes'])
+            // A finished event drops out of "what's on" — it used to sit in the app's
+            // Events tab forever, and was still bookable. Detail pages keep working.
+            ->notFinished()
             ->whereRaw('lower(status) = ?', ['published']);
 
         if ($request->filled('search')) {
@@ -75,7 +80,7 @@ final class EventsController extends Controller
     public function show(string $id, Request $request): JsonResponse
     {
         $event = Event::query()
-            ->with('partner.hostProfile')
+            ->with(['partner.hostProfile', 'slots', 'ticketTypes'])
             ->whereRaw('lower(status) = ?', ['published'])
             ->where('id', $id)
             ->first();
@@ -87,7 +92,7 @@ final class EventsController extends Controller
         // Record the open for Views analytics (best-effort; never blocks the response).
         \App\Support\EventViewRecorder::record($event, $request);
 
-        return response()->json(['data' => new EventResource($event)]);
+        return response()->json(['data' => (new EventResource($event))->asDetail()]);
     }
 
     public function store(StoreEventRequest $request): JsonResponse

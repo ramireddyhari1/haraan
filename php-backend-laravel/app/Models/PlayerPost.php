@@ -1,0 +1,43 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+/**
+ * One photo post on a player's profile grid.
+ */
+class PlayerPost extends Model
+{
+    protected $guarded = [];
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function likes(): HasMany
+    {
+        return $this->hasMany(PostLike::class, 'post_id');
+    }
+
+    /** Carousel images, in display order. Empty for pre-carousel posts (use image_path). */
+    public function images(): HasMany
+    {
+        return $this->hasMany(PostImage::class, 'post_id')->orderBy('position');
+    }
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(PostComment::class, 'post_id');
+    }
+
+    public function saves(): HasMany
+    {
+        return $this->hasMany(PostSave::class, 'post_id');
+    }
+}

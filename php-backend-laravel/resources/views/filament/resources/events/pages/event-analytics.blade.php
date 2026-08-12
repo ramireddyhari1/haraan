@@ -12,7 +12,7 @@
 
         // BMS-style demand tag, driven by real sell-through.
         $st = (int) $s['sellThrough'];
-        if ($s['total'] > 0 && $s['sold'] >= $s['total']) {
+        if ($e->is_sold_out || ($s['total'] > 0 && $s['sold'] >= $s['total'])) {
             $demand = ['label' => 'Sold out', 'tone' => 'full'];
         } elseif ($st >= 85) {
             $demand = ['label' => 'Almost full', 'tone' => 'hot'];
@@ -83,7 +83,46 @@
         .eh-btn svg{width:16px;height:16px;}
 
         /* Haraan brand lockup on the hero */
-        .eh-brand{display:flex;align-items:center;gap:11px;margin-bottom:2px;}
+        .eh-brand{display:flex;flex-wrap:wrap;align-items:center;gap:11px;margin-bottom:2px;}
+
+        /* Primary CTA on the hero top-right: open the desk registration flow. */
+        .eh-reg{margin-left:auto;display:inline-flex;align-items:center;gap:7px;text-decoration:none;
+            font-size:13px;font-weight:700;letter-spacing:.01em;padding:8px 15px;border-radius:999px;
+            color:#0b2b6b;background:#fff;
+            box-shadow:0 8px 20px -10px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.7);
+            transition:transform .15s,box-shadow .15s,background .15s;}
+        .eh-reg:hover{background:#eef4ff;transform:translateY(-1px);
+            box-shadow:0 12px 26px -12px rgba(0,0,0,.7),inset 0 0 0 1px rgba(255,255,255,.9);}
+        .eh-reg svg{width:16px;height:16px;}
+
+        /* Top action row above the hero: back link on the left, the manual
+           "Sold out" override on the right (in the whitespace over the poster). */
+        .eh-topbar{display:flex;align-items:center;justify-content:space-between;
+            gap:12px;margin-bottom:12px;}
+
+        /* Manual "Sold out" override toggle — quiet light outline when off (it now
+           sits on the page background, not the dark hero); solid red when the host
+           has closed sales. */
+        /* A real on/off switch: label + track + sliding knob. Off = grey, knob left;
+           On (sales closed) = red, knob right. */
+        .eh-so{display:inline-flex;align-items:center;gap:9px;cursor:pointer;border:0;background:none;
+            font:inherit;font-size:12.5px;font-weight:700;letter-spacing:-.005em;color:#4b5563;
+            padding:4px 2px;transition:color .15s;}
+        .eh-so:hover{color:#111827;}
+        .eh-so-track{position:relative;flex:0 0 auto;width:40px;height:23px;border-radius:999px;
+            background:#d1d5db;box-shadow:inset 0 0 0 1px rgba(17,24,39,.08);
+            transition:background .2s ease;}
+        .eh-so-knob{position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;
+            background:#fff;box-shadow:0 1px 3px rgba(17,24,39,.4);transition:transform .2s ease;}
+        .eh-so.is-on{color:#b91c1c;}
+        .eh-so.is-on .eh-so-track{background:#dc2626;box-shadow:inset 0 0 0 1px #dc2626;}
+        .eh-so.is-on .eh-so-knob{transform:translateX(17px);}
+        .eh-so[disabled]{opacity:.6;cursor:default;}
+        .dark .eh-so{color:#9ca3af;}
+        .dark .eh-so:hover{color:#fff;}
+        .dark .eh-so-track{background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);}
+        .dark .eh-so.is-on{color:#fca5a5;}
+        .dark .eh-so.is-on .eh-so-track{background:#dc2626;box-shadow:inset 0 0 0 1px #dc2626;}
         .eh-mark{display:inline-flex;background:#fff;border-radius:8px;padding:6px 11px;
             box-shadow:inset 0 0 0 1px rgba(0,0,0,.06),0 4px 12px -6px rgba(0,0,0,.4);}
         .eh-mark img{height:22px;width:auto;display:block;}
@@ -97,18 +136,25 @@
 
         /* Compact back control — small, quiet, BMS-style. Just an arrow + short
            label. No big surface or shadow — it stays out of the way. */
-        .eh-back{display:inline-flex;align-items:center;gap:5px;align-self:flex-start;
-            width:fit-content;text-decoration:none;
-            padding:0;margin-bottom:12px;background:none;
-            color:#6b7280;font-size:12.5px;font-weight:600;letter-spacing:-.005em;
+        /* Back control: a crafted circular icon chip + label (shared style with the
+           registration page's back button, so every back control looks the same). */
+        .eh-back{display:inline-flex;align-items:center;gap:10px;text-decoration:none;
+            align-self:center;color:#4b5563;font-size:13px;font-weight:600;letter-spacing:-.005em;
             transition:color .15s;}
-        .eh-back:hover{color:#2563eb;}
-        .eh-back-ic{display:inline-flex;align-items:center;justify-content:center;
-            transition:transform .15s;}
-        .eh-back:hover .eh-back-ic{transform:translateX(-2px);}
-        .eh-back-ic svg{width:16px;height:16px;}
+        .eh-back-ic{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;
+            background:#fff;color:#374151;border:1px solid rgba(17,24,39,.1);
+            box-shadow:0 1px 2px rgba(17,24,39,.06);
+            transition:transform .15s,border-color .15s,color .15s,box-shadow .15s;}
+        .eh-back-ic svg{width:17px;height:17px;}
+        .eh-back-tx{display:flex;flex-direction:column;line-height:1.15;}
+        .eh-back-tx small{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9ca3af;}
+        .eh-back:hover{color:#111827;}
+        .eh-back:hover .eh-back-ic{border-color:#2563eb;color:#2563eb;transform:translateX(-2px);
+            box-shadow:0 4px 12px -6px rgba(37,99,235,.5);}
         .dark .eh-back{color:#9ca3af;}
-        .dark .eh-back:hover{color:#7da8ff;}
+        .dark .eh-back-ic{background:rgba(255,255,255,.05);color:#e5e7eb;border-color:rgba(255,255,255,.14);}
+        .dark .eh-back:hover{color:#fff;}
+        .dark .eh-back:hover .eh-back-ic{border-color:#7da8ff;color:#93c5fd;}
 
         /* ---- Premium section-header system (applies to every analytics section) ---- */
         /* Divider under each header + room for the brand tag on the right. */
@@ -158,10 +204,22 @@
         }
     </style>
 
-    <a class="eh-back" href="{{ \App\Filament\Resources\Events\EventResource::getUrl('index') }}">
-        <span class="eh-back-ic"><x-filament::icon icon="heroicon-m-arrow-left" /></span>
-        <span class="eh-back-tx">Back to events</span>
-    </a>
+    <div class="eh-topbar">
+        <a class="eh-back" href="{{ \App\Filament\Resources\Events\EventResource::getUrl('index') }}">
+            <span class="eh-back-ic"><x-filament::icon icon="heroicon-m-arrow-left" /></span>
+            <span class="eh-back-tx"><small>Back to</small>Events</span>
+        </a>
+        <button type="button"
+                class="eh-so {{ $e->is_sold_out ? 'is-on' : '' }}"
+                role="switch"
+                aria-checked="{{ $e->is_sold_out ? 'true' : 'false' }}"
+                wire:click="toggleSoldOut"
+                wire:loading.attr="disabled"
+                title="{{ $e->is_sold_out ? 'Tickets are closed — switch off to put back on sale' : 'Switch on to close sales and show “Sold out” to buyers' }}">
+            <span class="eh-so-tx">Sold out</span>
+            <span class="eh-so-track"><span class="eh-so-knob"></span></span>
+        </button>
+    </div>
 
     <div class="eh">
         @if ($poster)
@@ -172,6 +230,12 @@
             <div class="eh-brand">
                 <span class="eh-mark"><img src="{{ asset('images/haraan-wordmark.png') }}" alt="Haraan"></span>
                 <span class="eh-kicker">Event Analytics</span>
+                @if (\App\Filament\Resources\Events\Pages\EventRegister::canAccess())
+                    <a class="eh-reg" href="{{ \App\Filament\Resources\Events\Pages\EventRegister::getUrl(['record' => $e]) }}">
+                        <x-filament::icon icon="heroicon-m-user-plus" />
+                        <span>Register</span>
+                    </a>
+                @endif
             </div>
             <div class="eh-lead">
                 @if ($poster)
@@ -190,7 +254,11 @@
                     <div class="eh-title">{{ $e->title }}</div>
                     <div class="eh-meta">
                         @if ($e->venue || $e->location)<span>{{ $e->venue ?: $e->location }}</span>@endif
-                        @if ($e->date)<span>{{ $e->date->format('D, d M Y · g:i A') }}</span>@endif
+                        @if ($e->date)
+                            {{-- Time lives in its own `time` column (a "g:i A" string); `date` is date-only,
+                                 so formatting the time out of it always yields 12:00 AM. --}}
+                            <span>{{ $e->date->format('D, d M Y') }}{{ trim((string) $e->time) !== '' ? ' · ' . $e->time : '' }}</span>
+                        @endif
                     </div>
                 </div>
             </div>

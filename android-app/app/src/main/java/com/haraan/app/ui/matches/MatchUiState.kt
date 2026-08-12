@@ -71,6 +71,45 @@ data class InningsCard(
     val scoreLine: String get() = "$runs/$wickets"
 }
 
+/**
+ * One row of the MVP (impact) ranking, computed on the backend from the same replayed
+ * ball log the scorecard uses. [batLine] / [bowlLine] are pre-formatted and blank when
+ * the player didn't bat / bowl. Fielding isn't included — the scorer never records the
+ * fielder, so catches can't be credited to anyone.
+ */
+data class MvpPlayer(
+    val name: String,
+    /** 1 = team1/home, 2 = team2/away — drives the row's team accent. */
+    val team: Int,
+    val teamName: String,
+    val points: Int,
+    val batPoints: Int,
+    val bowlPoints: Int,
+    val batLine: String,
+    val bowlLine: String,
+    val strikeRate: String,
+    val econ: String,
+    val runs: Int,
+    val ballsFaced: Int,
+    val fours: Int,
+    val sixes: Int,
+    val wickets: Int,
+    val ballsBowled: Int,
+    val runsConceded: Int,
+    val maidens: Int
+) {
+    val didBat: Boolean get() = ballsFaced > 0
+    val didBowl: Boolean get() = ballsBowled > 0
+    /** "ALL-ROUND" / "BATTER" / "BOWLER" — what this player's impact actually came from. */
+    val roleLabel: String
+        get() = when {
+            batPoints > 0 && bowlPoints > 0 -> "ALL-ROUND"
+            bowlPoints > 0 && !didBat -> "BOWLER"
+            bowlPoints > batPoints -> "BOWLER"
+            else -> "BATTER"
+        }
+}
+
 data class MatchUiState(
     val team1: String,
     val team1FullName: String,
@@ -87,6 +126,13 @@ data class MatchUiState(
     val isLive: Boolean = true,
     /** Sport code, e.g. "cricket", "football", "badminton". Drives which scorer/view opens. */
     val sport: String = "cricket",
+    /**
+     * Football's own state — scoreline, clock and timeline. Null for every other
+     * sport. Held here rather than folded into the cricket fields above, because a
+     * football match has no runs, overs or economy and blanking those out is how a
+     * screen ends up showing cricket furniture with the numbers removed.
+     */
+    val football: FootballState? = null,
 
     // ── Result verification (create → verify → XP) ──
     /** Backend verification state: "" (n/a), "pending", "settled", or "expired". */
@@ -132,7 +178,7 @@ data class MatchUiState(
     val innings: Int = 1,
     val team1Color: Color = Color(0xFF2563EB),   // brand blue
     val team2Color: Color = Color(0xFFEF4444),   // coral red
-    val battingColor: Color = Color(0xFF00C853), // mint — the on-strike accent
+    val battingColor: Color = Color(0xFF2563EB), // mint — the on-strike accent
     val homeSquad: List<SquadMember> = emptyList(),
     val awaySquad: List<SquadMember> = emptyList(),
 
@@ -140,7 +186,10 @@ data class MatchUiState(
     val inningsCards: List<InningsCard> = emptyList(),
 
     /** Ball-by-ball commentary feed, newest first. */
-    val commentary: List<CommentaryLine> = emptyList()
+    val commentary: List<CommentaryLine> = emptyList(),
+
+    /** Impact ranking for the MVP tab, highest points first (empty before any ball). */
+    val mvp: List<MvpPlayer> = emptyList()
 )
 
 sealed class MatchScreenState {

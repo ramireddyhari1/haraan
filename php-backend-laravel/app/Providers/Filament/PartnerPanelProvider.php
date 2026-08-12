@@ -59,6 +59,30 @@ class PartnerPanelProvider extends PanelProvider
             scopes: PartnerLogin::class,
         );
 
+        // Make the partner LOGIN page discoverable in Google (only this page — the
+        // console behind it stays out of the index via robots.txt + auth). The
+        // panel emits no description/canonical of its own, so add search metadata
+        // here; scoped to PartnerLogin so no other panel page is affected.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => '<meta name="description" content="Log in to the Haraan Partner dashboard — for event hosts and venue owners to manage events, bookings, earnings and payouts.">'
+                . '<meta name="robots" content="index,follow,max-image-preview:large">'
+                . '<link rel="canonical" href="' . e(url('/partner/login')) . '">',
+            scopes: PartnerLogin::class,
+        );
+
+        // Premium visual theme for the Event create/edit wizard — same overrides the
+        // control panel uses, scoped to those two pages so the partner's event-creation
+        // experience is just as polished without restyling the rest of the console.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => view('filament.forms.event-form-theme')->render(),
+            scopes: [
+                \App\Filament\Resources\Events\Pages\CreateEvent::class,
+                \App\Filament\Resources\Events\Pages\EditEvent::class,
+            ],
+        );
+
         // The brand logo lives in the sidebar header, which is collapsed behind the
         // hamburger on mobile — so on a phone the console opened with no Haraan mark
         // at all. Paint it into the top bar too, but only below the desktop breakpoint
@@ -67,7 +91,7 @@ class PartnerPanelProvider extends PanelProvider
         // · search + profile (right).
         FilamentView::registerRenderHook(
             PanelsRenderHook::TOPBAR_START,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
                     <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan Partner">
                     <span class="hrn-topbar-tag">partner</span>
@@ -99,7 +123,7 @@ class PartnerPanelProvider extends PanelProvider
         // + a full-basis tag drops it onto its own line directly beneath the logo.
         FilamentView::registerRenderHook(
             PanelsRenderHook::SIDEBAR_LOGO_AFTER,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 <span class="hrn-sidebar-tag">partner</span>
                 <span class="hrn-sidebar-tag hrn-sidebar-brand">Haraan</span>
                 <style>
@@ -153,7 +177,7 @@ class PartnerPanelProvider extends PanelProvider
         // state, more breathing room, and clearer section labels.
         FilamentView::registerRenderHook(
             PanelsRenderHook::SIDEBAR_FOOTER,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 @php
                     $u = auth()->user();
                     $name = $u?->name ?: 'Partner';
@@ -239,7 +263,7 @@ class PartnerPanelProvider extends PanelProvider
         // gate, so a desk person without listings access never sees it.
         FilamentView::registerRenderHook(
             PanelsRenderHook::SIDEBAR_NAV_START,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 @php
                     $isEvent = auth()->user()?->partner_type === 'event';
                     if ($isEvent) {
@@ -319,12 +343,44 @@ class PartnerPanelProvider extends PanelProvider
             scopes: \App\Filament\Pages\Dashboard::class,
         );
 
+        // Mobile: tighten the whole partner console's vertical rhythm. Stock
+        // Filament leaves a 2rem gap between the header widgets (KPI cards) and
+        // the content below, another 2rem between page sections, and 1.5rem
+        // between widgets — which on a phone reads as big empty bands between
+        // the stats, the search bar and the list. Halve them (partner panel
+        // only, and only below the desktop breakpoint) so the screen feels
+        // dense and app-like without touching the desktop layout.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::PAGE_START,
+            function (): string {
+                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
+                    return '';
+                }
+
+                return Blade::render(<<<'BLADE'
+                    <style>
+                        @media (max-width:1023px){
+                            /* Gap between header widgets → table, and between page sections. */
+                            .fi-page-content{row-gap:.85rem;}
+                            .fi-page-main{gap:.85rem;}
+                            /* Gap between stacked widgets / KPI cards in a widget group. */
+                            .fi-wi{gap:.7rem;}
+                            /* Trim the KPI stat cards' own padding + oversized number. */
+                            .fi-wi-stats-overview-stat{padding:12px 13px 11px;}
+                            .fi-wi-stats-overview-stat-value{font-size:22px;margin-top:3px;}
+                            .fi-wi-stats-overview-stat-description{margin-top:6px;}
+                        }
+                    </style>
+                BLADE);
+            },
+        );
+
         // Mobile: collapse the global search into a magnifier icon that sits beside the
         // profile menu; tapping it drops the real search field down as a full-width bar
         // under the top bar (and auto-focuses it). Desktop keeps the inline search field.
         FilamentView::registerRenderHook(
             PanelsRenderHook::GLOBAL_SEARCH_BEFORE,
-            fn (): string => Blade::render(<<<'BLADE'
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
                 <button type="button" class="hrn-search-btn" aria-label="Search"
                         onclick="window.hrnToggleSearch(event)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -394,7 +450,9 @@ class PartnerPanelProvider extends PanelProvider
             // CTA); /control keeps the navy mark via its own provider.
             ->brandLogo(asset('images/haraan-logo-blue.png'))
             ->brandLogoHeight('2.2rem')
-            ->favicon(asset('images/haraan-logo.png'))
+            // Square blue-H-on-white tile — the wide wordmark was illegible as a
+            // 16px browser-tab icon.
+            ->favicon(asset('favicon-192.png'))
             // Same design system as /control — Inter + the compiled theme. The
             // theme styles panel-agnostic fi-* hooks and follows each panel's own
             // primary colour, so the blue lane stays blue.
@@ -402,7 +460,9 @@ class PartnerPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/control/theme.css')
             ->login(PartnerLogin::class)
             ->passwordReset()
-            ->profile()
+            // Own account page, rendered inside the console shell (not Filament's
+            // bare "simple" layout, which read like the panel had dropped away).
+            ->profile(\App\Filament\Pages\Partner\PartnerProfile::class, isSimple: false)
             ->colors([
                 'primary' => Color::Blue,
             ])
@@ -414,6 +474,9 @@ class PartnerPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
+                \App\Filament\Pages\Partner\PartnerPayouts::class,
+                \App\Filament\Pages\Partner\PartnerReviews::class,
+                \App\Filament\Pages\Partner\PartnerPlanPage::class,
                 \App\Filament\Pages\Partner\PartnerPublicProfile::class,
                 \App\Filament\Pages\Partner\PartnerSupport::class,
                 \App\Filament\Pages\Partner\PartnerNotifications::class,

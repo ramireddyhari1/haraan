@@ -4,78 +4,82 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\Events\Widgets;
 
+use App\Filament\Resources\Events\EventResource;
 use App\Filament\Resources\Events\Pages\EventAnalytics;
 use App\Models\Event;
-use Filament\Tables\Columns\ImageColumn;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Table;
-use Filament\Widgets\TableWidget;
+use Filament\Widgets\Widget;
 
 /**
- * "What's coming up" — the next few published events, so the Events overview
- * leads with the calendar an operator is actually working toward rather than a
- * pair of navigation links. Poster, when/where, tickets-sold meter, status;
- * each row deep-links to that event's analytics. (Presentation mirrors the
- * Events list table intentionally.)
+ * "What's coming up" — the next few published events as premium event cards:
+ * poster, when/where, a ticket sell-through meter, a health pill, and quick
+ * actions (Analytics · Manage). Self-contained Blade + inline CSS, theme-aware,
+ * no Vite rebuild. Each card deep-links to that event's analytics.
  */
-class UpcomingEventsWidget extends TableWidget
+class UpcomingEventsWidget extends Widget
 {
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
     use \App\Filament\Concerns\ScopesToPartnerEvents;
 
+    protected string $view = 'filament.clusters.events.widgets.upcoming-events';
+
     protected static ?int $sort = 1;
 
-    protected int|string|array $columnSpan = 'full';
+    protected int | string | array $columnSpan = 'full';
 
-    protected function getTableHeading(): ?string
+    protected static bool $isLazy = false;
+
+    /**
+     * View-ready upcoming-event cards.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getEvents(): array
     {
-        return 'Upcoming events';
+        // Skip the soonest event — the hero spotlight already leads with it.
+        return $this->scopedEventQuery()
+            ->whereRaw("lower(status) = 'published'")
+            ->whereDate('date', '>=', now()->toDateString())
+            ->orderBy('date')
+            ->offset(1)
+            ->limit(6)
+            ->get()
+            ->map(function (Event $r): array {
+                $total = max(0, (int) $r->total_slots);
+                $avail = max(0, (int) $r->available_slots);
+                $sold = max(0, $total - $avail);
+                $pct = $total > 0 ? (int) round($sold / $total * 100) : 0;
+
+                [$sLabel, $sTone] = match (true) {
+                    $total > 0 && $avail <= 0 => ['Sold out', 'danger'],
+                    $total > 0 && $pct >= 85  => ['Almost full', 'warning'],
+                    $sold > 0                 => ['On sale', 'success'],
+                    default                   => ['Just listed', 'gray'],
+                };
+
+                return [
+                    'title'     => (string) $r->title,
+                    'poster'    => $r->heroImageUrl(),
+                    'whenWhere' => $this->whenWhere($r),
+                    'day'       => $r->date?->format('d') ?? '',
+                    'mon'       => $r->date ? strtoupper($r->date->format('M')) : '',
+                    'sold'      => number_format($sold),
+                    'total'     => number_format($total),
+                    'pct'       => min(100, max(0, $pct)),
+                    'sLabel'    => $sLabel,
+                    'sTone'     => $sTone,
+                    'analytics' => EventAnalytics::getUrl(['record' => $r]),
+                    'manage'    => EventResource::getUrl('edit', ['record' => $r]),
+                ];
+            })->all();
     }
 
-    public function table(Table $table): Table
-    {
-        return $table
-            ->query(
-                $this->scopedEventQuery()
-                    ->whereRaw("lower(status) = 'published'")
-                    ->whereDate('date', '>=', now()->toDateString())
-                    ->orderBy('date')
-                    ->limit(6)
-            )
-            ->paginated(false)
-            ->emptyStateHeading('No upcoming events')
-            ->emptyStateDescription('Published events with a future date will show here.')
-            ->emptyStateIcon('heroicon-o-calendar-days')
-            ->recordUrl(fn (Event $r): string => EventAnalytics::getUrl(['record' => $r]))
-            ->columns([
-                ImageColumn::make('poster')
-                    ->label('')
-                    ->height(40)
-                    ->extraImgAttributes(['style' => 'width:58px;object-fit:cover;border-radius:8px;'])
-                    ->getStateUsing(fn (Event $r): string => $r->heroImageUrl() ?? self::posterPlaceholder()),
-
-                TextColumn::make('title')
-                    ->weight('bold')
-                    ->description(fn (Event $r): ?string => self::whenWhere($r))
-                    ->wrap(),
-
-                TextColumn::make('sold')
-                    ->label('Tickets')
-                    ->badge()
-                    ->state(fn (Event $r): string => self::ticketsLabel($r))
-                    ->color(fn (Event $r): string => self::ticketsColor($r)),
-
-                TextColumn::make('date')
-                    ->date('d M Y')
-                    ->sortable(),
-            ]);
-    }
-
-    private static function whenWhere(Event $r): ?string
+    private function whenWhere(Event $r): ?string
     {
         $bits = [];
         if ($r->date !== null) {
-            $bits[] = $r->date->format('D, d M · g:i A');
+            // Time is its own `time` string column; `date` is date-only (else 12:00 AM).
+            $time  = trim((string) $r->time);
+            $bits[] = $r->date->format('D, d M') . ($time !== '' ? ' · ' . $time : '');
         }
         $place = trim((string) ($r->venue ?: $r->location));
         if ($place !== '') {
@@ -83,38 +87,5 @@ class UpcomingEventsWidget extends TableWidget
         }
 
         return $bits === [] ? null : implode(' · ', $bits);
-    }
-
-    private static function ticketsLabel(Event $r): string
-    {
-        $total = max(0, (int) $r->total_slots);
-        $sold = max(0, $total - max(0, (int) $r->available_slots));
-
-        return $total > 0 ? "{$sold} / {$total}" : (string) $sold;
-    }
-
-    private static function ticketsColor(Event $r): string
-    {
-        $total = max(0, (int) $r->total_slots);
-        if ($total === 0) {
-            return 'gray';
-        }
-        $ratio = 1 - (max(0, (int) $r->available_slots) / $total);
-
-        return match (true) {
-            $ratio >= 1.0 => 'danger',
-            $ratio >= 0.85 => 'warning',
-            default => 'success',
-        };
-    }
-
-    private static function posterPlaceholder(): string
-    {
-        $svg = "<svg xmlns='http://www.w3.org/2000/svg' width='58' height='40'>"
-            . "<rect width='58' height='40' rx='8' fill='#e8ecf3'/>"
-            . "<path d='M18 27l6-7 5 5 4-4 7 6z' fill='#b6c0d0'/>"
-            . "<circle cx='21' cy='16' r='3' fill='#b6c0d0'/></svg>";
-
-        return 'data:image/svg+xml;base64,' . base64_encode($svg);
     }
 }

@@ -1,4 +1,4 @@
-/* Lightweight theme overrides for Events (orange) and GameHub (green) */
+/* Lightweight theme overrides for the Events and Pulse lanes (one Haraan blue) */
 
 .theme-events {
     --accent-local: #2563EB; /* Haraan Events blue (app EventsBlue) */
@@ -7,10 +7,12 @@
 }
 
 .theme-gamehub {
-    --accent-local: #1B5E20; /* Haraan GameHub deep green (headings/hero, app GameHubDeep) */
-    --accent-cta: #00C853;   /* Haraan GameHub bright green (buttons/active states, app GameHubGreen) */
-    --accent-lite: #f0fbf6;  /* very light green */
-    --accent-ink: #14532D;   /* dark green text */
+    --accent-local: #1E3A8A; /* Haraan deep blue (headings/hero, app GameHubDeep) */
+    --accent-cta: #1E3A8A;   /* Pulse CTA = the DEEP Haraan blue, so the lane's
+                                buttons read apart from the Events #2563EB while
+                                staying in one brand family (app GameHubGreen) */
+    --accent-lite: #EFF6FF;  /* very light blue */
+    --accent-ink: #1E3A8A;   /* dark blue text */
 }
 
 /* Apply to key components */
@@ -66,7 +68,7 @@
 .theme-gamehub .events-section .section-shell__header .eyebrow,
 .theme-gamehub .gamehub-hero__copy h1,
 .theme-gamehub .promo-banner__content h2 {
-    color: #1B5E20 !important;
+    color: #1E3A8A !important;
 }
 
 .theme-gamehub .events-section .section-shell__header h2 {
@@ -100,68 +102,109 @@
 .theme-gamehub .action-card__title,
 .theme-gamehub .gamehub-hero__copy h1,
 .theme-gamehub .promo-banner__content h2 {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 /* Location selector modal */
+/* ============================================================
+   Location picker — a bottom-sheet city selector.
+   Design intent: typography carries the hierarchy; ink (not blue)
+   marks selection; one brand accent (the location row); generous
+   rhythm; nothing shouts. Base = centred panel (desktop); the
+   mobile override docks it to the bottom edge as a true sheet.
+   ============================================================ */
 .location-modal{display:none;position:fixed;inset:0;z-index:1200}
-.location-modal__backdrop{position:fixed;inset:0;background:rgba(8,12,20,0.55);backdrop-filter:blur(4px)}
-.location-modal__card{position:relative;max-width:860px;margin:6vh auto;padding:24px 26px;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(3,12,30,0.28);z-index:1201}
+.location-modal__backdrop{position:fixed;inset:0;background:rgba(9,12,19,.5);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.location-modal[aria-hidden="false"] .location-modal__backdrop{animation:locFade .28s ease}
+@keyframes locFade{from{opacity:0}to{opacity:1}}
 
-/* Title + corner close */
-.location-modal__titles{margin-bottom:16px;padding-right:40px}
-.location-modal__title{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em;color:#0f172a}
-.location-modal__sub{margin:3px 0 0;font-size:13px;color:#64748b}
-.location-modal__close{position:absolute;top:16px;right:16px;width:36px;height:36px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:#f1f5f9;color:#475569;cursor:pointer;transition:background .15s ease,color .15s ease}
-.location-modal__close:hover{background:#e2e8f0;color:#0f172a}
+.location-sheet{position:relative;z-index:1201;display:flex;flex-direction:column;width:min(440px,calc(100% - 40px));max-height:min(84vh,720px);margin:8vh auto 0;background:#fff;border-radius:24px;box-shadow:0 40px 90px -34px rgba(12,18,32,.5),0 10px 30px -18px rgba(12,18,32,.22);overflow:hidden}
+.location-sheet.show{animation:locSheetIn .42s cubic-bezier(.22,1,.36,1)}
+@keyframes locSheetIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+.location-sheet__grab{display:none}
 
-/* Header: search + primary "use current location" */
-.location-modal__header{display:flex;gap:12px;align-items:center;margin-bottom:18px}
-.location-search{position:relative;flex:1;display:flex;align-items:center}
-.location-search__icon{position:absolute;left:14px;color:#2563EB;pointer-events:none}
-.location-search input{width:100%;padding:12px 14px 12px 42px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;background:#fff;transition:border-color .15s ease,box-shadow .15s ease}
-.location-search input:focus{outline:0;border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.14)}
-.btn--use-location{flex-shrink:0;display:inline-flex;align-items:center;gap:7px;padding:11px 16px;border-radius:12px;background:#2563EB;color:#fff;font-weight:700;font-size:14px;border:0;box-shadow:0 8px 18px rgba(37,99,235,.22);cursor:pointer;transition:background .15s ease,transform .15s ease}
-.btn--use-location:hover{background:#1d4ed8;transform:translateY(-1px)}
-.btn--use-location:disabled{opacity:.7;cursor:default;transform:none}
+/* Header */
+.location-sheet__head{flex-shrink:0;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:26px 24px 14px}
+.location-sheet__heading{min-width:0}
+.location-sheet__title{margin:0;font-size:22px;font-weight:800;letter-spacing:-.022em;color:#0c1119;line-height:1.15}
+.location-sheet__sub{margin:6px 0 0;font-size:13px;color:#7b828d;display:inline-flex;align-items:center;gap:7px;line-height:1.3}
+.location-sheet__sub::before{content:"";flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.location-sheet__close{flex-shrink:0;width:34px;height:34px;margin-top:2px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:#f1f3f6;color:#6b727d;cursor:pointer;transition:background .16s ease,color .16s ease,transform .12s ease}
+.location-sheet__close:hover{background:#e7eaef;color:#0c1119}
+.location-sheet__close:active{transform:scale(.9)}
 
-/* Section headings */
-.loc-section{margin-top:6px}
-.loc-section+.loc-section{margin-top:18px}
-.loc-section__title{margin:0 0 12px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8}
+/* Scroll body */
+.location-sheet__body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:2px 20px 24px}
 
-/* Popular cities — shorter cards so the list below gets real room */
-.popular-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
-.city-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 8px;border-radius:14px;background:#fbfcff;border:1px solid #eef2f7;width:100%;height:92px;justify-content:center;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
-.city-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(12,30,60,0.1);border-color:#dbe6ff}
-.city-card .icon{display:flex;align-items:center;justify-content:center}
-.city-card strong{display:block;font-size:13px;text-align:center;line-height:1.2}
+/* Search — wide, calm, filled; sharpens on focus */
+.loc-search{position:relative;display:flex;align-items:center;margin:4px 0 10px}
+.loc-search__icon{position:absolute;left:16px;color:#9aa1ac;pointer-events:none;transition:color .16s ease}
+.loc-search input{width:100%;height:52px;padding:0 16px 0 46px;border:1.5px solid transparent;border-radius:16px;font-size:15.5px;font-weight:500;color:#12161c;background:#f3f5f8;transition:background .16s ease,border-color .16s ease,box-shadow .16s ease}
+.loc-search input::placeholder{color:#9aa1ac;font-weight:450}
+.loc-search input:focus{outline:0;background:#fff;border-color:#2563EB;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
+.loc-search:focus-within .loc-search__icon{color:#2563EB}
+.loc-search input::-webkit-search-cancel-button{-webkit-appearance:none}
 
-/* All cities list + attached A-Z rail */
-.all-cities-wrap{display:flex;gap:6px;align-items:stretch}
-.all-list{flex:1;display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto;padding-right:6px}
-.city-row{display:flex;gap:12px;align-items:center;padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
-.city-row:hover{background:#f6f9ff}
-.city-row .thumb{display:flex;align-items:center;justify-content:center}
-.city-row>div:nth-child(2){flex:1;min-width:0}
+/* Current location — an intelligent row, the single brand accent */
+.loc-current{width:100%;display:flex;align-items:center;gap:14px;padding:11px 12px;margin-bottom:2px;border:0;border-radius:16px;background:transparent;text-align:left;cursor:pointer;transition:background .16s ease,transform .12s ease}
+.loc-current:hover{background:#f5f7fa}
+.loc-current:active{transform:scale(.99);background:#eef1f6}
+.loc-current__icon{flex-shrink:0;width:42px;height:42px;display:grid;place-items:center;border-radius:13px;background:#eaf1ff;color:#2563EB}
+.loc-current__text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.loc-current__title{font-size:15px;font-weight:600;color:#12161c;line-height:1.2}
+.loc-current__sub{font-size:12.5px;color:#8a919c;line-height:1.2}
+.loc-current__chev{flex-shrink:0;color:#c4c9d2}
+.loc-current:disabled{cursor:default}
+.loc-current:disabled:hover{background:transparent}
+.loc-current.is-loading .loc-current__icon svg{transform-origin:center;animation:locSpin 1s linear infinite}
+.loc-current.is-loading .loc-current__chev{opacity:0}
+@keyframes locSpin{to{transform:rotate(360deg)}}
 
-/* Colored monogram chips — brand-blue family, cohesive with the header */
-.city-mono{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;line-height:1;letter-spacing:-.01em}
-.city-mono--sm{width:38px;height:38px;border-radius:10px;font-size:17px}
-/* Selected-city affordance */
-.city-card.is-selected{border-color:#2563EB;box-shadow:0 0 0 1px #2563EB inset}
-.city-row.is-selected{background:#eff4ff;border-color:#dbe6ff}
-.city-row__check{margin-left:auto;color:#2563EB;font-weight:800;font-size:15px}
+/* Group + quiet label */
+.loc-group{margin-top:22px}
+.loc-group[hidden]{display:none}
+.loc-group__label{margin:0 0 12px;font-size:12.5px;font-weight:600;letter-spacing:.01em;color:#9299a4}
 
-/* A-Z quick-jump rail — narrow, attached to the list, blue active state */
-.alpha-index{flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:2px;width:26px;border-left:1px solid #f1f5f9}
-.alpha-index button{background:transparent;border:0;padding:0;height:15px;width:22px;border-radius:5px;color:#94a3b8;font-size:10px;font-weight:700;cursor:pointer;transition:background .12s ease,color .12s ease}
-.alpha-index button:hover{color:#2563EB}
-.alpha-index button.active{background:#2563EB;color:#fff}
-.alpha-index button.disabled{color:#cbd5e1;pointer-events:none}
+/* Chips (Recent + Popular) — custom, ink-fills when chosen */
+.loc-chips{display:flex;flex-wrap:wrap;gap:8px}
+.loc-chip{display:inline-flex;align-items:center;gap:7px;height:40px;padding:0 16px;border:1px solid #e8ebf0;border-radius:13px;background:#fff;color:#1b2129;font-size:14.5px;font-weight:500;line-height:1;cursor:pointer;transition:border-color .16s ease,background .16s ease,color .16s ease,box-shadow .16s ease,transform .12s ease}
+.loc-chip:hover{border-color:#d3d9e2;background:#fafbfc}
+.loc-chip:active{transform:scale(.96)}
+.loc-chip.is-selected{background:#101828;border-color:#101828;color:#fff;box-shadow:0 8px 18px -8px rgba(16,24,40,.55)}
+.loc-chip__tick{display:inline-flex}
+.loc-chip__tick svg{width:14px;height:14px}
 
-.location-modal__card.show{animation:modalIn .18s ease}
-@keyframes modalIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* A-Z list — typography-led rows, hairline-separated, sticky letters */
+.loc-group--list{margin-top:24px}
+.loc-rows{display:flex;flex-direction:column}
+.loc-letter{position:sticky;top:0;z-index:1;padding:14px 2px 6px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3b9c4;background:linear-gradient(#fff 70%,rgba(255,255,255,0))}
+.loc-letter:first-child{padding-top:4px}
+.loc-row{position:relative;display:flex;align-items:center;min-height:52px;padding:12px 2px;cursor:pointer;border-radius:12px;transition:background .14s ease,transform .1s ease}
+.loc-row+.loc-row{box-shadow:inset 0 1px 0 #f1f3f6}
+.loc-row:hover{background:#f6f8fb}
+.loc-row:active{transform:scale(.995);background:#eef2f7}
+.loc-row__name{flex:1;min-width:0;font-size:16px;font-weight:500;color:#12161c;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.loc-row.is-selected .loc-row__name{font-weight:600;color:#101828}
+.loc-row__tick{flex-shrink:0;margin-left:12px;display:inline-flex;color:#2563EB}
+.loc-row__tick svg{width:19px;height:19px}
+
+/* While searching: collapse browse chrome, let results own the sheet */
+.location-sheet__body.is-searching .loc-group:not(.loc-group--list),
+.location-sheet__body.is-searching .loc-current{display:none}
+.location-sheet__body.is-searching .loc-group--list{margin-top:6px}
+.location-sheet__body.is-searching #locAllLabel{display:none}
+
+/* Empty state */
+.loc-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;padding:34px 20px 20px}
+.loc-empty[hidden]{display:none}
+.loc-empty__icon{width:52px;height:52px;display:grid;place-items:center;border-radius:16px;background:#f3f5f8;color:#aab0bb;margin-bottom:8px}
+.loc-empty__title{margin:0;font-size:15px;font-weight:600;color:#3a414c}
+.loc-empty__sub{margin:0;font-size:13px;color:#9299a4;max-width:250px;line-height:1.4}
+
+@media (prefers-reduced-motion:reduce){
+    .location-sheet.show,.location-modal[aria-hidden="false"] .location-modal__backdrop{animation:none}
+    .loc-chip,.loc-row,.loc-current,.location-sheet__close{transition:none}
+}
 
 /* ==========================================
    PRO DEVELOPER TYPOGRAPHY & DESIGN SYSTEM
@@ -249,7 +292,7 @@ h2, h3 {
 }
 
 .gamehub-venue-card__star {
-    color: #1B5E20;
+    color: #1E3A8A;
     font-weight: 700;
 }
 
@@ -267,8 +310,8 @@ h2, h3 {
 .gamehub-venue-card__rating--new {
     padding: 2px 8px;
     border-radius: 999px;
-    background: rgba(22, 94, 32, 0.10);
-    color: #1B5E20;
+    background: rgba(30, 58, 138, 0.10);
+    color: #1E3A8A;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -292,14 +335,14 @@ h2, h3 {
     padding: 8px 18px;
     font-size: 12.5px;
     font-weight: 700;
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #ffffff;
     border-radius: 999px;
     transition: transform 0.2s, background-color 0.2s;
 }
 
 .gamehub-venue-card__btn:hover {
-    background: #15803d;
+    background: #172554;
     transform: scale(1.02);
 }
 
@@ -355,7 +398,7 @@ h2, h3 {
 }
 
 .detail-badge {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
     font-size: 12px;
     font-weight: 800;
@@ -363,7 +406,7 @@ h2, h3 {
     border-radius: 6px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    box-shadow: 0 2px 6px rgba(22, 163, 74, 0.2);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
 }
 
 .detail-badge--dark {
@@ -530,8 +573,8 @@ h2, h3 {
 }
 
 .date-pill:hover {
-    border-color: #1B5E20;
-    background: #f0fdf4;
+    border-color: #1E3A8A;
+    background: #EFF6FF;
 }
 
 .date-pill__day {
@@ -578,15 +621,15 @@ h2, h3 {
 }
 
 .sport-tab:hover {
-    border-color: #1B5E20;
-    color: #1B5E20;
+    border-color: #1E3A8A;
+    color: #1E3A8A;
 }
 
 .sport-tab.is-active {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
-    border-color: #1B5E20;
-    box-shadow: 0 4px 14px rgba(22,163,74,0.25);
+    border-color: #1E3A8A;
+    box-shadow: 0 4px 14px rgba(37, 99, 235,0.25);
 }
 
 .sport-tab.is-active img {
@@ -648,8 +691,8 @@ h2, h3 {
 .slot-item {
     padding: 16px 14px;
     border-radius: 12px;
-    border: 1.5px solid #bbf7d0;
-    background: #f0fdf4;
+    border: 1.5px solid #DBEAFE;
+    background: #EFF6FF;
     cursor: pointer;
     text-align: center;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -659,13 +702,13 @@ h2, h3 {
 .slot-item__time {
     font-size: 13px;
     font-weight: 700;
-    color: #15803d;
+    color: #1D4ED8;
 }
 
 .slot-item__price {
     font-size: 11px;
     font-weight: 600;
-    color: #166534;
+    color: #1E40AF;
     margin-top: 4px;
 }
 
@@ -685,18 +728,18 @@ h2, h3 {
 }
 
 .slot-item.is-selected {
-    border-color: #1B5E20 !important;
-    background: #f0fdf4 !important;
-    box-shadow: 0 4px 14px rgba(22,163,74,0.18) !important;
+    border-color: #1E3A8A !important;
+    background: #EFF6FF !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235,0.18) !important;
     transform: translateY(-2px);
 }
 
 .slot-item.is-selected .slot-item__time {
-    color: #1B5E20 !important;
+    color: #1E3A8A !important;
 }
 
 .slot-item.is-selected .slot-item__price {
-    color: #1B5E20 !important;
+    color: #1E3A8A !important;
 }
 
 /* Amenities Grid */
@@ -750,7 +793,7 @@ h2, h3 {
     transition: transform 0.2s ease;
     font-size: 18px;
     font-weight: bold;
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .accordion-body {
@@ -785,13 +828,13 @@ h2, h3 {
 }
 
 .reviews-count-badge {
-    background: #f0fdf4;
-    color: #1B5E20;
+    background: #EFF6FF;
+    color: #1E3A8A;
     font-size: 14px;
     font-weight: 700;
     padding: 4px 14px;
     border-radius: 99px;
-    border: 1px solid #bbf7d0;
+    border: 1px solid #DBEAFE;
 }
 
 .review-card {
@@ -816,14 +859,14 @@ h2, h3 {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: #f0fdf4;
-    color: #1B5E20;
+    background: #EFF6FF;
+    color: #1E3A8A;
     font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 15px;
-    border: 1.5px solid #bbf7d0;
+    border: 1.5px solid #DBEAFE;
 }
 
 .review-user-name {
@@ -894,7 +937,7 @@ h2, h3 {
 
 .star-btn:hover,
 .star-btn.is-active {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .review-input-field {
@@ -910,12 +953,12 @@ h2, h3 {
 }
 
 .review-input-field:focus {
-    border-color: #1B5E20;
-    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.1);
+    border-color: #1E3A8A;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .review-submit-btn {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
     border: none;
     border-radius: 10px;
@@ -927,8 +970,8 @@ h2, h3 {
 }
 
 .review-submit-btn:hover {
-    background: #15803d;
-    box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+    background: #172554;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
 
 /* Sticky Booking Sidebar Card */
@@ -1000,8 +1043,8 @@ h2, h3 {
 }
 
 .selected-slot-item-pill {
-    background: #f0fdf4;
-    border: 1px solid #bbf7d0;
+    background: #EFF6FF;
+    border: 1px solid #DBEAFE;
     padding: 12px 14px;
     border-radius: 10px;
     margin-bottom: 8px;
@@ -1012,7 +1055,7 @@ h2, h3 {
 .selected-slot-item-pill__header {
     font-size: 11px;
     font-weight: 700;
-    color: #1B5E20;
+    color: #1E3A8A;
     text-transform: uppercase;
     margin-bottom: 2px;
 }
@@ -1030,7 +1073,7 @@ h2, h3 {
 }
 
 .selected-slot-item-pill__price {
-    color: #1B5E20;
+    color: #1E3A8A;
     font-weight: 800;
 }
 
@@ -1079,7 +1122,7 @@ h2, h3 {
 }
 
 .calc-row--bold .total-green {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 /* Submit and Lock Button */
@@ -1098,15 +1141,15 @@ h2, h3 {
 }
 
 .book-now-button-widget.is-ready {
-    background: #1B5E20;
+    background: #1E3A8A;
     color: #fff;
     cursor: pointer;
-    box-shadow: 0 8px 24px rgba(22, 163, 74, 0.25);
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.25);
 }
 
 .book-now-button-widget.is-ready:hover {
-    background: #15803d;
-    box-shadow: 0 12px 30px rgba(22, 163, 74, 0.35);
+    background: #172554;
+    box-shadow: 0 12px 30px rgba(37, 99, 235, 0.35);
     transform: translateY(-1px);
 }
 
@@ -1133,7 +1176,7 @@ h2, h3 {
     width: 90%;
     text-align: center;
     box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
-    border: 1px solid #bbf7d0;
+    border: 1px solid #DBEAFE;
 }
 
 .success-check-badge {
@@ -1167,8 +1210,8 @@ h2, h3 {
 }
 
 .success-receipt-box {
-    background: #f0fdf4;
-    border: 1.5px solid #bbf7d0;
+    background: #EFF6FF;
+    border: 1.5px solid #DBEAFE;
     border-radius: 14px;
     padding: 22px;
     text-align: left;
@@ -1188,7 +1231,7 @@ h2, h3 {
 .receipt-ref-id {
     font-family: monospace;
     font-weight: 700;
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .receipt-highlight {
@@ -1198,7 +1241,7 @@ h2, h3 {
 
 .receipt-total {
     font-weight: 900;
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .success-done-btn {
@@ -1228,7 +1271,7 @@ h2, h3 {
 .mb-32 { margin-bottom: 32px !important; }
 
 .detail-meta-star {
-    color: #1B5E20;
+    color: #1E3A8A;
     font-weight: 700;
     font-size: 18px;
 }
@@ -1249,7 +1292,7 @@ h2, h3 {
 }
 
 .review-star.is-active {
-    color: #1B5E20;
+    color: #1E3A8A;
 }
 
 .review-comment-textarea {
@@ -1330,14 +1373,14 @@ html {
 .gamehub-action-card:hover {
     transform: translateY(-3px);
     background: #ffffff;
-    border-color: rgba(27, 94, 32, 0.3);
-    box-shadow: 0 12px 28px rgba(27, 94, 32, 0.06), 0 4px 10px rgba(27, 94, 32, 0.02);
+    border-color: rgba(30, 58, 138, 0.3);
+    box-shadow: 0 12px 28px rgba(30, 58, 138, 0.06), 0 4px 10px rgba(30, 58, 138, 0.02);
 }
 
 .gamehub-action-card.active {
     background: #ffffff;
     border-color: var(--accent-local);
-    box-shadow: 0 14px 32px rgba(27, 94, 32, 0.08), 0 4px 12px rgba(27, 94, 32, 0.03);
+    box-shadow: 0 14px 32px rgba(30, 58, 138, 0.08), 0 4px 12px rgba(30, 58, 138, 0.03);
 }
 
 /* Light indicator line on the left side of active card */
@@ -1359,7 +1402,7 @@ html {
     width: 46px;
     height: 46px;
     border-radius: 12px;
-    background: rgba(27, 94, 32, 0.06);
+    background: rgba(30, 58, 138, 0.06);
     color: var(--accent-local);
     transition: all 0.3s ease;
     flex-shrink: 0;
@@ -1413,11 +1456,11 @@ html {
     right: 14px;
     font-size: 10px;
     font-weight: 800;
-    color: #15803d;
-    background: #f0fdf4;
+    color: #1D4ED8;
+    background: #EFF6FF;
     padding: 3px 8px;
     border-radius: 6px;
-    border: 1px solid #bbf7d0;
+    border: 1px solid #DBEAFE;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     animation: pulseBadge 2s infinite ease-in-out;

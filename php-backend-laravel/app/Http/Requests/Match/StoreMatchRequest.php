@@ -31,10 +31,27 @@ final class StoreMatchRequest extends FormRequest
             'matchType'      => ['required', 'string', 'in:casual,league,tournament'],
             // Private = pure scoreboard: no XP, no rank, hidden from feeds, share-code access.
             'isPrivate'      => ['nullable', 'boolean'],
-            'overs'          => ['required', 'integer', 'min:1', 'max:50'],
+            // Overs are cricket's. Football and badminton used to be forced to send a
+            // number here, so every non-cricket match carried "20 overs" as junk and
+            // titled itself "20 Over Match".
+            'overs'          => ['required_if:sport,cricket', 'nullable', 'integer', 'min:1', 'max:50'],
             // Must stay in sync with the app's BallType enum (CreateMatchWizard.kt).
             'ball'           => ['nullable', 'string', 'in:tennis,tape,rubber,cork,synthetic,leather,season'],
-            'playersPerSide' => ['required', 'integer', 'min:2', 'max:15'],
+            // Floor is 1, not 2: badminton singles is one a side, and the old floor
+            // meant a singles match literally could not be created.
+            'playersPerSide' => ['required', 'integer', 'min:1', 'max:15'],
+
+            // What ends the match, in that sport's own terms. Shape depends on `kind`;
+            // stored verbatim under `sport_state.format`.
+            'format'                => ['nullable', 'array'],
+            'format.kind'           => ['required_with:format', 'string', 'in:cricket,football,badminton'],
+            'format.overs'          => ['nullable', 'integer', 'min:1', 'max:50'],
+            'format.ball'           => ['nullable', 'string', 'max:20'],
+            'format.halves'         => ['nullable', 'integer', 'min:1', 'max:2'],
+            'format.halfLengthMin'  => ['nullable', 'integer', 'min:5', 'max:45'],
+            'format.bestOf'         => ['nullable', 'integer', 'in:1,3,5'],
+            'format.pointsTo'       => ['nullable', 'integer', 'in:11,15,21'],
+            'format.doubles'        => ['nullable', 'boolean'],
             'venue'          => ['nullable', 'string', 'max:255'],
             // Area/Village is mandatory for public matches (they appear in the district
             // feed). Private matches are hidden from feeds, so it's optional there.
@@ -49,6 +66,11 @@ final class StoreMatchRequest extends FormRequest
             'district'       => ['nullable', 'string', 'max:120'],
             'onHaraanTurf'   => ['nullable', 'boolean'],
             'venueBookingId' => ['nullable', 'integer'],
+
+            // Future kick-off (ISO-8601). Omitted / null = "play now" (started right
+            // after creation via the toss). Must be in the future when present, so a
+            // scheduled match never lands already overdue.
+            'scheduledAt'    => ['nullable', 'date', 'after:now'],
 
             'teamA'          => ['required', 'string', 'max:255'],
             'teamB'          => ['required', 'string', 'max:255'],

@@ -112,6 +112,7 @@ class EventsTable
             ->filters([
                 SelectFilter::make('status')
                     ->options([
+                        'pending' => 'Pending review',
                         'published' => 'Published',
                         'draft' => 'Draft',
                         'cancelled' => 'Cancelled',
@@ -150,6 +151,7 @@ class EventsTable
                     ->icon('heroicon-m-chart-bar')
                     ->color('gray')
                     ->url(fn ($record): string => EventAnalytics::getUrl(['record' => $record])),
+                \App\Filament\Resources\Events\Actions\ManageGalleryAction::make(),
                 Action::make('duplicate')
                     ->label('Duplicate')
                     ->icon('heroicon-m-document-duplicate')

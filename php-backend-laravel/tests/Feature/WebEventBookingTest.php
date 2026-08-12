@@ -30,6 +30,12 @@ class WebEventBookingTest extends TestCase
         ]);
     }
 
+    /** The attendee-contact block the checkout form always requires. */
+    private function contact(): array
+    {
+        return ['contact' => ['name' => 'Web Buyer', 'email' => 'buyer@example.test', 'phone' => '9876543210']];
+    }
+
     private function event(array $overrides = []): Event
     {
         $partner = User::firstOrCreate(
@@ -78,20 +84,21 @@ class WebEventBookingTest extends TestCase
             ->assertSee('498.00');
     }
 
+    /** A free event skips payment: the booking confirms on the spot and lands on the pass. */
     public function test_confirm_creates_booking_and_shows_pass(): void
     {
-        $event = $this->event();
+        $event = $this->event(['price' => 0]);
         $user  = $this->user();
 
         $response = $this->actingAs($user)
-            ->post("/events/{$event->id}/book", ['qty' => [0 => 2]]);
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2]] + $this->contact());
 
         $booking = Booking::query()->firstOrFail();
         $response->assertRedirect(route('site.booking.pass', ['id' => $booking->id]));
 
         $this->assertSame(2, $booking->quantity);
         $this->assertSame('CONFIRMED', $booking->status);
-        $this->assertSame(498.0, (float) $booking->total_amount);
+        $this->assertSame(0.0, (float) $booking->total_amount);
         $this->assertSame(98, $event->fresh()->available_slots);
         $this->assertNotEmpty($booking->ticket_code);
 
@@ -102,6 +109,10 @@ class WebEventBookingTest extends TestCase
             ->assertSee('haraan:ticket:'.$booking->ticket_code, false);
     }
 
+    /**
+     * A paid order reserves each tier at its own price and stops on the payment page
+     * (status PENDING until Razorpay confirms) — seats are held, not yet ticketed.
+     */
     public function test_tiered_order_books_each_tier_at_its_own_price(): void
     {
         $event = $this->event();
@@ -109,10 +120,11 @@ class WebEventBookingTest extends TestCase
         $silver = TicketType::create(['event_id' => $event->id, 'name' => 'Silver', 'kind' => 'paid', 'price' => 300, 'quota' => 10, 'sold' => 0, 'sort' => 2]);
 
         $this->actingAs($this->user())
-            ->post("/events/{$event->id}/book", ['qty' => [$gold->id => 1, $silver->id => 2]])
-            ->assertRedirect();
+            ->post("/events/{$event->id}/book", ['qty' => [$gold->id => 1, $silver->id => 2]] + $this->contact())
+            ->assertOk();
 
         $this->assertSame(2, Booking::query()->count());
+        $this->assertSame(['PENDING'], Booking::query()->pluck('status')->unique()->all());
         $this->assertSame(500.0, (float) Booking::query()->where('ticket_type_id', $gold->id)->value('total_amount'));
         $this->assertSame(600.0, (float) Booking::query()->where('ticket_type_id', $silver->id)->value('total_amount'));
         $this->assertSame(1, $gold->fresh()->sold);
@@ -126,7 +138,7 @@ class WebEventBookingTest extends TestCase
 
         $this->actingAs($this->user())
             ->from("/events/{$event->id}/book?qty[0]=3")
-            ->post("/events/{$event->id}/book", ['qty' => [0 => 3]])
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 3]] + $this->contact())
             ->assertRedirect()
             ->assertSessionHas('error');
 
@@ -159,12 +171,149 @@ class WebEventBookingTest extends TestCase
         $this->assertSame(0, Booking::query()->count());
     }
 
+    /**
+     * Release phases must reach the buyer: a phase-2 tier is listed as locked (no
+     * quantity input, so it can't be selected) and refuses a hand-typed order until
+     * the earlier phase sells out.
+     */
+    public function test_unreleased_phase_tier_is_locked_on_the_site_and_at_checkout(): void
+    {
+        // Free tiers so the order confirms in one step — the phase gate is what's under test.
+        $event = $this->event(['price' => 0, 'release_phases' => [['name' => 'Early Bird'], ['name' => 'Phase 2']]]);
+        $early = TicketType::create(['event_id' => $event->id, 'name' => 'Early Bird Pass', 'kind' => 'standard', 'price' => 0, 'capacity' => 2, 'sold' => 0, 'sort' => 1, 'release_phase' => 0]);
+        $late  = TicketType::create(['event_id' => $event->id, 'name' => 'Phase Two Pass', 'kind' => 'standard', 'price' => 0, 'capacity' => 5, 'sold' => 0, 'sort' => 2, 'release_phase' => 1]);
+
+        $this->get("/events/{$event->id}")
+            ->assertOk()
+            ->assertSee('Phase Two Pass')
+            ->assertSee('Opens when Early Bird sells out')
+            ->assertSee('qty['.$early->id.']', false)
+            ->assertDontSee('qty['.$late->id.']', false);
+
+        $buyer = $this->user();
+
+        $this->actingAs($buyer)
+            ->post("/events/{$event->id}/book", ['qty' => [$late->id => 1]] + $this->contact())
+            ->assertRedirect("/events/{$event->id}");
+        $this->assertSame(0, Booking::query()->count());
+
+        // Early Bird sells out → Phase 2 opens for real.
+        $early->update(['sold' => 2]);
+
+        $this->get("/events/{$event->id}")
+            ->assertOk()
+            ->assertDontSee('Opens when Early Bird sells out')
+            ->assertSee('qty['.$late->id.']', false);
+
+        $this->actingAs($buyer)
+            ->post("/events/{$event->id}/book", ['qty' => [$late->id => 1]] + $this->contact())
+            ->assertRedirect();
+        $this->assertSame(1, Booking::query()->where('ticket_type_id', $late->id)->count());
+    }
+
+    /** A hidden tier is not buyable from the website, the same rule the API applies. */
+    public function test_hidden_tier_never_reaches_web_checkout(): void
+    {
+        $event  = $this->event();
+        $hidden = TicketType::create(['event_id' => $event->id, 'name' => 'Staff Comp', 'kind' => 'paid', 'price' => 1, 'capacity' => 5, 'sold' => 0, 'sort' => 1, 'visible' => false]);
+
+        $this->actingAs($this->user())
+            ->post("/events/{$event->id}/book", ['qty' => [$hidden->id => 1]] + $this->contact())
+            ->assertRedirect("/events/{$event->id}");
+
+        $this->assertSame(0, Booking::query()->count());
+    }
+
+    /**
+     * The review page's Apply button quotes a coupon against the cart on screen, and the
+     * quote has to match what confirming actually charges — same resolver, both sides.
+     */
+    public function test_coupon_preview_quotes_the_discount_it_will_charge(): void
+    {
+        $event = $this->event(['price' => 500]);
+        $user  = $this->user();
+
+        \App\Models\Coupon::create([
+            'event_id' => $event->id, 'code' => 'BLOOM20', 'type' => 'percent',
+            'discount' => 20, 'min_order' => 800, 'active' => true,
+        ]);
+
+        // ₹1000 cart, 20% off → ₹200 off, ₹800 payable.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 2], 'couponCode' => 'bloom20'])
+            ->assertOk()
+            ->assertJson(['applied' => true, 'code' => 'BLOOM20', 'discount' => 200, 'totalLabel' => '800.00']);
+
+        // Same code on a cart below its minimum, and a code that doesn't exist.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 1], 'couponCode' => 'BLOOM20'])
+            ->assertOk()
+            ->assertJson(['applied' => false]);
+
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 2], 'couponCode' => 'NOPE'])
+            ->assertOk()
+            ->assertJson(['applied' => false, 'message' => 'This code isn’t valid.']);
+
+        // Previewing must not consume the code, and confirming must charge the quote.
+        $this->assertSame(0, (int) \App\Models\Coupon::query()->value('uses'));
+
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2], 'couponCode' => 'BLOOM20'] + $this->contact())
+            ->assertOk();
+
+        $this->assertSame(200.0, (float) Booking::query()->max('discount'));
+    }
+
+    /**
+     * A minimum-TICKETS coupon must count tickets, not rupees.
+     *
+     * A host setting up "₹100 off on 2 tickets" had only "Min Order Value" to reach for,
+     * typed 2 into it, and got a coupon that fired on a single ₹699 ticket (₹699 ≥ ₹2).
+     * min_tickets is the real rule, and it has to hold on the quote AND on the charge.
+     */
+    public function test_minimum_tickets_coupon_needs_the_ticket_count_not_the_amount(): void
+    {
+        $event = $this->event(['price' => 699]);
+        $user  = $this->user();
+
+        \App\Models\Coupon::create([
+            'event_id' => $event->id, 'code' => 'PAIR100', 'type' => 'fixed',
+            'discount' => 100, 'min_tickets' => 2, 'active' => true,
+        ]);
+
+        // One ticket: refused, with a reason that names the actual rule.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 1], 'couponCode' => 'PAIR100'])
+            ->assertOk()
+            ->assertJson(['applied' => false, 'message' => 'Applies on 2 tickets or more.']);
+
+        // Two tickets: applied.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book/coupon", ['qty' => [0 => 2], 'couponCode' => 'PAIR100'])
+            ->assertOk()
+            ->assertJson(['applied' => true, 'discount' => 100]);
+
+        // And the charge agrees with the quote in both directions.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 1], 'couponCode' => 'PAIR100'] + $this->contact())
+            ->assertOk();
+        $this->assertSame(0.0, (float) Booking::query()->max('discount'));
+
+        Booking::query()->delete();
+
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2], 'couponCode' => 'PAIR100'] + $this->contact())
+            ->assertOk();
+        $this->assertSame(100.0, (float) Booking::query()->max('discount'));
+    }
+
     public function test_pass_page_is_owner_only(): void
     {
         $event = $this->event();
         $owner = $this->user();
 
-        $this->actingAs($owner)->post("/events/{$event->id}/book", ['qty' => [0 => 1]]);
+        $this->actingAs($owner)->post("/events/{$event->id}/book", ['qty' => [0 => 1]] + $this->contact());
         $booking = Booking::query()->firstOrFail();
 
         $stranger = User::create([
@@ -175,5 +324,40 @@ class WebEventBookingTest extends TestCase
         $this->actingAs($stranger)
             ->get("/bookings/{$booking->id}/pass")
             ->assertNotFound();
+    }
+
+    public function test_multi_slot_booking_requires_a_session_and_tracks_its_inventory(): void
+    {
+        $event = $this->event(['price' => 0]);
+        $user  = $this->user();
+        // Two sessions turn on slot selection; the second one is capped at 2 seats.
+        $morning = \App\Models\EventSlot::create(['event_id' => $event->id, 'label' => 'Morning', 'starts_at' => now()->addDays(7)->setTime(10, 0), 'sort' => 0]);
+        $evening = \App\Models\EventSlot::create(['event_id' => $event->id, 'label' => 'Evening', 'starts_at' => now()->addDays(7)->setTime(19, 0), 'capacity' => 2, 'sort' => 1]);
+
+        // No session chosen on a multi-session event → bounced, nothing booked.
+        $this->actingAs($user)
+            ->from("/events/{$event->id}")
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 1]] + $this->contact())
+            ->assertRedirect()
+            ->assertSessionHas('error');
+        $this->assertSame(0, Booking::query()->count());
+
+        // Booking the capped evening session decrements its own sold count. A ₹0
+        // event confirms immediately, so this redirects to the pass.
+        $this->actingAs($user)
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 2], 'eventSlotId' => $evening->id] + $this->contact())
+            ->assertRedirect();
+
+        $this->assertSame(2, (int) $evening->fresh()->sold);
+        $this->assertSame(0, (int) $morning->fresh()->sold);
+        $this->assertSame($evening->id, (int) Booking::query()->value('event_slot_id'));
+
+        // The evening session is now full → a further booking there is refused.
+        $this->actingAs($user)
+            ->from("/events/{$event->id}")
+            ->post("/events/{$event->id}/book", ['qty' => [0 => 1], 'eventSlotId' => $evening->id] + $this->contact())
+            ->assertRedirect()
+            ->assertSessionHas('error');
+        $this->assertSame(1, Booking::query()->count());
     }
 }

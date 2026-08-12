@@ -110,9 +110,27 @@ final class AuthController extends Controller
         ]);
     }
 
-    public function logout(): JsonResponse
+    /**
+     * Sign out — and mean it.
+     *
+     * This used to return a success message and invalidate nothing, so a "signed out"
+     * token stayed usable for the rest of its 7-day life. Bumping token_version kills
+     * every token this user holds.
+     *
+     * That is deliberately account-wide, not per-device: these JWTs carry no per-token
+     * id, so there is nothing to revoke individually. Signing out here signs the account
+     * out of its other devices too, and the client says so before it calls this.
+     */
+    public function logout(Request $request): JsonResponse
     {
-        return response()->json(['message' => 'Logout successful']);
+        $user = $request->attributes->get('auth_user');
+        if (!$user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        JwtService::revokeAllFor($user);
+
+        return response()->json(['message' => 'Logout successful', 'revoked' => true]);
     }
 
     public function me(Request $request): JsonResponse
@@ -133,10 +151,6 @@ final class AuthController extends Controller
     /** Issue a JWT for the given user. */
     private function issueToken(User $user): string
     {
-        return JwtService::issue([
-            'sub'   => $user->id,
-            'email' => $user->email,
-            'role'  => $user->role,
-        ], (string) config('app.jwt_secret'));
+        return JwtService::issueForUser($user, (string) config('app.jwt_secret'));
     }
 }

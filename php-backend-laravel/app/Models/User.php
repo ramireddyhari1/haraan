@@ -104,16 +104,20 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
      * Gate the Filament panels. Partners live in the dedicated /partner console
      * and must never reach the internal /control panel (where support threads
      * and other tenants' data would otherwise be exposed); internal department
-     * staff get /control but not /partner. Super-admins get both. The
-     * per-workspace clusters then decide what each role actually sees.
+     * staff and super-admins get /control but not /partner. The /partner console
+     * is for real partner accounts only. The per-workspace clusters then decide
+     * what each role actually sees.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        if ($this->isSuperAdmin()) {
-            return true;
-        }
-
         if ($panel->getId() === 'partner') {
+            // Admins belong in /control only — they are barred from the partner
+            // console even if their account also happens to carry a PARTNER role,
+            // so an internal login can never masquerade inside a partner workspace.
+            if ($this->isSuperAdmin()) {
+                return false;
+            }
+
             // A suspended desk person keeps their login but is locked out until an
             // owner reactivates them (owners themselves are never auto-suspended here).
             if ($this->isDeskStaff() && strtoupper((string) $this->status) === 'SUSPENDED') {
@@ -123,7 +127,11 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             return $this->hasRoleEither(['PARTNER']);
         }
 
-        // /control — internal staff only, never partners.
+        // /control — internal staff and super-admins, never partners.
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
         return $this->hasRoleEither(['FINANCE', 'MARKETING', 'OPS']);
     }
 
@@ -211,6 +219,50 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasOne(HostProfile::class);
     }
 
+    // -------------------------------------------------------------------------
+    //  Player follows — the ActionBoard social graph
+    // -------------------------------------------------------------------------
+
+    /** Players this user follows. */
+    public function following(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'player_follows', 'follower_id', 'followee_id')
+            ->withTimestamps();
+    }
+
+    /** Players who follow this user. */
+    public function followers(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'player_follows', 'followee_id', 'follower_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Follow another player. Idempotent — following twice is a no-op rather than a
+     * duplicate row, so a double-tap on a slow connection can't break the button.
+     * Returns false when the follow was refused (yourself, or a guest account).
+     */
+    public function follow(self $player): bool
+    {
+        if ($player->id === $this->id || $player->is_guest) {
+            return false;
+        }
+
+        $this->following()->syncWithoutDetaching([$player->id]);
+
+        return true;
+    }
+
+    public function unfollow(self $player): void
+    {
+        $this->following()->detach($player->id);
+    }
+
+    public function isFollowing(self $player): bool
+    {
+        return $this->following()->whereKey($player->id)->exists();
+    }
+
     /** Venues this desk person is explicitly limited to (Phase 3 scoping). */
     public function assignedVenues(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
@@ -259,7 +311,9 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
     protected $fillable = [
         'player_id',
+        'username',
         'name',
+        'bio',
         'email',
         'password',
         'phone',
@@ -319,6 +373,64 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'Badminton'  => ['format', 'hand'],
         'Basketball' => ['position', 'hand'],
     ];
+
+    /**
+     * Handles that must never belong to a player, because a route, a support identity or
+     * an impersonation attempt would read as legitimate. Checked against the normalised
+     * (lowercased) handle.
+     */
+    public const RESERVED_USERNAMES = [
+        'haraan', 'admin', 'administrator', 'root', 'support', 'help', 'official',
+        'staff', 'team', 'moderator', 'mod', 'system', 'security', 'billing',
+        'api', 'www', 'app', 'web', 'control', 'partner', 'login', 'signup',
+        'register', 'account', 'settings', 'profile', 'me', 'you', 'null', 'undefined',
+        'haraanapp', 'haraanofficial', 'actionboard', 'gamehub', 'pulse',
+    ];
+
+    /** Lowercase + trim. The stored value is ALWAYS the normalised one, so uniqueness
+     *  is case-insensitive without needing a functional index (SQLite has none). */
+    public static function normalizeUsername(?string $username): string
+    {
+        return mb_strtolower(trim((string) $username));
+    }
+
+    /**
+     * Why a handle is unacceptable, or null when it is fine. Shape rules only — this
+     * says nothing about whether it is already taken.
+     *
+     * 3-20 chars, lowercase letters/digits/underscore/dot, must start with a letter,
+     * must end alphanumeric, no doubled separators. The "starts with a letter" rule
+     * keeps handles from colliding with Player IDs and from being read as numbers.
+     */
+    public static function usernameRejection(string $normalized): ?string
+    {
+        if (mb_strlen($normalized) < 3) {
+            return 'Usernames need at least 3 characters.';
+        }
+        if (mb_strlen($normalized) > 20) {
+            return 'Usernames can be at most 20 characters.';
+        }
+        if (!preg_match('/^[a-z][a-z0-9._]*[a-z0-9]$/', $normalized)) {
+            return 'Use letters, numbers, dot or underscore. Start with a letter.';
+        }
+        if (preg_match('/[._]{2,}/', $normalized)) {
+            return 'No two dots or underscores in a row.';
+        }
+        if (in_array($normalized, self::RESERVED_USERNAMES, true)) {
+            return 'That username is reserved.';
+        }
+
+        return null;
+    }
+
+    /** True when no OTHER account already holds this handle. */
+    public static function usernameIsFree(string $normalized, ?int $ignoreUserId = null): bool
+    {
+        return !self::query()
+            ->where('username', $normalized)
+            ->when($ignoreUserId !== null, fn ($q) => $q->where('id', '!=', $ignoreUserId))
+            ->exists();
+    }
 
     public function isActionboardProfileComplete(): bool
     {
@@ -489,6 +601,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     public function events(): HasMany
     {
         return $this->hasMany(Event::class, 'partner_id');
+    }
+
+    /** Venues managed by this user (as a venue-owner partner). */
+    public function venues(): HasMany
+    {
+        return $this->hasMany(Venue::class, 'partner_id');
     }
 
     /** Bookings placed by this user. */

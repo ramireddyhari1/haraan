@@ -32,10 +32,38 @@ fun MainNavigation() {
           MainScreen(onItemClick = { navKey -> backStack.add(navKey) }, modifier = Modifier.safeDrawingPadding().padding(16.dp))
         }
         entry<EventDetail> { event ->
+          val ctx = LocalContext.current
           EventDetailScreen(
             event = event,
             onBack = { backStack.removeLastOrNull() },
-            onCheckout = { order -> backStack.add(order) }
+            // Checkout requires a real account. Guests (and "skipped" browsers) are
+            // sent through the login wall first, then continue to the same order.
+            onCheckout = { order ->
+              if (TokenStore.isSignedIn(TokenStore.getToken(ctx))) {
+                backStack.add(order)
+              } else {
+                backStack.add(LoginGate(order))
+              }
+            }
+          )
+        }
+        entry<LoginGate> { gate ->
+          val ctx = LocalContext.current
+          com.haraan.app.ui.LoginRoute(
+            // Cancel / "Skip" → abandon checkout, back to the event (no order).
+            onSkipClick = { backStack.removeLastOrNull() },
+            // Signed in → persist the session, then drop the login screen and
+            // continue to the pending order (OrderSummary reads the saved token).
+            onLoginSuccess = { token ->
+              TokenStore.saveToken(ctx, token)
+              com.haraan.app.push.PushRegistrar.syncToken(ctx)
+              // The roster is filled in lazily from the profile screen
+              // (adoptExistingSessionIfNeeded) rather than here: this is the checkout
+              // login wall, and blocking a ticket purchase on a profile fetch that only
+              // the account switcher needs would be the wrong trade.
+              backStack.removeLastOrNull()
+              backStack.add(gate.pendingOrder)
+            }
           )
         }
         entry<OrderSummary> { order ->

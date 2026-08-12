@@ -83,6 +83,8 @@ final class EventBookingController extends Controller
 
         $coupon = trim((string) $request->input('couponCode', ''));
 
+        $slotId = $request->filled('eventSlotId') ? (int) $request->input('eventSlotId') : null;
+
         try {
             $order = $this->bookings->createOrder(
                 $request->user(),
@@ -90,6 +92,7 @@ final class EventBookingController extends Controller
                 $lines,
                 $coupon !== '' ? $coupon : null,
                 $contact,
+                eventSlotId: $slotId,
                 reserve: true,
             );
         } catch (ConflictHttpException|NotFoundHttpException $e) {
@@ -137,6 +140,44 @@ final class EventBookingController extends Controller
             'contact'     => $contact,
             'passUrl'     => route('site.booking.pass', ['id' => $order->first()->id]),
             'eventUrl'    => "/events/{$event->id}",
+        ]);
+    }
+
+    /**
+     * POST /events/{id}/book/coupon — quote a coupon against the cart on screen (AJAX from
+     * the review page's Apply button), so the buyer sees the discount before committing.
+     *
+     * A quote only: it counts no use and holds nothing. The cart is re-priced here from the
+     * same `qty[...]` the form carries rather than trusting a posted total, and confirm
+     * re-resolves the code anyway — so a tampered subtotal buys nothing but a wrong preview.
+     */
+    public function previewCoupon(Request $request, string $id): JsonResponse
+    {
+        $event = $this->publishedEvent($id);
+        $lines = $this->linesFrom($request, $event);
+        $code  = trim((string) $request->input('couponCode', ''));
+
+        if ($lines === [] || $code === '') {
+            return response()->json(['applied' => false, 'message' => 'Enter a coupon code.']);
+        }
+
+        $priced   = $this->priceLines($event, $lines);
+        $tickets  = array_sum(array_column($lines, 'quantity'));
+        $resolved = $this->bookings->resolveCoupon($request->user(), $event->id, $code, $priced['subtotal'], $priced['fee'], $tickets);
+
+        if ($resolved['coupon'] === null) {
+            return response()->json(['applied' => false, 'message' => $resolved['message']]);
+        }
+
+        $discount = $resolved['discount'];
+
+        return response()->json([
+            'applied'       => true,
+            'code'          => $resolved['coupon']->code,
+            'message'       => $resolved['message'],
+            'discount'      => $discount,
+            'discountLabel' => number_format($discount, 2),
+            'totalLabel'    => number_format(max(0, round($priced['total'] - $discount, 2)), 2),
         ]);
     }
 
@@ -213,6 +254,40 @@ final class EventBookingController extends Controller
             ->where('user_id', $request->user()->id)
             ->findOrFail($id);
 
+        return $this->renderPass($booking);
+    }
+
+    /**
+     * GET /t/{code} — the same entry pass, addressed by ticket code and open to
+     * anyone holding it.
+     *
+     * This is the link that goes out over SMS and email, and it deliberately does
+     * NOT require a session. The signed-in route above can't serve that job: a
+     * ticket is routinely bought for someone else, and a walk-in registered at the
+     * desk has the PARTNER's user_id on the row — so gating on the buyer's login
+     * means the person actually holding the ticket can't open it.
+     *
+     * The 24-character code is the bearer secret, exactly as it already is for the
+     * QR image at /t/{code}/qr.png (the QR is the code). Guessing one is not a
+     * realistic attack; hammering the endpoint to try is, hence the throttle on
+     * the route.
+     */
+    public function passByCode(string $code): View
+    {
+        /** @var Booking|null $booking */
+        $booking = Booking::query()
+            ->with(['event', 'ticketType'])
+            ->where('ticket_code', $code)
+            ->first();
+
+        abort_if($booking === null, 404);
+
+        return $this->renderPass($booking);
+    }
+
+    /** Shared rendering for both pass routes — one order, one pass, one QR per row. */
+    private function renderPass(Booking $booking): View
+    {
         abort_if($booking->event_id === null || $booking->event === null, 404);
 
         // Every booking row created in the same order shares the moment of
@@ -256,14 +331,25 @@ final class EventBookingController extends Controller
 
     private function publishedEvent(string $id): Event
     {
-        return Event::query()
+        $event = Event::query()
+            ->with('slots')
             ->whereRaw('lower(status) = ?', ['published'])
             ->findOrFail((int) $id);
+
+        // An event that has already happened cannot be sold. This checked `status`
+        // only, so a buyer could pay for — and be emailed a ticket to — an event that
+        // finished days ago, leaving the organiser to handle the refund. Slot-aware,
+        // so a multi-day event stays open until its last session (Event::endsAt()).
+        abort_if($event->hasFinished(), 404);
+
+        return $event;
     }
 
     /**
-     * Read `qty[...]` into service order lines, keeping only tiers that belong
-     * to this event (key 0 = the flat event price when no tiers exist).
+     * Read `qty[...]` into service order lines, keeping only tiers this buyer may
+     * actually purchase — visible, on sale, and in an opened release phase (key 0 =
+     * the flat event price when no tiers exist). A hand-typed qty for a hidden or
+     * not-yet-released tier is dropped here rather than failing at payment time.
      *
      * @return list<array{ticketTypeId: int|null, quantity: int}>
      */
@@ -274,7 +360,10 @@ final class EventBookingController extends Controller
             return [];
         }
 
-        $validTierIds = $event->ticketTypes->pluck('id')->all();
+        $validTierIds = $event->saleableTicketTypes()->pluck('id')->all();
+        // Key 0 is the flat event price, and only ever valid when the event has no
+        // tiers at all — not merely when none are currently buyable.
+        $hasTiers     = $event->ticketTypes->isNotEmpty();
         $lines        = [];
 
         foreach ($qty as $key => $value) {
@@ -283,7 +372,7 @@ final class EventBookingController extends Controller
                 continue;
             }
 
-            if ((int) $key === 0 && $validTierIds === []) {
+            if ((int) $key === 0 && ! $hasTiers) {
                 $lines[] = ['ticketTypeId' => null, 'quantity' => $quantity];
             } elseif (in_array((int) $key, $validTierIds, true)) {
                 $lines[] = ['ticketTypeId' => (int) $key, 'quantity' => $quantity];
@@ -322,12 +411,14 @@ final class EventBookingController extends Controller
         }
 
         $subtotal = round($subtotal, 2);
-        $fee      = $event->convenienceFeeFor($subtotal);
+        $feeLines = $event->feeLinesFor($subtotal);
+        $fee      = $event->feesTotalFor($subtotal);
 
         return [
             'lines'    => $priced,
             'subtotal' => $subtotal,
             'fee'      => $fee,
+            'feeLines' => $feeLines,
             'total'    => round($subtotal + $fee, 2),
         ];
     }

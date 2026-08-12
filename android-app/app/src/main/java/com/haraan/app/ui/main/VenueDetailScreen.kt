@@ -837,8 +837,10 @@ private fun RatingDialog(venue: VenueDetailData, onDismiss: () -> Unit, onSubmit
             submitting = true
             error = null
             scope.launch {
-              val token = TokenStore.getToken(ctx)
-              if (token.isNullOrBlank()) {
+              // getSignedInToken, not getToken: a guest holds the non-blank
+              // "skipped_guest" token and would otherwise sail past this check.
+              val token = TokenStore.getSignedInToken(ctx)
+              if (token == null) {
                 error = "Please log in to rate."
                 submitting = false
                 return@launch
@@ -1152,8 +1154,9 @@ internal fun BookingSheet(venue: VenueDetailData, onDismiss: () -> Unit) {
               submitting = true
               result = null
               scope.launch {
-                val token = TokenStore.getToken(ctx)
-                if (token.isNullOrBlank()) {
+                // getSignedInToken — see the rating check above.
+                val token = TokenStore.getSignedInToken(ctx)
+                if (token == null) {
                   result = "Please log in to book."
                   submitting = false
                   return@launch

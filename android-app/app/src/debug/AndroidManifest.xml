@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest overlay. Points debug builds at a network security config
+  that permits cleartext to loopback hosts, so `API_BASE_URL=http://127.0.0.1:8000`
+  + `adb reverse tcp:8000 tcp:8000` can actually reach a local `php artisan serve`.
+  `tools:replace` is required because the main manifest sets
+  usesCleartextTraffic="false" — this overlay must win for debug only.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:replace="android:networkSecurityConfig" />
+</manifest>

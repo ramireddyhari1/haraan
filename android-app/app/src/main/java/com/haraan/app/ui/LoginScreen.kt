@@ -28,14 +28,22 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -69,6 +77,7 @@ import com.haraan.app.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import com.haraan.app.ui.theme.HaraanColors
 
 @Composable
 fun LoginRoute(
@@ -80,6 +89,8 @@ fun LoginRoute(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    // Firebase phone-auth needs an Activity for its app-check (reCAPTCHA / Play Integrity).
+    val activity = context as? android.app.Activity
 
     LoginScreen(
         uiState = uiState,
@@ -89,6 +100,16 @@ fun LoginRoute(
         onSignUpToggle = viewModel::setSignUp,
         onSubmitClick = { viewModel.signInWithPassword(onLoginSuccess) },
         onExitForm = viewModel::clearMessages,
+        onPhoneChange = viewModel::onPhoneChange,
+        onOtpChange = viewModel::onOtpChange,
+        // "Continue with phone": drive Firebase phone-auth (needs an Activity), then the VM
+        // hands the resulting Firebase token to the backend for an app JWT.
+        onSendPhoneCode = {
+            if (activity != null) viewModel.sendPhoneCode(activity, onLoginSuccess)
+            else viewModel.onGoogleError("Phone sign-in isn't available here.")
+        },
+        onVerifyPhoneCode = { viewModel.verifyPhoneCode(onLoginSuccess) },
+        onResetPhone = viewModel::resetPhone,
         // Reset lives on the website (same accounts, same mail) — no app-side twin
         // to keep in sync. Opens externally so the login screen keeps its state.
         onForgotPasswordClick = {
@@ -125,18 +146,18 @@ fun LoginRoute(
 // Palette — content lives on a white card; the card floats over a full-bleed,
 // slowly-zooming hero image with a soft scrim.
 private val Ink = Color(0xFF0A0E14)
-private val Accent = Color(0xFF2563EB)
-private val Text1 = Color(0xFF0F172A)
-private val Text2 = Color(0xFF475569)
-private val Text3 = Color(0xFF94A3B8)
-private val Stroke = Color(0xFFE2E8F0)
-private val FieldBg = Color(0xFFF8FAFC)
+private val Accent = HaraanColors.EventsBlue
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Text3 = HaraanColors.TextMuted
+private val Stroke = HaraanColors.BorderLight
+private val FieldBg = HaraanColors.Background
 private val FrostFill = Color.White.copy(alpha = 0.16f)
 private val FrostBorder = Color.White.copy(alpha = 0.30f)
-private val Danger = Color(0xFFDC2626)
+private val Danger = HaraanColors.Danger
 // Green is reserved for the committed/done state — blue stays the "act now" colour.
-private val Success = Color(0xFF16A34A)
-private val SuccessTint = Color(0xFFE7F7EC)
+private val Success = HaraanColors.Success
+private val SuccessTint = HaraanColors.SuccessTint
 
 // ── Type scale ────────────────────────────────────────────────────────────────
 // Three sizes, three weights. The premium read on this screen comes from using
@@ -166,9 +187,16 @@ fun LoginScreen(
     onSkipClick: () -> Unit = {},
     googleEnabled: Boolean = false,
     onGoogleClick: () -> Unit = {},
+    onPhoneChange: (String) -> Unit = {},
+    onOtpChange: (String) -> Unit = {},
+    onSendPhoneCode: () -> Unit = {},
+    onVerifyPhoneCode: () -> Unit = {},
+    onResetPhone: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isDetailsInputVisible by remember { mutableStateOf(false) }
+    // Parallel to email: the landing card expands into the phone-number / code flow.
+    var isPhoneInputVisible by remember { mutableStateOf(false) }
     val view = LocalView.current
 
     // Expanding the card into the credentials form is a navigation step, so Back has to
@@ -176,12 +204,20 @@ fun LoginScreen(
     // Back fell straight through to the system — the app closed instead of going back to
     // the Google/email choice. Unwinds one step at a time (sign-up → sign-in → landing).
     // Disabled during Success so Back can't interrupt the hand-off to the app.
-    BackHandler(enabled = isDetailsInputVisible && uiState.stage != LoginStage.Success) {
-        if (uiState.isSignUp) {
-            onSignUpToggle(false)
-        } else {
-            isDetailsInputVisible = false
-            onExitForm()
+    BackHandler(enabled = (isDetailsInputVisible || isPhoneInputVisible) && uiState.stage != LoginStage.Success) {
+        when {
+            // Phone: code step → number step → landing.
+            isPhoneInputVisible && uiState.phoneCodeSent -> onResetPhone()
+            isPhoneInputVisible -> {
+                isPhoneInputVisible = false
+                onResetPhone()
+                onExitForm()
+            }
+            uiState.isSignUp -> onSignUpToggle(false)
+            else -> {
+                isDetailsInputVisible = false
+                onExitForm()
+            }
         }
     }
 
@@ -331,15 +367,27 @@ fun LoginScreen(
         //    Insets live on THIS column so the card sits just above the keyboard/nav
         //    bar with no internal gap (applying imePadding inside the card reserves
         //    keyboard-height padding inside it → a white void + clipped header).
+        // Bound the phone/OTP step ONLY while the keyboard is up. With it down there is
+        // no surplus to distribute, and filling then swallowed the hero entirely — the
+        // landing must keep its short sheet over the image.
+        val stepIsBounded = isPhoneInputVisible &&
+            WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                // The phone/OTP step needs a BOUNDED height. While the card wraps its
+                // content there is no distributable space, so every attempt to move the
+                // dead area just slid content toward the keyboard (see the note on the
+                // card's insets). Filling here, plus weight() on the card, gives the step
+                // a real height for its layout to work inside.
+                .then(if (stepIsBounded) Modifier.fillMaxHeight() else Modifier),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
             // card has room and nothing clips.
-            if (uiState.stage == LoginStage.EnterCredentials && !isDetailsInputVisible) {
+            if (uiState.stage == LoginStage.EnterCredentials && !isDetailsInputVisible && !isPhoneInputVisible) {
                 Row(
                     modifier = Modifier.padding(bottom = GapM),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -360,7 +408,10 @@ fun LoginScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .wrapContentHeight()
+                    // Bounded in the phone/OTP step (see the anchor above); wraps its
+                    // content everywhere else so the landing keeps its short sheet over
+                    // the hero.
+                    .then(if (stepIsBounded) Modifier.weight(1f) else Modifier.wrapContentHeight())
                     .graphicsLayer {
                         alpha = cardAlpha
                         translationY = cardShiftPx
@@ -372,12 +423,33 @@ fun LoginScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(if (stepIsBounded) Modifier.fillMaxHeight() else Modifier)
                         // Insets live INSIDE the white card, so the region reserved for the
                         // keyboard / nav bar is white — never a strip of background image.
                         // Union (not sum) avoids double-counting the nav bar.
+                        //
+                        // THE EMPTY SPACE UNDER THE CODE STEP IS NOT AN INSET BUG. Three
+                        // attempts on 2026-08-06, all measured on a Pixel_9, all reverted:
+                        //   1. ime inset moved out to the anchor column so the card wraps
+                        //      content -> card floats above the keyboard and the hero image
+                        //      shows through the same surplus. Worse.
+                        //   2. navigationBars.exclude(ime) -> gap unchanged, so it is not
+                        //      nav-bar double-counting.
+                        //   3. Splitting the surplus above/below the content -> the dead
+                        //      white "shrank" 327px to 198px only because the content was
+                        //      pushed DOWN under the keyboard; lifting all of it (226px)
+                        //      hid the Verify button outright.
+                        // The card is bottom-anchored AND wraps its content, so padding
+                        // moves never remove space, they only slide content toward the
+                        // keyboard. The real fix is to give this step a BOUNDED height and
+                        // lay it out — header / content / action pinned to the bottom —
+                        // rather than to keep tuning insets.
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                         .padding(start = GapL, end = GapL, top = GapM, bottom = GapL),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    // Centred only where the height is bounded. Anywhere else this is a
+                    // no-op, and Top keeps the landing sheet exactly as it was.
+                    verticalArrangement = if (stepIsBounded) Arrangement.Center else Arrangement.Top
                 ) {
                     // Authenticated: hold a short confirmation instead of cutting straight
                     // to the app. The VM delays its success callback by the same beat.
@@ -388,7 +460,8 @@ fun LoginScreen(
 
                     // Full branding only in the collapsed hero — hidden once the keyboard
                     // is up so the card stays compact and nothing clips at the top.
-                    val showBranding = uiState.stage == LoginStage.EnterCredentials && !isDetailsInputVisible
+                    val showBranding = uiState.stage == LoginStage.EnterCredentials &&
+                        !isDetailsInputVisible && !isPhoneInputVisible
 
                     // Grab handle.
                     Box(
@@ -423,6 +496,8 @@ fun LoginScreen(
                             // Kept short on purpose: at 24sp "…to continue" ran the full
                             // width of a 411dp screen and would wrap to two lines on a
                             // 360dp phone, which turns the headline into a paragraph.
+                            isPhoneInputVisible && uiState.phoneCodeSent -> "Enter the code"
+                            isPhoneInputVisible -> "Sign in with phone"
                             !isDetailsInputVisible -> "Login or sign up"
                             uiState.isSignUp -> "Create your account"
                             else -> "Sign in to continue"
@@ -449,7 +524,136 @@ fun LoginScreen(
                     // this same card into the credentials form. There is no second step —
                     // the backend signs up an unknown email, exactly as the website does.
                     run {
-                            if (!isDetailsInputVisible) {
+                            if (isPhoneInputVisible) {
+                                // ── Phone sign-in (Firebase SMS OTP) ──────────────────────
+                                // Two steps in one card: number → 6-digit code. The step is
+                                // driven by whether Firebase has handed back a verificationId.
+                                if (!uiState.phoneCodeSent) {
+                                    // A real number field, not a labelled box: the country code
+                                    // is a fixed affordance and the digits group as you type.
+                                    // The old version was a stock Material field whose helper
+                                    // text ("Add +country code for non-India numbers") was doing
+                                    // the job of a control that hadn't been built.
+                                    PhoneNumberField(
+                                        value = uiState.phone,
+                                        onValueChange = onPhoneChange,
+                                        isError = !uiState.errorMessage.isNullOrEmpty(),
+                                        onDone = { if (uiState.isPhoneValid) onSendPhoneCode() }
+                                    )
+
+                                    if (!uiState.errorMessage.isNullOrEmpty()) {
+                                        Spacer(Modifier.height(GapM))
+                                        Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                    }
+
+                                    Spacer(Modifier.height(GapL))
+                                    val si = remember { MutableInteractionSource() }
+                                    Button(
+                                        onClick = {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                            onSendPhoneCode()
+                                        },
+                                        interactionSource = si,
+                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(si),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
+                                        enabled = uiState.isPhoneValid && !uiState.isLoading
+                                    ) {
+                                        Text(
+                                            if (uiState.isLoading) "Sending…" else "Send code",
+                                            fontSize = BodySize, fontWeight = FontWeight.Bold,
+                                            color = if (uiState.isPhoneValid) Color.White else Text3
+                                        )
+                                    }
+                                } else {
+                                    // Name the channel. We KNOW whether the code went over
+                                    // WhatsApp or SMS (the backend says so), and saying which
+                                    // is the one thing here no generic login screen can say —
+                                    // it also tells the user which app to go look in.
+                                    Text(
+                                        text = buildAnnotatedString {
+                                            append(if (uiState.phoneWaToken != null) "Sent on WhatsApp to " else "Sent by SMS to ")
+                                            withStyle(SpanStyle(color = Text1, fontWeight = FontWeight.SemiBold)) {
+                                                append(prettyPhone(uiState.phoneE164 ?: uiState.phone))
+                                            }
+                                        },
+                                        fontSize = CaptionSize, color = Text2, textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(GapL))
+                                    // Six cells, not one labelled box. A single "Verification
+                                    // code" field is the stock Material default and reads as
+                                    // unfinished; every app people already use for OTP shows
+                                    // the digits landing one at a time.
+                                    OtpCells(
+                                        value = uiState.otp,
+                                        onValueChange = onOtpChange,
+                                        isError = !uiState.errorMessage.isNullOrEmpty(),
+                                        onDone = { if (uiState.isOtpValid) onVerifyPhoneCode() }
+                                    )
+
+                                    // Auto-submit the moment the 6-digit code is complete — the user
+                                    // (or the keyboard's SMS autofill) never has to tap Verify.
+                                    // verifyPhoneCode() no-ops while loading; tracking the last
+                                    // submitted value stops a wrong code from resubmitting in a loop.
+                                    var lastAutoOtp by remember { mutableStateOf("") }
+                                    LaunchedEffect(uiState.otp, uiState.isLoading) {
+                                        if (uiState.isOtpValid && !uiState.isLoading && uiState.otp != lastAutoOtp) {
+                                            lastAutoOtp = uiState.otp
+                                            onVerifyPhoneCode()
+                                        }
+                                    }
+
+                                    if (!uiState.errorMessage.isNullOrEmpty()) {
+                                        Spacer(Modifier.height(GapM))
+                                        Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                    }
+
+                                    Spacer(Modifier.height(GapL))
+                                    val vi = remember { MutableInteractionSource() }
+                                    Button(
+                                        onClick = {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                            onVerifyPhoneCode()
+                                        },
+                                        interactionSource = vi,
+                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(vi),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
+                                        enabled = uiState.isOtpValid && !uiState.isLoading
+                                    ) {
+                                        Text(
+                                            // "Verify" — the "& continue" was filler. The button
+                                            // is already the only thing to press.
+                                            if (uiState.isLoading) "Verifying…" else "Verify",
+                                            fontSize = BodySize, fontWeight = FontWeight.Bold,
+                                            color = if (uiState.isOtpValid) Color.White else Text3
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(GapS))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        TextButton(onClick = onResetPhone) {
+                                            Text("Change number", color = Accent, fontSize = CaptionSize, fontWeight = FontWeight.SemiBold)
+                                        }
+                                        // Resend gated by a short cooldown so we don't spam SMS.
+                                        if (uiState.phoneResendSeconds > 0) {
+                                            Text(
+                                                "Resend in ${uiState.phoneResendSeconds}s",
+                                                color = Text3, fontSize = CaptionSize, fontWeight = FontWeight.Normal
+                                            )
+                                        } else {
+                                            TextButton(onClick = onSendPhoneCode, enabled = !uiState.isLoading) {
+                                                Text("Resend code", color = Accent, fontSize = CaptionSize, fontWeight = FontWeight.SemiBold)
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if (!isDetailsInputVisible) {
                                 // Primary CTA — "Continue with Google" (when a Web client ID is
                                 // configured). Email drops to a secondary text link below.
                                 if (googleEnabled) {
@@ -493,22 +697,43 @@ fun LoginScreen(
                                         Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                     }
 
-                                    // Secondary — email + password as a plain text link.
+                                    // Secondary ways in — phone then email, matching the
+                                    // website's order (Google → Phone → email).
                                     Spacer(Modifier.height(GapM))
-                                    Text(
-                                        text = "Continue with email",
-                                        fontSize = CaptionSize,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Accent,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable {
-                                                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                                isDetailsInputVisible = true
-                                            }
-                                            .padding(horizontal = GapM, vertical = GapS)
-                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Continue with phone",
+                                            fontSize = CaptionSize,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Accent,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                                    onExitForm()
+                                                    isPhoneInputVisible = true
+                                                }
+                                                .padding(horizontal = GapM, vertical = GapS)
+                                        )
+                                        Box(Modifier.size(width = 1.dp, height = 14.dp).background(Stroke))
+                                        Text(
+                                            text = "Continue with email",
+                                            fontSize = CaptionSize,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Accent,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                                    isDetailsInputVisible = true
+                                                }
+                                                .padding(horizontal = GapM, vertical = GapS)
+                                        )
+                                    }
                                 } else {
                                     // No Google client configured — email is the primary CTA.
                                     val ci = remember { MutableInteractionSource() }
@@ -540,6 +765,24 @@ fun LoginScreen(
                                         Spacer(Modifier.height(GapM))
                                         Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                     }
+
+                                    // Secondary — phone sign-in as a plain text link.
+                                    Spacer(Modifier.height(GapM))
+                                    Text(
+                                        text = "Continue with phone",
+                                        fontSize = CaptionSize,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Accent,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                                onExitForm()
+                                                isPhoneInputVisible = true
+                                            }
+                                            .padding(horizontal = GapM, vertical = GapS)
+                                    )
                                 }
                             } else {
                                 // Name is asked only when the user chose "Create account".
@@ -771,6 +1014,253 @@ private fun LoginSuccessPanel(name: String) {
             fontWeight = FontWeight.Normal,
             color = Text2,
             textAlign = TextAlign.Center
+        )
+    }
+}
+
+// ── Phone + OTP input ───────────────────────────────────────────────────────
+// Both of these replaced stock Material fields. The stock versions were not ugly,
+// they were *generic*: a floating-label box for a phone number and a second one
+// for a 6-digit code is what a framework gives you before anyone has designed the
+// screen, and that is exactly what reads as unfinished. What follows is what the
+// apps these users already open every day do — a fixed country code, digits that
+// group as you type, and a code that lands one cell at a time.
+
+/** "98765 43210" — the grouping Indian numbers are read and spoken in. */
+private fun groupIndianDigits(digits: String): String =
+    if (digits.length <= 5) digits else digits.take(5) + " " + digits.drop(5)
+
+/** For the "Sent on WhatsApp to …" line: "+91 97013 77681". */
+private fun prettyPhone(raw: String): String {
+    val d = raw.filter { it.isDigit() }
+    return if (raw.startsWith("+91") && d.length == 12) "+91 " + groupIndianDigits(d.drop(2)) else raw
+}
+
+/**
+ * Groups the local part as it is typed without touching the stored value, so the
+ * ViewModel keeps raw digits and the cursor still lands where the user expects.
+ * [OffsetMapping] is what keeps the caret maths honest — dropping it is how these
+ * fields end up putting the cursor in the wrong place after an edit.
+ */
+private val IndianGroupingTransformation = VisualTransformation { text ->
+    val digits = text.text
+    if (digits.startsWith("+")) {
+        TransformedText(text, OffsetMapping.Identity)
+    } else {
+        TransformedText(
+            androidx.compose.ui.text.AnnotatedString(groupIndianDigits(digits)),
+            object : OffsetMapping {
+                override fun originalToTransformed(offset: Int) = if (offset <= 5) offset else offset + 1
+                override fun transformedToOriginal(offset: Int) = if (offset <= 5) offset else offset - 1
+            }
+        )
+    }
+}
+
+/**
+ * Number entry with the country code as a real part of the control.
+ *
+ * The `+91` is a fixed segment behind a hairline, not prose telling the user to
+ * type one — but it steps out of the way the moment the value starts with `+`, so
+ * an international number still works exactly as it did.
+ */
+@Composable
+private fun PhoneNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    onDone: () -> Unit,
+) {
+    val international = value.startsWith("+")
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(
+                width = if (isError) 1.5.dp else 1.dp,
+                color = if (isError) Danger else Stroke,
+                shape = RoundedCornerShape(16.dp)
+            ),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!international) {
+            Text(
+                text = "+91",
+                color = Text1,
+                fontSize = BodySize,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 18.dp, end = 12.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(24.dp)
+                    .background(Stroke)
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (value.isEmpty()) {
+                Text("98765 43210", color = Text3, fontSize = BodySize)
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = Text1,
+                    fontSize = BodySize,
+                    fontWeight = FontWeight.SemiBold,
+                    // Wider than body text: a phone number is read in chunks, and the
+                    // extra tracking is what makes the grouping legible at a glance.
+                    letterSpacing = 0.8.sp
+                ),
+                cursorBrush = SolidColor(Accent),
+                visualTransformation = IndianGroupingTransformation,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Phone,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { onDone() }),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/**
+ * Six cells for a six-digit code.
+ *
+ * One transparent [BasicTextField] stretched across the row owns the text, and the
+ * cells are drawn from its value. That is deliberate: it keeps the real keyboard,
+ * paste, and the SMS/WhatsApp autofill the platform already gives us — hand-rolling
+ * six separate fields is how you lose all three and gain a focus-management bug.
+ */
+@Composable
+private fun OtpCells(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    onDone: () -> Unit,
+    count: Int = 6,
+) {
+    val focus = remember { FocusRequester() }
+    val view = LocalView.current
+    // The code screen exists to be typed into; opening it focused saves a tap.
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    // A tick per digit. The screen was silent in the hand — digits appeared and
+    // nothing else happened, which is most of what "no feel" actually means.
+    LaunchedEffect(value.length) {
+        if (value.isNotEmpty()) {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+        }
+    }
+
+    // Wrong code: shake the row and buzz once, so the failure is felt where it
+    // happened rather than only announced in red text below.
+    val shake = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(isError) {
+        if (isError) {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            // Decaying left-right, not a single lurch — a lurch reads as a layout bug.
+            listOf(14f, -11f, 8f, -5f, 0f).forEach {
+                shake.animateTo(it, tween(durationMillis = 48, easing = LinearEasing))
+            }
+        } else {
+            shake.snapTo(0f)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationX = shake.value }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            repeat(count) { i ->
+                val char = value.getOrNull(i)
+                val filled = char != null
+                // The caret cell is the next empty one, and stays put once the code is
+                // complete so the row never looks unfocused mid-verify.
+                val isCaret = i == value.length.coerceAtMost(count - 1) && value.length < count
+
+                // The digit lands with a small spring instead of appearing. This is the
+                // per-keystroke feedback the row was missing — keep the overshoot low,
+                // a bouncy cell reads as a toy.
+                val pop by animateFloatAsState(
+                    targetValue = if (filled) 1f else 0.94f,
+                    animationSpec = spring(dampingRatio = 0.55f, stiffness = 900f),
+                    label = "otpCellPop"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp)
+                        .graphicsLayer { scaleX = pop; scaleY = pop }
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (filled) Color.White else Color(0xFFF8FAFC))
+                        .border(
+                            width = if (isError || isCaret) 1.5.dp else 1.dp,
+                            color = when {
+                                isError -> Danger
+                                isCaret -> Accent
+                                filled -> Text3.copy(alpha = 0.55f)
+                                else -> Stroke
+                            },
+                            shape = RoundedCornerShape(14.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (filled) {
+                        Text(
+                            text = char.toString(),
+                            color = Text1,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else if (isCaret) {
+                        // A resting caret in the active cell — the cue that typing goes
+                        // here, without a blinking cursor to chase.
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(22.dp)
+                                .background(Accent.copy(alpha = 0.55f))
+                        )
+                    }
+                }
+            }
+        }
+
+        // The real input: invisible, full-bleed over the cells, so a tap anywhere on
+        // the row opens the keyboard and the platform autofill still targets it.
+        BasicTextField(
+            value = value,
+            onValueChange = { onValueChange(it.filter(Char::isDigit).take(count)) },
+            singleLine = true,
+            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+            cursorBrush = SolidColor(Color.Transparent),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            modifier = Modifier
+                .matchParentSize()
+                .focusRequester(focus)
         )
     }
 }

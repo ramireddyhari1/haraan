@@ -18,7 +18,7 @@ final class Venue extends Model
     protected string $contentDomain = 'venues';
 
     protected $fillable = [
-        'name', 'category', 'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link',
+        'name', 'category', 'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
         'price', 'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',

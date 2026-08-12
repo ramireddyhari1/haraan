@@ -47,3 +47,17 @@ whatsapp-api/.wwebjs_auth/
 whatsapp-api/.wwebjs_cache/
 **/.wwebjs_auth/
 **/.wwebjs_cache/
+
+# Session scratch — screenshots and notes captured while working, never part of the app.
+# NB: a Chrome profile was committed here before this rule existed; it has been
+# untracked. The old copies still live in git HISTORY — see repo notes on scrubbing.
+_IGNORE_session/
+
+# Editor/backup leftovers — never source.
+*.bak
+*.old
+*.orig
+
+# Kotlin compiler daemon caches / error logs (build artifact, regenerated).
+.kotlin/
+**/.kotlin/

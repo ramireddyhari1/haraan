@@ -11,7 +11,19 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
+import com.haraan.app.ui.Feel
+import com.haraan.app.ui.pressable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -39,6 +51,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -51,8 +65,12 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsCricket
+import androidx.compose.material.icons.filled.SportsSoccer
+import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -90,20 +108,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
+import com.haraan.app.ui.theme.HaraanColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette — mirrors the CREX light theme tokens in MainScreen (which are private)
 // ─────────────────────────────────────────────────────────────────────────────
-private val Bg = Color(0xFFEBEBF0)
-private val Surface = Color(0xFFFFFFFF)
-private val Blue = Color(0xFF2563EB)
-private val Text1 = Color(0xFF111827)
-private val Text2 = Color(0xFF5A5A6A)
-private val Text3 = Color(0xFF9A9AA8)
-private val Stroke = Color(0xFFE2E8F0)
-private val BlueTint = Color(0xFFEFF4FF)
-private val Green = Color(0xFF16A34A)
-private val GreenTint = Color(0xFFE9F7EF)
+private val Bg = HaraanColors.Background
+private val Surface = HaraanColors.Surface
+private val Blue = HaraanColors.EventsBlue
+private val Text1 = HaraanColors.TextPrimary
+private val Text2 = HaraanColors.TextSecondary
+private val Text3 = HaraanColors.TextMuted
+private val Stroke = HaraanColors.BorderLight
+private val BlueTint = HaraanColors.AccentTint
+private val Green = HaraanColors.Success
+private val GreenTint = HaraanColors.SuccessTint
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain — Sprint 1 keeps this local. Match type sets the XP CEILING only;
@@ -132,6 +151,190 @@ enum class BallType(val label: String, val serverValue: String) {
     SEASON("Season", "season"),
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Format — the one question every sport has to answer: what makes the match end?
+//
+// Cricket answers it with overs, football with halves × length, badminton with
+// games × points. Until this existed the wizard only ever asked cricket, and the
+// football/badminton scorers opened on hardcoded defaults (45-minute halves,
+// best-of-3) that no gully match actually plays.
+// ─────────────────────────────────────────────────────────────────────────────
+sealed interface MatchFormat {
+    /** What the review card and the scorer header read. */
+    val summaryLine: String
+
+    /** Serialised into `sport_state.format` on the match — no schema per sport. */
+    fun toServerMap(): Map<String, Any>
+
+    data class Cricket(val overs: Int, val ball: BallType) : MatchFormat {
+        override val summaryLine: String get() = "$overs overs · ${ball.label} ball"
+        override fun toServerMap(): Map<String, Any> =
+            mapOf("kind" to "cricket", "overs" to overs, "ball" to ball.serverValue)
+    }
+
+    data class Football(val halves: Int, val halfLengthMin: Int) : MatchFormat {
+        override val summaryLine: String get() = "$halves × $halfLengthMin min"
+        override fun toServerMap(): Map<String, Any> =
+            mapOf("kind" to "football", "halves" to halves, "halfLengthMin" to halfLengthMin)
+    }
+
+    data class Badminton(val bestOf: Int, val pointsTo: Int, val doubles: Boolean) : MatchFormat {
+        override val summaryLine: String get() = buildString {
+            append(if (doubles) "Doubles" else "Singles")
+            append(" · ")
+            append(if (bestOf == 1) "one game" else "best of $bestOf")
+            append(" to $pointsTo")
+        }
+        override fun toServerMap(): Map<String, Any> = mapOf(
+            "kind" to "badminton",
+            "bestOf" to bestOf,
+            "pointsTo" to pointsTo,
+            "doubles" to doubles,
+        )
+    }
+}
+
+/**
+ * A one-tap format. Presets are the primary control on the Rules step — a column of
+ * bare steppers is both slower and reads like a form, not a sport. [playersPerSide]
+ * is set only where the preset genuinely implies it (a "7-a-side" football game is
+ * seven a side by definition); cricket leaves it to the stepper.
+ */
+data class FormatPreset(
+    val label: String,
+    val sub: String,
+    val format: MatchFormat,
+    val playersPerSide: Int? = null,
+) {
+    /**
+     * Whether [draft] currently sits on this preset. Cricket compares overs only —
+     * ball type is a separate axis, so changing the ball must not knock "T20" off.
+     */
+    fun matches(draft: CreateMatchDraft): Boolean {
+        val current = draft.format
+        val preset = format
+        val sameFormat = if (preset is MatchFormat.Cricket && current is MatchFormat.Cricket) {
+            current.overs == preset.overs
+        } else {
+            current == preset
+        }
+        return sameFormat && (playersPerSide == null || draft.playersPerSide == playersPerSide)
+    }
+
+    /** Applies the preset, preserving the ball the creator already chose. */
+    fun apply(draft: CreateMatchDraft) {
+        val preset = format
+        val current = draft.format
+        draft.format = if (preset is MatchFormat.Cricket && current is MatchFormat.Cricket) {
+            preset.copy(ball = current.ball)
+        } else {
+            preset
+        }
+        playersPerSide?.let { draft.playersPerSide = it }
+    }
+}
+
+/**
+ * Everything that differs between sports, in one place. Before this, the wizard's
+ * entire sport-awareness was an `if (isCricket)` that *hid* two cricket fields —
+ * so football and badminton were literally "cricket, minus overs".
+ */
+data class SportSpec(
+    val key: String,
+    val displayName: String,
+    val icon: ImageVector,
+    /** The casual tier reads differently per sport — "Gully" means nothing in badminton. */
+    val casualLabel: String,
+    val casualTagline: String,
+    /** How the casual tier reads mid-sentence: "…rank higher than gully games". */
+    val casualPlural: String,
+    val rulesSubtitle: String,
+    /** Badminton is played by people, not clubs — the Teams step has to say so. */
+    val teamsTitle: String,
+    val teamsSubtitle: String,
+    val presets: List<FormatPreset>,
+    val defaultFormat: MatchFormat,
+    val defaultPlayersPerSide: Int,
+    val playersRange: IntRange,
+    /** Hidden when the presets already fix it (badminton singles/doubles). */
+    val showPlayersStepper: Boolean = true,
+) {
+    companion object {
+        val Cricket = SportSpec(
+            key = "cricket",
+            displayName = "Cricket",
+            icon = Icons.Filled.SportsCricket,
+            casualLabel = "Casual / Gully",
+            casualTagline = "Friendly, self-scored",
+            casualPlural = "gully games",
+            rulesSubtitle = "How long, what ball, how many a side.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("T20", "20 overs", MatchFormat.Cricket(20, BallType.TENNIS)),
+                FormatPreset("T10", "10 overs", MatchFormat.Cricket(10, BallType.TENNIS)),
+                FormatPreset("Gully", "6 overs", MatchFormat.Cricket(6, BallType.TENNIS)),
+            ),
+            defaultFormat = MatchFormat.Cricket(20, BallType.TENNIS),
+            defaultPlayersPerSide = 11,
+            playersRange = 2..15,
+        )
+
+        val Football = SportSpec(
+            key = "football",
+            displayName = "Football",
+            icon = Icons.Filled.SportsSoccer,
+            casualLabel = "Casual kickabout",
+            casualTagline = "Friendly, self-scored",
+            casualPlural = "kickabouts",
+            rulesSubtitle = "How long the halves run, and how many a side.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("5-a-side", "2 × 20 min", MatchFormat.Football(2, 20), playersPerSide = 5),
+                FormatPreset("7-a-side", "2 × 25 min", MatchFormat.Football(2, 25), playersPerSide = 7),
+                FormatPreset("11-a-side", "2 × 45 min", MatchFormat.Football(2, 45), playersPerSide = 11),
+            ),
+            defaultFormat = MatchFormat.Football(2, 25),
+            defaultPlayersPerSide = 7,
+            playersRange = 3..11,
+        )
+
+        val Badminton = SportSpec(
+            key = "badminton",
+            displayName = "Badminton",
+            icon = Icons.Filled.SportsTennis,
+            casualLabel = "Friendly / Club",
+            casualTagline = "Knock-about, self-scored",
+            casualPlural = "friendlies",
+            rulesSubtitle = "Singles or doubles, and how many games it takes.",
+            teamsTitle = "Players",
+            teamsSubtitle = "Who's playing? Search by @username or name.",
+            presets = listOf(
+                FormatPreset("Singles", "Best of 3 to 21", MatchFormat.Badminton(3, 21, doubles = false), playersPerSide = 1),
+                FormatPreset("Doubles", "Best of 3 to 21", MatchFormat.Badminton(3, 21, doubles = true), playersPerSide = 2),
+                FormatPreset("One game", "Single game to 21", MatchFormat.Badminton(1, 21, doubles = false), playersPerSide = 1),
+            ),
+            defaultFormat = MatchFormat.Badminton(3, 21, doubles = false),
+            defaultPlayersPerSide = 1,
+            // Singles is one a side. The old floor of 2 (stepper *and* server) meant a
+            // singles match simply could not be expressed.
+            playersRange = 1..2,
+            showPlayersStepper = false,
+        )
+
+        /**
+         * Every sport that can be created AND scored end to end. The sport step offers
+         * exactly these, which is why the wizard no longer needs a "coming soon" gate:
+         * an unsupported sport can't be chosen in the first place.
+         */
+        val supported: List<SportSpec> = listOf(Cricket, Football, Badminton)
+
+        fun forKey(sport: String): SportSpec =
+            supported.firstOrNull { it.key == sport.lowercase() } ?: Cricket
+    }
+}
+
 /**
  * Default team icons offered at create time. A creator can pick one of these bundled
  * action images or upload their own photo; [teamEmblems] indices are stored on the draft
@@ -154,18 +357,32 @@ val teamEmblems = listOf(
 fun emblemDrawableFor(key: String): Int? =
     teamEmblems.firstOrNull { it.key == key }?.resId
 
-class CreateMatchDraft {
-    // Which sport this match is. Cricket is the only sport with a full create/toss/scorer
-    // flow today; other sports are gated at the wizard entry (see [CreateMatchWizard]).
-    // Persisted so the feed/detail can branch and the match is never mislabelled as cricket.
-    var sport by mutableStateOf("cricket")
+class CreateMatchDraft(sport: String = "cricket") {
+    /** Everything that differs by sport — presets, ranges, copy, icon. */
+    val spec: SportSpec = SportSpec.forKey(sport)
+
+    // Which sport this match is. Persisted so the feed/detail can branch and the match
+    // is never mislabelled as cricket.
+    var sport by mutableStateOf(spec.key)
     // Public = ranked/feed-visible (earns XP after verification). Private = a closed
     // scoreboard reachable only by share code: no XP, never ranked, hidden from feeds.
     var isPrivate by mutableStateOf(false)
     var type by mutableStateOf(MatchType.CASUAL)
-    var overs by mutableStateOf(20)
-    var ball by mutableStateOf(BallType.TENNIS)
-    var playersPerSide by mutableStateOf(11)
+    // What ends the match, in that sport's own terms. Replaces the old always-cricket
+    // overs+ball pair, which football and badminton carried as meaningless data.
+    var format by mutableStateOf(spec.defaultFormat)
+    var playersPerSide by mutableStateOf(spec.defaultPlayersPerSide)
+
+    // Cricket's fields, read off [format]. The server still takes `overs` for cricket,
+    // and sends a harmless placeholder for the other sports (see the payload builder).
+    val overs: Int get() = (format as? MatchFormat.Cricket)?.overs ?: 0
+    val ball: BallType get() = (format as? MatchFormat.Cricket)?.ball ?: BallType.TENNIS
+    /** Football's half length — what the scorer clock actually runs on. */
+    val halfLengthMin: Int get() = (format as? MatchFormat.Football)?.halfLengthMin ?: 45
+    /** Badminton's games-to-win-the-match. */
+    val bestOf: Int get() = (format as? MatchFormat.Badminton)?.bestOf ?: 3
+    /** "Football · 2 × 25 min" — the header line every scorer shows. */
+    val formatLabel: String get() = "${spec.displayName} · ${format.summaryLine}"
     var venue by mutableStateOf("")
     // Village / town / area — finer than the profile district. Auto-filled from the
     // GPS fix below, then editable: the reverse geocoder often returns the nearest
@@ -196,7 +413,32 @@ class CreateMatchDraft {
     var teamBPhoto by mutableStateOf<android.net.Uri?>(null)
     val squadA = mutableStateListOf<SquadMember>()
     val squadB = mutableStateListOf<SquadMember>()
+
+    // When the match kicks off. null = "Play now" — created and the toss runs straight
+    // away (the default). A future epoch-millis value = "Schedule for later": the match
+    // is created with that start time, skips the immediate toss, and waits in the
+    // Scheduled tab until the creator starts it.
+    var scheduledAt by mutableStateOf<Long?>(null)
 }
+
+/**
+ * What one side is called: "Team A"/"Team B" for cricket and football, "Player 1"/
+ * "Player 2" for badminton singles, "Pair 1"/"Pair 2" for doubles. Badminton is
+ * played by people, not clubs — calling a singles opponent "Team B" is the tell that
+ * a screen was built for one sport and handed to another.
+ */
+private fun CreateMatchDraft.sideLabel(index: Int): String {
+    val f = format
+    return when {
+        f is MatchFormat.Badminton && f.doubles -> "Pair ${index + 1}"
+        f is MatchFormat.Badminton -> "Player ${index + 1}"
+        else -> if (index == 0) "Team A" else "Team B"
+    }
+}
+
+/** The noun for that side's name field and icon: "Team" / "Player" / "Pair". */
+private val CreateMatchDraft.sideNoun: String
+    get() = sideLabel(0).substringBeforeLast(' ')
 
 /**
  * Sprint 1 — Create Match Wizard. Four steps: Type → Rules → Teams → Review.
@@ -207,24 +449,25 @@ class CreateMatchDraft {
 fun CreateMatchWizard(
     onDismiss: () -> Unit,
     onCreate: (CreateMatchDraft) -> Unit,
-    lookupPlayer: suspend (playerId: String) -> PlayerLite?,
+    searchPlayers: suspend (query: String) -> List<PlayerLite> = { emptyList() },
     loadBookings: suspend () -> List<com.haraan.app.data.BookingLite> = { emptyList() },
-    // The sport the creator picked on the ActionBoard tab. Only Cricket has a full
-    // create/toss/scorer flow today; any other sport is shown an honest "coming soon"
-    // gate so it can never silently be created as a cricket match.
+    /**
+     * The tab the creator pressed Create from. It PRE-SELECTS the sport step rather
+     * than locking it: opening from the Cricket tab and being unable to make anything
+     * but a cricket match was the complaint, but making everyone choose from scratch
+     * would tax the common case. So the common path is one extra tap, not one extra
+     * decision — and the choice is visible and changeable.
+     */
     sport: String = "Cricket",
     modifier: Modifier = Modifier,
 ) {
-    // Cricket is the only sport wired end-to-end. For everything else, gate here rather
-    // than fall through the cricket wizard (which would persist a mislabelled match).
-    if (!sport.equals("Cricket", ignoreCase = true)) {
-        SportComingSoon(sport = sport, onDismiss = onDismiss, modifier = modifier)
-        return
-    }
+    // Now wizard state, not a parameter: changing it rebuilds the draft, because
+    // format and players-per-side only mean anything within a sport.
+    var sportKey by remember { mutableStateOf(SportSpec.forKey(sport).key) }
 
-    val draft = remember { CreateMatchDraft().apply { this.sport = "cricket" } }
+    val draft = remember(sportKey) { CreateMatchDraft(sportKey) }
     var step by remember { mutableStateOf(0) }
-    val lastStep = 3
+    val lastStep = 4
 
     // System Back must do exactly what the top bar's ← does. Until this existed the
     // press fell through to the Activity and closed the app mid-wizard, discarding
@@ -241,6 +484,9 @@ fun CreateMatchWizard(
         WizardTopBar(
             step = step,
             total = lastStep + 1,
+            // Name the sport in the chrome — three sports share this wizard, and the
+            // steps alone no longer tell you which one you're creating.
+            sport = draft.spec.displayName,
             onBack = { if (step == 0) onDismiss() else step-- },
             onClose = onDismiss,
         )
@@ -257,9 +503,10 @@ fun CreateMatchWizard(
             label = "wizardStep",
         ) { s ->
             when (s) {
-                0 -> StepType(draft)
-                1 -> StepRules(draft, loadBookings)
-                2 -> StepTeams(draft, lookupPlayer)
+                0 -> StepSport(selected = sportKey, onSelect = { sportKey = it })
+                1 -> StepType(draft)
+                2 -> StepRules(draft, loadBookings)
+                3 -> StepTeams(draft, searchPlayers)
                 else -> StepReview(draft)
             }
         }
@@ -276,92 +523,79 @@ fun CreateMatchWizard(
     }
 }
 
+// ─────────────────────────────────────────────────────── Step 1 · Sport ────────
 /**
- * Gate shown when a creator taps "Create" on a non-cricket ActionBoard tab. Cricket is the
- * only sport with a full toss + scorer + feed today; rather than silently produce a cricket
- * match, we say so plainly and send them back. Removing this branch (and wiring a real
- * per-sport create) is the follow-up once each sport has its own scorer flow.
+ * Which sport this is. Replaces the old "coming soon" gate outright: the picker only
+ * offers sports that can be created AND scored end to end, so an unsupported one can
+ * no longer be reached, let alone silently persisted as cricket.
+ *
+ * Arrives pre-selected from the tab you pressed Create on, so the usual path is a
+ * single Continue. Changing it here rebuilds the draft with that sport's own defaults
+ * — nothing has been entered yet at this point, so nothing is lost.
  */
 @Composable
-private fun SportComingSoon(sport: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Bg)
+private fun StepSport(selected: String, onSelect: (String) -> Unit) {
+    StepScaffold(
+        title = "What are you playing?",
+        subtitle = "Everything after this — the format, the sides, the scorer — follows from this.",
     ) {
-        WizardTopBar(
-            step = 0,
-            total = 1,
-            onBack = onDismiss,
-            onClose = onDismiss,
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(CircleShape)
-                    .background(Blue.copy(alpha = 0.10f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.SportsCricket,
-                    contentDescription = null,
-                    tint = Blue,
-                    modifier = Modifier.size(40.dp),
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "$sport is coming soon",
-                color = Text1,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Live scoring for $sport isn't ready yet. Right now only Cricket matches can be created and scored on the ActionBoard.",
-                color = Text3,
-                fontSize = 14.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                lineHeight = 20.sp,
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(Surface)
-                .navigationBarsPadding()
-                .padding(16.dp)
-        ) {
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
-            ) {
-                Text("Got it", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
+        SportSpec.supported.forEachIndexed { i, spec ->
+            if (i > 0) Spacer(Modifier.height(12.dp))
+            SportCard(spec = spec, selected = spec.key == selected, onClick = { onSelect(spec.key) })
         }
     }
 }
 
+@Composable
+private fun SportCard(spec: SportSpec, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pressable(onClick = onClick)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) BlueTint else Surface)
+            .border(
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
+                RoundedCornerShape(16.dp),
+            )
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (selected) Blue.copy(alpha = 0.12f) else Bg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(spec.icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(spec.displayName, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(2.dp))
+            // The formats it offers — concrete, so the choice is about the game rather
+            // than the word.
+            Text(
+                spec.presets.joinToString(" · ") { it.label },
+                color = Text2,
+                fontSize = 13.sp,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        SelectDot(selected)
+    }
+}
+
+// Step indices: 0 sport · 1 type · 2 rules · 3 teams · 4 review.
 private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
     // A public match needs BOTH a GPS fix (so it can be found by distance) and a
     // readable place name (so the card means something). Private matches never
     // reach a feed, so neither is required there.
-    1 -> d.overs > 0 && d.playersPerSide > 0 &&
+    2 -> formatComplete(d.format) && d.playersPerSide > 0 &&
         (d.isPrivate || (d.latitude != null && d.longitude != null && d.locality.trim().length >= 2))
-    2 -> d.teamA.isNotBlank() && d.teamB.isNotBlank()
+    3 -> d.teamA.isNotBlank() && d.teamB.isNotBlank()
     else -> true
 }
 
@@ -370,17 +604,31 @@ private fun canAdvance(d: CreateMatchDraft, step: Int): Boolean = when (step) {
  * [canAdvance] exactly — a greyed-out Continue with no explanation is the same
  * dead end the player-profile form had.
  */
+/** A format is only usable if every number in it is positive — the steppers clamp, so this is a floor, not a UI guard. */
+private fun formatComplete(f: MatchFormat): Boolean = when (f) {
+    is MatchFormat.Cricket -> f.overs > 0
+    is MatchFormat.Football -> f.halves > 0 && f.halfLengthMin > 0
+    is MatchFormat.Badminton -> f.bestOf > 0 && f.pointsTo > 0
+}
+
+/** What the footer names as missing when [formatComplete] fails, in that sport's words. */
+private fun formatMissingLabel(f: MatchFormat): String = when (f) {
+    is MatchFormat.Cricket -> "the number of overs"
+    is MatchFormat.Football -> "the half length"
+    is MatchFormat.Badminton -> "the number of games"
+}
+
 private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
-    1 -> when {
-        d.overs <= 0 -> "the number of overs"
+    2 -> when {
+        !formatComplete(d.format) -> formatMissingLabel(d.format)
         d.playersPerSide <= 0 -> "players per side"
         !d.isPrivate && (d.latitude == null || d.longitude == null) -> "your match location"
         !d.isPrivate && d.locality.trim().length < 2 -> "the area or village"
         else -> null
     }
-    2 -> when {
-        d.teamA.isBlank() -> "a name for team A"
-        d.teamB.isBlank() -> "a name for team B"
+    3 -> when {
+        d.teamA.isBlank() -> "a name for ${d.sideLabel(0)}"
+        d.teamB.isBlank() -> "a name for ${d.sideLabel(1)}"
         else -> null
     }
     else -> null
@@ -388,7 +636,13 @@ private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
 
 // ─────────────────────────────────────────────────────────────── Top bar ──────
 @Composable
-private fun WizardTopBar(step: Int, total: Int, onBack: () -> Unit, onClose: () -> Unit) {
+private fun WizardTopBar(
+    step: Int,
+    total: Int,
+    onBack: () -> Unit,
+    onClose: () -> Unit,
+    sport: String = "",
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -400,7 +654,11 @@ private fun WizardTopBar(step: Int, total: Int, onBack: () -> Unit, onClose: () 
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("Create Match", color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Text("Step ${step + 1} of $total", color = Text3, fontSize = 12.sp)
+                Text(
+                    if (sport.isBlank()) "Step ${step + 1} of $total" else "$sport · Step ${step + 1} of $total",
+                    color = Text3,
+                    fontSize = 12.sp,
+                )
             }
             IconCircle(Icons.Default.Close, "Close", onClose)
         }
@@ -423,9 +681,9 @@ private fun IconCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, cd
     Box(
         modifier = Modifier
             .size(36.dp)
+            .pressable(onClick = onClick)
             .clip(CircleShape)
-            .background(Color(0xFFF1F5F9))
-            .clickable(onClick = onClick),
+            .background(Color(0xFFF1F5F9)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, cd, tint = Text1, modifier = Modifier.size(18.dp))
@@ -451,10 +709,16 @@ private fun WizardFooter(
             .imePadding()
             .padding(16.dp)
     ) {
-        // Why the button is inert, named, before the user pokes at it.
-        if (missing != null) {
+        // Why the button is inert, named, before the user pokes at it. Slides away
+        // rather than vanishing — the line disappearing is how you notice the form
+        // just became valid.
+        AnimatedVisibility(
+            visible = missing != null,
+            enter = fadeIn(tween(180)) + expandVertically(tween(180)),
+            exit = fadeOut(tween(140)) + shrinkVertically(tween(140)),
+        ) {
             Text(
-                text = "Add $missing to continue",
+                text = "Add ${missing.orEmpty()} to continue",
                 color = Text2,
                 fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -465,17 +729,38 @@ private fun WizardFooter(
         // the end — a deliberate blue→green hand-off so the final action reads as "go".
         val isCommit = step == lastStep
         val accent = if (isCommit) Green else Blue
+
+        // The moment a step becomes completable is the most satisfying beat in a
+        // wizard, and it used to pass unmarked: the fill snapped from 35% to solid.
+        // Now it eases in, and the hand is told.
+        val view = LocalView.current
+        val container by animateColorAsState(
+            targetValue = if (canContinue) accent else accent.copy(alpha = 0.35f),
+            animationSpec = tween(220),
+            label = "footerFill",
+        )
+        var wasReady by remember(step) { mutableStateOf(canContinue) }
+        LaunchedEffect(canContinue) {
+            if (canContinue && !wasReady) view.performHapticFeedback(Feel.TICK)
+            wasReady = canContinue
+        }
+
         Button(
-            onClick = onContinue,
+            onClick = {
+                // Creating the match is the one irreversible action in the flow, so it
+                // gets its own weight — distinct from every Continue that preceded it.
+                view.performHapticFeedback(if (isCommit) Feel.COMMIT else Feel.SELECT)
+                onContinue()
+            },
             enabled = canContinue,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = accent,
+                containerColor = container,
                 contentColor = Color.White,
-                disabledContainerColor = accent.copy(alpha = 0.35f),
+                disabledContainerColor = container,
                 disabledContentColor = Color.White.copy(alpha = 0.7f),
             ),
         ) {
@@ -496,7 +781,8 @@ private fun StepType(draft: CreateMatchDraft) {
         subtitle = if (draft.isPrivate)
             "Private games are just a scoreboard for your group — no XP, no ranking."
         else
-            "This sets how much it's worth. Tournament games rank higher than gully games.",
+            // "gully" is cricket's word — a football screen shouldn't use it.
+            "This sets how much it's worth. Tournament games rank higher than ${draft.spec.casualPlural}.",
     ) {
         // Public vs Private — the top-level choice. It decides whether this match
         // participates in XP/ranking at all.
@@ -513,6 +799,7 @@ private fun StepType(draft: CreateMatchDraft) {
                 val locked = type != MatchType.CASUAL
                 MatchTypeCard(
                     type = type,
+                    spec = draft.spec,
                     selected = draft.type == type && !locked,
                     locked = locked,
                     onClick = {
@@ -582,9 +869,9 @@ private fun VisibilityTab(
 ) {
     Column(
         modifier
+            .pressable(onClick = onClick)
             .clip(RoundedCornerShape(11.dp))
             .background(if (selected) Blue else Color.Transparent)
-            .clickable(onClick = onClick)
             .padding(vertical = 12.dp, horizontal = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -595,17 +882,31 @@ private fun VisibilityTab(
 }
 
 @Composable
-private fun MatchTypeCard(type: MatchType, selected: Boolean, onClick: () -> Unit, locked: Boolean = false) {
+private fun MatchTypeCard(
+    type: MatchType,
+    spec: SportSpec,
+    selected: Boolean,
+    onClick: () -> Unit,
+    locked: Boolean = false,
+) {
+    // The casual tier is the one that speaks the sport's own language — "Gully" in
+    // cricket, "kickabout" in football. League and Tournament read the same everywhere.
+    val isCasual = type == MatchType.CASUAL
+    val label = if (isCasual) spec.casualLabel else type.label
+    val tagline = if (isCasual) spec.casualTagline else type.tagline
+    val icon = if (isCasual) spec.icon else type.icon
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // A locked tier still presses — the toast explaining why is the response,
+            // and a card that ignores the finger entirely reads as broken, not gated.
+            .pressable(onClick = onClick)
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) BlueTint else Surface)
             .border(
                 BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
                 RoundedCornerShape(16.dp),
             )
-            .clickable(onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -617,13 +918,13 @@ private fun MatchTypeCard(type: MatchType, selected: Boolean, onClick: () -> Uni
                 .alpha(if (locked) 0.55f else 1f),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(type.icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).alpha(if (locked) 0.55f else 1f)) {
-            Text(type.label, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(2.dp))
-            Text(type.tagline, color = Text2, fontSize = 13.sp, maxLines = 1)
+            Text(tagline, color = Text2, fontSize = 13.sp, maxLines = 1)
         }
         Spacer(Modifier.width(10.dp))
         if (locked) {
@@ -670,36 +971,34 @@ private fun SelectDot(selected: Boolean) {
 
 // ─────────────────────────────────────────────────────── Step 2 · Rules ────────
 @Composable
-private fun StepRules(draft: CreateMatchDraft, loadBookings: suspend () -> List<com.haraan.app.data.BookingLite>) {
+private fun StepRules(
+    draft: CreateMatchDraft,
+    loadBookings: suspend () -> List<com.haraan.app.data.BookingLite>,
+) {
+    val spec = draft.spec
     StepScaffold(
         title = "Format & rules",
-        subtitle = "How long, what ball, how many a side.",
+        subtitle = spec.rulesSubtitle,
     ) {
-        FieldLabel("Overs per side")
-        Stepper(
-            value = draft.overs,
-            onChange = { draft.overs = it.coerceIn(1, 50) },
-            min = 1, max = 50,
-            suffix = "ov",
-        )
+        // The format block — the one question that defines the sport. Presets first:
+        // one tap gets a real match, and "Custom" opens the numbers for anyone whose
+        // game doesn't fit a preset.
+        FieldLabel("Match format")
+        FormatPicker(draft)
         Spacer(Modifier.height(20.dp))
 
-        FieldLabel("Ball type")
-        ChipRow(
-            options = BallType.entries.toList(),
-            selected = draft.ball,
-            label = { it.label },
-            onSelect = { draft.ball = it },
-        )
-        Spacer(Modifier.height(20.dp))
-
-        FieldLabel("Players per side")
-        Stepper(
-            value = draft.playersPerSide,
-            onChange = { draft.playersPerSide = it.coerceIn(2, 15) },
-            min = 2, max = 15,
-        )
-        Spacer(Modifier.height(20.dp))
+        // Badminton fixes this with singles/doubles, so the stepper would only be a
+        // way to create something the sport doesn't have.
+        if (spec.showPlayersStepper) {
+            FieldLabel("Players per side")
+            Stepper(
+                value = draft.playersPerSide,
+                onChange = { draft.playersPerSide = it.coerceIn(spec.playersRange) },
+                min = spec.playersRange.first,
+                max = spec.playersRange.last,
+            )
+            Spacer(Modifier.height(20.dp))
+        }
 
         // Location is captured from GPS, not typed. The fix is what makes this match
         // findable by distance; the name below is only how it reads on the card. A
@@ -767,6 +1066,180 @@ private fun StepRules(draft: CreateMatchDraft, loadBookings: suspend () -> List<
     }
 }
 
+/**
+ * The format block. Presets carry the common cases; "Custom" reveals that sport's own
+ * numbers. Ball type sits outside the preset set for cricket because it varies
+ * independently of length — a 20-over game is played on tennis, tape or leather.
+ */
+@Composable
+private fun FormatPicker(draft: CreateMatchDraft) {
+    val spec = draft.spec
+    val presets = spec.presets
+    // Custom opens on demand, and also whenever the current format doesn't correspond
+    // to any preset (e.g. re-entering after editing the numbers).
+    var custom by remember { mutableStateOf(presets.none { it.matches(draft) }) }
+
+    FormatPresetRow(
+        presets = presets,
+        customSelected = custom,
+        isSelected = { !custom && it.matches(draft) },
+        onSelect = { preset -> custom = false; preset.apply(draft) },
+        onCustom = { custom = true },
+    )
+
+    if (custom) {
+        // Only in Custom: a selected preset card already states its own format, so
+        // echoing it there would just repeat the line directly above it.
+        Spacer(Modifier.height(10.dp))
+        Text(draft.format.summaryLine, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(16.dp))
+        when (val f = draft.format) {
+            is MatchFormat.Cricket -> {
+                FieldLabel("Overs per side")
+                Stepper(
+                    value = f.overs,
+                    onChange = { draft.format = f.copy(overs = it.coerceIn(1, 50)) },
+                    min = 1, max = 50,
+                    suffix = "ov",
+                )
+            }
+            is MatchFormat.Football -> {
+                FieldLabel("Halves")
+                Stepper(
+                    value = f.halves,
+                    onChange = { draft.format = f.copy(halves = it.coerceIn(1, 2)) },
+                    min = 1, max = 2,
+                )
+                Spacer(Modifier.height(16.dp))
+                FieldLabel("Half length")
+                // Fives, because nobody plays a 23-minute half and the stepper
+                // shouldn't make you tap twenty times to reach one that's real.
+                Stepper(
+                    value = f.halfLengthMin,
+                    onChange = { draft.format = f.copy(halfLengthMin = it.coerceIn(5, 45)) },
+                    min = 5, max = 45, step = 5,
+                    suffix = "min",
+                )
+            }
+            is MatchFormat.Badminton -> {
+                FieldLabel("Singles or doubles")
+                ChipRow(
+                    options = listOf(false, true),
+                    selected = f.doubles,
+                    label = { if (it) "Doubles" else "Singles" },
+                    onSelect = { doubles ->
+                        draft.format = f.copy(doubles = doubles)
+                        draft.playersPerSide = if (doubles) 2 else 1
+                    },
+                )
+                Spacer(Modifier.height(16.dp))
+                FieldLabel("Games")
+                ChipRow(
+                    options = listOf(1, 3, 5),
+                    selected = f.bestOf,
+                    label = { if (it == 1) "One game" else "Best of $it" },
+                    onSelect = { draft.format = f.copy(bestOf = it) },
+                )
+                Spacer(Modifier.height(16.dp))
+                FieldLabel("Points per game")
+                ChipRow(
+                    options = listOf(11, 15, 21),
+                    selected = f.pointsTo,
+                    label = { "To $it" },
+                    onSelect = { draft.format = f.copy(pointsTo = it) },
+                )
+            }
+        }
+    }
+
+    // Ball type is cricket's alone, and independent of length — kept out of the
+    // presets so picking "T20" never silently changes the ball you're playing with.
+    if (draft.format is MatchFormat.Cricket) {
+        Spacer(Modifier.height(20.dp))
+        FieldLabel("Ball type")
+        ChipRow(
+            options = BallType.entries.toList(),
+            selected = draft.ball,
+            label = { it.label },
+            onSelect = { ball ->
+                (draft.format as? MatchFormat.Cricket)?.let { draft.format = it.copy(ball = ball) }
+            },
+        )
+    }
+}
+
+/** The preset cards, plus the Custom escape hatch, as one wrapping row. */
+@Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+private fun FormatPresetRow(
+    presets: List<FormatPreset>,
+    customSelected: Boolean,
+    isSelected: (FormatPreset) -> Boolean,
+    onSelect: (FormatPreset) -> Unit,
+    onCustom: () -> Unit,
+) {
+    // Two per row, equal width — three presets plus Custom make a clean 2×2 block.
+    // Left to wrap naturally, the fourth card stranded itself on its own line and
+    // read like a layout accident rather than a choice.
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        maxItemsInEachRow = 2,
+    ) {
+        presets.forEach { preset ->
+            FormatPresetCard(
+                label = preset.label,
+                sub = preset.sub,
+                selected = isSelected(preset),
+                onClick = { onSelect(preset) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        FormatPresetCard(
+            label = "Custom",
+            sub = "Set it yourself",
+            selected = customSelected,
+            onClick = onCustom,
+            modifier = Modifier.weight(1f),
+        )
+        // An odd preset count would leave the last card double-width; a spacer keeps
+        // every card on the same grid.
+        if (presets.size % 2 == 0) Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun FormatPresetCard(
+    label: String,
+    sub: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .pressable(onClick = onClick)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) BlueTint else Surface)
+            .border(
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
+                RoundedCornerShape(14.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) Blue else Text1,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(sub, color = if (selected) Blue.copy(alpha = 0.75f) else Text3, fontSize = 12.sp, maxLines = 1)
+    }
+}
+
 // Lists the creator's recent CONFIRMED turf bookings so they can attach the one this
 // match was played on. The chosen booking id rides along on create; the backend
 // validates it and auto-verifies the result against it.
@@ -804,10 +1277,10 @@ private fun TurfBookingPicker(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .pressable { onSelect(if (sel) null else b.id) }
                         .clip(RoundedCornerShape(12.dp))
                         .background(Surface)
                         .border(1.5.dp, if (sel) Green else Stroke, RoundedCornerShape(12.dp))
-                        .clickable { onSelect(if (sel) null else b.id) }
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1103,13 +1576,14 @@ private fun resolveCurrentLocality(context: Context): String? = try {
 
 // ─────────────────────────────────────────────────────── Step 3 · Teams ────────
 @Composable
-private fun StepTeams(draft: CreateMatchDraft, lookupPlayer: suspend (String) -> PlayerLite?) {
+private fun StepTeams(draft: CreateMatchDraft, searchPlayers: suspend (String) -> List<PlayerLite>) {
     StepScaffold(
-        title = "Teams & squads",
-        subtitle = "Name both sides. Add players by their Player ID.",
+        title = draft.spec.teamsTitle,
+        subtitle = draft.spec.teamsSubtitle,
     ) {
         TeamBlock(
-            heading = "Team A",
+            heading = draft.sideLabel(0),
+            noun = draft.sideNoun,
             name = draft.teamA,
             onName = { draft.teamA = it },
             emblemIndex = draft.teamAEmblem,
@@ -1118,11 +1592,12 @@ private fun StepTeams(draft: CreateMatchDraft, lookupPlayer: suspend (String) ->
             onPhoto = { draft.teamAPhoto = it },
             squad = draft.squadA,
             limit = draft.playersPerSide,
-            lookupPlayer = lookupPlayer,
+            searchPlayers = searchPlayers,
         )
         Spacer(Modifier.height(20.dp))
         TeamBlock(
-            heading = "Team B",
+            heading = draft.sideLabel(1),
+            noun = draft.sideNoun,
             name = draft.teamB,
             onName = { draft.teamB = it },
             emblemIndex = draft.teamBEmblem,
@@ -1131,29 +1606,76 @@ private fun StepTeams(draft: CreateMatchDraft, lookupPlayer: suspend (String) ->
             onPhoto = { draft.teamBPhoto = it },
             squad = draft.squadB,
             limit = draft.playersPerSide,
-            lookupPlayer = lookupPlayer,
+            searchPlayers = searchPlayers,
         )
         Spacer(Modifier.height(16.dp))
         ImpactNote(
             "Registered players earn XP",
-            "Add players by their Haraan Player ID. A match only counts for Ranked XP " +
+            "Search a teammate by their @username. A match only counts for Ranked XP " +
                 "with enough distinct registered players on each side.",
         )
     }
 }
 
-/** Lookup state for the add-player field. */
-private sealed interface LookupState {
-    data object Idle : LookupState
-    data object Searching : LookupState
-    data class Found(val player: PlayerLite) : LookupState
-    data object NotFound : LookupState
-    data object AlreadyAdded : LookupState
+/**
+ * One search hit. Shows the @handle prominently — that's the thing a player shares with
+ * a teammate, and the thing that makes two people with the same name distinguishable.
+ * Accounts created before usernames existed fall back to their district.
+ */
+@Composable
+private fun PlayerResultRow(
+    player: PlayerLite,
+    alreadyAdded: Boolean,
+    onAdd: () -> Unit,
+) {
+    val subtitle = player.username?.let { "@$it" }
+        ?: player.district?.takeIf { it.isNotBlank() }
+        ?: player.playerId
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressable(enabled = !alreadyAdded, onClick = onAdd)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (alreadyAdded) Color(0xFFF3F5F8) else Color(0xFFF7F9FC))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(Color(0xFFE3EAF6)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                player.name.trim().take(1).uppercase().ifBlank { "?" },
+                color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                player.name.ifBlank { player.playerId },
+                color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            )
+            Text(subtitle, color = Text3, fontSize = 12.sp, maxLines = 1)
+        }
+        if (alreadyAdded) {
+            Text("Added", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        } else {
+            Box(
+                Modifier.size(28.dp).clip(CircleShape).background(Green),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Add, "Add ${player.name}", tint = Color.White, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
 }
 
 @Composable
 private fun TeamBlock(
     heading: String,
+    /** "Team" / "Player" / "Pair" — labels the name field and the icon picker. */
+    noun: String,
     name: String,
     onName: (String) -> Unit,
     emblemIndex: Int,
@@ -1162,32 +1684,33 @@ private fun TeamBlock(
     onPhoto: (android.net.Uri?) -> Unit,
     squad: androidx.compose.runtime.snapshots.SnapshotStateList<SquadMember>,
     limit: Int,
-    lookupPlayer: suspend (String) -> PlayerLite?,
+    searchPlayers: suspend (String) -> List<PlayerLite>,
 ) {
     var entry by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf<LookupState>(LookupState.Idle) }
+    var results by remember { mutableStateOf<List<PlayerLite>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
     var guestName by remember { mutableStateOf("") }
     var showGuest by remember { mutableStateOf(false) }
 
-    // Debounced live lookup as the user types a Player ID.
+    // Debounced search by @username or name. Was an exact-match lookup on a Player ID
+    // (HRN-000123), which nobody knows by heart — in practice you could only build a
+    // squad with people standing next to you. An exact Player ID still resolves, because
+    // the search endpoint matches on it too.
     LaunchedEffect(entry) {
-        val id = entry.trim()
-        if (id.isEmpty()) {
-            status = LookupState.Idle
+        val q = entry.trim()
+        if (q.length < 2) {
+            results = emptyList(); searching = false; searched = false
             return@LaunchedEffect
         }
-        status = LookupState.Searching
-        delay(400)
-        val player = lookupPlayer(id)
-        status = when {
-            player == null -> LookupState.NotFound
-            squad.any { it.id == player.playerId } -> LookupState.AlreadyAdded
-            else -> LookupState.Found(player)
-        }
+        searching = true
+        delay(350)
+        results = searchPlayers(q)
+        searching = false
+        searched = true
     }
 
-    val found = status as? LookupState.Found
-    val canAdd = found != null && squad.size < limit
+    val atLimit = squad.size >= limit
 
     Column(
         Modifier
@@ -1199,10 +1722,11 @@ private fun TeamBlock(
     ) {
         Text(heading, color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        WizardTextField(value = name, onChange = onName, placeholder = "Team name")
+        WizardTextField(value = name, onChange = onName, placeholder = "$noun name")
         Spacer(Modifier.height(12.dp))
 
         TeamIconPicker(
+            noun = noun,
             emblemIndex = emblemIndex,
             photoUri = photoUri,
             onEmblem = onEmblem,
@@ -1210,31 +1734,50 @@ private fun TeamBlock(
         )
         Spacer(Modifier.height(12.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
-                WizardTextField(
-                    value = entry,
-                    onChange = { entry = it },
-                    placeholder = "Enter Player ID (${squad.size}/$limit)",
-                )
+        WizardTextField(
+            value = entry,
+            onChange = { entry = it },
+            placeholder = "Search @username or name (${squad.size}/$limit)",
+        )
+
+        // Results are the control surface: tap a row to add. No separate "+" button to
+        // aim at, and no guessing whether the thing you typed resolved to the right person.
+        when {
+            searching -> {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Text3)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Searching…", color = Text3, fontSize = 13.sp)
+                }
             }
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (canAdd) Green else Stroke)
-                    .clickable(enabled = canAdd) {
-                        found?.let { squad.add(SquadMember(it.player.playerId, it.player.name)) }
-                        entry = ""
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.Add, "Add player", tint = Color.White, modifier = Modifier.size(20.dp))
+            atLimit && entry.isNotBlank() -> {
+                Spacer(Modifier.height(10.dp))
+                Text("Squad full — remove a player first", color = Text3, fontSize = 13.sp)
+            }
+            searched && results.isEmpty() -> {
+                Spacer(Modifier.height(10.dp))
+                Text("No players found for \"${entry.trim()}\"", color = Text2, fontSize = 13.sp)
+            }
+            results.isNotEmpty() -> {
+                Spacer(Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    results.take(6).forEach { player ->
+                        val already = squad.any { it.id == player.playerId }
+                        PlayerResultRow(
+                            player = player,
+                            alreadyAdded = already,
+                            onAdd = {
+                                squad.add(SquadMember(player.playerId, player.name))
+                                entry = ""
+                                results = emptyList()
+                                searched = false
+                            },
+                        )
+                    }
+                }
             }
         }
-
-        LookupStatusRow(status, atLimit = squad.size >= limit)
 
         // Guest add — casual players without a Haraan account (no XP, just fill the side).
         val canAddGuest = guestName.trim().length >= 2 && squad.size < limit
@@ -1245,7 +1788,7 @@ private fun TeamBlock(
                 color = Blue,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { showGuest = true },
+                modifier = Modifier.pressable { showGuest = true },
             )
         } else {
             Spacer(Modifier.height(10.dp))
@@ -1261,13 +1804,13 @@ private fun TeamBlock(
                 Box(
                     Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (canAddGuest) Green else Stroke)
-                        .clickable(enabled = canAddGuest) {
+                        .pressable(enabled = canAddGuest) {
                             squad.add(SquadMember(id = "", name = guestName.trim(), isGuest = true))
                             guestName = ""
                             showGuest = false
-                        },
+                        }
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (canAddGuest) Green else Stroke),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Add, "Add guest", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -1359,8 +1902,10 @@ private fun TeamBlock(
                     Icons.Default.Close, "Remove",
                     tint = Text3,
                     modifier = Modifier
-                        .size(18.dp)
-                        .clickable { squad.removeAt(i) },
+                        // Removing someone is destructive — a firmer, distinctly
+                        // different response from the tick that added them.
+                        .pressable(haptic = Feel.REMOVE) { squad.removeAt(i) }
+                        .size(18.dp),
                 )
             }
         }
@@ -1373,10 +1918,10 @@ private fun TeamBlock(
 private fun LeaderBadge(label: String, active: Boolean, activeColor: Color, onClick: () -> Unit) {
     Box(
         Modifier
+            .pressable { onClick() }
             .clip(RoundedCornerShape(6.dp))
             .background(if (active) activeColor else Color.Transparent)
             .then(if (active) Modifier else Modifier.border(1.dp, Stroke, RoundedCornerShape(6.dp)))
-            .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1390,45 +1935,13 @@ private fun LeaderBadge(label: String, active: Boolean, activeColor: Color, onCl
     }
 }
 
-@Composable
-private fun LookupStatusRow(status: LookupState, atLimit: Boolean) {
-    val content: (@Composable () -> Unit)? = when (status) {
-        is LookupState.Idle -> null
-        is LookupState.Searching -> ({
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Text3)
-                Spacer(Modifier.width(8.dp))
-                Text("Checking…", color = Text3, fontSize = 13.sp)
-            }
-        })
-        is LookupState.Found -> ({
-            val p = status.player
-            val sub = if (p.district.isNullOrBlank()) p.name else "${p.name} · ${p.district}"
-            Text(
-                if (atLimit) "Squad full — remove a player first" else "✓ $sub",
-                color = if (atLimit) Text3 else Green,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        })
-        is LookupState.NotFound -> ({
-            Text("No player with that ID", color = Text2, fontSize = 13.sp)
-        })
-        is LookupState.AlreadyAdded -> ({
-            Text("Already added to this team", color = Text3, fontSize = 13.sp)
-        })
-    }
-    if (content != null) {
-        Spacer(Modifier.height(8.dp))
-        content()
-    }
-}
 
 // Team icon chooser — a live preview, a scrollable row of default emblems, and an
 // "upload" tile that opens the system photo picker for a custom image. A chosen photo
 // wins over the emblem; tapping an emblem clears the photo.
 @Composable
 private fun TeamIconPicker(
+    noun: String,
     emblemIndex: Int,
     photoUri: android.net.Uri?,
     onEmblem: (Int) -> Unit,
@@ -1442,7 +1955,7 @@ private fun TeamIconPicker(
         TeamIconPreview(emblemIndex, photoUri, size = 52.dp)
         Spacer(Modifier.width(12.dp))
         Column {
-            Text("Team icon", color = Text1, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("$noun icon", color = Text1, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 if (photoUri != null) "Custom image" else "Pick a default or upload your own",
                 color = Text3, fontSize = 12.sp,
@@ -1459,9 +1972,9 @@ private fun TeamIconPicker(
             Box(
                 Modifier
                     .size(44.dp)
+                    .pressable { onPhoto(null); onEmblem(i) }
                     .clip(CircleShape)
-                    .border(BorderStroke(if (selected) 2.5.dp else 0.dp, Blue), CircleShape)
-                    .clickable { onPhoto(null); onEmblem(i) },
+                    .border(BorderStroke(if (selected) 2.5.dp else 0.dp, Blue), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 androidx.compose.foundation.Image(
@@ -1532,6 +2045,8 @@ private fun StepReview(draft: CreateMatchDraft) {
     ) {
         SummaryCard(draft)
         Spacer(Modifier.height(16.dp))
+        WhenCard(draft)
+        Spacer(Modifier.height(16.dp))
         if (draft.isPrivate) {
             ImpactNote(
                 "Private · no XP or ranking",
@@ -1545,6 +2060,316 @@ private fun StepReview(draft: CreateMatchDraft) {
                     "result within 72h to settle Ranked XP — otherwise it expires to Low trust.",
             )
         }
+    }
+}
+
+/**
+ * When the match kicks off: "Play now" (the default — runs the toss immediately) or
+ * "Schedule for later" (pick a date + time; the match waits in the Scheduled tab until
+ * the creator starts it). Uses the platform date/time pickers so it feels native and
+ * needs no extra Compose Material dependency.
+ */
+@Composable
+private fun WhenCard(draft: CreateMatchDraft) {
+    val isScheduled = draft.scheduledAt != null
+    // Drives the in-app schedule sheet. The platform DatePickerDialog was replaced with
+    // a custom, on-brand picker — the stock dialog ships a teal Holo theme that clashes
+    // hard with the app's blue design language.
+    var showSheet by remember { mutableStateOf(false) }
+    if (showSheet) {
+        ScheduleDialog(
+            initialMillis = draft.scheduledAt,
+            onDismiss = { showSheet = false },
+            onConfirm = { draft.scheduledAt = it; showSheet = false },
+        )
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text("When", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        // A segmented mode toggle — selection is a *progress* choice, so it reads blue
+        // (per the app's CTA rules: blue = progress, green = commit). Green stays
+        // reserved for the single "Create Match" commit button below, so the two don't
+        // compete. The selected side is a soft blue tint, not a solid fill.
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            WhenChoice(
+                label = "Play now",
+                icon = Icons.Filled.PlayArrow,
+                selected = !isScheduled,
+                modifier = Modifier.weight(1f),
+            ) { draft.scheduledAt = null }
+            WhenChoice(
+                label = "Schedule",
+                icon = Icons.Filled.Schedule,
+                selected = isScheduled,
+                modifier = Modifier.weight(1f),
+            ) { showSheet = true }
+        }
+        if (isScheduled) {
+            Spacer(Modifier.height(12.dp))
+            val fmt = remember { java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(BlueTint)
+                    .clickable { showSheet = true }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Schedule, null, tint = Blue, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    fmt.format(java.util.Date(draft.scheduledAt!!)),
+                    color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("Change", color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        } else {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "The toss runs right away and the match goes live.",
+                color = Text3, fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WhenChoice(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            // Selected = soft blue tint + blue border (not a solid fill, so it never
+            // reads as a primary button). Unselected = plain surface.
+            .background(if (selected) BlueTint else Surface)
+            .border(
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Blue else Stroke),
+                RoundedCornerShape(14.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = if (selected) Blue else Text2, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            label,
+            color = if (selected) Blue else Text2,
+            fontSize = 14.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+        )
+    }
+}
+
+/**
+ * In-app match scheduler — replaces the stock DatePickerDialog (whose teal Holo theme
+ * clashed with the app). A premium, on-brand sheet: a horizontal rail of upcoming days
+ * and one of 30-minute time slots, both tactile blue-selectable pills, with a live
+ * summary and a blue confirm. Past slots grey out when "Today" is selected, so a
+ * scheduled match can never land in the past.
+ */
+@Composable
+private fun ScheduleDialog(
+    initialMillis: Long?,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    // Midnight today, our day-0 anchor.
+    val today0 = remember {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val dayMs = 24L * 60 * 60 * 1000
+    // 30-minute slots, 6:00 AM → 11:30 PM — the realistic window for a gully match.
+    val slots = remember { (6 * 60..23 * 60 + 30 step 30).toList() }
+
+    // Seed selection from the existing pick, else ~1 hour out, snapped to a slot.
+    val seed = remember {
+        val base = initialMillis ?: (System.currentTimeMillis() + 60 * 60 * 1000)
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = base }
+        val dayIdx = (((c.apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis) - today0) / dayMs).toInt().coerceIn(0, 20)
+        val cc = java.util.Calendar.getInstance().apply { timeInMillis = base }
+        val minute = cc.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cc.get(java.util.Calendar.MINUTE)
+        val nearest = slots.minByOrNull { kotlin.math.abs(it - minute) } ?: (18 * 60)
+        dayIdx to nearest
+    }
+    var selDay by remember { mutableStateOf(seed.first) }
+    var selMinute by remember { mutableStateOf(seed.second) }
+
+    fun absMillis(dayIdx: Int, minute: Int): Long =
+        today0 + dayIdx * dayMs + minute.toLong() * 60_000
+
+    // On "Today", disable slots already past (with a small buffer); bump the selection
+    // forward if it fell into a now-disabled slot.
+    val nowBuf = System.currentTimeMillis() + 60_000
+    val firstEnabledToday = slots.firstOrNull { absMillis(0, it) >= nowBuf }
+    if (selDay == 0 && (firstEnabledToday == null || selMinute < firstEnabledToday)) {
+        // No enabled slot left today → jump to tomorrow; else snap to the first open slot.
+        if (firstEnabledToday == null) selDay = 1 else selMinute = firstEnabledToday
+    }
+
+    val dayFmt = remember { java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()) }
+    val dateFmt = remember { java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()) }
+    val timeFmt = remember { java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()) }
+    fun timeLabel(minute: Int): String = timeFmt.format(java.util.Date(absMillis(0, minute)))
+    val summaryFmt = remember { java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()) }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Surface)
+                .padding(20.dp)
+        ) {
+            Text("Schedule match", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(3.dp))
+            Text("Pick when it kicks off.", color = Text3, fontSize = 13.sp)
+            Spacer(Modifier.height(18.dp))
+
+            // ── Date rail ──
+            Text("DATE", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                for (i in 0..20) {
+                    val ms = today0 + i * dayMs
+                    val top = when (i) { 0 -> "Today"; 1 -> "Tomorrow"; else -> dayFmt.format(java.util.Date(ms)) }
+                    DayPill(
+                        top = top,
+                        day = dateFmt.format(java.util.Date(ms)),
+                        selected = selDay == i,
+                    ) { selDay = i }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // ── Time rail ──
+            Text("TIME", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                slots.forEach { minute ->
+                    val enabled = selDay != 0 || absMillis(0, minute) >= nowBuf
+                    TimePill(
+                        label = timeLabel(minute),
+                        selected = selMinute == minute && enabled,
+                        enabled = enabled,
+                    ) { selMinute = minute }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // Live summary of the chosen instant.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(BlueTint)
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Schedule, null, tint = Blue, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    summaryFmt.format(java.util.Date(absMillis(selDay, selMinute))),
+                    color = Text1, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, Stroke, RoundedCornerShape(14.dp))
+                        .clickable(onClick = onDismiss)
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Cancel", color = Text2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Blue)
+                        .clickable {
+                            // Final guard: never return a past instant (server rejects it too).
+                            onConfirm(maxOf(absMillis(selDay, selMinute), System.currentTimeMillis() + 60_000))
+                        }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Set time", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+/** A tactile day pill for the scheduler: weekday/label on top, date below; blue when picked. */
+@Composable
+private fun DayPill(top: String, day: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) Blue else Bg)
+            .border(BorderStroke(if (selected) 0.dp else 1.dp, Stroke), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(top, color = if (selected) Color.White.copy(alpha = 0.85f) else Text3, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(3.dp))
+        Text(day, color = if (selected) Color.White else Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+/** A tactile time-slot pill; blue when picked, greyed when it's already past (today). */
+@Composable
+private fun TimePill(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Blue else Bg)
+            .border(BorderStroke(if (selected) 0.dp else 1.dp, Stroke), RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = when {
+                selected -> Color.White
+                !enabled -> Text3.copy(alpha = 0.4f)
+                else -> Text1
+            },
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+        )
     }
 }
 
@@ -1562,7 +2387,7 @@ private fun SummaryCard(draft: CreateMatchDraft) {
             TeamIconPreview(draft.teamAEmblem, draft.teamAPhoto, size = 28.dp)
             Spacer(Modifier.width(6.dp))
             Text(
-                "${draft.teamA.ifBlank { "Team A" }}  vs  ${draft.teamB.ifBlank { "Team B" }}",
+                "${draft.teamA.ifBlank { draft.sideLabel(0) }}  vs  ${draft.teamB.ifBlank { draft.sideLabel(1) }}",
                 color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
@@ -1572,11 +2397,19 @@ private fun SummaryCard(draft: CreateMatchDraft) {
         }
         Spacer(Modifier.height(14.dp))
         SummaryRow("Mode", if (draft.isPrivate) "Private" else "Public")
-        SummaryRow("Type", draft.type.label)
-        SummaryRow("Format", "${draft.overs} overs · ${draft.ball.label} ball")
-        SummaryRow("Per side", "${draft.playersPerSide} players")
+        SummaryRow("Sport", draft.spec.displayName)
+        SummaryRow("Type", if (draft.type == MatchType.CASUAL) draft.spec.casualLabel else draft.type.label)
+        // Reads in the sport's own terms — "2 × 25 min", "Doubles · best of 3 to 21" —
+        // instead of the old bare "Sport: Football", which confirmed nothing.
+        SummaryRow("Format", draft.format.summaryLine)
+        if (draft.spec.showPlayersStepper) {
+            SummaryRow("Per side", "${draft.playersPerSide} players")
+        }
         SummaryRow("Venue", draft.venue.ifBlank { "—" } + if (draft.onHaraanTurf) "  · Haraan turf" else "")
-        SummaryRow("Squads", "${draft.squadA.size} + ${draft.squadB.size} added")
+        SummaryRow(
+            if (draft.format is MatchFormat.Badminton) "Players" else "Squads",
+            "${draft.squadA.size} + ${draft.squadB.size} added",
+        )
     }
 }
 
@@ -1627,10 +2460,10 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onS
             val isSel = opt == selected
             Box(
                 Modifier
+                    .pressable { onSelect(opt) }
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (isSel) Blue else Surface)
                     .border(1.dp, if (isSel) Blue else Stroke, RoundedCornerShape(12.dp))
-                    .clickable { onSelect(opt) }
                     .padding(horizontal = 18.dp, vertical = 12.dp),
             ) {
                 Text(
@@ -1647,7 +2480,16 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onS
 // One cohesive pill — [ − | value | + ] — rather than three floating tiles. The ∓ zones
 // dim and stop responding at the bounds so the limits read visually, not just by clamping.
 @Composable
-private fun Stepper(value: Int, onChange: (Int) -> Unit, min: Int, max: Int, suffix: String = "") {
+private fun Stepper(
+    value: Int,
+    onChange: (Int) -> Unit,
+    min: Int,
+    max: Int,
+    suffix: String = "",
+    // Football's half length moves in fives — a 23-minute half isn't a thing, and a
+    // step of 1 would mean twenty taps to get from 25 to 45.
+    step: Int = 1,
+) {
     Row(
         Modifier
             .clip(RoundedCornerShape(12.dp))
@@ -1655,8 +2497,9 @@ private fun Stepper(value: Int, onChange: (Int) -> Unit, min: Int, max: Int, suf
             .border(1.dp, Stroke, RoundedCornerShape(12.dp)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StepperZone("−", enabled = value > min) { onChange(value - 1) }
+        StepperZone("−", enabled = value > min) { onChange((value - step).coerceAtLeast(min)) }
         StepperDivider()
+
         Box(
             Modifier
                 .widthIn(min = if (suffix.isBlank()) 56.dp else 76.dp)
@@ -1669,21 +2512,55 @@ private fun Stepper(value: Int, onChange: (Int) -> Unit, min: Int, max: Int, suf
             )
         }
         StepperDivider()
-        StepperZone("+", enabled = value < max) { onChange(value + 1) }
+        StepperZone("+", enabled = value < max) { onChange((value + step).coerceAtMost(max)) }
     }
 }
 
+/**
+ * One −/+ zone. Fires once on tap, then **repeats while held**, accelerating — going
+ * from 11 a side down to 5 was six separate taps with nothing under the finger.
+ * Each increment ticks, so the count can be felt without watching the number.
+ */
 @Composable
 private fun StepperZone(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val view = LocalView.current
+
+    // Held past the threshold, repeat and speed up. `enabled` is a key, so reaching a
+    // bound cancels the loop rather than spinning against a clamped value.
+    LaunchedEffect(pressed, enabled) {
+        if (!pressed || !enabled) return@LaunchedEffect
+        delay(450)
+        var gap = 130L
+        while (true) {
+            view.performHapticFeedback(Feel.TICK)
+            onClick()
+            delay(gap)
+            gap = (gap * 82 / 100).coerceAtLeast(45L)
+        }
+    }
+
     Box(
         Modifier
             .size(46.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+            ) {
+                view.performHapticFeedback(Feel.TICK)
+                onClick()
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(
             symbol,
-            color = if (enabled) Text1 else Text3.copy(alpha = 0.4f),
+            color = when {
+                !enabled -> Text3.copy(alpha = 0.4f)
+                pressed -> Blue
+                else -> Text1
+            },
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
         )
@@ -1700,10 +2577,10 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (B
     Row(
         Modifier
             .fillMaxWidth()
+            .pressable { onToggle(!checked) }
             .clip(RoundedCornerShape(14.dp))
             .background(Surface)
             .border(1.dp, if (checked) Green else Stroke, RoundedCornerShape(14.dp))
-            .clickable { onToggle(!checked) }
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

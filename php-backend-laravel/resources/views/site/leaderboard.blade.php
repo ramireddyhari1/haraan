@@ -3,8 +3,8 @@
 @section('content')
 <div class="leaderboard-page" style="padding: 40px 0; font-family: 'Plus Jakarta Sans', sans-serif;">
     <!-- Leaderboard Header Card -->
-    <div style="background: linear-gradient(135deg, #093727 0%, #0d543c 50%, #111c18 100%); padding: 40px; border-radius: 16px; color: #fff; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(9,55,39,0.15);">
-        <span style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #34d399; text-transform: uppercase;">Haraan Stats & Standings</span>
+    <div style="background: linear-gradient(135deg, #0F2557 0%, #1e3a8a 50%, #111c18 100%); padding: 40px; border-radius: 16px; color: #fff; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(9,55,39,0.15);">
+        <span style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #60a5fa; text-transform: uppercase;">Haraan Stats & Standings</span>
         <h1 style="margin: 8px 0 12px 0; font-size: 36px; font-weight: 900; color: #fff; border: none; padding: 0; line-height: 1.1;">Leaderboard Rankings</h1>
         <p style="color: rgba(255,255,255,0.85); font-size: 14px; max-width: 600px; margin: 0; line-height: 1.5;">Discover the top batting and bowling performers across districts, states, and the nation. Ranks update in real-time as match scorecards freeze.</p>
     </div>
@@ -52,7 +52,7 @@
 
     <!-- Leaderboard Switcher Tabs -->
     <div style="display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 24px; gap: 30px;">
-        <button class="tab-btn active" id="btn-batting" onclick="switchLeaderboard('batting')" style="background: none; border: none; padding: 12px 0; font-size: 15px; font-weight: 800; color: #0d543c; cursor: pointer; border-bottom: 3px solid #0d543c; text-transform: uppercase; letter-spacing: 0.5px;">Batting Leaders</button>
+        <button class="tab-btn active" id="btn-batting" onclick="switchLeaderboard('batting')" style="background: none; border: none; padding: 12px 0; font-size: 15px; font-weight: 800; color: #1e3a8a; cursor: pointer; border-bottom: 3px solid #1e3a8a; text-transform: uppercase; letter-spacing: 0.5px;">Batting Leaders</button>
         <button class="tab-btn" id="btn-bowling" onclick="switchLeaderboard('bowling')" style="background: none; border: none; padding: 12px 0; font-size: 15px; font-weight: 800; color: #64748b; cursor: pointer; border-bottom: 3px solid transparent; text-transform: uppercase; letter-spacing: 0.5px;">Bowling Leaders</button>
     </div>
 
@@ -103,7 +103,7 @@
                                     </div>
                                 </td>
                                 <td style="padding: 16px 20px; font-weight: 700; text-align: center; color: #475569;">{{ $player->career_matches }}</td>
-                                <td style="padding: 16px 20px; font-weight: 900; text-align: center; color: #0d543c; font-size: 16px;">{{ $player->career_runs }}</td>
+                                <td style="padding: 16px 20px; font-weight: 900; text-align: center; color: #1e3a8a; font-size: 16px;">{{ $player->career_runs }}</td>
                                 <td style="padding: 16px 20px; font-weight: 700; text-align: center; color: #475569;">{{ number_format($sr, 1) }}</td>
                                 <td style="padding: 16px 20px; font-weight: 700; text-align: center; color: #475569;">{{ number_format($avg, 1) }}</td>
                             </tr>
@@ -215,8 +215,8 @@
         });
         
         const activeBtn = document.getElementById('btn-' + tab);
-        activeBtn.style.color = '#0d543c';
-        activeBtn.style.borderBottomColor = '#0d543c';
+        activeBtn.style.color = '#1e3a8a';
+        activeBtn.style.borderBottomColor = '#1e3a8a';
 
         document.getElementById('tab-batting').style.display = tab === 'batting' ? 'block' : 'none';
         document.getElementById('tab-bowling').style.display = tab === 'bowling' ? 'block' : 'none';

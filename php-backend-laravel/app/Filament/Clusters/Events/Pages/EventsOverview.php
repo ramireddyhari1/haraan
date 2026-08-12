@@ -4,6 +4,7 @@ namespace App\Filament\Clusters\Events\Pages;
 
 use App\Filament\Clusters\Events\EventsCluster;
 use App\Filament\Clusters\Events\Widgets\EventSalesTrendWidget;
+use App\Filament\Clusters\Events\Widgets\EventSpotlightWidget;
 use App\Filament\Clusters\Events\Widgets\EventsStatsWidget;
 use App\Filament\Clusters\Events\Widgets\UpcomingEventsWidget;
 use App\Filament\Widgets\LatestBookingsWidget;
@@ -27,6 +28,8 @@ class EventsOverview extends Page
     protected function getHeaderWidgets(): array
     {
         return [
+            // The active event as a cinematic hero, then a slim portfolio strip.
+            EventSpotlightWidget::class,
             EventsStatsWidget::class,
         ];
     }

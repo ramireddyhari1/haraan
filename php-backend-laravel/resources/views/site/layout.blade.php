@@ -4,14 +4,33 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ $title ?? 'Haraan' }}</title>
+    @php
+        // "Page name | Haraan", but never "Haraan | Haraan" — several pages already
+        // carry the brand in the title they pass (e.g. host profiles).
+        $pageTitle = trim((string) ($title ?? 'Haraan'));
+        $fullTitle = ($pageTitle === '' || str_contains($pageTitle, 'Haraan'))
+            ? ($pageTitle ?: 'Haraan')
+            : $pageTitle . ' | Haraan';
+    @endphp
+    <title>{{ $fullTitle }}</title>
     <meta name="theme-color" content="#ffffff">
+    @include('site.partials.seo', ['title' => $fullTitle])
     @stack('head')
-    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ asset('site.webmanifest') }}">
+    {{-- Favicon: the white Haraan "H" on the #2563EB launcher blue, so the tab,
+         the Google result and the phone home screen all show the same mark.
+         The ?v= busts the older white-tile icons browsers and Google cached.
+         48 and 192 are there because Google's favicon crawler wants a square
+         that's a multiple of 48px; a filled tile also stays legible at 16px. --}}
+    <link rel="icon" href="{{ asset('favicon.ico') }}?v=3" sizes="any">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('favicon-192.png') }}?v=3">
+    <link rel="icon" type="image/png" sizes="48x48" href="{{ asset('favicon-48.png') }}?v=3">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32.png') }}?v=3">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16.png') }}?v=3">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}?v=3">
+    <link rel="manifest" href="{{ asset('site.webmanifest') }}?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@300..800&family=Great+Vibes&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@300..800&display=swap" rel="stylesheet">
     @php
         // Cache-bust assets by file mtime: browsers can cache them, but a new
         // deploy (changed file) yields a new URL. Beats ?v=time() which never caches.
@@ -38,7 +57,7 @@
         /* Brand lockup and mobile footer are phone-only (styled in the mobile
            overrides ≤720px); never render elsewhere. */
         @media (min-width: 721px) {
-            .mbrandmark, .mfoot { display: none !important; }
+            .mband, .mfoot { display: none !important; }
         }
 
         /* Focused checkout: the booking review + payment pages hide the whole site
@@ -67,24 +86,31 @@
             box-shadow: 0 10px 20px rgba(13, 110, 253, 0.12) !important;
         }
 
-        /* GameHub section header accent, applied only on /gamehub pages.
+        /* Pulse section header accent, applied only on /gamehub pages.
            Location-pill label left neutral (see note above). */
         .topbar.topbar--gamehub .brand__text strong,
         .topbar.topbar--gamehub .topnav__link,
         .topbar.topbar--gamehub .topnav__link.is-active,
         .topbar.topbar--gamehub .topnav__link:hover {
-            color: #16a34a !important;
+            color: #1D4ED8 !important;
         }
 
         .topbar.topbar--gamehub .topnav__link.is-active::after,
         .topbar.topbar--gamehub .topnav__link:hover::after {
-            background: #16a34a !important;
+            background: #2563EB !important;
         }
 
+        /* Pulse CTAs take the DEEP blue — same brand family as Events, but the
+           button itself is visibly the other lane. */
         .topbar.topbar--gamehub .btn--solid {
-            background: #16a34a !important;
-            border-color: #16a34a !important;
-            box-shadow: 0 10px 20px rgba(22, 163, 74, 0.12) !important;
+            background: #1E3A8A !important;
+            border-color: #1E3A8A !important;
+            box-shadow: 0 10px 20px rgba(30, 58, 138, 0.18) !important;
+        }
+
+        .topbar.topbar--gamehub .btn--solid:hover {
+            background: #172554 !important;
+            border-color: #172554 !important;
         }
 
         /* ── Brand splash loader (BookMyShow-style) ───────────────────────────
@@ -218,7 +244,7 @@
             </a>
 
             {{-- Mobile header lockup (the app's GreetingHeader). Hidden ≥1025px, where the
-                 brand + location pill + nav row takes over. GameHub renders its own copy on
+                 brand + location pill + nav row takes over. Pulse renders its own copy on
                  the green hero and hides this whole topbar — see site/partials/app-greet. --}}
             @include('site.partials.app-greet')
 
@@ -240,7 +266,7 @@
             <form action="/search" method="GET" class="topbar__search" role="search">
                 <span class="search-icon">
                     {{-- Inline SVG (was a lord-icon with hardcoded black) so it inherits
-                         the section accent — blue on Events, green on GameHub — and drops
+                         the section accent — blue on Events, green on Pulse — and drops
                          the cdn.lordicon.com dependency. --}}
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="11" cy="11" r="7"></circle>
@@ -263,12 +289,12 @@
 
             <div class="mobile-action-buttons">
                 <a href="/events" class="mobile-action-btn mobile-action-btn--events">Events</a>
-                <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub">GameHub</a>
+                <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub">Pulse</a>
             </div>
 
             <nav class="topnav" aria-label="Primary">
                 <a href="/events" class="topnav__link {{ request()->is('/') || request()->is('events*') ? 'is-active' : '' }}">Events</a>
-                <a href="/gamehub" class="topnav__link {{ request()->is('gamehub*') && !request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">GameHub</a>
+                <a href="/gamehub" class="topnav__link {{ request()->is('gamehub*') && !request()->is('gamehub/leaderboard*') ? 'is-active' : '' }}">Pulse</a>
             </nav>
 
             <div class="topbar__actions">
@@ -323,7 +349,7 @@
          a PageHeader (back + title) instead of the greeting/search/tabs, so the phone
          does too. Desktop keeps the topbar — it's the only nav a wide screen has, and
          CSS decides which of the two shows (see .pagebar). --}}
-    @if(request()->is('profile', 'bookings', 'account/*', 'legal/*'))
+    @if(request()->is('profile', 'bookings', 'account/*', 'legal/*', 'support', 'notifications'))
         <header class="pagebar">
             <button type="button" class="pagebar__back" aria-label="Back" data-back>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
@@ -349,8 +375,13 @@
         $footTag   = $footIsHub ? 'Play. Compete. Climb.' : 'Discover. Book. Play.';
     @endphp
     <footer class="mfoot">
-        <div class="mfoot__app">
-            <div>
+        {{-- Brand-gradient hairline: keeps the two-lane (Events blue · Pulse green)
+             identity as a quiet accent instead of flooding the whole sheet. --}}
+        <span class="mfoot__accent" aria-hidden="true"></span>
+
+        {{-- Get-the-app card --}}
+        <div class="mfoot__cta">
+            <div class="mfoot__cta-copy">
                 <strong>{{ $footHead }}</strong>
                 <p>{{ $footBlurb }}</p>
             </div>
@@ -361,26 +392,46 @@
                     <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
                     <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
                 </svg>
-                <span><small>Get it on</small><b>Google Play</b></span>
+                <span><small>GET IT ON</small><b>Google Play</b></span>
             </a>
-            <a class="mfoot__apk" href="/haraan.apk">or download the Android APK directly</a>
+            <a class="mfoot__apk" href="/haraan.apk">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download the Android APK
+            </a>
         </div>
-        <nav class="mfoot__links" aria-label="Footer">
-            @if($footIsHub)
-            <a href="/gamehub">GameHub</a>
-            <a href="/gamehub/leaderboard">Leaderboard</a>
-            @else
-            <a href="/events">Events</a>
-            <a href="/gamehub">GameHub</a>
-            @endif
-            <a href="/support">Support</a>
-            <a href="/notifications">Notifications</a>
-            <a href="/profile">My profile</a>
-        </nav>
+
+        {{-- Tidy, labelled link columns — the structure that reads as a real product
+             footer rather than a single wrapped row. --}}
+        <div class="mfoot__cols">
+            <nav class="mfoot__col" aria-label="Explore">
+                <h4>Explore</h4>
+                <a href="/events">Events</a>
+                <a href="/gamehub">Pulse</a>
+                <a href="/gamehub/leaderboard">Leaderboard</a>
+            </nav>
+            <nav class="mfoot__col" aria-label="Your account">
+                <h4>Your account</h4>
+                <a href="/profile">My profile</a>
+                <a href="/bookings">My bookings</a>
+                <a href="/notifications">Notifications</a>
+            </nav>
+            <nav class="mfoot__col" aria-label="Help and legal">
+                <h4>Help &amp; legal</h4>
+                <a href="/support">Support</a>
+                <a href="/legal/terms">Terms of Use</a>
+                <a href="/legal/privacy">Privacy</a>
+            </nav>
+        </div>
+
         <div class="mfoot__base">
-            <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-            <span>{{ $footTag }}</span>
-            <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
+            <div class="mfoot__brand">
+                <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                <span class="mfoot__tag">{{ $footTag }}</span>
+            </div>
+            <div class="mfoot__meta">
+                <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
+                <span class="mfoot__made">Made in India</span>
+            </div>
         </div>
     </footer>
     @endif
@@ -414,8 +465,8 @@
             
             <div class="auth-modal__header">
                 <div class="auth-modal__logo">
-                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-                    <p>Book events, play sports, follow live scores — one account for both lanes.</p>
+                    <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan">
+                    <span class="auth-modal__tag">Login</span>
                 </div>
             </div>
 
@@ -462,8 +513,21 @@
                         });
                     </script>
                 @else
-                    <h3>Log in or sign up</h3>
-                    <p class="subtitle">If you don't have an account yet, we'll create one for you</p>
+                    <style>
+                        .auth-modal__choices { display: flex; flex-direction: column; gap: 12px; }
+                        .auth-modal__choices[hidden] { display: none; } /* flex above would otherwise defeat [hidden] */
+                        .auth-modal .auth-google__btn { width: 100%; display: flex; justify-content: center; min-height: 50px; }
+                        .auth-modal .auth-google__error { color: #B91C1C; font-size: 12.5px; font-weight: 600; text-align: center; margin: 2px 0 0; }
+                        .auth-modal__opt { position: relative; width: 100%; height: 50px; border: 1.5px solid #E2E7F0; border-radius: 12px; background: #fff; cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 15px; font-weight: 700; color: #1F2937; display: flex; align-items: center; justify-content: center; transition: border-color .15s, background .15s; }
+                        .auth-modal__opt:hover { border-color: #C7D0DE; background: #F9FAFC; }
+                        .auth-modal__opt svg { position: absolute; left: 16px; width: 20px; height: 20px; }
+                        .auth-modal__panel[hidden] { display: none; }
+                        .auth-modal__back { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; margin: 0 0 16px; cursor: pointer; color: #64748B; font-size: 13px; font-weight: 600; }
+                        .auth-modal__back:hover { color: #2563EB; }
+                        .auth-modal__back svg { width: 15px; height: 15px; }
+                    </style>
+                    <h3>Get started</h3>
+                    <p class="subtitle">One account for both lanes — tickets and play.</p>
 
                     @if(session('error'))
                         <div class="auth-alert" role="alert">{{ session('error') }}</div>
@@ -472,18 +536,41 @@
                         <div class="auth-alert" role="alert">{{ $errors->first() }}</div>
                     @endif
 
-                    {{-- Google first: one tap for returning users, no round-trip.
-                         Hidden entirely when GOOGLE_CLIENT_ID isn't set, so a missing
-                         config shows nothing rather than a button that always fails. --}}
-                    @if(config('services.google.client_id'))
-                        <div class="auth-google">
-                            <div id="googleSignInBtn" class="auth-google__btn"></div>
-                            <p class="auth-google__error" id="googleSignInError" role="alert" hidden></p>
+                    {{-- BookMyShow-style: uniform choices; the chosen method reveals its
+                         panel. Google renders into .auth-google__btn (site.js). --}}
+                    <div class="auth-modal__choices" data-mlgn-choices>
+                        @if(config('services.google.client_id'))
+                            <div class="auth-google"><div class="auth-google__btn"></div></div>
+                            <p class="auth-google__error" role="alert" hidden></p>
+                        @endif
+                        @if(config('services.firebase.api_key'))
+                            <button type="button" class="auth-modal__opt" data-mlgn-open="phone">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                                Continue with phone
+                            </button>
+                        @endif
+                        <button type="button" class="auth-modal__opt" data-mlgn-open="email">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
+                            Continue with Email
+                        </button>
+                    </div>
+
+                    @if(config('services.firebase.api_key'))
+                        <div class="auth-modal__panel" data-mlgn-panel="phone" hidden>
+                            <button type="button" class="auth-modal__back" data-mlgn-back>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                                All sign-in options
+                            </button>
+                            @include('site.partials.auth-phone')
                         </div>
-                        <div class="auth-divider"><span>or</span></div>
                     @endif
 
-                    <form class="pw-form" id="mAuthForm" method="POST" action="{{ route('site.password.login') }}" data-mode="login">
+                    <div class="auth-modal__panel" data-mlgn-panel="email" hidden>
+                        <button type="button" class="auth-modal__back" data-mlgn-back>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                            All sign-in options
+                        </button>
+                        <form class="pw-form" id="mAuthForm" method="POST" action="{{ route('site.password.login') }}" data-mode="login">
                         @csrf
                         <div class="auth-field auth-field--signup" id="mNameField" hidden>
                             <label for="mAuthName">Name</label>
@@ -517,44 +604,63 @@
                             <a href="{{ route('site.password.request') }}" class="pw-forgot-link" id="mForgotLink">Forgot password?</a>
                         </div>
                         <button type="submit" class="btn btn--solid btn--full btn--large" id="mAuthSubmit">Continue</button>
-                    </form>
+                        </form>
+                    </div>
 
                     <script>
                         (function () {
-                            var form = document.getElementById('mAuthForm');
-                            if (!form) return;
-                            var toggle = document.getElementById('mSignupToggle');
-                            var nameField = document.getElementById('mNameField');
-                            var nameInput = document.getElementById('mAuthName');
-                            var pwInput = document.getElementById('mAuthPassword');
-                            var submit = document.getElementById('mAuthSubmit');
-                            var forgot = document.getElementById('mForgotLink');
-                            var heading = form.closest('.auth-modal__body')?.querySelector('h3');
+                            var body = document.querySelector('.auth-modal__body');
+                            if (!body) return;
+                            var choices = body.querySelector('[data-mlgn-choices]');
+                            var panels = body.querySelectorAll('[data-mlgn-panel]');
 
-                            function setMode(signup) {
-                                form.dataset.mode = signup ? 'signup' : 'login';
-                                // Show/hide every sign-up-only field and toggle its inputs
-                                // (disabled inputs are NOT submitted, so login mode stays clean).
-                                form.querySelectorAll('.auth-field--signup').forEach(function (el) { el.hidden = !signup; });
-                                form.querySelectorAll('.auth-field--signup input, .auth-field--signup select').forEach(function (inp) { inp.disabled = !signup; });
-                                nameInput.required = signup;       // only name is required among sign-up fields
-                                submit.textContent = signup ? 'Create account' : 'Continue';
-                                toggle.textContent = signup ? 'Have an account? Log in' : 'Create new account';
-                                if (forgot) forgot.hidden = signup;
-                                if (heading) heading.textContent = signup ? 'Create your account' : 'Log in or sign up';
-                                pwInput.setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
-                                if (signup) nameInput.focus();
+                            function open(name) {
+                                if (choices) choices.hidden = true;
+                                panels.forEach(function (p) { p.hidden = p.getAttribute('data-mlgn-panel') !== name; });
+                                var active = body.querySelector('[data-mlgn-panel="' + name + '"]');
+                                var f = active && active.querySelector('input, select');
+                                if (f) setTimeout(function () { f.focus(); }, 30);
+                            }
+                            function back() {
+                                panels.forEach(function (p) { p.hidden = true; });
+                                if (choices) choices.hidden = false;
+                            }
+                            body.querySelectorAll('[data-mlgn-open]').forEach(function (b) { b.addEventListener('click', function () { open(b.getAttribute('data-mlgn-open')); }); });
+                            body.querySelectorAll('[data-mlgn-back]').forEach(function (b) { b.addEventListener('click', back); });
+
+                            // Email panel: toggle between "log in" and "sign up" (extra fields).
+                            var form = document.getElementById('mAuthForm');
+                            if (form) {
+                                var toggle = document.getElementById('mSignupToggle');
+                                var nameInput = document.getElementById('mAuthName');
+                                var pwInput = document.getElementById('mAuthPassword');
+                                var submit = document.getElementById('mAuthSubmit');
+                                var forgot = document.getElementById('mForgotLink');
+
+                                function setMode(signup) {
+                                    form.dataset.mode = signup ? 'signup' : 'login';
+                                    // Disabled inputs are NOT submitted, so login mode stays clean.
+                                    form.querySelectorAll('.auth-field--signup').forEach(function (el) { el.hidden = !signup; });
+                                    form.querySelectorAll('.auth-field--signup input, .auth-field--signup select').forEach(function (inp) { inp.disabled = !signup; });
+                                    nameInput.required = signup;
+                                    submit.textContent = signup ? 'Create account' : 'Continue';
+                                    toggle.textContent = signup ? 'Have an account? Log in' : 'Create new account';
+                                    if (forgot) forgot.hidden = signup;
+                                    pwInput.setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+                                    if (signup) nameInput.focus();
+                                }
+                                toggle.addEventListener('click', function (e) { e.preventDefault(); setMode(form.dataset.mode !== 'signup'); });
                             }
 
-                            toggle.addEventListener('click', function (e) {
-                                e.preventDefault();
-                                setMode(form.dataset.mode !== 'signup');
-                            });
+                            // A server-side validation error means email was tried — reveal that panel.
+                            @if($errors->any() && old('email'))
+                                open('email');
+                            @endif
                         })();
                     </script>
 
                     <div class="auth-modal__footer">
-                        <p>By continuing, you agree to our <br> <a href="#">Terms of Service</a> &nbsp; <a href="#">Privacy Policy</a></p>
+                        <p>By continuing, you agree to our <a href="{{ route('site.legal', 'terms') }}">Terms of Service</a> and <a href="{{ route('site.legal', 'privacy') }}">Privacy Policy</a></p>
                     </div>
                 @endif
             </div>
@@ -591,6 +697,15 @@
                 <p>It helps organisers plan better events for you. Takes 5 seconds.</p>
                 <form method="POST" action="{{ route('site.account.demographics') }}">
                     @csrf
+                    {{-- Phone OTP sign-ups have no name yet (created as the placeholder
+                         "Member"), so ask for it here. Google users already have a real
+                         name, so they don't see this field — just age + gender as before. --}}
+                    @if(blank(auth()->user()->name) || auth()->user()->name === 'Member')
+                        <div class="demo-field" style="margin-bottom: 14px; text-align: left;">
+                            <label for="dpName">Name</label>
+                            <input type="text" name="name" id="dpName" maxlength="60" placeholder="Your full name" autocomplete="name" required>
+                        </div>
+                    @endif
                     <div class="demo-row">
                         <div class="demo-field">
                             <label for="dpAge">Age</label>
@@ -607,7 +722,7 @@
                         </div>
                     </div>
                     <button type="submit" class="btn btn--solid btn--full btn--large">Save</button>
-                    <button type="submit" name="skip" value="1" class="demo-skip">Skip for now</button>
+                    <button type="submit" name="skip" value="1" class="demo-skip" formnovalidate>Skip for now</button>
                 </form>
             </div>
         </div>
@@ -628,42 +743,61 @@
         @endif
     @endauth
 
-    <!-- Location selector modal (improved) -->
+    <!-- Location selector — bottom sheet -->
     <div id="locationModal" class="location-modal" aria-hidden="true">
         <div class="location-modal__backdrop" id="locationBackdrop"></div>
-        <div class="location-modal__card" role="dialog" aria-modal="true" aria-labelledby="locationTitle">
-            <button id="closeLocation" class="location-modal__close" aria-label="Close">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
+        <div class="location-sheet" role="dialog" aria-modal="true" aria-labelledby="locationTitle">
+            <span class="location-sheet__grab" aria-hidden="true"></span>
 
-            <div class="location-modal__titles">
-                <h3 id="locationTitle" class="location-modal__title">Choose your city</h3>
-                <p class="location-modal__sub" id="locationCurrent">Set where you want to play &amp; attend</p>
-            </div>
-
-            <div class="location-modal__header">
-                <label class="location-search">
-                    <svg class="location-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                    <input type="search" id="locationSearch" placeholder="Search cities">
-                </label>
-                <button id="useCurrent" class="btn btn--use-location">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                    Use current location
-                </button>
-            </div>
-
-            <section class="loc-section">
-                <h4 class="loc-section__title">Popular Cities</h4>
-                <div id="popularCities" class="popular-grid" role="list"></div>
-            </section>
-
-            <section class="loc-section">
-                <h4 class="loc-section__title">All Cities</h4>
-                <div class="all-cities-wrap">
-                    <div id="allCities" class="all-list" role="list"></div>
-                    <aside class="alpha-index" aria-hidden="false" id="alphaIndex" title="Jump to letter"></aside>
+            <header class="location-sheet__head">
+                <div class="location-sheet__heading">
+                    <h3 id="locationTitle" class="location-sheet__title">Choose your city</h3>
+                    <p class="location-sheet__sub" id="locationCurrent">Set where you want to play &amp; attend</p>
                 </div>
-            </section>
+                <button id="closeLocation" class="location-sheet__close" aria-label="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+
+            <div class="location-sheet__body" id="locationBody">
+                <label class="loc-search">
+                    <svg class="loc-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="search" id="locationSearch" placeholder="Search for a city" autocomplete="off" spellcheck="false">
+                </label>
+
+                <button id="useCurrent" class="loc-current">
+                    <span class="loc-current__icon" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
+                    </span>
+                    <span class="loc-current__text">
+                        <span class="loc-current__title">Use my current location</span>
+                        <span class="loc-current__sub">Find events &amp; venues near you</span>
+                    </span>
+                    <svg class="loc-current__chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+
+                <section class="loc-group" id="locRecentWrap" hidden>
+                    <h4 class="loc-group__label">Recent</h4>
+                    <div id="locRecent" class="loc-chips" role="list"></div>
+                </section>
+
+                <section class="loc-group" id="locPopularWrap">
+                    <h4 class="loc-group__label">Popular cities</h4>
+                    <div id="popularCities" class="loc-chips" role="list"></div>
+                </section>
+
+                <section class="loc-group loc-group--list">
+                    <h4 class="loc-group__label" id="locAllLabel">All cities</h4>
+                    <div id="allCities" class="loc-rows" role="list"></div>
+                    <div id="locEmpty" class="loc-empty" hidden>
+                        <span class="loc-empty__icon" aria-hidden="true">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                        </span>
+                        <p class="loc-empty__title">No matching city</p>
+                        <p class="loc-empty__sub">Check the spelling, or pick one from the list.</p>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 
@@ -684,8 +818,8 @@
     @endif
 
     {{-- "Continue with Google" (Google Identity Services). Loaded only when an OAuth
-         client is configured. GIS renders its own button into #googleSignInBtn and hands
-         us an ID token, which we post to the session-login route. --}}
+         client is configured. GIS renders its own button into every .auth-google__btn
+         slot and hands us an ID token, which we post to the session-login route. --}}
     @if(config('services.google.client_id') && !auth()->check())
         <script>
             window.HaraanGoogleAuth = {
@@ -694,6 +828,23 @@
             };
         </script>
         <script src="https://accounts.google.com/gsi/client" async defer></script>
+    @endif
+
+    {{-- Phone sign-in (Firebase SMS OTP). Loaded only when a web API key is configured
+         and the visitor is signed out. The compat SDK is loaded before our init script
+         (not async) so `firebase` is ready; firebase-phone-auth.js also polls to be safe. --}}
+    @if(config('services.firebase.api_key') && !auth()->check())
+        <script>
+            window.HaraanFirebase = {
+                apiKey: @json(config('services.firebase.api_key')),
+                authDomain: @json(config('services.firebase.auth_domain')),
+                projectId: @json(config('services.firebase.project_id')),
+                appId: @json(config('services.firebase.app_id')),
+            };
+        </script>
+        <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+        <script src="{{ $assetVer('js/firebase-phone-auth.js') }}"></script>
     @endif
 
     <script src="{{ $assetVer('js/site.js') }}"></script>
