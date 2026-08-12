@@ -661,10 +661,13 @@ internal fun MainAppContainer(
           .fillMaxWidth()
           .height(280.dp)
           .background(
+            // Derive the header wash from the brand blue (#2563EB) so it reads as
+            // the same family as the Events button / Special banner instead of a
+            // clashing sky-cyan. Kept at low alpha to stay soft over white.
             Brush.verticalGradient(
               colors = listOf(
-                Color(0xFF7DD3FC).copy(alpha = 0.45f),
-                Color(0xFF38BDF8).copy(alpha = 0.15f),
+                HaraanColors.EventsBlue.copy(alpha = 0.20f),
+                HaraanColors.EventsBlue.copy(alpha = 0.06f),
                 Color.Transparent
               )
             )
@@ -696,8 +699,8 @@ internal fun MainAppContainer(
                 if (isEventsTab) {
                   Brush.verticalGradient(
                     colors = listOf(
-                      Color(0xFFE0F2FE), // Light sky blue top
-                      Color.White        // Blends into white content area
+                      HaraanColors.AccentTint, // Brand-blue tint (#EAF1FE) — same family as the CTA
+                      Color.White              // Blends into white content area
                     )
                   )
                 } else {
