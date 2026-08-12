@@ -133,7 +133,10 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.SportsTennis
 import androidx.compose.material.icons.outlined.SportsFootball
 import androidx.compose.material.icons.filled.Stadium
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.PersonAddAlt1
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.requiredHeightIn
@@ -7612,15 +7615,15 @@ private fun ScheduledMatchCard(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(16.dp))
+      .shadow(6.dp, RoundedCornerShape(18.dp), spotColor = Color(0x141D4ED8))
+      .clip(RoundedCornerShape(18.dp))
       .background(Color.White)
-      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
       .clickable(onClick = onOpen)
-      .padding(14.dp),
+      .padding(15.dp),
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       ScheduledCrest(match.teamAEmblem, blue, match.teamA)
-      Spacer(Modifier.width(8.dp))
+      Spacer(Modifier.width(9.dp))
       Text(
         match.teamA.ifBlank { "Team A" },
         color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
@@ -7655,38 +7658,66 @@ private fun ScheduledMatchCard(
         Spacer(Modifier.width(10.dp))
       }
       // Start is a commit action → green (per the app's CTA colour rules).
-      Box(
+      Row(
         modifier = Modifier
-          .clip(RoundedCornerShape(10.dp))
+          .pressable(onClick = onStart)
+          .clip(RoundedCornerShape(12.dp))
           .background(green)
-          .clickable(onClick = onStart)
-          .padding(horizontal = 16.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
+          .padding(horizontal = 15.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
+        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
         Text("Start", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
       }
     }
   }
 }
 
-/** A small circular team crest for the Scheduled card: emblem drawable, else the initial. */
+/** A team crest framed in a soft white ring — reads as a real badge, not a flat dot. */
 @Composable
-private fun ScheduledCrest(emblem: String, accent: Color, name: String) {
+private fun ScheduledCrest(emblem: String, accent: Color, name: String, size: androidx.compose.ui.unit.Dp = 34.dp) {
   val res = emblem.takeIf { it.isNotBlank() }?.let { com.haraan.app.ui.matches.create.emblemDrawableFor(it) }
-  if (res != null) {
-    androidx.compose.foundation.Image(
-      painter = painterResource(res),
-      contentDescription = name,
-      contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-      modifier = Modifier.size(30.dp).clip(CircleShape),
-    )
-  } else {
-    Box(
-      modifier = Modifier.size(30.dp).clip(CircleShape).background(accent),
-      contentAlignment = Alignment.Center,
-    ) {
-      Text(name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+  Box(
+    modifier = Modifier
+      .size(size)
+      .shadow(3.dp, CircleShape)
+      .clip(CircleShape)
+      .background(Color.White)
+      .border(1.dp, Color(0x14000000), CircleShape)
+      .padding(2.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    if (res != null) {
+      androidx.compose.foundation.Image(
+        painter = painterResource(res),
+        contentDescription = name,
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = Modifier.fillMaxSize().clip(CircleShape),
+      )
+    } else {
+      Box(
+        modifier = Modifier.fillMaxSize().clip(CircleShape).background(accent),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = (size.value / 2.6f).sp, fontWeight = FontWeight.Black)
+      }
     }
+  }
+}
+
+/** A small pill chip (icon + label) for meta like "3 spots left" / "0.5 km". */
+@Composable
+private fun MetaPill(text: String, color: Color, bg: Color, icon: ImageVector? = null) {
+  Row(
+    Modifier.clip(RoundedCornerShape(8.dp)).background(bg).padding(horizontal = 8.dp, vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    if (icon != null) {
+      Icon(icon, null, tint = color, modifier = Modifier.size(12.dp))
+      Spacer(Modifier.width(4.dp))
+    }
+    Text(text, color = color, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
   }
 }
 
@@ -7710,10 +7741,11 @@ private fun ScheduledSubToggle(selected: Int, requestCount: Int, onSelect: (Int)
 private fun SubTabChip(label: String, selected: Boolean, badge: Int, modifier: Modifier, onClick: () -> Unit) {
   Box(
     modifier
+      .then(if (selected) Modifier.shadow(3.dp, RoundedCornerShape(10.dp)) else Modifier)
       .clip(RoundedCornerShape(10.dp))
       .background(if (selected) Color.White else Color.Transparent)
-      .clickable(onClick = onClick)
-      .padding(vertical = 9.dp),
+      .pressable(onClick = onClick)
+      .padding(vertical = 10.dp),
     contentAlignment = Alignment.Center,
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -7736,17 +7768,20 @@ private fun JoinRequestCard(
   onAccept: () -> Unit,
   onDecline: () -> Unit,
 ) {
+  val blue = HaraanColors.EventsBlue
+  val green = HaraanColors.Success
   Column(
     Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(16.dp))
+      .shadow(6.dp, RoundedCornerShape(18.dp), spotColor = Color(0x1A1D4ED8))
+      .clip(RoundedCornerShape(18.dp))
       .background(Color.White)
-      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
-      .padding(14.dp),
+      .padding(15.dp),
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+      // Avatar in a soft blue ring — a real face/monogram, not an empty disc.
       Box(
-        Modifier.size(38.dp).clip(CircleShape).background(HaraanColors.EventsBlue.copy(alpha = 0.14f)),
+        Modifier.size(46.dp).clip(CircleShape).background(blue.copy(alpha = 0.12f)).border(1.5.dp, blue.copy(alpha = 0.35f), CircleShape),
         contentAlignment = Alignment.Center,
       ) {
         if (request.playerAvatar.isNotBlank()) {
@@ -7757,32 +7792,50 @@ private fun JoinRequestCard(
             modifier = Modifier.fillMaxSize().clip(CircleShape),
           )
         } else {
-          Text(request.playerName.take(1).uppercase(), color = HaraanColors.EventsBlue, fontSize = 15.sp, fontWeight = FontWeight.Black)
+          Text(request.playerName.take(1).uppercase().ifBlank { "?" }, color = blue, fontSize = 18.sp, fontWeight = FontWeight.Black)
         }
       }
-      Spacer(Modifier.width(11.dp))
+      Spacer(Modifier.width(12.dp))
       Column(Modifier.weight(1f)) {
-        Text(request.playerName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HaraanColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(
-          "wants to join · ${request.matchTitle}",
-          fontSize = 12.sp, color = HaraanColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
+        Text(request.playerName, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = HaraanColors.TextPrimary, letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Filled.Groups, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(13.dp))
+          Spacer(Modifier.width(4.dp))
+          Text(
+            "wants to join · ${request.matchTitle}",
+            fontSize = 12.sp, color = HaraanColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+          )
+        }
       }
     }
     if (request.message.isNotBlank()) {
-      Spacer(Modifier.height(8.dp))
-      Text("“${request.message}”", fontSize = 12.5.sp, color = HaraanColors.TextSecondary)
+      Spacer(Modifier.height(11.dp))
+      // Message in a tinted bubble so it reads as the player's words, not filler text.
+      Text(
+        "“${request.message}”",
+        fontSize = 13.sp, color = HaraanColors.TextSecondary, fontWeight = FontWeight.Medium,
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .background(Color(0xFFF3F5F9))
+          .padding(horizontal = 12.dp, vertical = 10.dp),
+      )
     }
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(14.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
       Box(
-        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp)).clickable(onClick = onDecline).padding(vertical = 11.dp),
+        Modifier.weight(1f).pressable(onClick = onDecline).clip(RoundedCornerShape(13.dp)).background(Color(0xFFF3F5F9)).padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
-      ) { Text("Decline", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = HaraanColors.TextSecondary) }
-      Box(
-        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(HaraanColors.Success).clickable(onClick = onAccept).padding(vertical = 11.dp),
-        contentAlignment = Alignment.Center,
-      ) { Text("Accept", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+      ) { Text("Decline", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HaraanColors.TextSecondary) }
+      Row(
+        Modifier.weight(1f).pressable(onClick = onAccept).clip(RoundedCornerShape(13.dp)).background(green).padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(5.dp))
+        Text("Accept", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+      }
     }
   }
 }
@@ -7800,42 +7853,50 @@ private fun OpenMatchCard(
   Column(
     Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(16.dp))
+      .shadow(6.dp, RoundedCornerShape(18.dp), spotColor = Color(0x141D4ED8))
+      .clip(RoundedCornerShape(18.dp))
       .background(Color.White)
-      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(16.dp))
       .clickable(onClick = onOpen)
-      .padding(14.dp),
+      .padding(15.dp),
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       ScheduledCrest(match.team1Emblem, blue, match.team1)
-      Spacer(Modifier.width(8.dp))
-      Text(match.team1.ifBlank { "Team A" }, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
-      Text("vs", color = HaraanColors.TextMuted, fontSize = 12.sp)
-      Text(match.team2.ifBlank { "Team B" }, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-      Spacer(Modifier.width(8.dp))
+      Spacer(Modifier.width(9.dp))
+      Text(match.team1.ifBlank { "Team A" }, color = HaraanColors.TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
+      Text("vs", color = HaraanColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      Text(match.team2.ifBlank { "Team B" }, color = HaraanColors.TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+      Spacer(Modifier.width(9.dp))
       ScheduledCrest(match.team2Emblem, Color(0xFFF59E0B), match.team2)
     }
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(13.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Box(Modifier.size(7.dp).clip(CircleShape).background(green))
-      Spacer(Modifier.width(6.dp))
-      Text(
+      MetaPill(
         "${match.slotsNeeded} " + if (match.slotsNeeded == 1) "spot left" else "spots left",
-        color = green, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+        color = green, bg = green.copy(alpha = 0.12f), icon = Icons.Filled.Groups,
       )
       match.distanceKm?.let {
-        Text("  ·  ${it} km", color = HaraanColors.TextMuted, fontSize = 12.sp)
+        Spacer(Modifier.width(8.dp))
+        MetaPill("$it km", color = HaraanColors.TextSecondary, bg = Color(0xFFF1F3F7), icon = Icons.Filled.Place)
       }
       Spacer(Modifier.weight(1f))
       when (match.myStatus) {
         "pending" -> Box(
-          Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(10.dp)).clickable(onClick = onCancel).padding(horizontal = 14.dp, vertical = 8.dp),
-        ) { Text("Requested · Cancel", color = HaraanColors.TextSecondary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold) }
-        "accepted" -> Text("You're in ✓", color = green, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        "declined" -> Text("Declined", color = HaraanColors.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-        else -> Box(
-          Modifier.clip(RoundedCornerShape(10.dp)).background(blue).clickable(onClick = onRequest).padding(horizontal = 16.dp, vertical = 8.dp),
-        ) { Text("Request to join", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+          Modifier.pressable(onClick = onCancel).clip(RoundedCornerShape(12.dp)).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 9.dp),
+        ) { Text("Requested · Cancel", color = HaraanColors.TextSecondary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold) }
+        "accepted" -> Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Filled.Check, null, tint = green, modifier = Modifier.size(15.dp))
+          Spacer(Modifier.width(4.dp))
+          Text("You're in", color = green, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        "declined" -> Text("Not accepted", color = HaraanColors.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        else -> Row(
+          Modifier.pressable(onClick = onRequest).clip(RoundedCornerShape(12.dp)).background(blue).padding(horizontal = 15.dp, vertical = 9.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(Icons.Filled.PersonAddAlt1, null, tint = Color.White, modifier = Modifier.size(15.dp))
+          Spacer(Modifier.width(5.dp))
+          Text("Request to join", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
       }
     }
   }
