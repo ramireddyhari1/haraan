@@ -1,6 +1,7 @@
 package com.haraan.app.ui.matches
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -12,6 +13,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -23,6 +25,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -41,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,8 +54,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,6 +69,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -103,11 +114,25 @@ private val OnHeroDim = Color(0xFFB6C4E4)
 fun FootballMatchScreen(
     state: MatchUiState,
     onBack: () -> Unit = {},
+    /** Opens the scorer for this match — shown as a "Score" button to the creator. */
+    onScore: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val football = state.football ?: FootballState()
     var tab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Summary", "Stats", "Timeline", "Line-ups")
+
+    // Translate: a language picker in the hero translates every user-facing string on
+    // this screen via the server-side Google Translate proxy.
+    val trRepo = remember { com.haraan.app.data.TranslationRepository() }
+    var showLangSheet by remember { mutableStateOf(false) }
+    var langCode by remember { mutableStateOf(com.haraan.app.data.TranslationController.target) }
+    // Re-translate on language change AND whenever the match data changes — a goal that
+    // arrives via realtime after the language was picked would otherwise stay in English.
+    // Only uncached strings hit the network, so re-runs are cheap.
+    LaunchedEffect(langCode, football) {
+        com.haraan.app.data.TranslationController.apply(langCode, footballStrings(state, football), trRepo)
+    }
 
     // Collapsing hero: the full scoreboard shrinks to a slim sticky bar as the content
     // scrolls up, the way premium sports apps do it. A nested-scroll connection eats the
@@ -147,6 +172,9 @@ fun FootballMatchScreen(
             state, football,
             heightDp = with(density) { heroHeight.floatValue.toDp() },
             progress = progress,
+            canScore = state.canScore,
+            onScore = onScore,
+            onTranslate = { showLangSheet = true },
         )
 
         // Segmented tab bar with a single underline that glides between tabs — the
@@ -164,7 +192,7 @@ fun FootballMatchScreen(
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                label,
+                                t(label),
                                 fontSize = 13.5.sp,
                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                 color = if (active) Blue else Muted,
@@ -195,8 +223,8 @@ fun FootballMatchScreen(
 
         // Crossfade tab content so a switch dissolves rather than hard-cutting.
         Box(Modifier.weight(1f)) {
-            androidx.compose.animation.Crossfade(targetState = tab, label = "fbTabContent") { t ->
-                when (t) {
+            androidx.compose.animation.Crossfade(targetState = tab, label = "fbTabContent") { page ->
+                when (page) {
                     0 -> SummaryTab(state, football, onOpenStats = { tab = 1 })
                     1 -> StatsTab(state, football)
                     2 -> TimelineTab(state, football)
@@ -205,7 +233,48 @@ fun FootballMatchScreen(
             }
         }
     }
+
+    if (showLangSheet) {
+        LanguageSheet(
+            current = com.haraan.app.data.TranslationController.target,
+            onDismiss = { showLangSheet = false },
+            onPick = { code ->
+                langCode = code
+                showLangSheet = false
+            },
+        )
+    }
 }
+
+/** Translate helper — every user-facing literal on this screen flows through it. */
+@Composable
+private fun t(s: String): String = com.haraan.app.data.TranslationController.tr(s)
+
+/** Every user-facing string on the football screen, gathered for one batch translate. */
+private fun footballStrings(state: MatchUiState, football: FootballState): List<String> = buildList {
+    addAll(
+        listOf(
+            "Summary", "Stats", "Timeline", "Line-ups", "Football",
+            "Result", "Goals", "No goals yet.", "assist",
+            "Match stats", "View all", "No match stats yet",
+            "Shots, corners, fouls, offsides and more appear here as the scorer records them.",
+            "Match info", "Venue", "Format", "Status", "In play", "Full time",
+            "Nothing has happened yet",
+            "Goals, cards and substitutions appear here the moment the scorer records them.",
+            "Kick-off", "Goal", "Own goal", "Yellow card", "Red card", "Substitution", "for",
+            "No line-ups recorded", "Squads added when the match was created will show here.",
+            "No players recorded.", "Score",
+        )
+    )
+    add(state.team1); add(state.team2)
+    add(state.team1FullName); add(state.team2FullName)
+    add(state.venue); add(state.status); add(state.competition)
+    football.stats?.groups?.forEach { g -> add(g.title); g.rows.forEach { add(it.label) } }
+    football.goals.forEach { g -> g.player?.let { add(it) }; g.related?.let { add(it) } }
+    football.timeline.forEach { e -> e.player?.let { add(it) }; e.related?.let { add(it) } }
+    state.homeSquad.forEach { add(it.name) }
+    state.awaySquad.forEach { add(it.name) }
+}.filter { it.isNotBlank() }.distinct()
 
 /* ------------------------------------------------------------------ hero */
 
@@ -215,6 +284,9 @@ private fun CollapsingFootballHero(
     football: FootballState,
     heightDp: androidx.compose.ui.unit.Dp,
     progress: Float,   // 0 = fully expanded, 1 = fully collapsed
+    canScore: Boolean = false,
+    onScore: () -> Unit = {},
+    onTranslate: () -> Unit = {},
 ) {
     val homeScore = football.timeline.lastOrNull()?.homeScore ?: 0
     val awayScore = football.timeline.lastOrNull()?.awayScore ?: 0
@@ -237,6 +309,35 @@ private fun CollapsingFootballHero(
                 )
             ),
     ) {
+        // Scrolling boundary ribbon along the hero's bottom strip — the football
+        // counterpart of the cricket "SIX" border, on its own translucent band. Flashes
+        // GOAL / RED CARD / BOOKING off the latest event, else a calm "HARAAN LIVE".
+        val (rWord, rColor) = when (football.timeline.lastOrNull()?.kind) {
+            "goal", "own_goal" -> "GOAL" to Color(0xFF34D399)
+            "red" -> "RED CARD" to Color(0xFFF87171)
+            "yellow" -> "BOOKING" to Color(0xFFFBBF24)
+            else -> "HARAAN   LIVE" to Color(0xFFB6C4E4)
+        }
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(24.dp)
+                .graphicsLayer { alpha = fullAlpha }
+                .background(Color.Black.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                "$rWord        ".repeat(30),
+                modifier = Modifier.fillMaxWidth().basicMarquee(),
+                color = rColor,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp,
+                maxLines = 1,
+            )
+        }
+
         // ── Full scoreboard (expanded) — parallaxes up + fades as it collapses. ──
         Column(
             modifier = Modifier
@@ -246,13 +347,41 @@ private fun CollapsingFootballHero(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = 20.dp),
         ) {
-            Text(
-                state.footballFormatLabel(),
-                fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = OnHeroDim,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(16.dp))
+            // Top bar: format label + the Score button (creator only) + Translate.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    t(state.footballFormatLabel()),
+                    fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = OnHeroDim,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (canScore) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.White.copy(alpha = 0.16f))
+                            .clickable(onClick = onScore)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.SportsSoccer, null, tint = OnHero, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(t("Score"), fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = OnHero)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.16f))
+                        .clickable(onClick = onTranslate),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Translate, "Translate", tint = OnHero, modifier = Modifier.size(18.dp))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 HeroTeam(state.team1FullName.ifBlank { state.team1 }, state.team1Logo, Modifier.weight(1f))
                 Column(
@@ -269,7 +398,6 @@ private fun CollapsingFootballHero(
                 }
                 HeroTeam(state.team2FullName.ifBlank { state.team2 }, state.team2Logo, Modifier.weight(1f))
             }
-            GoalTicker(state, football)
         }
 
         // ── Compact bar (collapsed) — mini crests + scoreline, pinned under the status
@@ -418,7 +546,7 @@ private fun HeroTeam(name: String, logo: String, modifier: Modifier) {
         }
         Spacer(Modifier.height(9.dp))
         Text(
-            name,
+            t(name),
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             color = OnHero,
@@ -486,7 +614,7 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
                 Spacer(Modifier.height(10.dp))
                 val goals = football.goals
                 if (goals.isEmpty()) {
-                    Text("No goals yet.", fontSize = 13.5.sp, color = Muted)
+                    Text(t("No goals yet."), fontSize = 13.5.sp, color = Muted)
                 } else {
                     goals.forEachIndexed { i, g ->
                         GoalRow(g, state)
@@ -505,7 +633,7 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
                         CardTitle("Match stats")
                         Spacer(Modifier.weight(1f))
                         Text(
-                            "View all",
+                            t("View all"),
                             fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Blue,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenStats).padding(4.dp),
                         )
@@ -562,7 +690,7 @@ private fun StatsTab(state: MatchUiState, football: FootballState) {
             item {
                 Card {
                     Text(
-                        group.title.uppercase(),
+                        t(group.title).uppercase(),
                         fontSize = 12.sp, fontWeight = FontWeight.Black, color = Faint,
                         letterSpacing = 1.sp, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
@@ -617,7 +745,7 @@ private fun StatBar(label: String, home: Int, away: Int, homeColor: Color, awayC
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("$home", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (leadHome) homeColor else Ink, modifier = Modifier.width(28.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            Text(t(label), fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(5.dp))
             Row(
                 Modifier
@@ -649,12 +777,12 @@ private fun GoalRow(g: FootballEvent, state: MatchUiState) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                (g.player ?: "Goal") + if (g.kind == "own_goal") " (OG)" else "",
+                t(g.player ?: "Goal") + if (g.kind == "own_goal") " (OG)" else "",
                 fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             g.related?.takeIf { g.kind == "goal" }?.let {
-                Text("assist $it", fontSize = 11.sp, color = Faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${t("assist")} ${t(it)}", fontSize = 11.sp, color = Faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         g.scoreLabel?.let {
@@ -707,7 +835,7 @@ private fun PhaseMarker(label: String) {
     ) {
         Box(Modifier.weight(1f).height(1.dp).background(Hairline))
         Text(
-            label,
+            t(label),
             fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Faint,
             modifier = Modifier
                 .padding(horizontal = 10.dp)
@@ -733,7 +861,7 @@ private fun TimelineRow(event: FootballEvent, state: MatchUiState) {
 
         // Central spine with the minute badge.
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(48.dp)) {
-            Box(Modifier.width(2.dp).height(10.dp).background(Hairline))
+            Box(Modifier.width(2.dp).height(26.dp).background(Hairline))
             Box(
                 Modifier
                     .clip(CircleShape)
@@ -743,7 +871,7 @@ private fun TimelineRow(event: FootballEvent, state: MatchUiState) {
             ) {
                 Text(event.minuteLabel ?: "·", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Muted)
             }
-            Box(Modifier.width(2.dp).height(10.dp).background(Hairline))
+            Box(Modifier.width(2.dp).height(26.dp).background(Hairline))
         }
 
         // Right — away events.
@@ -809,7 +937,7 @@ private fun EventText(event: FootballEvent, label: String, accent: Color, alignE
         modifier = Modifier.wrapContentWidth(),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = accent)
+            Text(t(label), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = accent)
             event.scoreLabel?.takeIf { event.kind == "goal" || event.kind == "own_goal" }?.let {
                 Spacer(Modifier.width(6.dp))
                 Text(
@@ -823,14 +951,14 @@ private fun EventText(event: FootballEvent, label: String, accent: Color, alignE
         }
         Spacer(Modifier.height(2.dp))
         Text(
-            event.player ?: event.headline,
+            t(event.player ?: event.headline),
             fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Ink,
             textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         event.related?.let {
             Text(
-                if (event.kind == "sub") "for $it" else "assist $it",
+                if (event.kind == "sub") "${t("for")} ${t(it)}" else "${t("assist")} ${t(it)}",
                 fontSize = 11.sp, color = Faint,
                 textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -880,11 +1008,11 @@ private fun SquadCard(team: String, logo: String, squad: List<SquadMember>, acce
         ) {
             TeamLogo(team = team, logoUrl = logo, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(10.dp))
-            Text(team, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(t(team), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${squad.size}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = accent)
         }
         if (squad.isEmpty()) {
-            Text("No players recorded.", fontSize = 13.sp, color = Muted, modifier = Modifier.padding(14.dp))
+            Text(t("No players recorded."), fontSize = 13.sp, color = Muted, modifier = Modifier.padding(14.dp))
         } else {
             squad.forEachIndexed { index, player ->
                 Row(
@@ -898,7 +1026,7 @@ private fun SquadCard(team: String, logo: String, squad: List<SquadMember>, acce
                         Text("${index + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)
                     }
                     Spacer(Modifier.width(12.dp))
-                    Text(player.name, fontSize = 13.5.sp, color = Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(t(player.name), fontSize = 13.5.sp, color = Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (player.isCaptain) RoleBadge("C", accent)
                     else if (player.isViceCaptain) RoleBadge("VC", Muted)
                 }
@@ -940,15 +1068,15 @@ private fun Card(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun CardTitle(text: String) {
-    Text(text, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+    Text(t(text), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-        Text(label, fontSize = 13.sp, color = Muted)
+        Text(t(label), fontSize = 13.sp, color = Muted)
         Text(
-            value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink,
+            t(value), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink,
             textAlign = TextAlign.End, modifier = Modifier.padding(start = 16.dp),
         )
     }
@@ -965,9 +1093,9 @@ private fun EmptyNote(title: String, body: String) {
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.SportsSoccer, null, tint = Faint, modifier = Modifier.size(26.dp)) }
         Spacer(Modifier.height(14.dp))
-        Text(title, fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Text(t(title), fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
         Spacer(Modifier.height(6.dp))
-        Text(body, fontSize = 13.sp, color = Muted, textAlign = TextAlign.Center)
+        Text(t(body), fontSize = 13.sp, color = Muted, textAlign = TextAlign.Center)
     }
 }
 
@@ -979,4 +1107,50 @@ private fun EmptyNote(title: String, body: String) {
 private fun MatchUiState.footballFormatLabel(): String {
     val c = competition.trim()
     return if (c.isBlank() || c.contains("over", ignoreCase = true)) "Football" else c
+}
+
+/** Language picker for the Translate control — the languages Haraan targets. */
+@Composable
+private fun LanguageSheet(current: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Surface)
+                .padding(vertical = 18.dp),
+        ) {
+            Text(
+                "Language",
+                fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Text(
+                "Translate this match to your language.",
+                fontSize = 12.5.sp, color = Faint,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            com.haraan.app.data.TranslationController.languages.forEach { (code, label) ->
+                val selected = (current.ifBlank { "en" }) == code
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(code) }
+                        .padding(horizontal = 20.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        label,
+                        fontSize = 15.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (selected) Blue else Ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selected) Text("✓", color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+    }
 }

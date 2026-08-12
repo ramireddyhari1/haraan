@@ -206,4 +206,10 @@ return [
         'server_key' => env('GOOGLE_MAPS_SERVER_KEY') ?: env('GOOGLE_MAPS_API_KEY'),
     ],
 
+    // Google Cloud Translation API (server-side key — never shipped to the app; the
+    // app calls /api/translate which proxies to Google with this key).
+    'google_translate' => [
+        'key' => env('GOOGLE_TRANSLATE_API_KEY'),
+    ],
+
 ];

@@ -43,6 +43,12 @@ fun MatchDetailsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val liveAds by viewModel.liveAds.collectAsState()
     val loadContext = androidx.compose.ui.platform.LocalContext.current
+    // Football scorer opened from the detail's "Score" button (creator only). Rendered
+    // as a full-screen overlay so the match creator can score an existing match without
+    // going back through the create wizard.
+    var footballScoring by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val matchRepo = androidx.compose.runtime.remember { com.haraan.app.data.MatchRepository() }
+    val detailScope = rememberCoroutineScope()
 
     // Fetch real match data: by share code (private) when present, else by id.
     LaunchedEffect(matchId, joinCode) {
@@ -110,7 +116,7 @@ fun MatchDetailsScreen(
             // Commentary, Live, Scorecard, MVP only mean anything for a ball-by-ball
             // sport, and a football match rendered through them showed a scorecard
             // with every number blank.
-            FootballMatchScreen(state = state.data, onBack = onBack, modifier = modifier)
+            FootballMatchScreen(state = state.data, onBack = onBack, onScore = { footballScoring = true }, modifier = modifier)
         }
         is MatchScreenState.Success -> {
             // Open on Commentary by default (index 1 in tabsList).
@@ -176,6 +182,57 @@ fun MatchDetailsScreen(
             }
         }
     }
+    }
+
+    // Football scorer overlay — the "Score" button on a football detail opens it here,
+    // wired to the same event API as the create-flow scorer. Refreshes the detail on exit.
+    val scoringState = uiState
+    if (footballScoring && scoringState is MatchScreenState.Success &&
+        scoringState.data.sport.equals("football", ignoreCase = true)
+    ) {
+        val d = scoringState.data
+        val fb = d.football ?: FootballState()
+        FootballScorerScreen(
+            setup = FootballScorerSetup(
+                matchId = matchId,
+                teamA = d.team1FullName.ifBlank { d.team1 },
+                teamB = d.team2FullName.ifBlank { d.team2 },
+                formatLabel = d.competition,
+                joinCode = joinCode,
+                squadA = d.homeSquad,
+                squadB = d.awaySquad,
+                initialHome = fb.timeline.lastOrNull()?.homeScore ?: 0,
+                initialAway = fb.timeline.lastOrNull()?.awayScore ?: 0,
+            ),
+            onGoal = { side, player, _, minute ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok == null) null else matchRepo.recordMatchEvent(tok, matchId, "goal", side, minute, player)
+            },
+            onCard = { side, player, kind, minute ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok == null) null else matchRepo.recordMatchEvent(tok, matchId, kind, side, minute, player)
+            },
+            onUndoGoal = { side ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok == null) null else matchRepo.undoMatchEvent(tok, matchId, side)
+            },
+            onStat = { kind, side, inc ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok != null) matchRepo.adjustStat(tok, matchId, kind, side, inc)
+            },
+            finishMatch = {
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok != null) matchRepo.completeMatch(tok, matchId)
+            },
+            onDone = {
+                footballScoring = false
+                detailScope.launch {
+                    val tok = com.haraan.app.data.TokenStore.getToken(loadContext)
+                    viewModel.refresh(id = matchId, code = joinCode, token = tok)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

@@ -36,6 +36,9 @@ Route::get('/health', static fn () => response()->json([
 // Remote config / feature flags — anonymous-safe; resolved per viewer when logged in.
 Route::middleware('auth.jwt.optional')->get('/config', [ConfigController::class, 'index']);
 
+// On-the-fly UI translation (Google Cloud Translation proxy; server-side key + cache).
+Route::middleware('throttle:120,1')->post('/translate', [\App\Http\Controllers\Api\TranslationController::class, 'translate']);
+
 // Localization bundles — public; app overlays these on its built-in strings.
 Route::get('/i18n', [\App\Http\Controllers\Api\I18nController::class, 'index']);
 Route::get('/i18n/{locale}', [\App\Http\Controllers\Api\I18nController::class, 'show']);
