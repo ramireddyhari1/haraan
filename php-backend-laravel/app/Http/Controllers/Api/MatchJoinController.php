@@ -8,6 +8,7 @@ use App\Events\MatchUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\MatchJoinRequest;
+use App\Models\Notification;
 use App\Models\User;
 use App\Support\MatchProximity;
 use Illuminate\Http\JsonResponse;
@@ -117,6 +118,12 @@ final class MatchJoinController extends Controller
 
         // Nudge the owner's open apps to refresh their requests inbox.
         MatchUpdated::dispatch($match->id);
+        // Push + bell: tell the owner a player wants in.
+        $this->notifyUser(
+            (int) $match->user_id,
+            'New join request',
+            trim(($viewer->name ?: 'A player') . " wants to join {$match->home} vs {$match->away}"),
+        );
 
         return response()->json(['message' => 'Request sent', 'data' => $req], 201);
     }
@@ -212,6 +219,11 @@ final class MatchJoinController extends Controller
 
         if ($data['action'] === 'decline') {
             $req->update(['status' => MatchJoinRequest::DECLINED, 'responded_at' => now()]);
+            $this->notifyUser(
+                (int) $req->requester_id,
+                'Join request update',
+                "Your request to join {$match->home} vs {$match->away} wasn't accepted this time.",
+            );
             return response()->json(['message' => 'Declined', 'data' => $req]);
         }
 
@@ -245,11 +257,41 @@ final class MatchJoinController extends Controller
         });
 
         MatchUpdated::dispatch($match->id);
+        // Push + bell: tell the player they're in.
+        $this->notifyUser(
+            (int) $req->requester_id,
+            "You're in! 🎉",
+            "Your request to join {$match->home} vs {$match->away} was accepted.",
+        );
 
         return response()->json(['message' => 'Accepted', 'data' => $req->fresh()]);
     }
 
     // ── helpers ──
+
+    /**
+     * Notify one user — writes a bell-inbox row targeted at them (audience_type=user),
+     * which the Notification model also fans out to their devices via FCM when the
+     * server has push credentials. Never lets a notification failure break the action.
+     */
+    private function notifyUser(int $userId, string $title, string $body): void
+    {
+        if ($userId <= 0) {
+            return;
+        }
+        try {
+            Notification::create([
+                'title'          => $title,
+                'body'           => $body,
+                'audience_type'  => 'user',
+                'audience_value' => (string) $userId,
+                'status'         => 'sent',
+                'deep_link'      => 'haraan://matches/scheduled',
+            ]);
+        } catch (\Throwable $e) {
+            // best-effort — the join action already succeeded.
+        }
+    }
 
     private function position(Request $request, ?User $viewer): MatchProximity
     {
