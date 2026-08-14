@@ -150,7 +150,22 @@ data class DayBooking(
     val status: String,
     val checkedIn: Int,
     val amount: Double,
+    val amountPaid: Double = 0.0,
+    /** unpaid | part | paid */
+    val paymentStatus: String = "unpaid",
 )
+
+/** How the desk took the money for a walk-in. */
+enum class PayMethod(val api: String, val label: String) {
+    CASH("cash", "Cash"),
+    UPI("upi", "UPI"),
+    CARD("card", "Card"),
+    LINK("link", "Payment link"),
+    LATER("later", "Pay later"),
+}
+
+/** Outcome of creating a walk-in: the booking, plus a Razorpay link when asked for. */
+data class WalkInResult(val paymentMethod: String, val paymentLink: String?)
 
 /** One court column in the day grid. */
 data class CourtCol(val id: Long, val name: String, val sports: List<String>)
@@ -486,13 +501,26 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         Unit
     }
 
-    suspend fun createWalkIn(token: String, venueId: Long, slotId: Long, date: String, name: String, phone: String, courtId: Long? = null) = withContext(Dispatchers.IO) {
+    suspend fun createWalkIn(
+        token: String,
+        venueId: Long,
+        slotId: Long,
+        date: String,
+        name: String,
+        phone: String,
+        courtId: Long? = null,
+        method: PayMethod = PayMethod.CASH,
+    ): WalkInResult = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("slotId", slotId).put("date", date)
             .put("guestName", name).put("guestPhone", phone)
+            .put("paymentMethod", method.api)
         if (courtId != null) payload.put("courtId", courtId)
-        post("/api/partner/venues/$venueId/bookings", payload.toString(), token)
-        Unit
+        val o = JSONObject(post("/api/partner/venues/$venueId/bookings", payload.toString(), token))
+        WalkInResult(
+            paymentMethod = o.optString("payment_method", method.api),
+            paymentLink = o.optStringOrNull("payment_link"),
+        )
     }
 
     suspend fun cancelBooking(token: String, bookingId: Long) = withContext(Dispatchers.IO) {
@@ -521,6 +549,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 status = b.optString("status"),
                 checkedIn = b.optInt("checked_in"),
                 amount = b.optDouble("amount", 0.0),
+                amountPaid = b.optDouble("amount_paid", 0.0),
+                paymentStatus = b.optString("payment_status", "unpaid"),
             )
         }
     }

@@ -96,6 +96,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
@@ -1456,6 +1457,8 @@ private fun VenueDayScreen(
     var addForCell by remember { mutableStateOf<CellTarget?>(null) }
     var cancelTarget by remember { mutableStateOf<DayBooking?>(null) }
     var showPricing by remember { mutableStateOf(false) }
+    var booking by remember { mutableStateOf(false) }
+    var payLink by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val date = apiDate(dayMillis)
     val state by produceState<UiState<DayGrid>>(UiState.Loading, dayMillis, reload) {
@@ -1523,7 +1526,11 @@ private fun VenueDayScreen(
                             CourtGrid(
                                 grid = grid,
                                 canBookings = canBookings && !grid.isBlocked,
-                                onAddCell = { slot, courtId, courtName -> addForCell = CellTarget(slot, courtId, courtName) },
+                                onAddCell = { slot, courtId, courtName ->
+                                    // Court's own rate wins over the slot base price.
+                                    val cellPrice = slot.courts.firstOrNull { it.courtId == courtId }?.price ?: slot.price
+                                    addForCell = CellTarget(slot, courtId, courtName, cellPrice)
+                                },
                                 onCancel = { b -> cancelTarget = b },
                             )
                         }
@@ -1549,10 +1556,16 @@ private fun VenueDayScreen(
     addForSlot?.let { slot ->
         WalkInDialog(
             slotLabel = slot.time ?: slot.label,
+            amount = slot.price,
+            busy = booking,
             onDismiss = { addForSlot = null },
-            onConfirm = { name, phone ->
-                addForSlot = null
-                scope.launch { runCatching { api.createWalkIn(token, venueId, slot.slotId, date, name, phone) }; reload++ }
+            onConfirm = { name, phone, method ->
+                booking = true
+                scope.launch {
+                    runCatching { api.createWalkIn(token, venueId, slot.slotId, date, name, phone, null, method) }
+                        .onSuccess { payLink = it.paymentLink }
+                    booking = false; addForSlot = null; reload++
+                }
             },
         )
     }
@@ -1560,13 +1573,21 @@ private fun VenueDayScreen(
     addForCell?.let { t ->
         WalkInDialog(
             slotLabel = "${t.slot.time ?: t.slot.label} · ${t.courtName}",
+            amount = t.price,
+            busy = booking,
             onDismiss = { addForCell = null },
-            onConfirm = { name, phone ->
-                addForCell = null
-                scope.launch { runCatching { api.createWalkIn(token, venueId, t.slot.slotId, date, name, phone, t.courtId) }; reload++ }
+            onConfirm = { name, phone, method ->
+                booking = true
+                scope.launch {
+                    runCatching { api.createWalkIn(token, venueId, t.slot.slotId, date, name, phone, t.courtId, method) }
+                        .onSuccess { payLink = it.paymentLink }
+                    booking = false; addForCell = null; reload++
+                }
             },
         )
     }
+
+    payLink?.let { link -> PaymentLinkDialog(link) { payLink = null } }
 
     cancelTarget?.let { b ->
         AlertDialog(
@@ -1585,7 +1606,7 @@ private fun VenueDayScreen(
 }
 
 /** A tapped free cell in the court grid: which slot + which court. */
-private data class CellTarget(val slot: DaySlot, val courtId: Long, val courtName: String)
+private data class CellTarget(val slot: DaySlot, val courtId: Long, val courtName: String, val price: Double = 0.0)
 
 /** Playo-style day grid: courts as columns, time slots as rows. Free cells add a
  *  walk-in; booked cells open a cancel confirm. Scrolls horizontally for many courts. */
@@ -1601,7 +1622,7 @@ private fun CourtGrid(
     val courtName = { id: Long -> grid.courts.firstOrNull { it.id == id }?.name ?: "Court" }
     Column(Modifier.fillMaxWidth().premiumSurface().padding(vertical = 12.dp)) {
         Row(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            LegendDot(Color(0xFF16A34A), "Free"); Spacer(Modifier.width(14.dp)); LegendDot(AuthAccent, "Booked")
+            LegendDot(Color(0xFF16A34A), "Open"); Spacer(Modifier.width(14.dp)); LegendDot(AuthAccent, "Booked")
         }
         Column(Modifier.horizontalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1665,7 +1686,7 @@ private fun GridCell(cell: CourtCell, width: Dp, canBook: Boolean, onFree: () ->
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Free", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = GREEN)
+                Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = GREEN)
                 if (cell.price > 0) Text("₹${cell.price.toInt()}", fontSize = 10.sp, color = AuthMuted)
             }
         }
@@ -1743,24 +1764,193 @@ private fun SlotCard(slot: DaySlot, blocked: Boolean, canBookings: Boolean, onAd
 }
 
 @Composable
-private fun WalkInDialog(slotLabel: String, onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+private fun WalkInDialog(
+    slotLabel: String,
+    amount: Double,
+    busy: Boolean = false,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, PayMethod) -> Unit,
+) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Walk-in booking") },
-        text = {
-            Column {
-                Text(slotLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(name, { name = it }, label = { Text("Customer name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(phone, { phone = it }, label = { Text("Phone (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    var method by remember { mutableStateOf(PayMethod.CASH) }
+    val view = LocalView.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White)
+                .padding(22.dp),
+        ) {
+            // Header: what's being booked, and for how much.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LayoutBox(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                        .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF)))),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Add, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(22.dp)) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Walk-in booking", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                    Spacer(Modifier.height(1.dp))
+                    Text(slotLabel, fontSize = 12.sp, color = AuthMuted, maxLines = 2)
+                }
             }
-        },
-        confirmButton = { TextButton(onClick = { onConfirm(name.trim(), phone.trim()) }, enabled = name.isNotBlank()) { Text("Book") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+
+            if (amount > 0) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFF6F8FC))
+                        .border(1.dp, CardBorder, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Amount to collect", fontSize = 13.sp, color = AuthMuted)
+                    Text("₹" + formatInr(amount), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            val fieldColors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+                cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+            )
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Customer name") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it.filter { c -> c.isDigit() }.take(10) },
+                label = { Text("Phone (optional)") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(18.dp))
+            Text("PAYMENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp)
+            Spacer(Modifier.height(10.dp))
+            // Two rows of two so every label stays readable at any width.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PayChip(PayMethod.CASH, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+                PayChip(PayMethod.UPI, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PayChip(PayMethod.CARD, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+                PayChip(PayMethod.LATER, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+            }
+            Spacer(Modifier.height(8.dp))
+            PayChip(PayMethod.LINK, method, Modifier.fillMaxWidth()) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+
+            if (method == PayMethod.LINK) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "A Razorpay payment link is created and texted to the customer. The booking stays unpaid until they pay.",
+                    fontSize = 11.5.sp, color = AuthMuted, lineHeight = 16.sp,
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+            GradientCta(
+                text = if (busy) "Booking…" else "Confirm booking",
+                enabled = !busy && name.isNotBlank(),
+                loading = busy,
+            ) {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                onConfirm(name.trim(), phone.trim(), method)
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/** A selectable payment-method chip. */
+@Composable
+private fun PayChip(value: PayMethod, selected: PayMethod, modifier: Modifier = Modifier, onPick: (PayMethod) -> Unit) {
+    val on = value == selected
+    Row(
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (on) Color(0x142F6BFF) else Color(0xFFF8FAFC))
+            .border(if (on) 1.5.dp else 1.dp, if (on) AuthAccent else Color(0x1F0F172A), RoundedCornerShape(12.dp))
+            .clickable { onPick(value) }
+            .padding(vertical = 11.dp, horizontal = 8.dp),
+    ) {
+        if (on) {
+            LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(AuthAccent))
+            Spacer(Modifier.width(7.dp))
+        }
+        Text(
+            value.label,
+            fontSize = 13.sp,
+            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+            color = if (on) AuthAccentDeep else AuthInk,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Shown after a "payment link" walk-in so the desk can share it immediately. */
+@Composable
+private fun PaymentLinkDialog(link: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AuthIconBadge(Icons.Filled.Payments)
+            Spacer(Modifier.height(14.dp))
+            Text("Payment link ready", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Razorpay has texted this to the customer. You can share it again below.",
+                fontSize = 13.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                link,
+                fontSize = 12.5.sp,
+                color = AuthAccentDeep,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFF6F8FC)).border(1.dp, CardBorder, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+            )
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Share link", enabled = true, loading = false) {
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "Complete your booking payment: $link")
+                }
+                context.startActivity(Intent.createChooser(send, "Share payment link"))
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Done", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
 }
 
 // ---- Venue pricing / slot editor ---------------------------------------

@@ -12,12 +12,15 @@ use App\Models\Venue;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
+use App\Services\BookingLedger;
 use App\Services\BookingService;
+use App\Services\RazorpayGateway;
 use App\Support\BookingReport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Read/dashboard API for the partner mobile app. Everything is scoped to the
@@ -35,8 +38,11 @@ class PartnerController extends Controller
     /** Case-insensitive money statuses, matching the web analytics widgets. */
     private const PAID_STATUSES = ['confirmed', 'paid', 'completed'];
 
-    public function __construct(private readonly BookingService $bookings)
-    {
+    public function __construct(
+        private readonly BookingService $bookings,
+        private readonly BookingLedger $ledger,
+        private readonly RazorpayGateway $razorpay,
+    ) {
     }
 
     /** GET /api/partner/overview — headline numbers for the home screen. */
@@ -334,6 +340,10 @@ class PartnerController extends Controller
             'duration'   => ['nullable', 'integer', 'min:1', 'max:12'],
             'guestName'  => ['nullable', 'string', 'max:120'],
             'guestPhone' => ['nullable', 'string', 'max:30'],
+            // How the desk took the money. 'link' mints a Razorpay payment link and
+            // leaves the booking unpaid until the payment webhook says otherwise;
+            // 'later' records nothing at all.
+            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card,link,later'],
         ]);
 
         // Scope the venue to the acting partner before booking — a caller must not be
@@ -352,7 +362,38 @@ class PartnerController extends Controller
             isset($data['duration']) ? (int) $data['duration'] : 1,
         );
 
-        return response()->json(['status' => 'ok', 'booking' => $this->slotBooking($booking)], 201);
+        $method = $data['paymentMethod'] ?? 'later';
+        $amount = (float) $booking->total_amount;
+        $payLink = null;
+
+        // Money that physically changed hands at the desk is recorded straight away;
+        // the ledger recomputes amount_paid/payment_status in the same transaction.
+        if (in_array($method, ['cash', 'upi', 'card'], true) && $amount > 0) {
+            $this->ledger->collect($booking, $amount, $method, $request->user());
+            $booking->refresh();
+        } elseif ($method === 'link' && $amount > 0) {
+            // Best-effort: a link that can't be minted must not lose the booking the
+            // partner just took — surface the failure and leave it payable at the desk.
+            try {
+                $link = $this->razorpay->createPaymentLink(
+                    (int) round($amount * 100),
+                    'Booking at '.$venue->name,
+                    $data['guestName'] ?? null,
+                    $data['guestPhone'] ?? null,
+                    ['booking_id' => (string) $booking->id],
+                );
+                $payLink = $link['short_url'];
+            } catch (\Throwable $e) {
+                Log::warning("Booking {$booking->id}: payment link failed: ".$e->getMessage());
+            }
+        }
+
+        return response()->json([
+            'status'         => 'ok',
+            'booking'        => $this->slotBooking($booking),
+            'payment_method' => $method,
+            'payment_link'   => $payLink,
+        ], 201);
     }
 
     /** PATCH /api/partner/bookings/{id}/cancel — cancel a booking on my event/venue. */
@@ -602,6 +643,9 @@ class PartnerController extends Controller
             'checked_in'  => (int) $x->checked_in_count,
             'ticket_code' => $x->ticket_code,
             'amount'      => round((float) $x->total_amount, 2),
+            'amount_paid' => round((float) $x->amount_paid, 2),
+            // unpaid | part | paid — drives the desk's "who still owes" chase list.
+            'payment_status' => $x->payment_status,
         ];
     }
 
