@@ -427,6 +427,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::delete('/venues/{id}/block', 'unblockDate')->whereNumber('id');
             Route::patch('/bookings/{id}/cancel', 'cancelBooking')->whereNumber('id');
             Route::post('/bookings/{id}/cancel', 'cancelBooking')->whereNumber('id'); // app (no PATCH)
+            Route::post('/bookings/{id}/payment-status', 'paymentStatus')->whereNumber('id');
         });
         Route::middleware('partner.can:checkin')->post('/check-in', 'checkInByCode');
         Route::middleware('partner.can:reports')->get('/reports/bookings', 'bookingsReport');

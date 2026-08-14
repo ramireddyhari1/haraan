@@ -149,6 +149,64 @@ final class RazorpayGateway
     }
 
     /**
+     * Ask Razorpay whether a payment link has been paid. This is the authority, and it
+     * needs no webhook — the desk can watch a link go green while the customer is still
+     * standing there, and a venue whose webhook was never configured still collects.
+     *
+     * @return array{status: string, paid: bool, payment_id: string|null, amount_paid: float}
+     *
+     * @throws RuntimeException  When Razorpay can't be reached or errors — callers must
+     *                           treat that as "don't know yet", never as "not paid".
+     */
+    public function paymentLinkStatus(string $linkId): array
+    {
+        if (! $this->isConfigured()) {
+            throw new RuntimeException('Payments are not configured.', 500);
+        }
+
+        $linkId = trim($linkId);
+
+        if ($linkId === '') {
+            throw new RuntimeException('Missing payment link id.', 422);
+        }
+
+        try {
+            $response = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()
+                ->timeout(15)
+                ->get(self::PAYMENT_LINKS_ENDPOINT.'/'.$linkId);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('Could not reach the payment provider.', 502);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Could not read the payment link.', 500);
+        }
+
+        $link = $response->json();
+        $status = (string) ($link['status'] ?? 'created');
+
+        // Only `paid` is money. `created`/`partially_paid`/`expired`/`cancelled` are not,
+        // and treating a partial as settled would hand over a ticket for part of the fee.
+        $paid = $status === 'paid';
+
+        $paymentId = null;
+        foreach ((array) ($link['payments'] ?? []) as $p) {
+            if (($p['status'] ?? '') === 'captured') {
+                $paymentId = (string) ($p['payment_id'] ?? $p['id'] ?? '');
+                break;
+            }
+        }
+
+        return [
+            'status'      => $status,
+            'paid'        => $paid,
+            'payment_id'  => $paymentId ?: null,
+            'amount_paid' => ((int) ($link['amount_paid'] ?? 0)) / 100,
+        ];
+    }
+
+    /**
      * The id of a CAPTURED payment against a Razorpay order, or null when the order has not
      * been paid. Asks Razorpay directly, so it is the authority when our own record of an
      * order is in doubt — a buyer whose browser died after paying leaves us a reservation

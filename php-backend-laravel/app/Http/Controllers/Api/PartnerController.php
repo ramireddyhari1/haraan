@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
+use App\Models\BookingPayment;
 use App\Models\Event;
 use App\Models\User;
 use App\Models\Venue;
@@ -371,6 +372,7 @@ class PartnerController extends Controller
         $method = $data['paymentMethod'] ?? 'later';
         $amount = (float) $booking->total_amount;
         $payLink = null;
+        $payLinkId = null;
 
         // Money that physically changed hands at the desk is recorded straight away;
         // the ledger recomputes amount_paid/payment_status in the same transaction.
@@ -389,6 +391,7 @@ class PartnerController extends Controller
                     ['booking_id' => (string) $booking->id],
                 );
                 $payLink = $link['short_url'];
+                $payLinkId = $link['id'] ?: null;
             } catch (\Throwable $e) {
                 Log::warning("Booking {$booking->id}: payment link failed: ".$e->getMessage());
             }
@@ -416,8 +419,69 @@ class PartnerController extends Controller
             'booking'        => $this->slotBooking($booking),
             'payment_method' => $method,
             'payment_link'   => $payLink,
+            'payment_link_id' => $payLinkId,
             'notified'       => $notified,
         ], 201);
+    }
+
+    /**
+     * POST /api/partner/bookings/{id}/payment-status { linkId } — has this walk-in's
+     * payment link been paid yet?
+     *
+     * Asks Razorpay directly rather than waiting on a webhook, so the desk can watch the
+     * payment land while the customer is still at the counter — and so a venue whose
+     * webhook was never configured still gets paid bookings settled.
+     *
+     * Settles exactly once: the payment id is the ledger row's reference, so polling this
+     * every few seconds (or racing the webhook) cannot collect the same money twice.
+     */
+    public function paymentStatus(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'linkId' => ['required', 'string', 'max:64'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+
+        // Scope to the acting partner: a booking id alone must not expose another
+        // tenant's payment state.
+        $booking = Booking::query()
+            ->where('id', $id)
+            ->whereIn('venue_id', Venue::query()->where('partner_id', $partnerId)->select('id'))
+            ->firstOrFail();
+
+        if (strtolower((string) $booking->payment_status) === 'paid') {
+            return response()->json(['paid' => true, 'status' => 'paid', 'booking' => $this->slotBooking($booking)]);
+        }
+
+        try {
+            $link = $this->razorpay->paymentLinkStatus($data['linkId']);
+        } catch (\Throwable $e) {
+            // "Don't know yet" — never report unpaid on an unreachable gateway.
+            return response()->json(['paid' => false, 'status' => 'unknown', 'error' => 'Could not reach Razorpay'], 200);
+        }
+
+        if (! $link['paid']) {
+            return response()->json(['paid' => false, 'status' => $link['status']]);
+        }
+
+        $paymentId = $link['payment_id'];
+        $already = $paymentId !== null && BookingPayment::query()
+            ->where('booking_id', $booking->id)->where('reference', $paymentId)->exists();
+
+        if (! $already) {
+            $amount = $link['amount_paid'] > 0 ? $link['amount_paid'] : (float) $booking->total_amount;
+            $this->ledger->collect($booking, $amount, 'online', null, $paymentId, 'Razorpay payment link');
+            $booking->refresh();
+            // The money is real now, so the ticket may go out.
+            BookingNotifier::dispatch($booking);
+        }
+
+        return response()->json([
+            'paid'    => true,
+            'status'  => 'paid',
+            'booking' => $this->slotBooking($booking),
+        ]);
     }
 
     /** PATCH /api/partner/bookings/{id}/cancel — cancel a booking on my event/venue. */

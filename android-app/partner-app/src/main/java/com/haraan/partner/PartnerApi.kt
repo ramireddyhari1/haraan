@@ -164,7 +164,16 @@ enum class PayMethod(val api: String, val label: String) {
 }
 
 /** Outcome of creating a walk-in: the booking, plus a Razorpay link when asked for. */
-data class WalkInResult(val paymentMethod: String, val paymentLink: String?)
+data class WalkInResult(
+    val bookingId: Long,
+    val amount: Double,
+    val paymentMethod: String,
+    val paymentLink: String?,
+    val paymentLinkId: String?,
+)
+
+/** Live payment state of a walk-in's link, straight from Razorpay. */
+data class PayState(val paid: Boolean, val status: String)
 
 /** One court column in the day grid. */
 data class CourtCol(val id: Long, val name: String, val sports: List<String>)
@@ -579,10 +588,25 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             .put("paymentMethod", method.api)
         if (courtId != null) payload.put("courtId", courtId)
         val o = JSONObject(post("/api/partner/venues/$venueId/bookings", payload.toString(), token))
+        val b = o.optJSONObject("booking")
         WalkInResult(
+            bookingId = b?.optLong("id") ?: 0L,
+            amount = b?.optDouble("amount", 0.0) ?: 0.0,
             paymentMethod = o.optString("payment_method", method.api),
             paymentLink = o.optStringOrNull("payment_link"),
+            paymentLinkId = o.optStringOrNull("payment_link_id"),
         )
+    }
+
+    /**
+     * Ask whether the walk-in's payment link has been paid. The server checks Razorpay
+     * directly, so this works with no webhook configured, and settles the money (ledger +
+     * customer confirmation) the first time it comes back paid.
+     */
+    suspend fun paymentStatus(token: String, bookingId: Long, linkId: String): PayState = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("linkId", linkId)
+        val o = JSONObject(post("/api/partner/bookings/$bookingId/payment-status", payload.toString(), token))
+        PayState(paid = o.optBoolean("paid", false), status = o.optString("status", "unknown"))
     }
 
     suspend fun cancelBooking(token: String, bookingId: Long) = withContext(Dispatchers.IO) {

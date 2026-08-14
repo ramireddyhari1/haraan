@@ -1458,7 +1458,7 @@ private fun VenueDayScreen(
     var cancelTarget by remember { mutableStateOf<DayBooking?>(null) }
     var showPricing by remember { mutableStateOf(false) }
     var booking by remember { mutableStateOf(false) }
-    var payLink by remember { mutableStateOf<String?>(null) }
+    var pendingPay by remember { mutableStateOf<PendingPay?>(null) }
     val scope = rememberCoroutineScope()
     val date = apiDate(dayMillis)
     val state by produceState<UiState<DayGrid>>(UiState.Loading, dayMillis, reload) {
@@ -1563,7 +1563,12 @@ private fun VenueDayScreen(
                 booking = true
                 scope.launch {
                     runCatching { api.createWalkIn(token, venueId, slot.slotId, date, name, phone, null, method) }
-                        .onSuccess { payLink = it.paymentLink }
+                        .onSuccess { r ->
+                            // Only a link needs watching; cash/UPI/card are already settled.
+                            if (r.paymentLink != null) {
+                                pendingPay = PendingPay(r.bookingId, r.paymentLink, r.paymentLinkId, r.amount)
+                            }
+                        }
                     booking = false; addForSlot = null; reload++
                 }
             },
@@ -1580,14 +1585,21 @@ private fun VenueDayScreen(
                 booking = true
                 scope.launch {
                     runCatching { api.createWalkIn(token, venueId, t.slot.slotId, date, name, phone, t.courtId, method) }
-                        .onSuccess { payLink = it.paymentLink }
+                        .onSuccess { r ->
+                            // Only a link needs watching; cash/UPI/card are already settled.
+                            if (r.paymentLink != null) {
+                                pendingPay = PendingPay(r.bookingId, r.paymentLink, r.paymentLinkId, r.amount)
+                            }
+                        }
                     booking = false; addForCell = null; reload++
                 }
             },
         )
     }
 
-    payLink?.let { link -> PaymentLinkDialog(link) { payLink = null } }
+    pendingPay?.let { p ->
+        PaymentWaitDialog(p, api, token) { paid -> pendingPay = null; if (paid) reload++ }
+    }
 
     cancelTarget?.let { b ->
         AlertDialog(
@@ -1924,45 +1936,122 @@ private fun PayChip(value: PayMethod, selected: PayMethod, modifier: Modifier = 
     }
 }
 
-/** Shown after a "payment link" walk-in so the desk can share it immediately. */
+/** What the desk is waiting on after sending a payment link. */
+private data class PendingPay(
+    val bookingId: Long,
+    val link: String,
+    val linkId: String?,
+    val amount: Double,
+)
+
+/** How long the desk watches before the sheet stops counting down (link stays valid). */
+private const val PAY_WAIT_SECONDS = 300
+
+/**
+ * The "waiting for payment" moment: Razorpay has texted the link, and the desk watches
+ * it go green while the customer is still at the counter.
+ *
+ * Polls the server (which asks Razorpay directly, so this works with no webhook), and
+ * flips to a confirmed state the instant the money lands.
+ */
 @Composable
-private fun PaymentLinkDialog(link: String, onDismiss: () -> Unit) {
+private fun PaymentWaitDialog(pending: PendingPay, api: PartnerApi, token: String, onDismiss: (paid: Boolean) -> Unit) {
     val context = LocalContext.current
-    Dialog(onDismissRequest = onDismiss) {
+    val view = LocalView.current
+    var paid by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var left by remember { mutableStateOf(PAY_WAIT_SECONDS) }
+
+    // Poll while we're waiting. Stops the moment it's paid or the window closes; the
+    // link itself stays valid either way, so a timeout is not a failure.
+    LaunchedEffect(pending.bookingId) {
+        while (!paid && left > 0) {
+            kotlinx.coroutines.delay(4_000)
+            left = (left - 4).coerceAtLeast(0)
+            if (pending.linkId == null) continue
+            checking = true
+            runCatching { api.paymentStatus(token, pending.bookingId, pending.linkId) }
+                .onSuccess {
+                    if (it.paid) {
+                        paid = true
+                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    }
+                }
+            checking = false
+        }
+    }
+
+    Dialog(onDismissRequest = { onDismiss(paid) }) {
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            AuthIconBadge(Icons.Filled.Payments)
-            Spacer(Modifier.height(14.dp))
-            Text("Payment link ready", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Razorpay has texted this to the customer. You can share it again below.",
-                fontSize = 13.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 18.sp,
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                link,
-                fontSize = 12.5.sp,
-                color = AuthAccentDeep,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFF6F8FC)).border(1.dp, CardBorder, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-            )
-            Spacer(Modifier.height(18.dp))
-            GradientCta(text = "Share link", enabled = true, loading = false) {
-                val send = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, "Complete your booking payment: $link")
+            if (paid) {
+                // --- Money is in ------------------------------------------------
+                LayoutBox(
+                    Modifier.size(60.dp).clip(RoundedCornerShape(99.dp)).background(Color(0x1A16A34A)),
+                    contentAlignment = Alignment.Center,
+                ) { Text("✓", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = GREEN) }
+                Spacer(Modifier.height(14.dp))
+                Text("Payment received", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "₹" + formatInr(pending.amount) + " paid. The booking is confirmed and the ticket has gone to the customer.",
+                    fontSize = 13.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(20.dp))
+                GradientCta(text = "Done", enabled = true, loading = false) { onDismiss(true) }
+            } else {
+                // --- Waiting ----------------------------------------------------
+                AuthIconBadge(Icons.Filled.Payments)
+                Spacer(Modifier.height(14.dp))
+                Text("Waiting for payment", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Razorpay has texted the link to the customer. This updates the moment they pay.",
+                    fontSize = 13.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 18.sp,
+                )
+
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFF6F8FC)).border(1.dp, CardBorder, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Amount", fontSize = 13.sp, color = AuthMuted)
+                    Text("₹" + formatInr(pending.amount), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
                 }
-                context.startActivity(Intent.createChooser(send, "Share payment link"))
-            }
-            Spacer(Modifier.height(4.dp))
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("Done", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+
+                Spacer(Modifier.height(14.dp))
+                // Countdown + live pulse, so it never looks frozen.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(15.dp),
+                        color = if (checking) AuthAccent else Color(0xFFCBD5E1),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        if (left > 0) "Checking… ${left / 60}:${(left % 60).toString().padStart(2, '0')} left"
+                        else "Still unpaid — the link stays valid",
+                        fontSize = 12.5.sp, color = AuthMuted, fontWeight = FontWeight.Medium,
+                    )
+                }
+
+                Spacer(Modifier.height(18.dp))
+                GradientCta(text = "Share link again", enabled = true, loading = false) {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "Complete your booking payment: ${pending.link}")
+                    }
+                    context.startActivity(Intent.createChooser(send, "Share payment link"))
+                }
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = { onDismiss(false) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Collect later", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
