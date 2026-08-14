@@ -18,6 +18,7 @@ use App\Services\BookingService;
 use App\Services\RazorpayGateway;
 use App\Support\BookingReport;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -289,17 +290,21 @@ class PartnerController extends Controller
             fn (Booking $b): string => ((int) ($b->venue_court_id ?? 0)).'-'.((int) ($b->venue_slot_id ?? 0)),
         );
 
-        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $courts): array {
+        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $courts, $date, $venue): array {
             $b = $bySlot->get($s->id) ?? collect();
-            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell): array {
+            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell, $date, $venue): array {
                 $cb = $byCell->get($c->id.'-'.$s->id) ?? collect();
+                // The rate this cell would actually CHARGE — peak included. Showing the
+                // base rate here while reserveVenue() bills the peak one would have the
+                // desk quoting a price the customer is never charged.
+                $rate = $c->rateFor(Carbon::parse($date), $s->time, (int) ($venue->price ?? 0));
 
                 return [
                     'court_id'  => $c->id,
                     'booked'    => $cb->count(),
                     'is_booked' => $cb->isNotEmpty(),
-                    // Court's own hourly rate wins; falls back to the slot price.
-                    'price'     => $c->price ? (float) $c->price : (float) $s->price,
+                    'price'     => (float) $rate,
+                    'is_peak'   => $c->isPeak(Carbon::parse($date), $s->time),
                     'bookings'  => $cb->map(fn (Booking $x): array => $this->slotBooking($x))->values(),
                 ];
             })->values();
@@ -562,6 +567,96 @@ class PartnerController extends Controller
             'Content-Type'        => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
+    }
+
+    /** GET /api/partner/venues/{id}/courts — courts with their base + peak pricing. */
+    public function venueCourts(Request $request, string $id): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+
+        $courts = VenueCourt::query()->where('venue_id', $venue->id)
+            ->orderBy('sort_order')->get()
+            ->map(fn (VenueCourt $c): array => $this->courtRow($c, (int) ($venue->price ?? 0)));
+
+        return response()->json([
+            'venue_price' => (int) ($venue->price ?? 0),
+            'data'        => $courts,
+        ]);
+    }
+
+    /**
+     * POST /api/partner/venues/{id}/courts/{courtId} — set a court's base and peak pricing.
+     *
+     * Peak needs a price AND a schedule to mean anything ({@see VenueCourt::isPeak()}), so
+     * clearing either one turns peak off rather than leaving a rate that silently never
+     * applies — or worse, one that applies to every hour.
+     */
+    public function saveCourt(Request $request, string $id, string $courtId): JsonResponse
+    {
+        $data = $request->validate([
+            'price'     => ['nullable', 'integer', 'min:0'],
+            'peakPrice' => ['nullable', 'integer', 'min:0'],
+            'peakDays'  => ['nullable', 'array'],
+            'peakDays.*' => ['string', 'max:12'],
+            'peakStart' => ['nullable', 'string', 'max:5'],
+            'peakEnd'   => ['nullable', 'string', 'max:5'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $court = VenueCourt::query()->where('venue_id', $venue->id)->findOrFail($courtId);
+
+        if (array_key_exists('price', $data)) {
+            $court->price = $data['price'];
+        }
+
+        $peakPrice = $data['peakPrice'] ?? null;
+        // Normalise to the 3-letter capitalised form isPeak() compares against.
+        $days = array_values(array_filter(array_map(
+            static fn ($d): string => ucfirst(strtolower(substr(trim((string) $d), 0, 3))),
+            $data['peakDays'] ?? [],
+        )));
+        $start = trim((string) ($data['peakStart'] ?? '')) ?: null;
+        $end = trim((string) ($data['peakEnd'] ?? '')) ?: null;
+
+        $hasSchedule = $days !== [] || ($start !== null && $end !== null);
+
+        if ($peakPrice === null || $peakPrice <= 0 || ! $hasSchedule) {
+            $court->peak_price = null;
+            $court->peak_days = null;
+            $court->peak_start = null;
+            $court->peak_end = null;
+        } else {
+            $court->peak_price = $peakPrice;
+            $court->peak_days = $days === [] ? null : $days;
+            $court->peak_start = $start;
+            $court->peak_end = $end;
+        }
+
+        $court->save();
+
+        return response()->json([
+            'status' => 'ok',
+            'court'  => $this->courtRow($court, (int) ($venue->price ?? 0)),
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function courtRow(VenueCourt $c, int $venuePrice): array
+    {
+        return [
+            'id'          => $c->id,
+            'name'        => $c->name,
+            'sports'      => $c->sportsList(),
+            'is_active'   => (bool) $c->is_active,
+            'price'       => (int) ($c->price ?? $venuePrice),
+            'has_own_price' => $c->price !== null,
+            'peak_price'  => $c->peak_price !== null ? (int) $c->peak_price : null,
+            'peak_days'   => $c->peakDaysList(),
+            'peak_start'  => $c->peak_start,
+            'peak_end'    => $c->peak_end,
+        ];
     }
 
     /** GET /api/partner/venues/{id}/slots — the venue's price/slot rows. */

@@ -174,7 +174,9 @@ data class CourtCell(
     val courtId: Long,
     val booked: Int,
     val isBooked: Boolean,
+    /** The rate this cell would actually charge — peak included. */
     val price: Double,
+    val isPeak: Boolean = false,
     val bookings: List<DayBooking>,
 )
 
@@ -204,6 +206,25 @@ data class StaffMember(val id: Long, val name: String, val email: String, val pe
 
 /** All capabilities an owner can grant a desk person. */
 val STAFF_PERMISSIONS = listOf("bookings", "checkin", "pricing", "reports")
+
+/**
+ * A court's pricing: a base hourly rate plus optional peak pricing. Peak only
+ * applies when it has a price AND a schedule (days and/or a time window) — the
+ * server ignores a bare peak price rather than charging it for every hour.
+ */
+data class CourtPricing(
+    val id: Long,
+    val name: String,
+    val sports: List<String>,
+    val price: Int,
+    val hasOwnPrice: Boolean,
+    val peakPrice: Int?,
+    val peakDays: List<String>,
+    val peakStart: String?,
+    val peakEnd: String?,
+) {
+    val peakOn: Boolean get() = peakPrice != null && peakPrice > 0
+}
 
 /** An editable price/slot row for the pricing screen. */
 data class SlotEdit(
@@ -409,6 +430,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     booked = c.optInt("booked"),
                     isBooked = c.optBoolean("is_booked", c.optInt("booked") > 0),
                     price = c.optDouble("price", 0.0),
+                    isPeak = c.optBoolean("is_peak", false),
                     bookings = parseDayBookings(c.optJSONArray("bookings")),
                 )
             }
@@ -483,6 +505,47 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 isOpen = o.optBoolean("is_open", true),
             )
         }
+    }
+
+    /** GET the venue's courts with base + peak pricing. */
+    suspend fun venueCourts(token: String, venueId: Long): List<CourtPricing> = withContext(Dispatchers.IO) {
+        parseArray(get("/api/partner/venues/$venueId/courts", token)) { o ->
+            val daysArr = o.optJSONArray("peak_days")
+            CourtPricing(
+                id = o.optLong("id"),
+                name = o.optString("name"),
+                sports = o.optJSONArray("sports").let { a ->
+                    if (a == null) emptyList() else (0 until a.length()).map { a.optString(it) }
+                },
+                price = o.optInt("price"),
+                hasOwnPrice = o.optBoolean("has_own_price", false),
+                peakPrice = if (o.isNull("peak_price")) null else o.optInt("peak_price"),
+                peakDays = if (daysArr == null) emptyList() else (0 until daysArr.length()).map { daysArr.optString(it) },
+                peakStart = o.optStringOrNull("peak_start"),
+                peakEnd = o.optStringOrNull("peak_end"),
+            )
+        }
+    }
+
+    /** Save a court's base rate and peak rule. Pass peakPrice null to turn peak off. */
+    suspend fun saveCourtPricing(
+        token: String,
+        venueId: Long,
+        courtId: Long,
+        price: Int,
+        peakPrice: Int?,
+        peakDays: List<String>,
+        peakStart: String?,
+        peakEnd: String?,
+    ) = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("price", price)
+            .put("peakPrice", peakPrice ?: JSONObject.NULL)
+            .put("peakDays", JSONArray(peakDays))
+            .put("peakStart", peakStart ?: JSONObject.NULL)
+            .put("peakEnd", peakEnd ?: JSONObject.NULL)
+        post("/api/partner/venues/$venueId/courts/$courtId", payload.toString(), token)
+        Unit
     }
 
     /** Create (slotId null) or update a slot. */

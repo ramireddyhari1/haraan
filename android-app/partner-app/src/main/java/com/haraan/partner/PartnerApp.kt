@@ -1687,7 +1687,15 @@ private fun GridCell(cell: CourtCell, width: Dp, canBook: Boolean, onFree: () ->
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = GREEN)
-                if (cell.price > 0) Text("₹${cell.price.toInt()}", fontSize = 10.sp, color = AuthMuted)
+                if (cell.price > 0) {
+                    // Peak hours read amber so the desk can see the higher rate at a glance.
+                    Text(
+                        "₹${cell.price.toInt()}" + if (cell.isPeak) " ▲" else "",
+                        fontSize = 10.sp,
+                        fontWeight = if (cell.isPeak) FontWeight.Bold else FontWeight.Normal,
+                        color = if (cell.isPeak) Color(0xFFB45309) else AuthMuted,
+                    )
+                }
             }
         }
     }
@@ -1962,37 +1970,326 @@ private fun PaymentLinkDialog(link: String, onDismiss: () -> Unit) {
 
 // ---- Venue pricing / slot editor ---------------------------------------
 
+private val WEEK_DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+/**
+ * Per-court base rate + peak pricing — the "charge more at busy hours" lever
+ * Playo has and we didn't expose. The server already charges the peak rate
+ * ({@link VenueCourt::rateFor}); this is the missing way to configure it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CourtPricingScreen(api: PartnerApi, token: String, venueId: Long, venueName: String, onBack: () -> Unit) {
+    var reload by remember { mutableStateOf(0) }
+    var editing by remember { mutableStateOf<CourtPricing?>(null) }
+    val scope = rememberCoroutineScope()
+    val state by produceState<UiState<List<CourtPricing>>>(UiState.Loading, reload) {
+        value = runCatchingUi { api.venueCourts(token, venueId) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Courts & peak pricing", maxLines = 1, fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            Text(venueName, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), fontSize = 13.sp, color = AuthMuted)
+            Loaded(state) { courts ->
+                if (courts.isEmpty()) {
+                    EmptyState("No courts on this venue yet.")
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
+                    ) {
+                        items(courts) { c -> CourtPricingCard(c) { editing = c } }
+                    }
+                }
+            }
+        }
+    }
+
+    editing?.let { court ->
+        PeakPricingDialog(
+            court = court,
+            onDismiss = { editing = null },
+            onSave = { price, peak, days, start, end ->
+                editing = null
+                scope.launch {
+                    runCatching { api.saveCourtPricing(token, venueId, court.id, price, peak, days, start, end) }
+                    reload++
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun CourtPricingCard(c: CourtPricing, onClick: () -> Unit) {
+    PressableSurface(onClick = onClick) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(c.name, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                    if (c.sports.isNotEmpty()) {
+                        Spacer(Modifier.height(1.dp))
+                        Text(c.sports.joinToString(" · "), fontSize = 12.sp, color = AuthMuted)
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("₹${c.price}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                    Text("per hour", fontSize = 11.sp, color = AuthMuted)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (c.peakOn) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                        .background(Color(0x1AB45309)).padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "₹${c.peakPrice} peak · " + peakWhenLabel(c),
+                        fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF92400E),
+                    )
+                }
+            } else {
+                Text("No peak pricing — tap to add", fontSize = 12.sp, color = AuthMuted)
+            }
+        }
+    }
+}
+
+/** "Sat, Sun 6:00 PM–10:00 PM" / "every day 6:00 PM–10:00 PM" / "Sat, Sun". */
+private fun peakWhenLabel(c: CourtPricing): String {
+    val days = if (c.peakDays.isEmpty()) "every day" else c.peakDays.joinToString(", ")
+    val window = if (c.peakStart != null && c.peakEnd != null) " ${c.peakStart}–${c.peakEnd}" else ""
+    return days + window
+}
+
+/** Editor for one court's base rate and its peak rule. */
+@Composable
+private fun PeakPricingDialog(
+    court: CourtPricing,
+    onDismiss: () -> Unit,
+    onSave: (price: Int, peakPrice: Int?, days: List<String>, start: String?, end: String?) -> Unit,
+) {
+    var base by remember { mutableStateOf(court.price.toString()) }
+    var peakOn by remember { mutableStateOf(court.peakOn) }
+    var peak by remember { mutableStateOf(court.peakPrice?.toString() ?: "") }
+    var days by remember { mutableStateOf(court.peakDays.toSet()) }
+    var start by remember { mutableStateOf(court.peakStart ?: "18:00") }
+    var end by remember { mutableStateOf(court.peakEnd ?: "22:00") }
+    val view = LocalView.current
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+    )
+    // Peak needs a price AND a schedule, or the server ignores it — mirror that here
+    // so the button can't promise something the backend will drop.
+    val peakValid = !peakOn || (peak.toIntOrNull()?.let { it > 0 } == true &&
+        (days.isNotEmpty() || (start.isNotBlank() && end.isNotBlank())))
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White)
+                .verticalScroll(rememberScrollState()).padding(22.dp),
+        ) {
+            Text(court.name, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(2.dp))
+            Text("Hourly rate for this court", fontSize = 12.sp, color = AuthMuted)
+
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = base,
+                onValueChange = { base = it.filter { ch -> ch.isDigit() }.take(6) },
+                label = { Text("Base price (₹/hour)") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(18.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFFFF8EE)).border(1.dp, Color(0x33B45309), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Peak pricing", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF92400E))
+                    Text("Charge more at busy hours", fontSize = 11.5.sp, color = Color(0xFFB45309))
+                }
+                Switch(
+                    checked = peakOn,
+                    onCheckedChange = { peakOn = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) },
+                )
+            }
+
+            if (peakOn) {
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = peak,
+                    onValueChange = { peak = it.filter { ch -> ch.isDigit() }.take(6) },
+                    label = { Text("Peak price (₹/hour)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = fieldColors,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(Modifier.height(16.dp))
+                Text("PEAK DAYS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp)
+                Spacer(Modifier.height(4.dp))
+                Text("None selected = every day", fontSize = 11.sp, color = AuthMuted)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    WEEK_DAYS.forEach { d ->
+                        val on = d in days
+                        LayoutBox(
+                            Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(10.dp))
+                                .background(if (on) AuthAccent else Color(0xFFF1F5F9))
+                                .clickable {
+                                    days = if (on) days - d else days + d
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                d.take(1),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (on) Color.White else AuthMuted,
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text("PEAK HOURS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = start,
+                        onValueChange = { start = it.take(5) },
+                        label = { Text("From") },
+                        placeholder = { Text("18:00") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = fieldColors,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = end,
+                        onValueChange = { end = it.take(5) },
+                        label = { Text("To") },
+                        placeholder = { Text("22:00") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = fieldColors,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (!peakValid) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Set a peak price and at least a day or an hours window.",
+                        fontSize = 11.5.sp, color = RED,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            GradientCta(text = "Save pricing", enabled = peakValid && base.isNotBlank(), loading = false) {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                onSave(
+                    base.toIntOrNull() ?: court.price,
+                    if (peakOn) peak.toIntOrNull() else null,
+                    days.toList(),
+                    if (peakOn && start.isNotBlank()) start else null,
+                    if (peakOn && end.isNotBlank()) end else null,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, venueName: String, onBack: () -> Unit) {
     var reload by remember { mutableStateOf(0) }
     var editing by remember { mutableStateOf<SlotEdit?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var showCourts by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val state by produceState<UiState<List<SlotEdit>>>(UiState.Loading, reload) {
         value = runCatchingUi { api.venueSlots(token, venueId) }
     }
 
+    if (showCourts) {
+        CourtPricingScreen(api, token, venueId, venueName, onBack = { showCourts = false })
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Pricing & slots", maxLines = 1) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Pricing & slots", maxLines = 1, fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
                 },
                 actions = {
-                    IconButton(onClick = { adding = true }) { Icon(Icons.Filled.Add, contentDescription = "Add slot") }
+                    HeaderIcon(Icons.Filled.Add, "Add slot") { adding = true }
+                    Spacer(Modifier.width(4.dp))
                 },
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
             Text(
                 venueName,
-                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                fontSize = 13.sp,
+                color = AuthMuted,
             )
+            // Peak pricing lives on the court, not the slot — its own screen.
+            LayoutBox(Modifier.padding(horizontal = 16.dp)) {
+                PressableSurface(onClick = { showCourts = true }) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LayoutBox(
+                            Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                                .background(Brush.linearGradient(listOf(Color(0xFFFFF1DC), Color(0xFFFFE3BC)))),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(21.dp)) }
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Courts & peak pricing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                            Spacer(Modifier.height(1.dp))
+                            Text("Charge more at busy hours", fontSize = 12.sp, color = AuthMuted)
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
             Loaded(state) { slots ->
                 if (slots.isEmpty()) {
                     EmptyState("No slots yet. Tap + to add your first bookable slot.")

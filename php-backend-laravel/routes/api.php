@@ -411,6 +411,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/venues/{id}/analytics', 'venueAnalytics')->whereNumber('id');
         Route::get('/venues/{id}/day', 'venueDay')->whereNumber('id');
         Route::get('/venues/{id}/slots', 'venueSlots')->whereNumber('id');
+        Route::get('/venues/{id}/courts', 'venueCourts')->whereNumber('id');
         Route::get('/bookings', 'bookings');
 
         // --- Write actions gated by staff capability (owners hold all) ---
@@ -418,6 +419,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/venues/{id}/slots', 'saveSlot')->whereNumber('id');
             Route::post('/venues/{id}/slots/{slotId}', 'saveSlot')->whereNumber('id')->whereNumber('slotId');
             Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');
+            Route::post('/venues/{id}/courts/{courtId}', 'saveCourt')->whereNumber('id')->whereNumber('courtId');
         });
         Route::middleware('partner.can:bookings')->group(function (): void {
             Route::post('/venues/{id}/bookings', 'storeOfflineBooking')->whereNumber('id');
