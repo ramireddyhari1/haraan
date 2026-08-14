@@ -1839,6 +1839,17 @@ private fun WalkInDialog(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (phone.length == 10) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFF25D366)))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Booking confirmation sent on WhatsApp",
+                        fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = AuthMuted,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(18.dp))
             Text("PAYMENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp)
@@ -1847,11 +1858,7 @@ private fun WalkInDialog(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PayChip(PayMethod.CASH, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
                 PayChip(PayMethod.UPI, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PayChip(PayMethod.CARD, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
-                PayChip(PayMethod.LATER, method, Modifier.weight(1f)) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
             }
             Spacer(Modifier.height(8.dp))
             PayChip(PayMethod.LINK, method, Modifier.fillMaxWidth()) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }

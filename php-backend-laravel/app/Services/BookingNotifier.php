@@ -245,11 +245,26 @@ final class BookingNotifier
         }
     }
 
+    /**
+     * True for a desk walk-in. Such a booking carries the PARTNER's user_id (the desk
+     * created it), so the account contact on it belongs to the venue, not the customer.
+     * Only the guest fields may be used, or the customer's ticket is delivered to the
+     * venue's own phone/inbox — see the same guard in {@see push()}.
+     */
+    private function isDeskWalkIn(Booking $booking): bool
+    {
+        return strtolower((string) $booking->channel) === 'offline';
+    }
+
     private function recipientEmail(Booking $booking): ?string
     {
         $attendee = trim((string) $booking->attendee_email);
         if ($attendee !== '' && ContactPrefill::isRealEmail($attendee)) {
             return $attendee;
+        }
+
+        if ($this->isDeskWalkIn($booking)) {
+            return null;
         }
 
         $userEmail = trim((string) ($booking->user->email ?? ''));
@@ -259,7 +274,11 @@ final class BookingNotifier
 
     private function recipientPhone(Booking $booking): ?string
     {
-        foreach ([$booking->attendee_phone, $booking->user->phone ?? null, $booking->guest_phone] as $p) {
+        $candidates = $this->isDeskWalkIn($booking)
+            ? [$booking->attendee_phone, $booking->guest_phone]
+            : [$booking->attendee_phone, $booking->user->phone ?? null, $booking->guest_phone];
+
+        foreach ($candidates as $p) {
             $digits = preg_replace('/[^0-9]/', '', (string) $p);
             if ($digits !== null && strlen($digits) >= 10) {
                 return $digits;

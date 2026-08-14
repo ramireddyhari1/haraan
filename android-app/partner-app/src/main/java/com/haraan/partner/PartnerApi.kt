@@ -161,7 +161,6 @@ enum class PayMethod(val api: String, val label: String) {
     UPI("upi", "UPI"),
     CARD("card", "Card"),
     LINK("link", "Payment link"),
-    LATER("later", "Pay later"),
 }
 
 /** Outcome of creating a walk-in: the booking, plus a Razorpay link when asked for. */

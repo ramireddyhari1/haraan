@@ -13,6 +13,7 @@ use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
 use App\Services\BookingLedger;
+use App\Services\BookingNotifier;
 use App\Services\BookingService;
 use App\Services\RazorpayGateway;
 use App\Support\BookingReport;
@@ -388,11 +389,22 @@ class PartnerController extends Controller
             }
         }
 
+        // Confirmation to the CUSTOMER (WhatsApp, with the booking code + QR link).
+        // Only when the desk actually took a number — BookingNotifier is guest-only for
+        // walk-ins, so this can never fire the customer's ticket at the venue's phone.
+        // Deferred and best-effort: messaging must not fail a booking already taken.
+        $notified = false;
+        if (trim((string) ($data['guestPhone'] ?? '')) !== '') {
+            BookingNotifier::dispatch($booking);
+            $notified = true;
+        }
+
         return response()->json([
             'status'         => 'ok',
             'booking'        => $this->slotBooking($booking),
             'payment_method' => $method,
             'payment_link'   => $payLink,
+            'notified'       => $notified,
         ], 201);
     }
 
