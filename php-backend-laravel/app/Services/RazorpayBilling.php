@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Booking;
+use App\Models\BookingPayment;
 use App\Models\CreditPack;
 use App\Models\PartnerCredit;
 use App\Models\PartnerPlan;
@@ -37,6 +38,7 @@ final class RazorpayBilling
     public function __construct(
         private readonly RazorpayGateway $gateway,
         private readonly BookingService $bookings,
+        private readonly BookingLedger $ledger,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -117,8 +119,59 @@ final class RazorpayBilling
             'subscription.halted', 'subscription.pending' => $this->markStatus($payload, PartnerSubscription::STATUS_HALTED),
             'subscription.cancelled', 'subscription.completed', 'subscription.expired' => $this->markStatus($payload, PartnerSubscription::STATUS_CANCELLED),
             'payment.captured' => $this->applyCapturedPayment($payload),
+            'payment_link.paid' => $this->applyPaidPaymentLink($payload),
             default => 'ignored',
         };
+    }
+
+    /**
+     * A desk "pay by link" walk-in that the customer has now paid.
+     *
+     * These can't be found by `razorpay_order_id` — a payment link creates its own order
+     * on Razorpay's side, which we never see — so the booking is identified by the
+     * `booking_id` note stamped on the link when it was created.
+     *
+     * Idempotent: Razorpay redelivers until it gets a 200, and the payment id is written
+     * as the ledger row's reference, so a redelivery finds the row and stops rather than
+     * collecting the same money twice and over-reporting the venue's takings.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function applyPaidPaymentLink(array $payload): string
+    {
+        $link = $payload['payload']['payment_link']['entity'] ?? [];
+        $payment = $payload['payload']['payment']['entity'] ?? [];
+
+        $bookingId = (int) ($link['notes']['booking_id'] ?? 0);
+        $paymentId = trim((string) ($payment['id'] ?? ''));
+
+        if ($bookingId <= 0) {
+            return 'link_without_booking';
+        }
+
+        $booking = Booking::query()->find($bookingId);
+
+        if ($booking === null) {
+            return 'booking_missing';
+        }
+
+        if ($paymentId !== '' && BookingPayment::query()
+            ->where('booking_id', $booking->id)->where('reference', $paymentId)->exists()) {
+            return 'already_recorded';
+        }
+
+        // Razorpay reports paise; fall back to the booking's own total if it's absent.
+        $amount = isset($payment['amount'])
+            ? ((int) $payment['amount']) / 100
+            : (float) $booking->total_amount;
+
+        $this->ledger->collect($booking, $amount, 'online', null, $paymentId ?: null, 'Razorpay payment link');
+
+        // NOW the customer may have their ticket — this is the first moment the money is
+        // real, and the walk-in path deliberately sends nothing before it.
+        BookingNotifier::dispatch($booking->refresh());
+
+        return 'link_paid';
     }
 
     /**
@@ -147,6 +200,19 @@ final class RazorpayBilling
         $bookings = Booking::query()->where('razorpay_order_id', $orderId)->get();
 
         if ($bookings->isEmpty()) {
+            // A desk payment link carries its own Razorpay order that we never stored, so
+            // it can only be recognised by the booking_id note we stamped on it. Some
+            // accounts deliver this instead of (or as well as) `payment_link.paid`, and
+            // that handler is idempotent on the payment id, so either route is safe.
+            if ((int) ($entity['notes']['booking_id'] ?? 0) > 0) {
+                return $this->applyPaidPaymentLink([
+                    'payload' => [
+                        'payment_link' => ['entity' => ['notes' => $entity['notes']]],
+                        'payment'      => ['entity' => $entity],
+                    ],
+                ]);
+            }
+
             return $this->grantFromPayment($payload);
         }
 

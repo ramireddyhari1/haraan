@@ -395,11 +395,18 @@ class PartnerController extends Controller
         }
 
         // Confirmation to the CUSTOMER (WhatsApp, with the booking code + QR link).
-        // Only when the desk actually took a number — BookingNotifier is guest-only for
-        // walk-ins, so this can never fire the customer's ticket at the venue's phone.
-        // Deferred and best-effort: messaging must not fail a booking already taken.
+        //
+        // ONLY once the money is actually in. The ticket carries a QR that gets someone
+        // through the gate, so sending it against an unpaid "pay by link" booking hands
+        // out free entry — the customer holds a valid ticket whether or not they ever pay.
+        // For the link path the confirmation is sent by the payment webhook instead, when
+        // Razorpay reports the capture ({@see RazorpayBilling::applyPaidPaymentLink()}).
+        //
+        // BookingNotifier is guest-only for walk-ins, so this can never fire the
+        // customer's ticket at the venue's own phone.
         $notified = false;
-        if (trim((string) ($data['guestPhone'] ?? '')) !== '') {
+        $isPaid = strtolower((string) $booking->payment_status) === 'paid' || $amount <= 0;
+        if ($isPaid && trim((string) ($data['guestPhone'] ?? '')) !== '') {
             BookingNotifier::dispatch($booking);
             $notified = true;
         }
