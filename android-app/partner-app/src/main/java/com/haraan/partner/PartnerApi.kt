@@ -57,11 +57,17 @@ class Session(context: Context) {
         return permission in set
     }
 
+    /** Highest booking id we've already surfaced as a "new booking" alert. */
+    var lastNotifiedBookingId: Long
+        get() = prefs.getLong("last_notified_booking", 0L)
+        set(value) = prefs.edit().putLong("last_notified_booking", value).apply()
+
     val isSignedIn: Boolean get() = !token.isNullOrBlank()
 
     fun clear() {
         token = null; name = null; partnerType = null
         isDesk = false; permissionsCsv = null
+        lastNotifiedBookingId = 0L
     }
 }
 
@@ -73,6 +79,9 @@ data class LoginResult(
     val isDesk: Boolean,
     val permissions: List<String>,
 )
+
+/** Result of starting a phone-OTP: which channel carried the code, and its token. */
+data class PhoneOtpStart(val channel: String, val token: String?)
 
 // ---- API response models ------------------------------------------------
 
@@ -143,6 +152,18 @@ data class DayBooking(
     val amount: Double,
 )
 
+/** One court column in the day grid. */
+data class CourtCol(val id: Long, val name: String, val sports: List<String>)
+
+/** One court × slot cell: is this court free or booked for this time. */
+data class CourtCell(
+    val courtId: Long,
+    val booked: Int,
+    val isBooked: Boolean,
+    val price: Double,
+    val bookings: List<DayBooking>,
+)
+
 data class DaySlot(
     val slotId: Long,
     val label: String,
@@ -153,6 +174,7 @@ data class DaySlot(
     val available: Int,
     val isOpen: Boolean,
     val bookings: List<DayBooking>,
+    val courts: List<CourtCell> = emptyList(),
 )
 
 data class DayGrid(
@@ -160,6 +182,7 @@ data class DayGrid(
     val venueName: String,
     val isBlocked: Boolean,
     val slots: List<DaySlot>,
+    val courts: List<CourtCol> = emptyList(),
 )
 
 /** A desk person under a partner owner. */
@@ -200,7 +223,35 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     /** POST /api/auth/login → returns the JWT + display name. */
     suspend fun login(email: String, password: String): LoginResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("email", email).put("password", password)
-        val body = post("/api/auth/login", payload.toString(), token = null)
+        parseLoginEnvelope(post("/api/auth/login", payload.toString(), token = null))
+    }
+
+    /** POST /api/auth/google { id_token } → same envelope as email login. */
+    suspend fun google(idToken: String): LoginResult = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("id_token", idToken)
+        parseLoginEnvelope(post("/api/auth/google", payload.toString(), token = null))
+    }
+
+    /**
+     * POST /api/auth/phone-otp/start { phone } — sends a WhatsApp login code.
+     * Returns channel "whatsapp" + a token when the code went out, or channel "sms"
+     * for every reason it couldn't (the app has no Firebase SMS fallback, so that
+     * surfaces as "try another way").
+     */
+    suspend fun startPhoneOtp(phone: String): PhoneOtpStart = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("phone", phone)
+        val o = JSONObject(post("/api/auth/phone-otp/start", payload.toString(), token = null))
+        PhoneOtpStart(o.optString("channel", "sms"), o.optStringOrNull("token"))
+    }
+
+    /** POST /api/auth/phone-otp/verify { token, code } → same envelope as email login. */
+    suspend fun verifyPhoneOtp(otpToken: String, code: String): LoginResult = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("token", otpToken).put("code", code)
+        parseLoginEnvelope(post("/api/auth/phone-otp/verify", payload.toString(), token = null))
+    }
+
+    /** Shared parser for the `{ token, user }` envelope every sign-in path returns. */
+    private fun parseLoginEnvelope(body: String): LoginResult {
         val o = JSONObject(body)
         val token = o.optString("token").ifBlank { throw ApiException(200, "Login response had no token") }
         val user = o.optJSONObject("user")
@@ -208,7 +259,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         val isDesk = user != null && !user.isNull("parentPartnerId")
         val permsArr = user?.optJSONArray("staffPermissions")
         val perms = if (permsArr == null) emptyList() else (0 until permsArr.length()).map { permsArr.optString(it) }
-        LoginResult(token, name, user?.optStringOrNull("partnerType"), isDesk, perms)
+        return LoginResult(token, name, user?.optStringOrNull("partnerType"), isDesk, perms)
     }
 
     suspend fun overview(token: String): Overview = withContext(Dispatchers.IO) {
@@ -336,17 +387,15 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         val slotsArr = o.optJSONArray("slots")
         val slots = if (slotsArr == null) emptyList() else (0 until slotsArr.length()).map { i ->
             val s = slotsArr.getJSONObject(i)
-            val bArr = s.optJSONArray("bookings")
-            val bookings = if (bArr == null) emptyList() else (0 until bArr.length()).map { j ->
-                val b = bArr.getJSONObject(j)
-                DayBooking(
-                    id = b.optLong("id"),
-                    customer = b.optString("customer"),
-                    phone = b.optStringOrNull("phone"),
-                    channel = b.optString("channel", "online"),
-                    status = b.optString("status"),
-                    checkedIn = b.optInt("checked_in"),
-                    amount = b.optDouble("amount", 0.0),
+            val cellsArr = s.optJSONArray("courts")
+            val cells = if (cellsArr == null) emptyList() else (0 until cellsArr.length()).map { k ->
+                val c = cellsArr.getJSONObject(k)
+                CourtCell(
+                    courtId = c.optLong("court_id"),
+                    booked = c.optInt("booked"),
+                    isBooked = c.optBoolean("is_booked", c.optInt("booked") > 0),
+                    price = c.optDouble("price", 0.0),
+                    bookings = parseDayBookings(c.optJSONArray("bookings")),
                 )
             }
             DaySlot(
@@ -358,14 +407,23 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 booked = s.optInt("booked"),
                 available = s.optInt("available"),
                 isOpen = s.optBoolean("is_open", true),
-                bookings = bookings,
+                bookings = parseDayBookings(s.optJSONArray("bookings")),
+                courts = cells,
             )
+        }
+        val courtsArr = o.optJSONArray("courts")
+        val courts = if (courtsArr == null) emptyList() else (0 until courtsArr.length()).map { i ->
+            val c = courtsArr.getJSONObject(i)
+            val sportsArr = c.optJSONArray("sports")
+            val sports = if (sportsArr == null) emptyList() else (0 until sportsArr.length()).map { sportsArr.optString(it) }
+            CourtCol(id = c.optLong("id"), name = c.optString("name"), sports = sports)
         }
         DayGrid(
             date = o.optString("date"),
             venueName = o.optJSONObject("venue")?.optStringOrNull("name") ?: "Venue",
             isBlocked = o.optBoolean("is_blocked", false),
             slots = slots,
+            courts = courts,
         )
     }
 
@@ -428,10 +486,11 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         Unit
     }
 
-    suspend fun createWalkIn(token: String, venueId: Long, slotId: Long, date: String, name: String, phone: String) = withContext(Dispatchers.IO) {
+    suspend fun createWalkIn(token: String, venueId: Long, slotId: Long, date: String, name: String, phone: String, courtId: Long? = null) = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("slotId", slotId).put("date", date)
             .put("guestName", name).put("guestPhone", phone)
+        if (courtId != null) payload.put("courtId", courtId)
         post("/api/partner/venues/$venueId/bookings", payload.toString(), token)
         Unit
     }
@@ -448,6 +507,22 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             request("DELETE", "/api/partner/venues/$venueId/block?date=$date", null, token)
         }
         Unit
+    }
+
+    private fun parseDayBookings(arr: JSONArray?): List<DayBooking> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).map { j ->
+            val b = arr.getJSONObject(j)
+            DayBooking(
+                id = b.optLong("id"),
+                customer = b.optString("customer"),
+                phone = b.optStringOrNull("phone"),
+                channel = b.optString("channel", "online"),
+                status = b.optString("status"),
+                checkedIn = b.optInt("checked_in"),
+                amount = b.optDouble("amount", 0.0),
+            )
+        }
     }
 
     private fun parseSales(o: JSONObject, secondaryKey: String): List<SalesPoint> {

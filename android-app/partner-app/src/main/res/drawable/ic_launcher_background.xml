@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Haraan Partner launcher icon background: a clean white plate, the inverse of
+  the member app's royal-blue plate. A whisper-soft top-left light and a faint
+  cool falloff at the bottom-right keep it from reading as a dead flat block
+  (an "AI-built-it" tell) while staying unmistakably white.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- flat white base -->
+    <path android:pathData="M0,0h108v108h-108z" android:fillColor="#FFFFFFFF" />
+
+    <!-- top-left light: a barely-there brightening so the plate has a sky -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="34"
+                android:centerY="26"
+                android:gradientRadius="86">
+                <item android:offset="0" android:color="#FFFFFFFF" />
+                <item android:offset="1" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- bottom-right falloff: a faint cool shadow so the mark sits on a surface -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="112"
+                android:centerY="112"
+                android:gradientRadius="104">
+                <item android:offset="0" android:color="#14C6D6EF" />
+                <item android:offset="0.6" android:color="#07C6D6EF" />
+                <item android:offset="1" android:color="#00C6D6EF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

@@ -10,6 +10,7 @@ use App\Models\Event;
 use App\Models\User;
 use App\Models\Venue;
 use App\Models\VenueBlockedDate;
+use App\Models\VenueCourt;
 use App\Models\VenueSlot;
 use App\Services\BookingService;
 use App\Support\BookingReport;
@@ -267,15 +268,35 @@ class PartnerController extends Controller
             ->where('venue_id', $venue->id)->whereDate('date', $date)->exists();
 
         $slots = VenueSlot::query()->where('venue_id', $venue->id)->orderBy('sort_order')->get();
+        $courts = VenueCourt::query()->where('venue_id', $venue->id)
+            ->where('is_active', true)->orderBy('sort_order')->get();
 
         $bookings = Booking::query()
             ->where('booking_type', 'venue')->where('venue_id', $venue->id)
             ->whereDate('slot_date', $date)->where('status', self::PAID)
             ->with('user:id,name')->get();
         $bySlot = $bookings->groupBy('venue_slot_id');
+        // One bucket per (court, slot) cell so the grid can render each court column.
+        // Court id 0 keys the bookings made before courts existed (venue-level only).
+        $byCell = $bookings->groupBy(
+            fn (Booking $b): string => ((int) ($b->venue_court_id ?? 0)).'-'.((int) ($b->venue_slot_id ?? 0)),
+        );
 
-        $rows = $slots->map(function (VenueSlot $s) use ($bySlot): array {
+        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $courts): array {
             $b = $bySlot->get($s->id) ?? collect();
+            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell): array {
+                $cb = $byCell->get($c->id.'-'.$s->id) ?? collect();
+
+                return [
+                    'court_id'  => $c->id,
+                    'booked'    => $cb->count(),
+                    'is_booked' => $cb->isNotEmpty(),
+                    // Court's own hourly rate wins; falls back to the slot price.
+                    'price'     => $c->price ? (float) $c->price : (float) $s->price,
+                    'bookings'  => $cb->map(fn (Booking $x): array => $this->slotBooking($x))->values(),
+                ];
+            })->values();
+
             return [
                 'slot_id'   => $s->id,
                 'label'     => trim(($s->day ?? '').' · '.($s->time ?? ''), " ·\t"),
@@ -286,6 +307,7 @@ class PartnerController extends Controller
                 'available' => max((int) $s->capacity - $b->count(), 0),
                 'is_open'   => (bool) $s->is_available,
                 'bookings'  => $b->map(fn (Booking $x): array => $this->slotBooking($x))->values(),
+                'courts'    => $cells,
             ];
         });
 
@@ -293,6 +315,11 @@ class PartnerController extends Controller
             'date'       => $date,
             'venue'      => ['id' => $venue->id, 'name' => $venue->name],
             'is_blocked' => $isBlocked,
+            'courts'     => $courts->map(fn (VenueCourt $c): array => [
+                'id'     => $c->id,
+                'name'   => $c->name,
+                'sports' => $c->sportsList(),
+            ])->values(),
             'slots'      => $rows,
         ]);
     }

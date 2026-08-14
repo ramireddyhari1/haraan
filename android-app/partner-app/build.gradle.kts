@@ -12,9 +12,12 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-        // Same deployed EC2 backend as the consumer app. The partner endpoints
-        // live under /api/partner/* (see PartnerController on the server).
-        buildConfigField("String", "API_BASE_URL", "\"http://13.204.63.181\"")
+        // Live prod backend (same host the consumer app uses). The old EC2 IP
+        // (13.204.63.181) is dead; partner endpoints live under /api/partner/*.
+        buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
+        // Shared OAuth Web client ID (android-app/gradle.properties). Blank → the
+        // "Continue with Google" button hides itself, so this is never half-wired.
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
     }
 
     buildTypes {
@@ -65,6 +68,11 @@ dependencies {
   // QR ticket scanning — ships its own capture UI and handles the camera
   // runtime permission itself.
   implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
+  // "Continue with Google" via Credential Manager (same stack as the member app).
+  implementation("androidx.credentials:credentials:1.3.0")
+  implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
   testImplementation(libs.junit)
 }

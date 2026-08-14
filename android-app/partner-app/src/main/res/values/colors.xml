@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Launcher-icon background. White keeps the navy Haraan wordmark crisp and
-         high-contrast inside the adaptive-icon mask. -->
+    <!-- Kept for reference; the adaptive icon now uses @drawable/ic_launcher_background. -->
     <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!-- Launch seam: the system splash paints this as the window colour and the
+         in-app BrandSplash uses it as its base, so the handoff has no flash.
+         White = the inverse of the member app's blue icon plate. -->
+    <color name="splash_background">#FFFFFFFF</color>
+    <color name="brand_blue">#2563EB</color>
 </resources>

@@ -6,6 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
 class MainActivity : ComponentActivity() {
@@ -14,7 +18,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MaterialTheme(colorScheme = PartnerColors) {
+                // The app composes immediately behind the splash; the branded
+                // moment is a time-boxed overlay, not a gate on any network work.
+                var showSplash by remember { mutableStateOf(true) }
                 PartnerApp()
+                if (showSplash) {
+                    BrandSplash(onFinished = { showSplash = false })
+                }
             }
         }
     }
