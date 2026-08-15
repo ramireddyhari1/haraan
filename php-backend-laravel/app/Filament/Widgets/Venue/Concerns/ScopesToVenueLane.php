@@ -7,6 +7,8 @@ namespace App\Filament\Widgets\Venue\Concerns;
 use App\Filament\Resources\Venues\VenueResource;
 use App\Models\Booking;
 use App\Models\Venue;
+use App\Support\PartnerBranchContext;
+use App\Support\PartnerLane;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -32,10 +34,17 @@ trait ScopesToVenueLane
     protected const LIVE_STATUSES = ['confirmed', 'paid', 'completed', 'checked_in'];
 
     /**
-     * The venue lane, and only the venue lane.
+     * The branch-operating lanes — sports venues AND cafés, never event hosts.
      *
-     * Partners without a `partner_type` fall back to venue — the historical
-     * default — so legacy accounts aren't stranded with a blank dashboard.
+     * These widgets are shared by both because their arithmetic is identical:
+     * money collected, bookings taken, peak hours, who is coming. Only the NOUN
+     * differs (a court vs a table), and that resolves through
+     * {@see resourceNoun()} rather than by forking four widgets — a fork would
+     * mean every future fix has to be made twice, and one copy would rot.
+     *
+     * What must never happen is a café silently inheriting SPORTS language. That
+     * is why the lane is separate and the noun is looked up per lane, instead of
+     * "not the events lane" standing in for "a turf".
      */
     public static function canView(): bool
     {
@@ -43,13 +52,48 @@ trait ScopesToVenueLane
             return false;
         }
 
-        return auth()->user()?->partner_type !== 'event';
+        $lane = auth()->user()?->partnerLane();
+
+        return $lane !== null && PartnerLane::isBranchLane($lane);
     }
 
-    /** This partner's venues, already org/partner-scoped by the resource. */
+    /** This viewer's lane. Widgets use it to pick their vocabulary. */
+    protected function lane(): string
+    {
+        return auth()->user()?->partnerLane() ?? PartnerLane::GAMEHUB;
+    }
+
+    /** "court" / "table" — what a bookable unit is called in this lane. */
+    protected function resourceNoun(bool $plural = false): string
+    {
+        return PartnerLane::resourceNoun($this->lane(), $plural);
+    }
+
+    /** "court-hours" / "table-hours" — the occupancy denominator's unit. */
+    protected function resourceHours(): string
+    {
+        return PartnerLane::resourceHours($this->lane());
+    }
+
+    /**
+     * The venues these widgets read, already org/partner-scoped by the resource
+     * and then narrowed to the branch the topbar switcher has selected.
+     *
+     * The switcher would be decoration without this line: every number on this
+     * dashboard flows through here, so selecting "Koramangala" changes the whole
+     * page rather than just the label above it. No selection means all branches,
+     * which is both the default and what a single-branch partner always gets.
+     *
+     * The narrowing is a filter on an already-scoped query, never a replacement
+     * for it — a tampered session value can only ever select a branch the
+     * resource query would have returned anyway.
+     */
     protected function venueIds(): Builder
     {
-        return VenueResource::getEloquentQuery()->select('venues.id');
+        $query = VenueResource::getEloquentQuery()->select('venues.id');
+        $branchId = PartnerBranchContext::currentId();
+
+        return $branchId === null ? $query : $query->where('venues.id', $branchId);
     }
 
     /** @return \Illuminate\Support\Collection<int, Venue> */

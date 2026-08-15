@@ -172,6 +172,105 @@ class PartnerPanelProvider extends PanelProvider
             BLADE),
         );
 
+        // Branch switcher — the one control that turns a single-venue console into
+        // a chain's. Pinned in the topbar on every page, because switching branch
+        // is a filter, not a destination: nobody should have to walk
+        // Settings → Branches → Koramangala → Dashboard to change what they're
+        // looking at.
+        //
+        // Renders only for partners with more than one branch. A dropdown with a
+        // single option is chrome that does nothing, so today's partners see no
+        // change at all and the control appears on its own the day someone opens
+        // a second outlet.
+        //
+        // Native <details> rather than Alpine: the topbar hook is a string of
+        // Blade, this needs no state beyond open/closed, and a POST form means the
+        // selection survives without any JS at all.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::TOPBAR_START,
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner'
+                || ! \App\Support\PartnerBranchContext::isMultiBranch()
+                    ? ''
+                    : Blade::render(<<<'BLADE'
+                @php
+                    $branches = \App\Support\PartnerBranchContext::branches();
+                    $currentId = \App\Support\PartnerBranchContext::currentId();
+                    $label = \App\Support\PartnerBranchContext::label();
+                @endphp
+                <details class="hrn-branch" name="hrn-branch">
+                    <summary class="hrn-branch-btn" title="Switch branch">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="hrn-branch-pin">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z"/>
+                            <circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        <span class="hrn-branch-label">{{ $label }}</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="hrn-branch-chev">
+                            <path d="m6 9 6 6 6-6"/>
+                        </svg>
+                    </summary>
+                    <form method="POST" action="{{ route('partner.branch.switch') }}" class="hrn-branch-menu">
+                        @csrf
+                        <button type="submit" name="venue_id" value=""
+                                class="hrn-branch-item @if ($currentId === null) is-on @endif">
+                            <span class="hrn-branch-item-name">All branches</span>
+                            <span class="hrn-branch-item-sub">{{ $branches->count() }} outlets</span>
+                        </button>
+                        <div class="hrn-branch-rule"></div>
+                        @foreach ($branches as $b)
+                            <button type="submit" name="venue_id" value="{{ $b->id }}"
+                                    class="hrn-branch-item @if ($currentId === $b->id) is-on @endif">
+                                <span class="hrn-branch-item-name">{{ $b->branchName() }}</span>
+                                <span class="hrn-branch-item-sub">
+                                    {{ $b->branch_code ?: $b->city ?: $b->location }}
+                                    @unless ($b->is_active) · inactive @endunless
+                                </span>
+                            </button>
+                        @endforeach
+                    </form>
+                </details>
+                <style>
+                    .hrn-branch{position:relative;margin-inline-start:.5rem;}
+                    .hrn-branch-btn{display:flex;align-items:center;gap:6px;cursor:pointer;
+                        list-style:none;padding:6px 10px;border-radius:10px;
+                        background:#f2f6fd;box-shadow:inset 0 0 0 1px #e2e9f5;
+                        font-size:13px;font-weight:600;color:#1e3a6b;max-width:15rem;}
+                    .hrn-branch-btn::-webkit-details-marker{display:none;}
+                    .hrn-branch-btn:hover{background:#e9f0fc;}
+                    .hrn-branch-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+                    .hrn-branch-pin{width:15px;height:15px;flex:none;opacity:.75;}
+                    .hrn-branch-chev{width:14px;height:14px;flex:none;opacity:.6;transition:transform .15s;}
+                    .hrn-branch[open] .hrn-branch-chev{transform:rotate(180deg);}
+                    .hrn-branch-menu{position:absolute;z-index:50;inset-inline-start:0;top:calc(100% + 6px);
+                        min-width:15rem;max-height:60vh;overflow-y:auto;padding:5px;
+                        background:#fff;border-radius:13px;
+                        box-shadow:0 10px 34px rgba(15,23,42,.16),0 0 0 1px #e9edf4;}
+                    .hrn-branch-item{display:flex;flex-direction:column;gap:1px;width:100%;
+                        padding:8px 10px;border-radius:9px;text-align:start;cursor:pointer;
+                        background:none;border:0;}
+                    .hrn-branch-item:hover{background:#f4f7fb;}
+                    .hrn-branch-item.is-on{background:#eef4ff;}
+                    .hrn-branch-item-name{font-size:13px;font-weight:600;color:#0b1220;}
+                    .hrn-branch-item-sub{font-size:11px;color:#6b7688;}
+                    .hrn-branch-rule{height:1px;margin:4px 6px;background:#eef1f6;}
+                    /* The switcher matters more than the mobile logo — keep it, and let
+                       the label shrink rather than push the topbar into a scroll. */
+                    @media (max-width:640px){
+                        .hrn-branch-btn{max-width:9rem;padding:6px 8px;}
+                        .hrn-branch-menu{min-width:13rem;}
+                    }
+                    .dark .hrn-branch-btn{background:#1c2432;box-shadow:inset 0 0 0 1px #2a3446;color:#dbe6fb;}
+                    .dark .hrn-branch-btn:hover{background:#222c3d;}
+                    .dark .hrn-branch-menu{background:#151b26;box-shadow:0 10px 34px rgba(0,0,0,.5),0 0 0 1px #2a3446;}
+                    .dark .hrn-branch-item:hover{background:#1c2432;}
+                    .dark .hrn-branch-item.is-on{background:#1d2a44;}
+                    .dark .hrn-branch-item-name{color:#eef2f8;}
+                    .dark .hrn-branch-item-sub{color:#9aa6b8;}
+                </style>
+            BLADE),
+        );
+
         // Premium sidebar pass: an identity card pinned to the footer (who + which
         // workspace + quiet sign-out) plus a nav polish sheet — accent-rail active
         // state, more breathing room, and clearer section labels.

@@ -18,7 +18,8 @@ final class Venue extends Model
     protected string $contentDomain = 'venues';
 
     protected $fillable = [
-        'name', 'category', 'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
+        'name', 'category', 'kind', 'branch_label', 'branch_code', 'capabilities',
+        'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
         'price', 'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
@@ -28,6 +29,7 @@ final class Venue extends Model
     protected $casts = [
         'images' => 'array',
         'amenities' => 'array',
+        'capabilities' => 'array',
         'sports' => 'array',
         'rules' => 'array',
         'price_chart' => 'array',
@@ -54,6 +56,25 @@ final class Venue extends Model
         $list = array_merge([$this->category], $list);
 
         return array_values(array_unique(array_filter(array_map('trim', $list))));
+    }
+
+    /**
+     * What to call this branch in the partner console — the explicit label, else
+     * the area, else the venue name. Never blank.
+     *
+     * A chain's venues usually share one brand name ("Big Bean Coffee"), so the
+     * switcher and every internal table must show the branch, not the brand, or
+     * the column reads as the same word three times.
+     */
+    public function branchName(): string
+    {
+        foreach ([$this->branch_label, $this->location, $this->name] as $candidate) {
+            if (trim((string) $candidate) !== '') {
+                return trim((string) $candidate);
+            }
+        }
+
+        return 'Branch';
     }
 
     public function slots(): HasMany

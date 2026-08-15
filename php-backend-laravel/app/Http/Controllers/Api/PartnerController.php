@@ -24,6 +24,8 @@ use App\Services\BookingService;
 use App\Services\PartnerSettlement;
 use App\Services\RazorpayGateway;
 use App\Support\BookingReport;
+use App\Support\PartnerCapabilities;
+use App\Support\PartnerLane;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
@@ -54,14 +56,140 @@ class PartnerController extends Controller
     ) {
     }
 
+    /**
+     * The branch behind a `{id}` route parameter, or a 404.
+     *
+     * Every venue-scoped endpoint resolves its branch through here so the tenant
+     * boundary and the per-staff branch assignment are applied in exactly one
+     * place. `User::branches()` is always a real query, so a branch the caller may
+     * not touch is not "forbidden" — it does not exist, and `findOrFail` says 404
+     * rather than leaking that the id belongs to a sibling branch.
+     */
+    private function branch(Request $request, string $id): Venue
+    {
+        return $request->user()->branches()->findOrFail($id);
+    }
+
+    /**
+     * Branches in play for a request: all the caller may see, or just the one they
+     * asked for with `?venue_id=`.
+     *
+     * The business-level screens (overview, bookings, customers, payouts) sum
+     * across every branch by default — that is the owner's "All branches" view.
+     * Passing a branch id narrows them to it, which is what the switcher does.
+     * An id the caller may not reach yields an empty set rather than an error, so
+     * a stale switcher selection reads as "nothing here" instead of a broken page.
+     *
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private function branchIds(Request $request)
+    {
+        $query = $request->user()->branches();
+        $only = $this->branchFilter($request);
+
+        if ($only !== null) {
+            $query->where('id', $only);
+        }
+
+        return $query->pluck('id');
+    }
+
+    /** The `?venue_id=` the caller asked to narrow to, or null for all branches. */
+    private function branchFilter(Request $request): ?int
+    {
+        $raw = $request->query('venue_id');
+
+        return (is_string($raw) && $raw !== '' && ctype_digit($raw)) ? (int) $raw : null;
+    }
+
+    /**
+     * GET /api/partner/context — who this is, what they run, and which branches
+     * they may act on. The first call a client makes after signing in.
+     *
+     * Everything the shell needs to draw itself comes from here, so the app never
+     * has to infer its own shape:
+     *
+     *   business.capabilities   which sections exist at all
+     *   branches[]              what the switcher offers — already scoped, so a
+     *                           desk person is simply not told the others exist
+     *   altitude                owner | manager | desk — which nav graph to mount
+     *
+     * `altitude` decides layout, never access. A client that ignores it and calls
+     * a branch endpoint it shouldn't still gets a 404 from {@see branch()}.
+     */
+    public function context(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $owner = $user->isDeskStaff()
+            ? User::query()->find($user->effectivePartnerId())
+            : $user;
+
+        // A desk person whose owner row has vanished has no business to belong to;
+        // fall back to their own record rather than dereferencing null.
+        $owner ??= $user;
+
+        $businessCaps = PartnerCapabilities::forBusiness($owner);
+
+        $branches = $user->branches()
+            ->orderBy('branch_label')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Venue $v): array => [
+                'id'           => $v->id,
+                'name'         => $v->name,
+                'branch'       => $v->branchName(),
+                'code'         => $v->branch_code,
+                'kind'         => $v->kind ?? 'sports',
+                'city'         => $v->city ?? $v->location ?? null,
+                'is_active'    => (bool) $v->is_active,
+                'capabilities' => PartnerCapabilities::forBranch($v, $owner),
+            ])
+            ->values();
+
+        return response()->json([
+            'business' => [
+                'id'   => $owner->id,
+                'name' => $owner->name,
+                // ONE dimension. `type` is the stored value the app already knows
+                // ('event' | 'venue' | 'cafe'); `lane` is the console it mounts,
+                // derived, so a client never has to hold the mapping itself.
+                'type'         => $owner->partner_type ?? 'venue',
+                'type_label'   => PartnerLane::typeLabel($owner->partner_type),
+                'lane'         => $owner->partnerLane(),
+                'capabilities' => $businessCaps,
+            ],
+            'user' => [
+                'id'          => $user->id,
+                'name'        => $user->name,
+                'altitude'    => $user->partnerAltitude(),
+                'permissions' => $user->isDeskStaff()
+                    ? ($user->staff_permissions ?? [])
+                    : User::STAFF_PERMISSIONS,
+            ],
+            'branches' => $branches,
+        ]);
+    }
+
     /** GET /api/partner/overview — headline numbers for the home screen. */
     public function overview(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
         $today = now()->toDateString();
 
-        $eventIds = Event::query()->where('partner_id', $partnerId)->pluck('id');
-        $venueIds = Venue::query()->where('partner_id', $partnerId)->pluck('id');
+        $venueIds = $this->branchIds($request);
+        $onOneBranch = $this->branchFilter($request) !== null;
+
+        // Events carry a partner, never a venue, so there is no honest way to say
+        // which BRANCH an event belongs to. Rather than let a chain's ticket
+        // revenue land inside one branch's total — "Koramangala made ₹4L" when
+        // most of it was a citywide event — a branch-scoped overview drops events
+        // from the money entirely and says so in `scope`.
+        //
+        // Attributing events to a branch needs `events.venue_id`; until that
+        // exists, silence is the only truthful answer here.
+        $eventIds = $onOneBranch
+            ? collect()
+            : Event::query()->where('partner_id', $partnerId)->pluck('id');
 
         $paid = fn () => Booking::query()
             ->where('status', self::PAID)
@@ -69,8 +197,8 @@ class PartnerController extends Controller
                 $q->whereIn('event_id', $eventIds)->orWhereIn('venue_id', $venueIds);
             });
 
-        // 14-day revenue trend across all of the partner's events + venues, for
-        // the home hero sparkline. Gaps filled with 0.
+        // 14-day revenue trend across everything in scope, for the home hero
+        // sparkline. Gaps filled with 0.
         $start = now()->startOfDay()->subDays(13);
         $rows = (clone $paid())->where('created_at', '>=', $start)->get(['total_amount', 'created_at']);
         $byDay = [];
@@ -87,9 +215,16 @@ class PartnerController extends Controller
                 'name' => $request->user()->name,
                 'type' => $request->user()->partner_type, // 'event' | 'venue' | null
             ],
+            // What these numbers actually cover, so the app can title the screen
+            // "Koramangala" vs "All branches" instead of guessing from its own state.
+            'scope' => [
+                'venue_id'        => $this->branchFilter($request),
+                'branches'        => $venueIds->count(),
+                'includes_events' => ! $onOneBranch,
+            ],
             'events' => [
                 'total'    => $eventIds->count(),
-                'upcoming' => Event::query()->where('partner_id', $partnerId)
+                'upcoming' => $onOneBranch ? 0 : Event::query()->where('partner_id', $partnerId)
                     ->whereDate('date', '>=', $today)->count(),
             ],
             'venues' => [
@@ -149,10 +284,8 @@ class PartnerController extends Controller
     /** GET /api/partner/venues — the partner's own venues with a bookings rollup. */
     public function venues(Request $request): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-
-        $venues = Venue::query()
-            ->where('partner_id', $partnerId)
+        $venues = $request->user()->branches()
+            ->orderBy('branch_label')
             ->orderBy('name')
             ->get()
             ->map(fn (Venue $v): array => $this->venueSummary($v));
@@ -163,9 +296,7 @@ class PartnerController extends Controller
     /** GET /api/partner/venues/{id} — one venue, its slots and upcoming bookings. */
     public function showVenue(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-
-        $venue = Venue::query()->with('slots')->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $request->user()->branches()->with('slots')->findOrFail($id);
 
         $bookings = Booking::query()
             ->where('venue_id', $venue->id)
@@ -192,19 +323,28 @@ class PartnerController extends Controller
     public function bookings(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
+        $venueIds = $this->branchIds($request);
+        // Same rule as overview(): an event has no branch, so narrowing to one
+        // branch drops events rather than pretending they happened there.
+        $onOneBranch = $this->branchFilter($request) !== null;
 
         $bookings = Booking::query()
-            ->where(function ($q) use ($partnerId): void {
-                $q->whereHas('event', fn ($e) => $e->where('partner_id', $partnerId))
-                    ->orWhereHas('venue', fn ($v) => $v->where('partner_id', $partnerId));
+            ->where(function ($q) use ($partnerId, $venueIds, $onOneBranch): void {
+                $q->whereIn('venue_id', $venueIds);
+
+                if (! $onOneBranch) {
+                    $q->orWhereHas('event', fn ($e) => $e->where('partner_id', $partnerId));
+                }
             })
-            ->with(['event:id,title', 'venue:id,name'])
+            ->with(['event:id,title', 'venue:id,name,branch_label'])
             ->latest()
             ->limit(100)
             ->get()
             ->map(fn (Booking $b): array => $this->bookingSummary($b) + [
-                'event' => $b->event?->title,
-                'venue' => $b->venue?->name,
+                'event'  => $b->event?->title,
+                'venue'  => $b->venue?->name,
+                // Which outlet took it — the only way to read a mixed chain feed.
+                'branch' => $b->venue?->branchName(),
             ]);
 
         return response()->json(['data' => $bookings]);
@@ -273,8 +413,7 @@ class PartnerController extends Controller
      */
     public function venueDay(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $date = $request->query('date');
         $date = is_string($date) && strtotime($date) ? date('Y-m-d', strtotime($date)) : now()->toDateString();
@@ -361,10 +500,11 @@ class PartnerController extends Controller
             'customerPackageId' => ['nullable', 'integer'],
         ]);
 
-        // Scope the venue to the acting partner before booking — a caller must not be
-        // able to create a booking on another tenant's venue by passing its id.
+        // Resolve the branch before booking — a caller must not be able to create a
+        // booking on another tenant's venue, or on a branch of their own business
+        // they were never assigned to, by passing its id.
         $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $booking = $this->bookings->createOfflineVenueBooking(
             $request->user(),
@@ -387,26 +527,34 @@ class PartnerController extends Controller
         if ($method === 'package') {
             // Spend a session instead of taking money. The pass was already paid
             // for when it was sold, so the booking is settled without a payment.
+            // A pass locked to another branch is not spendable here, however many
+            // sessions are left on it — so the branch filter is part of finding the
+            // pass, not a check applied to the one we happened to pick first.
             $pkg = CustomerPackage::query()
                 ->where('partner_id', $partnerId)
+                ->usableAtVenue((int) $venue->id)
                 ->when(! empty($data['customerPackageId']), fn ($q) => $q->where('id', $data['customerPackageId']))
                 ->when(empty($data['customerPackageId']), fn ($q) => $q->where('customer_phone', (string) $this->digits($data['guestPhone'] ?? '')))
                 ->with('package')->withCount('redemptions')
                 ->orderBy('expires_at')
                 ->get()
-                ->first(fn (CustomerPackage $c): bool => $c->isUsable());
+                ->first(fn (CustomerPackage $c): bool => $c->isUsableAt((int) $venue->id));
 
             if ($pkg === null) {
                 // Refuse rather than silently charge: the desk chose "use a pass",
                 // and quietly making it payable would be a different transaction.
                 $booking->delete();
 
-                return response()->json(['error' => 'No usable package for that customer.'], 422);
+                return response()->json([
+                    'error' => 'No usable package for that customer at '.$venue->branchName().'.',
+                ], 422);
             }
 
             PackageRedemption::query()->create([
-                'customer_package_id' => $pkg->id,
-                'booking_id'          => $booking->id,
+                'customer_package_id'  => $pkg->id,
+                'booking_id'           => $booking->id,
+                // Which branch gave the session away — unrecoverable afterwards.
+                'redeemed_at_venue_id' => $venue->id,
             ]);
 
             // Zero-rate the booking so it can't also appear as money owed.
@@ -479,13 +627,11 @@ class PartnerController extends Controller
             'linkId' => ['required', 'string', 'max:64'],
         ]);
 
-        $partnerId = $request->user()->effectivePartnerId();
-
-        // Scope to the acting partner: a booking id alone must not expose another
-        // tenant's payment state.
+        // Scope to the branches this caller may act on: a booking id alone must not
+        // expose another tenant's — or another branch's — payment state.
         $booking = Booking::query()
             ->where('id', $id)
-            ->whereIn('venue_id', Venue::query()->where('partner_id', $partnerId)->select('id'))
+            ->whereIn('venue_id', $request->user()->branches()->select('id'))
             ->firstOrFail();
 
         if (strtolower((string) $booking->payment_status) === 'paid') {
@@ -533,8 +679,7 @@ class PartnerController extends Controller
     /** POST /api/partner/venues/{id}/block — close a date (maintenance/holiday). */
     public function blockDate(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $request->validate(['date' => ['required', 'date']]);
 
         VenueBlockedDate::query()->firstOrCreate([
@@ -548,8 +693,7 @@ class PartnerController extends Controller
     /** DELETE /api/partner/venues/{id}/block — reopen a previously closed date. */
     public function unblockDate(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $request->validate(['date' => ['required', 'date']]);
 
         VenueBlockedDate::query()->where('venue_id', $venue->id)
@@ -695,12 +839,16 @@ class PartnerController extends Controller
                 'per_session'   => $p->perSession(),
                 'validity_days' => $p->validity_days,
                 'is_active'     => $p->is_active,
+                // Null = sellable and spendable at every branch.
+                'venue_id'      => $p->venue_id,
             ]);
 
-        // Active holders — the desk's "who's on a pass" list.
+        // Active holders — the desk's "who's on a pass" list, narrowed to passes
+        // this branch can actually honour when a branch is selected.
         $holders = CustomerPackage::query()
             ->where('partner_id', $partnerId)
-            ->with('package:id,name')
+            ->usableAtVenue($this->branchFilter($request))
+            ->with('package:id,name,venue_id')
             ->withCount('redemptions')
             ->orderByDesc('created_at')
             ->limit(200)
@@ -730,8 +878,7 @@ class PartnerController extends Controller
         // attach an offer to another tenant's venue.
         $venueId = null;
         if (! empty($data['venueId'])) {
-            $venueId = (int) Venue::query()->where('partner_id', $partnerId)
-                ->findOrFail($data['venueId'])->id;
+            $venueId = (int) $this->branch($request, (string) $data['venueId'])->id;
         }
 
         $attrs = [
@@ -763,6 +910,9 @@ class PartnerController extends Controller
             'customerPhone' => ['required', 'string', 'max:20'],
             'customerName'  => ['nullable', 'string', 'max:120'],
             'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card'],
+            // Which branch's desk took the money. Optional so a single-branch
+            // partner's existing app build keeps working unchanged.
+            'venueId'       => ['nullable', 'integer'],
         ]);
 
         $partnerId = $request->user()->effectivePartnerId();
@@ -774,9 +924,20 @@ class PartnerController extends Controller
             return response()->json(['error' => 'A valid phone number is required.'], 422);
         }
 
+        // Credit the sale to the branch that made it: the one the desk says it is
+        // at, else the branch the offer is locked to. A chain-wide pass sold by a
+        // client that doesn't send a branch stays null rather than being credited
+        // to an arbitrary one — an unattributed sale is recoverable, a wrongly
+        // attributed one silently distorts every branch report built on it.
+        $soldAt = $data['venueId'] ?? null;
+        $soldAt = $soldAt !== null
+            ? (int) $this->branch($request, (string) $soldAt)->id
+            : $package->venue_id;
+
         $sold = CustomerPackage::query()->create([
             'venue_package_id' => $package->id,
             'partner_id'       => $partnerId,
+            'sold_at_venue_id' => $soldAt,
             'customer_phone'   => $phone,
             'customer_name'    => $data['customerName'] ?? null,
             'sessions_total'   => $package->sessions,
@@ -794,13 +955,21 @@ class PartnerController extends Controller
     }
 
     /**
-     * GET /api/partner/packages/holder?phone= — what this number has left.
-     * Drives the walk-in sheet's "use a session" option.
+     * GET /api/partner/packages/holder?phone=&venue_id= — what this number has
+     * left, and may actually spend HERE. Drives the walk-in sheet's "use a
+     * session" option.
+     *
+     * The branch filter is not cosmetic. Without it a pass sold as "Koramangala
+     * only" is offered by every other branch's desk, the desk spends it, and the
+     * customer has been given a session the offer never entitled them to. The
+     * query used to filter on `partner_id` alone, which was invisible while every
+     * partner had exactly one venue and wrong the day one had two.
      */
     public function packageHolder(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
         $phone = $this->digits((string) $request->query('phone', ''));
+        $venueId = $this->branchFilter($request);
 
         if ($phone === null) {
             return response()->json(['data' => []]);
@@ -809,11 +978,12 @@ class PartnerController extends Controller
         $rows = CustomerPackage::query()
             ->where('partner_id', $partnerId)
             ->where('customer_phone', $phone)
-            ->with('package:id,name')
+            ->usableAtVenue($venueId)
+            ->with('package:id,name,venue_id')
             ->withCount('redemptions')
             ->get()
+            ->filter(fn (CustomerPackage $c): bool => $c->isUsableAt($venueId))
             ->map(fn (CustomerPackage $c): array => $this->holderRow($c))
-            ->filter(fn (array $r): bool => $r['usable'])
             ->values();
 
         return response()->json(['data' => $rows]);
@@ -835,6 +1005,9 @@ class PartnerController extends Controller
             'expires_at' => optional($c->expires_at)->toDateString(),
             'expired'    => $c->isExpired(),
             'usable'     => max($c->sessions_total - $used, 0) > 0 && ! $c->isExpired(),
+            // Null = valid at every branch. The desk needs to see this before it
+            // promises a customer their pass works somewhere it doesn't.
+            'valid_at_venue_id' => $c->package?->venue_id,
         ];
     }
 
@@ -1083,8 +1256,7 @@ class PartnerController extends Controller
     /** GET /api/partner/venues/{id}/courts — courts with their base + peak pricing. */
     public function venueCourts(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $courts = VenueCourt::query()->where('venue_id', $venue->id)
             ->orderBy('sort_order')->get()
@@ -1114,8 +1286,7 @@ class PartnerController extends Controller
             'peakEnd'   => ['nullable', 'string', 'max:5'],
         ]);
 
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
         $court = VenueCourt::query()->where('venue_id', $venue->id)->findOrFail($courtId);
 
         if (array_key_exists('price', $data)) {
@@ -1173,8 +1344,7 @@ class PartnerController extends Controller
     /** GET /api/partner/venues/{id}/slots — the venue's price/slot rows. */
     public function venueSlots(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $slots = VenueSlot::query()->where('venue_id', $venue->id)->orderBy('sort_order')->get()
             ->map(fn (VenueSlot $s): array => $this->slotRow($s));
@@ -1188,8 +1358,7 @@ class PartnerController extends Controller
      */
     public function saveSlot(Request $request, string $id, ?string $slotId = null): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $data = $request->validate([
             'day'      => ['nullable', 'string', 'max:40'],
@@ -1228,8 +1397,7 @@ class PartnerController extends Controller
     /** DELETE /api/partner/venues/{id}/slots/{slotId} — remove a slot. */
     public function deleteSlot(Request $request, string $id, string $slotId): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         VenueSlot::query()->where('venue_id', $venue->id)->where('id', $slotId)->delete();
 
@@ -1351,8 +1519,7 @@ class PartnerController extends Controller
      */
     public function venueAnalytics(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $venue = Venue::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $paid = fn () => Booking::query()->where('booking_type', 'venue')
             ->where('venue_id', $venue->id)
@@ -1451,6 +1618,9 @@ class PartnerController extends Controller
         return [
             'id'       => $v->id,
             'name'     => $v->name,
+            'branch'   => $v->branchName(),
+            'code'     => $v->branch_code,
+            'kind'     => $v->kind ?? 'sports',
             'location' => $v->location ?? null,
             'bookings' => (clone $paid)->count(),
             'revenue'  => round((float) (clone $paid)->sum('total_amount'), 2),

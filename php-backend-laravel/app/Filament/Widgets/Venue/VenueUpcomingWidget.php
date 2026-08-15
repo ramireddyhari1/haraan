@@ -61,7 +61,9 @@ class VenueUpcomingWidget extends TableWidget
                     ->description(fn (Booking $record): ?string => $record->guest_phone),
 
                 TextColumn::make('venueCourt.name')
-                    ->label('Court')
+                    // A café books tables, not courts — same column, same row,
+                    // different word. See PartnerLane.
+                    ->label(ucfirst($this->resourceNoun()))
                     ->placeholder('—'),
 
                 TextColumn::make('channel')

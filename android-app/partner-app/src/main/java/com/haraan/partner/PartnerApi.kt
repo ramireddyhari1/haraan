@@ -57,6 +57,18 @@ class Session(context: Context) {
         return permission in set
     }
 
+    /**
+     * The branch the console is currently looking at, or null for "all branches".
+     *
+     * Stored as 0 rather than removed when cleared, so "all branches" is a real
+     * remembered choice and not indistinguishable from a fresh install. The
+     * selection is only ever a filter — the server decides what this account may
+     * actually reach, so a stale id here can leak nothing.
+     */
+    var branchId: Long?
+        get() = prefs.getLong("branch_id", 0L).takeIf { it > 0L }
+        set(value) = prefs.edit().putLong("branch_id", value ?: 0L).apply()
+
     /** Highest booking id we've already surfaced as a "new booking" alert. */
     var lastNotifiedBookingId: Long
         get() = prefs.getLong("last_notified_booking", 0L)
@@ -67,6 +79,7 @@ class Session(context: Context) {
     fun clear() {
         token = null; name = null; partnerType = null
         isDesk = false; permissionsCsv = null
+        branchId = null
         lastNotifiedBookingId = 0L
     }
 }
@@ -84,6 +97,49 @@ data class LoginResult(
 data class PhoneOtpStart(val channel: String, val token: String?)
 
 // ---- API response models ------------------------------------------------
+
+/**
+ * One outlet of the business. `branch` is what to SHOW — a chain's venues all
+ * share the brand name ("Big Bean Coffee"), so a list of `name` reads as the
+ * same word three times.
+ */
+data class Branch(
+    val id: Long,
+    val name: String,
+    val branch: String,
+    val code: String?,
+    val kind: String,
+    val city: String?,
+    val isActive: Boolean,
+    val capabilities: List<String>,
+)
+
+/**
+ * The shell: who this is, what they run, and which branches they may act on.
+ * The first call after sign-in — the app never infers its own shape.
+ *
+ * `altitude` (owner | manager | desk) decides layout only. A client that ignores
+ * it and calls a branch endpoint it shouldn't still gets a 404 from the server.
+ */
+data class PartnerContext(
+    val businessName: String,
+    /** Stored partner type: 'event' | 'venue' | 'cafe'. One dimension, not two. */
+    val businessType: String,
+    /** Server-rendered label for it ("Café venue"), so the app holds no mapping. */
+    val typeLabel: String?,
+    /** The console this partner mounts: 'events' | 'gamehub' | 'cafe'. */
+    val lane: String?,
+    val capabilities: List<String>,
+    val altitude: String,
+    val permissions: List<String>,
+    val branches: List<Branch>,
+) {
+    /** A switcher with one option is chrome that does nothing. */
+    val isMultiBranch: Boolean get() = branches.size > 1
+
+    fun branchName(id: Long?): String =
+        branches.firstOrNull { it.id == id }?.branch ?: "All branches"
+}
 
 data class Overview(
     val name: String,
@@ -130,6 +186,8 @@ data class BookingSummary(
     val status: String?,
     val checkedIn: Int,
     val label: String?,
+    /** Which outlet took it. Null for event bookings, which have no branch. */
+    val branch: String? = null,
 )
 
 /** Result of a scan-and-check-in. */
@@ -381,8 +439,49 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         return LoginResult(token, name, user?.optStringOrNull("partnerType"), isDesk, perms)
     }
 
-    suspend fun overview(token: String): Overview = withContext(Dispatchers.IO) {
-        val o = JSONObject(get("/api/partner/overview", token))
+    /**
+     * GET /api/partner/context — the shell. Branches come back already scoped, so
+     * a desk person is simply never told the other outlets exist.
+     */
+    suspend fun context(token: String): PartnerContext = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/context", token))
+        val business = o.optJSONObject("business")
+        val user = o.optJSONObject("user")
+        val arr = o.optJSONArray("branches")
+
+        PartnerContext(
+            businessName = business?.optStringOrNull("name") ?: "Partner",
+            businessType = business?.optStringOrNull("type") ?: "venue",
+            typeLabel = business?.optStringOrNull("type_label"),
+            lane = business?.optStringOrNull("lane"),
+            capabilities = business?.optJSONArray("capabilities").toStringList(),
+            altitude = user?.optStringOrNull("altitude") ?: "owner",
+            permissions = user?.optJSONArray("permissions").toStringList(),
+            branches = if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                val b = arr.getJSONObject(i)
+                Branch(
+                    id = b.optLong("id"),
+                    name = b.optString("name"),
+                    branch = b.optStringOrNull("branch") ?: b.optString("name"),
+                    code = b.optStringOrNull("code"),
+                    kind = b.optStringOrNull("kind") ?: "sports",
+                    city = b.optStringOrNull("city"),
+                    isActive = b.optBoolean("is_active", true),
+                    capabilities = b.optJSONArray("capabilities").toStringList(),
+                )
+            },
+        )
+    }
+
+    /**
+     * `?venue_id=` when a branch is selected, else nothing — "all branches" is the
+     * absence of the parameter, matching the server's default.
+     */
+    private fun branchParam(venueId: Long?, separator: String = "?"): String =
+        if (venueId == null || venueId <= 0L) "" else "${separator}venue_id=$venueId"
+
+    suspend fun overview(token: String, venueId: Long? = null): Overview = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/overview" + branchParam(venueId), token))
         val events = o.getJSONObject("events")
         val venues = o.getJSONObject("venues")
         val sales = o.getJSONObject("sales")
@@ -435,8 +534,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         }
     }
 
-    suspend fun bookings(token: String): List<BookingSummary> = withContext(Dispatchers.IO) {
-        parseArray(get("/api/partner/bookings", token)) { o ->
+    suspend fun bookings(token: String, venueId: Long? = null): List<BookingSummary> = withContext(Dispatchers.IO) {
+        parseArray(get("/api/partner/bookings" + branchParam(venueId), token)) { o ->
             val label = o.optStringOrNull("event") ?: o.optStringOrNull("venue")
             BookingSummary(
                 id = o.optLong("id"),
@@ -446,6 +545,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 status = o.optStringOrNull("status"),
                 checkedIn = o.optInt("checked_in"),
                 label = label,
+                branch = o.optStringOrNull("branch"),
             )
         }
     }
@@ -605,8 +705,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     )
 
     /** GET /api/partner/packages — offers this venue sells + who holds a pass. */
-    suspend fun packages(token: String): PackagesPage = withContext(Dispatchers.IO) {
-        val o = JSONObject(get("/api/partner/packages", token))
+    suspend fun packages(token: String, venueId: Long? = null): PackagesPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/packages" + branchParam(venueId), token))
         val pk = o.optJSONArray("data")
         val hd = o.optJSONArray("holders")
         PackagesPage(
@@ -633,23 +733,38 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         Unit
     }
 
-    suspend fun sellPackage(token: String, packageId: Long, phone: String, name: String, method: String = "cash") = withContext(Dispatchers.IO) {
+    suspend fun sellPackage(
+        token: String,
+        packageId: Long,
+        phone: String,
+        name: String,
+        method: String = "cash",
+        venueId: Long? = null,
+    ) = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("customerPhone", phone).put("customerName", name).put("paymentMethod", method)
+        // Credit the sale to the branch the desk is standing in. Without this the
+        // server has no way to attribute it and leaves it null.
+        if (venueId != null && venueId > 0L) payload.put("venueId", venueId)
         post("/api/partner/packages/$packageId/sell", payload.toString(), token)
         Unit
     }
 
-    /** What this number has left — drives "use a session" on the walk-in sheet. */
-    suspend fun packageHolder(token: String, phone: String): List<PackageHolder> = withContext(Dispatchers.IO) {
+    /**
+     * What this number has left AND may spend here — drives "use a session" on the
+     * walk-in sheet. Passing the branch matters: a pass locked to another outlet
+     * must not be offered, or the desk spends a session the offer never covered.
+     */
+    suspend fun packageHolder(token: String, phone: String, venueId: Long? = null): List<PackageHolder> = withContext(Dispatchers.IO) {
         if (phone.length < 10) return@withContext emptyList()
-        val o = JSONObject(get("/api/partner/packages/holder?phone=$phone", token))
+        val o = JSONObject(get("/api/partner/packages/holder?phone=$phone" + branchParam(venueId, "&"), token))
         val arr = o.optJSONArray("data")
         if (arr == null) emptyList() else (0 until arr.length()).map { parseHolder(arr.getJSONObject(it)) }
     }
 
     /** GET /api/partner/customers — who books here, keyed on phone. */
-    suspend fun customers(token: String, query: String = ""): CustomersPage = withContext(Dispatchers.IO) {
-        val suffix = if (query.isBlank()) "" else "?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8")
+    suspend fun customers(token: String, query: String = "", venueId: Long? = null): CustomersPage = withContext(Dispatchers.IO) {
+        val q = if (query.isBlank()) "" else "?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val suffix = q + branchParam(venueId, if (q.isEmpty()) "?" else "&")
         val o = JSONObject(get("/api/partner/customers$suffix", token))
         val s = o.optJSONObject("summary")
         val arr = o.optJSONArray("data")
@@ -945,6 +1060,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
 
 private fun JSONObject.optStringOrNull(key: String): String? =
     if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() && it != "null" }
+
+/** A JSON array of strings, or an empty list when the key was absent or null. */
+private fun JSONArray?.toStringList(): List<String> =
+    if (this == null) emptyList() else (0 until length()).map { optString(it) }.filter { it.isNotBlank() }
 
 /** Formats a rupee amount with Indian digit grouping, e.g. 120000.0 -> "1,20,000". */
 fun formatInr(v: Double): String {

@@ -235,7 +235,7 @@ class PartnerPublicProfile extends Page implements HasForms
             'url' => url('/host/' . $slug),
             'isLive' => $missing === [],
             'missing' => $missing,
-            'isVenue' => $user->partner_type !== 'event',
+            'isVenue' => $user->partnerLane() === 'gamehub',
             'verified' => (bool) $profile?->isVerified(),
             'followers' => (int) ($this->insights['followers']['total'] ?? 0),
         ];

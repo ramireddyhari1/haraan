@@ -171,7 +171,12 @@ class PartnerResource extends Resource
                     return 'Password for the partner to sign in. When editing, leave blank to keep the current one.';
                 }),
             Select::make('partner_type')
-                ->options(['venue' => 'Venue owner', 'event' => 'Event organiser'])
+                // The single dimension: it picks the console AND the capability
+                // preset. A café was uncreatable before this option existed.
+                ->label('Partner type')
+                ->options(\App\Support\PartnerLane::TYPE_LABELS)
+                ->default('venue')
+                ->helperText('Decides which console they sign in to. Sports venues and cafés both take bookings; cafés also host events.')
                 ->native(false),
             Select::make('status')
                 ->options(['active' => 'Active', 'suspended' => 'Suspended'])
@@ -204,11 +209,9 @@ class PartnerResource extends Resource
                         ->label('Type')
                         ->badge()
                         ->color('info')
-                        ->formatStateUsing(fn (?string $state): string => match (strtolower((string) $state)) {
-                            'venue' => 'Venue owner',
-                            'event' => 'Event organiser',
-                            default => '—',
-                        }),
+                        ->formatStateUsing(fn (?string $state): string => \App\Support\PartnerLane::typeLabel(
+                            strtolower((string) $state),
+                        )),
                     TextEntry::make('email')
                         ->label('Email')
                         ->icon('heroicon-m-envelope')
@@ -252,6 +255,7 @@ class PartnerResource extends Resource
                     ->label('Type')
                     ->badge()
                     ->color('info')
+                    ->formatStateUsing(fn (?string $state): string => \App\Support\PartnerLane::typeLabel($state))
                     ->placeholder('—'),
                 TextColumn::make('status')
                     ->badge()
@@ -261,7 +265,7 @@ class PartnerResource extends Resource
             ->defaultSort('created_at', 'desc')
             ->filters([
                 SelectFilter::make('partner_type')
-                    ->options(['venue' => 'Venue owner', 'event' => 'Event organiser']),
+                    ->options(\App\Support\PartnerLane::TYPE_LABELS),
                 SelectFilter::make('status')
                     ->options(['active' => 'Active', 'suspended' => 'Suspended']),
             ])

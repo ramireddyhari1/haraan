@@ -79,6 +79,20 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasRoleEither(self::SUPER_ROLES);
     }
 
+    /**
+     * The console this partner signs in to — see {@see \App\Support\PartnerLane},
+     * which owns the lane list, the type→lane map and each lane's vocabulary.
+     *
+     * `partner_type` is the ONLY dimension here. It briefly shared the job with a
+     * `business_type` column, which was a mistake: two columns encoding one fact
+     * means they can disagree, and nothing could ever set the second one anyway
+     * (the admin never offered it). One type, one lane, one capability preset.
+     */
+    public function partnerLane(): string
+    {
+        return \App\Support\PartnerLane::forType($this->partner_type);
+    }
+
     /** Can this user manage a given workspace? Super-admins can manage all. */
     public function canManage(string $workspace): bool
     {
@@ -86,15 +100,10 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             return true;
         }
 
-        // Partners are lane-locked by partner_type: an event organiser only sees the
-        // Events lane, a venue owner only the GameHub (venue) lane. Partners without a
-        // type set fall back to GameHub, the historical default, so they aren't stranded.
+        // Partners are lane-locked by partner_type — see partnerLane().
         if ($this->hasRoleEither(['PARTNER'])) {
-            return match ($workspace) {
-                'events' => $this->partner_type === 'event',
-                'gamehub' => $this->partner_type !== 'event',
-                default => false,
-            };
+            return in_array($workspace, \App\Support\PartnerLane::ALL, true)
+                && $this->partnerLane() === $workspace;
         }
 
         return $this->hasRoleEither(self::WORKSPACE_ROLES[$workspace] ?? []);
@@ -294,6 +303,57 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     }
 
     /**
+     * Every branch this user may act on, as a query — the tenant boundary AND the
+     * per-staff assignment in one place.
+     *
+     * `scopedVenueIds()` answers "is this person restricted?" and returns null when
+     * they are not. That shape is right for a post-hoc check on a booking that has
+     * already been loaded, but it is the wrong shape for the ~20 places that fetch
+     * a branch BY ID, because forgetting the null case there fails open: the desk
+     * person reaches a branch they were never assigned to.
+     *
+     * So those callers use this instead. It is always a real query, it is never
+     * null, and a branch outside it simply does not exist as far as the caller is
+     * concerned — `findOrFail` turns a cross-branch id into a 404 rather than a
+     * 200 with someone else's day.
+     *
+     *     $venue = $user->branches()->findOrFail($id);   // scoped, always
+     *
+     * The frontend branch switcher is a convenience. This is the boundary.
+     */
+    public function branches(): \Illuminate\Database\Eloquent\Builder
+    {
+        $query = Venue::query()->where('partner_id', $this->effectivePartnerId());
+        $assigned = $this->scopedVenueIds();
+
+        return $assigned === null ? $query : $query->whereIn('id', $assigned);
+    }
+
+    /**
+     * How much of the business this user sees. Derived, never stored — the facts
+     * it reads from are already authoritative, and a stored copy would be a third
+     * thing to keep in sync with the other two.
+     *
+     *   owner    not desk staff          → every branch, business-level screens
+     *   manager  desk staff, all perms   → their branches, everything within them
+     *   desk     desk staff, some perms  → their branch, this shift
+     *
+     * Drives the nav graph and whether the branch switcher renders as a picker or
+     * as a static name. It is NOT an authorisation check — permissions and
+     * {@see branches()} remain the things that actually gate.
+     */
+    public function partnerAltitude(): string
+    {
+        if (! $this->isDeskStaff()) {
+            return 'owner';
+        }
+
+        $perms = is_array($this->staff_permissions) ? $this->staff_permissions : [];
+
+        return array_diff(self::STAFF_PERMISSIONS, $perms) === [] ? 'manager' : 'desk';
+    }
+
+    /**
      * The event ids this user is restricted to, or null for "all their owner's".
      *
      * @return array<int, int>|null
@@ -323,6 +383,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'organization_id',
         'status',
         'partner_type',
+        'capabilities',
         'event_host_id',
         'parent_partner_id',
         'staff_permissions',
@@ -526,6 +587,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'date_of_birth'     => 'date',
             'sport_attributes'  => 'array',
             'staff_permissions' => 'array',
+            'capabilities'      => 'array',
             'privacy_public_profile' => 'boolean',
             'privacy_show_stats'     => 'boolean',
             'privacy_show_district'  => 'boolean',

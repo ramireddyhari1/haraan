@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 final class CustomerPackage extends Model
 {
     protected $fillable = [
-        'venue_package_id', 'partner_id', 'customer_phone', 'customer_name',
+        'venue_package_id', 'partner_id', 'sold_at_venue_id', 'customer_phone', 'customer_name',
         'sessions_total', 'amount_paid', 'payment_method', 'expires_at',
     ];
 
@@ -58,5 +58,43 @@ final class CustomerPackage extends Model
     public function isUsable(): bool
     {
         return $this->remaining() > 0 && ! $this->isExpired();
+    }
+
+    /**
+     * Whether this pass may be spent at a given branch.
+     *
+     * A pass inherits its branch lock from the OFFER it was bought from:
+     * `venue_packages.venue_id` null means "any of this partner's branches", and a
+     * value means that one only. Where the pass was SOLD is irrelevant to where it
+     * may be used — a customer can buy a chain-wide pass at Koramangala and spend
+     * it at HSR, which is the whole point of selling one.
+     *
+     * Null `$venueId` means the caller isn't acting at a branch (a business-level
+     * report), so no branch restriction applies.
+     */
+    public function isUsableAt(?int $venueId): bool
+    {
+        if (! $this->isUsable()) {
+            return false;
+        }
+
+        $lockedTo = $this->package?->venue_id;
+
+        return $lockedTo === null || $venueId === null || (int) $lockedTo === $venueId;
+    }
+
+    /**
+     * Constrain a query to passes spendable at a branch — the SQL half of
+     * {@see isUsableAt()}, for the lists that must not load every row to filter.
+     */
+    public function scopeUsableAtVenue(\Illuminate\Database\Eloquent\Builder $query, ?int $venueId): void
+    {
+        if ($venueId === null) {
+            return;
+        }
+
+        $query->whereHas('package', function (\Illuminate\Database\Eloquent\Builder $p) use ($venueId): void {
+            $p->whereNull('venue_id')->orWhere('venue_id', $venueId);
+        });
     }
 }

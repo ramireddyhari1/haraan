@@ -402,6 +402,9 @@ Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
     ->controller(\App\Http\Controllers\Api\PartnerController::class)
     ->group(function (): void {
+        // The shell: business, capabilities, the branches this caller may act on,
+        // and their altitude. Every client calls this first.
+        Route::get('/context', 'context');
         Route::get('/overview', 'overview');
         Route::get('/events', 'events');
         Route::get('/events/{id}', 'showEvent')->whereNumber('id');

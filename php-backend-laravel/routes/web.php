@@ -241,6 +241,19 @@ Route::post('/auth/firebase-phone', [\App\Http\Controllers\Auth\FirebasePhoneAut
 // Partner console sign-in (phone OTP / Google / email) — the console's own login
 // page (/partner/login) posts here. Unlike the member flows above, these authenticate
 // ONLY existing PARTNER accounts and land on the partner dashboard (see PartnerAuthController).
+// The topbar branch switcher. A POST because it mutates session state, and it
+// returns to wherever the partner was rather than to a landing page — switching
+// branch should feel like changing a filter, not like navigating away.
+Route::post('/partner/branch', function (\Illuminate\Http\Request $request) {
+    $raw = $request->input('venue_id');
+
+    \App\Support\PartnerBranchContext::select(
+        (is_string($raw) || is_int($raw)) && ctype_digit((string) $raw) ? (int) $raw : null,
+    );
+
+    return back();
+})->middleware(['web', 'auth'])->name('partner.branch.switch');
+
 Route::controller(\App\Http\Controllers\Auth\PartnerAuthController::class)
     ->middleware('throttle:auth')
     ->group(function (): void {

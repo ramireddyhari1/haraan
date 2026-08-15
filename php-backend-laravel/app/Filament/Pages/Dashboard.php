@@ -14,10 +14,12 @@ use App\Filament\Widgets\Partner\PartnerRecentBookingsWidget;
 use App\Filament\Widgets\Partner\PartnerFunnelWidget;
 use App\Filament\Widgets\Partner\PartnerRevenueTrendWidget;
 use App\Filament\Widgets\Partner\PartnerTrafficSourcesWidget;
+use App\Filament\Widgets\Cafe\CafeWhatsOnWidget;
 use App\Filament\Widgets\Venue\VenueMoneyHealthWidget;
 use App\Filament\Widgets\Venue\VenuePeakHoursWidget;
 use App\Filament\Widgets\Venue\VenueTodayWidget;
 use App\Filament\Widgets\Venue\VenueUpcomingWidget;
+use App\Support\PartnerLane;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
@@ -132,14 +134,43 @@ class Dashboard extends BaseDashboard
             return parent::getWidgets();
         }
 
-        // The venue lane gets its own home. Until now it inherited the event
-        // host's widget list, ten of whose twelve widgets self-gate on
-        // partner_type === 'event' — so a venue owner signed in and landed on a
-        // near-empty dashboard. The events lane below is unchanged.
-        if (auth()->user()?->partner_type !== 'event') {
-            return $this->venueWidgets();
-        }
+        // Each lane gets its own home. This used to be a two-way split, and the
+        // fall-through was the trap: the event list below is ten widgets that all
+        // self-gate on `partner_type === 'event'`, so ANY lane that isn't handled
+        // explicitly lands here and renders nothing at all. That is exactly how
+        // the venue lane shipped hollow once already — and it is why adding the
+        // café lane meant adding its widget set in the same change, not after.
+        return match (auth()->user()?->partnerLane()) {
+            PartnerLane::GAMEHUB => $this->venueWidgets(),
+            PartnerLane::CAFE => $this->cafeWidgets(),
+            default => $this->eventWidgets(),
+        };
+    }
 
+    /**
+     * The café home.
+     *
+     * Shares the branch-lane widgets with a sports venue — the money and booking
+     * arithmetic is the same, and the nouns resolve per lane, so this reads
+     * "table-hours" where a turf reads "court-hours". What makes it a café
+     * console is what's added and what's left out: What's On is here, and
+     * nothing sports-shaped is.
+     */
+    private function cafeWidgets(): array
+    {
+        return [
+            PartnerQuickActionsWidget::class,
+            VenueTodayWidget::class,
+            CafeWhatsOnWidget::class,
+            VenueMoneyHealthWidget::class,
+            PartnerEarningsStatsWidget::class,
+            VenuePeakHoursWidget::class,
+            VenueUpcomingWidget::class,
+        ];
+    }
+
+    private function eventWidgets(): array
+    {
         return [
             PartnerQuickActionsWidget::class,
             // Premium "money hero" (dominant revenue + supporting KPIs), lane-aware

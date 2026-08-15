@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
@@ -55,6 +56,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -120,6 +123,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -824,13 +828,26 @@ private fun GradientCta(
 
 private enum class Tab(val label: String) { Home("Home"), Events("Events"), Venues("Venues"), Sales("Sales"), Scan("Scan") }
 
-/** Which lane the signed-in partner belongs to. Drives the whole shell. */
-private enum class Lane { EVENT, VENUE, BOTH }
+/**
+ * Which console the signed-in partner belongs to. Drives the whole shell.
+ *
+ * CAFE is its own lane, not a flavour of VENUE. A café owner reading "Courts"
+ * and turf language is looking at somebody else's business — the two share their
+ * booking arithmetic, but not their vocabulary and not their tabs.
+ */
+private enum class Lane { EVENT, VENUE, CAFE, BOTH }
 
 private fun laneOf(partnerType: String?): Lane = when (partnerType?.lowercase()) {
     "event", "host", "organiser", "organizer" -> Lane.EVENT
     "venue" -> Lane.VENUE
+    "cafe", "café" -> Lane.CAFE
     else -> Lane.BOTH // legacy / no type / admin → combined
+}
+
+/** What a bookable unit is called here: a turf has courts, a café has tables. */
+private fun resourceNoun(lane: Lane, plural: Boolean = false): String = when (lane) {
+    Lane.CAFE -> if (plural) "Tables" else "Table"
+    else -> if (plural) "Courts" else "Court"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -846,11 +863,11 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     val token = session.token ?: return
 
     if (showPackages) {
-        PackagesScreen(api, token, onBack = { showPackages = false })
+        PackagesScreen(api, token, session.branchId, onBack = { showPackages = false })
         return
     }
     if (showCustomers) {
-        CustomersScreen(api, token, onBack = { showCustomers = false })
+        CustomersScreen(api, token, session.branchId, onBack = { showCustomers = false })
         return
     }
     if (showPayouts) {
@@ -870,6 +887,25 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     // venue tabs and vice-versa. Sales is shared but relabelled per lane. The lane
     // seeds from the cached type and is corrected once the server confirms it.
     var lane by remember { mutableStateOf(laneOf(session.partnerType)) }
+
+    // The shell: which branches this account may act on, and at what altitude.
+    // Loaded once; a failure leaves ctx null, which renders exactly the
+    // single-branch console that shipped before branches existed — the switcher
+    // never becomes a way to lock someone out of their own app.
+    var ctx by remember { mutableStateOf<PartnerContext?>(null) }
+    var branchId by remember { mutableStateOf(session.branchId) }
+    LaunchedEffect(token) { ctx = runCatching { api.context(token) }.getOrNull() }
+
+    // A remembered branch the server no longer offers (reassigned, deactivated)
+    // must fall back to "all branches" rather than silently filtering everything
+    // to an outlet this person can't see.
+    LaunchedEffect(ctx) {
+        val known = ctx ?: return@LaunchedEffect
+        if (branchId != null && known.branches.none { it.id == branchId }) {
+            branchId = null
+            session.branchId = null
+        }
+    }
     val tabs = remember(lane) {
         buildList {
             add(Tab.Home)
@@ -900,8 +936,12 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     maxId > last -> {
                         val fresh = list.filter { it.id > last }
                         unseenBookings += fresh.size
+                        // Deliberately NOT branch-filtered: an owner wants to know
+                        // a booking landed anywhere, not only at the outlet they
+                        // happen to be looking at — so the alert names the branch.
                         bookingBanner = fresh.firstOrNull()?.let {
-                            "${it.label ?: "Booking"} · ₹" + formatInr(it.amount)
+                            val where = it.branch ?: it.label
+                            listOfNotNull(where, "₹" + formatInr(it.amount)).joinToString(" · ")
                         }
                         session.lastNotifiedBookingId = maxId
                         view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
@@ -927,6 +967,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             onAnalytics = { detail = AnalyticsTarget(AnalyticsKind.Venue, id, name) },
             canPricing = session.can("pricing"),
             canBookings = session.can("bookings"),
+            lane = lane,
         )
         return
     }
@@ -939,12 +980,21 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     scrolledContainerColor = Color.White,
                 ),
                 title = {
-                    Image(
-                        painter = painterResource(R.drawable.haraan_logo),
-                        contentDescription = "Haraan",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.height(22.dp),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.haraan_logo),
+                            contentDescription = "Haraan",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.height(22.dp),
+                        )
+                        ctx?.takeIf { it.isMultiBranch }?.let { known ->
+                            Spacer(Modifier.width(8.dp))
+                            BranchSwitcher(known, branchId) { picked ->
+                                branchId = picked
+                                session.branchId = picked
+                            }
+                        }
+                    }
                 },
                 actions = {
                     BellIcon(unseenBookings) { tab = Tab.Sales; unseenBookings = 0 }
@@ -988,7 +1038,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             }
             when (tab) {
                 Tab.Home -> HomeTab(
-                    api, token, session.name ?: "Partner", lane,
+                    api, token, session.name ?: "Partner", lane, branchId,
                     onPayouts = if (session.can("reports")) ({ showPayouts = true }) else null,
                     onCustomers = { showCustomers = true },
                     onPackages = if (session.can("pricing")) ({ showPackages = true }) else null,
@@ -1004,10 +1054,81 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 Tab.Venues -> VenuesTab(api, token) { id, name ->
                     manageVenue = id to name
                 }
-                Tab.Sales -> SalesTab(api, token)
+                Tab.Sales -> SalesTab(api, token, branchId)
                 Tab.Scan -> ScanTab(api, token)
             }
         }
+    }
+}
+
+/**
+ * The branch switcher — a chip in the topbar that opens the outlet list.
+ *
+ * Lives beside the wordmark rather than in the actions row because it answers
+ * "where am I", which is orientation, not an action. Switching is instant and
+ * global: no partner should walk a settings tree to change what they're looking
+ * at.
+ *
+ * Rendered only when there is more than one branch, so today's single-venue
+ * partners see no change at all.
+ */
+@Composable
+private fun BranchSwitcher(ctx: PartnerContext, selected: Long?, onSelect: (Long?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0x142F6BFF))
+                .clickable { open = true }
+                .padding(start = 9.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+        ) {
+            Icon(Icons.Filled.Place, null, tint = AuthAccentDeep, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(
+                ctx.branchName(selected),
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AuthAccentDeep,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 104.dp),
+            )
+            Icon(Icons.Filled.ExpandMore, null, tint = AuthAccentDeep, modifier = Modifier.size(15.dp))
+        }
+
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { BranchMenuRow("All branches", "${ctx.branches.size} outlets", selected == null) },
+                onClick = { onSelect(null); open = false },
+            )
+            ctx.branches.forEach { b ->
+                val sub = listOfNotNull(
+                    b.code ?: b.city,
+                    if (b.isActive) null else "inactive",
+                ).joinToString(" · ")
+                DropdownMenuItem(
+                    text = { BranchMenuRow(b.branch, sub, selected == b.id) },
+                    onClick = { onSelect(b.id); open = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BranchMenuRow(name: String, sub: String, isOn: Boolean) {
+    Column {
+        Text(
+            name,
+            fontSize = 13.5.sp,
+            fontWeight = if (isOn) FontWeight.Bold else FontWeight.SemiBold,
+            color = if (isOn) AuthAccentDeep else AuthInk,
+            maxLines = 1,
+        )
+        if (sub.isNotBlank()) Text(sub, fontSize = 11.sp, color = AuthMuted, maxLines = 1)
     }
 }
 
@@ -1019,9 +1140,18 @@ private fun iconFor(tab: Tab) = when (tab) {
     Tab.Scan -> Icons.Filled.QrCodeScanner
 }
 
-/** Venue owners see "Bookings" where event hosts see "Sales". */
-private fun labelFor(tab: Tab, lane: Lane): String =
-    if (tab == Tab.Sales && lane == Lane.VENUE) "Bookings" else tab.label
+/**
+ * Tab labels follow the lane's vocabulary.
+ *
+ * A venue takes "Bookings" where a host makes "Sales"; a café runs "Outlets"
+ * where a turf lists "Venues". The tab SET is already right for a café — it
+ * keeps Events, which a sports venue doesn't get — so only the words change.
+ */
+private fun labelFor(tab: Tab, lane: Lane): String = when {
+    tab == Tab.Sales && (lane == Lane.VENUE || lane == Lane.CAFE) -> "Bookings"
+    tab == Tab.Venues && lane == Lane.CAFE -> "Outlets"
+    else -> tab.label
+}
 
 /**
  * Loads data once, shows it, and lets the user swipe down to reload. Keeps the
@@ -1052,15 +1182,18 @@ private fun <T> RefreshableContent(key: Any?, load: suspend () -> T, content: @C
 private data class Tile(val icon: ImageVector, val label: String, val value: String, val hint: String)
 
 @Composable
-private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onPackages: (() -> Unit)? = null, onLane: (String?) -> Unit) {
-    RefreshableContent(token, load = { api.overview(token) }) { o ->
+private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, venueId: Long? = null, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onPackages: (() -> Unit)? = null, onLane: (String?) -> Unit) {
+    // The branch is part of the key, so picking one reloads rather than leaving
+    // the previous outlet's numbers under a new title.
+    RefreshableContent(token to venueId, load = { api.overview(token, venueId) }) { o ->
         // Report the server's authoritative type up so the tab bar matches.
         LaunchedEffect(o.type) { onLane(o.type) }
         // If the server knows a more specific lane than the cached one, honour it.
         val effective = if (o.type != null) laneOf(o.type) else lane
         val subtitle = when (effective) {
-            Lane.EVENT -> "Event organiser"
-            Lane.VENUE -> "Venue owner"
+            Lane.EVENT -> "Event host"
+            Lane.VENUE -> "Sports venue"
+            Lane.CAFE -> "Café venue"
             Lane.BOTH -> "Partner"
         }
         val tiles = when (effective) {
@@ -1074,6 +1207,15 @@ private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, on
                 Tile(Icons.Filled.Place, "Venues", o.venuesTotal.toString(), "turfs & spaces"),
                 Tile(Icons.Filled.ConfirmationNumber, "Bookings", o.bookingsTotal.toString(), "all-time"),
                 Tile(Icons.Filled.Today, "Today", o.bookingsToday.toString(), "bookings today"),
+            )
+            // A café counts outlets and the nights it hosts — never "turfs".
+            // Events are here and absent from the sports tiles above, which is
+            // the difference between the two lanes in one glance.
+            Lane.CAFE -> listOf(
+                Tile(Icons.Filled.Place, "Outlets", o.venuesTotal.toString(), "cafés & spaces"),
+                Tile(Icons.Filled.ConfirmationNumber, "Events", o.eventsTotal.toString(), "${o.eventsUpcoming} upcoming"),
+                Tile(Icons.Filled.Today, "Today", o.bookingsToday.toString(), "bookings today"),
+                Tile(Icons.Filled.ConfirmationNumber, "Bookings", o.bookingsTotal.toString(), "all-time"),
             )
             Lane.BOTH -> listOf(
                 Tile(Icons.Filled.ConfirmationNumber, "Events", o.eventsTotal.toString(), "${o.eventsUpcoming} upcoming"),
@@ -1546,6 +1688,8 @@ private fun VenueDayScreen(
     onAnalytics: () -> Unit,
     canPricing: Boolean = true,
     canBookings: Boolean = true,
+    /** Decides whether this desk books courts or tables. */
+    lane: Lane = Lane.VENUE,
 ) {
     var dayMillis by remember { mutableStateOf(todayMillis()) }
     var reload by remember { mutableStateOf(0) }
@@ -1628,6 +1772,7 @@ private fun VenueDayScreen(
                                     addForCell = CellTarget(slot, courtId, courtName, cellPrice)
                                 },
                                 onCancel = { b -> cancelTarget = b },
+                                lane = lane,
                             )
                         }
                     } else {
@@ -1655,6 +1800,7 @@ private fun VenueDayScreen(
             amount = slot.price,
             api = api,
             token = token,
+            venueId = venueId,
             busy = booking,
             onDismiss = { addForSlot = null },
             onConfirm = { name, phone, method, passId ->
@@ -1679,6 +1825,7 @@ private fun VenueDayScreen(
             amount = t.price,
             api = api,
             token = token,
+            venueId = venueId,
             busy = booking,
             onDismiss = { addForCell = null },
             onConfirm = { name, phone, method, passId ->
@@ -1705,7 +1852,7 @@ private fun VenueDayScreen(
         AlertDialog(
             onDismissRequest = { cancelTarget = null },
             title = { Text("Cancel booking?") },
-            text = { Text("${b.customer} — this frees the court for that time.") },
+            text = { Text("${b.customer} — this frees the ${resourceNoun(lane).lowercase()} for that time.") },
             confirmButton = {
                 TextButton(onClick = {
                     cancelTarget = null
@@ -1728,10 +1875,11 @@ private fun CourtGrid(
     canBookings: Boolean,
     onAddCell: (DaySlot, Long, String) -> Unit,
     onCancel: (DayBooking) -> Unit,
+    lane: Lane = Lane.VENUE,
 ) {
     val timeW = 58.dp
     val cellW = 96.dp
-    val courtName = { id: Long -> grid.courts.firstOrNull { it.id == id }?.name ?: "Court" }
+    val courtName = { id: Long -> grid.courts.firstOrNull { it.id == id }?.name ?: resourceNoun(lane) }
     Column(Modifier.fillMaxWidth().premiumSurface().padding(vertical = 12.dp)) {
         Row(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             LegendDot(Color(0xFF16A34A), "Open"); Spacer(Modifier.width(14.dp)); LegendDot(AuthAccent, "Booked")
@@ -1889,6 +2037,8 @@ private fun WalkInDialog(
     amount: Double,
     api: PartnerApi,
     token: String,
+    /** The branch this desk is standing in — a pass locked elsewhere isn't offered. */
+    venueId: Long,
     busy: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (String, String, PayMethod, Long?) -> Unit,
@@ -1901,9 +2051,11 @@ private fun WalkInDialog(
 
     // A full number is enough to know whether this customer already holds a pass —
     // the desk shouldn't have to remember, or charge someone who already paid.
-    LaunchedEffect(phone) {
+    // Scoped to this branch: a pass locked to another outlet must never be offered
+    // here, or the desk spends a session the offer never covered.
+    LaunchedEffect(phone, venueId) {
         passes = if (phone.length == 10) {
-            runCatching { api.packageHolder(token, phone) }.getOrDefault(emptyList())
+            runCatching { api.packageHolder(token, phone, venueId) }.getOrDefault(emptyList())
         } else {
             emptyList()
         }
@@ -2653,13 +2805,13 @@ private fun shareCsv(context: Context, from: String, to: String, csv: String) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PackagesScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+private fun PackagesScreen(api: PartnerApi, token: String, venueId: Long? = null, onBack: () -> Unit) {
     var reload by remember { mutableStateOf(0) }
     var creating by remember { mutableStateOf(false) }
     var selling by remember { mutableStateOf<VenuePackageRow?>(null) }
     val scope = rememberCoroutineScope()
-    val state by produceState<UiState<PackagesPage>>(UiState.Loading, reload) {
-        value = runCatchingUi { api.packages(token) }
+    val state by produceState<UiState<PackagesPage>>(UiState.Loading, reload, venueId) {
+        value = runCatchingUi { api.packages(token, venueId) }
     }
 
     Scaffold(
@@ -2724,7 +2876,7 @@ private fun PackagesScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
             onDismiss = { selling = null },
             onSell = { phone, name ->
                 selling = null
-                scope.launch { runCatching { api.sellPackage(token, pkg.id, phone, name) }; reload++ }
+                scope.launch { runCatching { api.sellPackage(token, pkg.id, phone, name, venueId = venueId) }; reload++ }
             },
         )
     }
@@ -2870,13 +3022,13 @@ private fun SellPackageDialog(pkg: VenuePackageRow, onDismiss: () -> Unit, onSel
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CustomersScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+private fun CustomersScreen(api: PartnerApi, token: String, venueId: Long? = null, onBack: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var contacting by remember { mutableStateOf<CustomerRow?>(null) }
-    val state by produceState<UiState<CustomersPage>>(UiState.Loading, query) {
+    val state by produceState<UiState<CustomersPage>>(UiState.Loading, query, venueId) {
         // Debounce so typing doesn't fire a request per keystroke.
         if (query.isNotBlank()) kotlinx.coroutines.delay(300)
-        value = runCatchingUi { api.customers(token, query) }
+        value = runCatchingUi { api.customers(token, query, venueId) }
     }
 
     Scaffold(
@@ -3703,14 +3855,17 @@ private fun TiersCard(tiers: List<TierRow>) {
 }
 
 @Composable
-private fun SalesTab(api: PartnerApi, token: String) {
-    RefreshableContent(token, load = { api.bookings(token) }) { list ->
+private fun SalesTab(api: PartnerApi, token: String, venueId: Long? = null) {
+    RefreshableContent(token to venueId, load = { api.bookings(token, venueId) }) { list ->
         if (list.isEmpty()) EmptyState("No bookings yet") else
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(list) { b ->
+                    // Viewing all branches, a feed of bare amounts is unreadable —
+                    // say which outlet each one came from.
+                    val where = if (venueId == null) b.branch else null
                     ListCard(
                         title = b.label ?: (b.ticketCode ?: "Booking #${b.id}"),
-                        subtitle = "${b.quantity} × · ${b.status ?: ""}",
+                        subtitle = listOfNotNull(where, "${b.quantity} ×", b.status).joinToString(" · "),
                         trailing = "₹" + formatInr(b.amount),
                         footer = if (b.checkedIn > 0) "Checked in: ${b.checkedIn}" else b.ticketCode ?: "",
                     )

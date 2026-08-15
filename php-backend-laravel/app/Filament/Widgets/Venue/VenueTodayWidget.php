@@ -70,7 +70,8 @@ class VenueTodayWidget extends StatsOverviewWidget
 
             Stat::make('Occupancy', $sellable > 0 ? $occupancy . '%' : '—')
                 ->description($sellable > 0
-                    ? sprintf('%d of %d court-hours sold', $sold, $sellable)
+                    // "court-hours" for a turf, "table-hours" for a café.
+                    ? sprintf('%d of %d %s sold', $sold, $sellable, $this->resourceHours())
                     : 'Set opening hours to measure this')
                 ->descriptionIcon('heroicon-m-squares-2x2')
                 ->color(match (true) {
@@ -97,7 +98,8 @@ class VenueTodayWidget extends StatsOverviewWidget
     }
 
     /**
-     * Court-hours sold today over court-hours sellable today.
+     * Resource-hours sold today over resource-hours sellable today — court-hours
+     * on a turf, table-hours in a café.
      *
      * Sellable = active courts × the venue's open hours. It is deliberately a
      * rough denominator: a precise one needs the pricing/hours rework, and a
