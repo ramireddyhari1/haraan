@@ -15,6 +15,7 @@ use App\Filament\Widgets\Partner\PartnerFunnelWidget;
 use App\Filament\Widgets\Partner\PartnerRevenueTrendWidget;
 use App\Filament\Widgets\Partner\PartnerTrafficSourcesWidget;
 use App\Filament\Widgets\Cafe\CafeWhatsOnWidget;
+use App\Filament\Widgets\Venue\BranchComparisonWidget;
 use App\Filament\Widgets\Venue\VenueMoneyHealthWidget;
 use App\Filament\Widgets\Venue\VenuePeakHoursWidget;
 use App\Filament\Widgets\Venue\VenueTodayWidget;
@@ -161,6 +162,8 @@ class Dashboard extends BaseDashboard
         return [
             PartnerQuickActionsWidget::class,
             VenueTodayWidget::class,
+            // Self-gates to multi-branch owners on "All branches".
+            BranchComparisonWidget::class,
             CafeWhatsOnWidget::class,
             VenueMoneyHealthWidget::class,
             PartnerEarningsStatsWidget::class,
@@ -215,6 +218,8 @@ class Dashboard extends BaseDashboard
         return [
             PartnerQuickActionsWidget::class,
             VenueTodayWidget::class,
+            // The owner intelligence layer — invisible to single-branch partners.
+            BranchComparisonWidget::class,
             VenueMoneyHealthWidget::class,
             // Already venue-visible before this change — kept, and now sitting
             // under real KPIs instead of alone on an empty page.
