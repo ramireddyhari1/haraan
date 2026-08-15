@@ -101,6 +101,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import android.net.Uri
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -839,9 +840,14 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var manageVenue by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var showReports by remember { mutableStateOf(false) }
     var showPayouts by remember { mutableStateOf(false) }
+    var showCustomers by remember { mutableStateOf(false) }
     var showStaff by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    if (showCustomers) {
+        CustomersScreen(api, token, onBack = { showCustomers = false })
+        return
+    }
     if (showPayouts) {
         PayoutsScreen(api, token, onBack = { showPayouts = false })
         return
@@ -979,6 +985,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 Tab.Home -> HomeTab(
                     api, token, session.name ?: "Partner", lane,
                     onPayouts = if (session.can("reports")) ({ showPayouts = true }) else null,
+                    onCustomers = { showCustomers = true },
                 ) { serverType ->
                     if (serverType != null) {
                         session.partnerType = serverType
@@ -1039,7 +1046,7 @@ private fun <T> RefreshableContent(key: Any?, load: suspend () -> T, content: @C
 private data class Tile(val icon: ImageVector, val label: String, val value: String, val hint: String)
 
 @Composable
-private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onPayouts: (() -> Unit)? = null, onLane: (String?) -> Unit) {
+private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onLane: (String?) -> Unit) {
     RefreshableContent(token, load = { api.overview(token) }) { o ->
         // Report the server's authoritative type up so the tab bar matches.
         LaunchedEffect(o.type) { onLane(o.type) }
@@ -1078,12 +1085,36 @@ private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, on
             item { GreetingHeader(name, subtitle) }
             item { RevenueHero(o) }
             item { StatStrip(tiles) }
+            if (onCustomers != null) {
+                item { CustomersEntryCard(onCustomers) }
+            }
             if (onPayouts != null) {
                 item { PayoutsEntryCard(onPayouts) }
             }
             if (effective != Lane.EVENT) {
                 item { BookingsMixCard(o) }
             }
+        }
+    }
+}
+
+/** Dashboard shortcut into Customers. */
+@Composable
+private fun CustomersEntryCard(onClick: () -> Unit) {
+    PressableSurface(onClick = onClick) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF)))),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.People, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(21.dp)) }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Customers", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                Spacer(Modifier.height(1.dp))
+                Text("Who plays here, and how often", fontSize = 12.sp, color = AuthMuted)
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -2553,6 +2584,191 @@ private fun shareCsv(context: Context, from: String, to: String, csv: String) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(send, "Share report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/**
+ * Customers — who books here, how often, and what they're worth. Identity is the
+ * customer's phone, so a person who books online and later walks in is one row.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomersScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var contacting by remember { mutableStateOf<CustomerRow?>(null) }
+    val state by produceState<UiState<CustomersPage>>(UiState.Loading, query) {
+        // Debounce so typing doesn't fire a request per keystroke.
+        if (query.isNotBlank()) kotlinx.coroutines.delay(300)
+        value = runCatchingUi { api.customers(token, query) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Customers", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search name or phone") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AuthAccent, cursorColor = AuthAccent,
+                    unfocusedBorderColor = Color(0x1F0F172A),
+                    focusedContainerColor = Color.White, unfocusedContainerColor = Color.White,
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+            Loaded(state) { p ->
+                if (p.data.isEmpty()) {
+                    EmptyState(if (query.isBlank()) "No customers yet." else "No customer matches \"$query\".")
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
+                    ) {
+                        item { CustomerSummaryStrip(p) }
+                        items(p.data) { c -> CustomerCard(c) { contacting = c } }
+                    }
+                }
+            }
+        }
+    }
+
+    contacting?.let { c -> ContactCustomerDialog(c) { contacting = null } }
+}
+
+@Composable
+private fun CustomerSummaryStrip(p: CustomersPage) {
+    Row(
+        Modifier.fillMaxWidth().premiumSurface().padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf(
+            "Customers" to p.total.toString(),
+            "Repeat" to p.repeat.toString(),
+            "No phone" to p.anonymous.toString(),
+        ).forEachIndexed { i, (label, value) ->
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(value, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                Spacer(Modifier.height(1.dp))
+                Text(label, fontSize = 11.5.sp, color = AuthMuted)
+            }
+            if (i < 2) LayoutBox(Modifier.width(1.dp).height(34.dp).background(Hairline))
+        }
+    }
+}
+
+@Composable
+private fun CustomerCard(c: CustomerRow, onClick: () -> Unit) {
+    PressableSurface(onClick = onClick, radius = 16.dp) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(42.dp).clip(RoundedCornerShape(99.dp))
+                    .background(if (c.isRepeat) Color(0x1A16A34A) else Color(0x142F6BFF)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    c.name.take(1).uppercase(),
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    color = if (c.isRepeat) GREEN else AuthAccentDeep,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(c.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
+                    if (c.isRepeat) {
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            "REGULAR",
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GREEN, letterSpacing = 0.8.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x1A16A34A))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${c.bookings} booking${if (c.bookings == 1) "" else "s"}" +
+                        (c.lastVisit?.let { " · last $it" } ?: ""),
+                    fontSize = 12.sp, color = AuthMuted, maxLines = 1,
+                )
+            }
+            Text("₹" + formatInr(c.spent), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+        }
+    }
+}
+
+/** Reach a customer straight from the list — the point of having their number. */
+@Composable
+private fun ContactCustomerDialog(c: CustomerRow, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            LayoutBox(
+                Modifier.size(56.dp).clip(RoundedCornerShape(99.dp)).background(Color(0x142F6BFF)),
+                contentAlignment = Alignment.Center,
+            ) { Text(c.name.take(1).uppercase(), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep) }
+            Spacer(Modifier.height(12.dp))
+            Text(c.name, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(3.dp))
+            Text("+91 ${c.phone}", fontSize = 13.sp, color = AuthMuted)
+            Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF6F8FC))
+                    .border(1.dp, CardBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${c.bookings}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                    Text("bookings", fontSize = 11.sp, color = AuthMuted)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("₹" + formatInr(c.spent), fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                    Text("spent", fontSize = 11.sp, color = AuthMuted)
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Message on WhatsApp", enabled = true, loading = false) {
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/91${c.phone}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+                onDismiss()
+            }
+            Spacer(Modifier.height(10.dp))
+            SocialButton(
+                text = "Call",
+                leading = { Icon(Icons.Filled.Phone, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(19.dp)) },
+            ) {
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_DIAL, Uri.parse("tel:+91${c.phone}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+                onDismiss()
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Close", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
 }
 
 /**

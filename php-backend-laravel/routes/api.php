@@ -434,6 +434,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::get('/reports/bookings', 'bookingsReport');
             // Settlement is money-sensitive: same 'reports' gate as Earnings, and
             // the destination itself is only ever returned masked.
+            Route::get('/customers', 'customers');
             Route::get('/payouts', 'payouts');
             Route::post('/payouts/account', 'savePayoutAccount');
         });

@@ -644,6 +644,111 @@ class PartnerController extends Controller
     }
 
     /**
+     * GET /api/partner/customers — who books here, how often, and what they spend.
+     *
+     * Identity is keyed on PHONE, never on user_id. A desk walk-in carries the
+     * PARTNER's user_id (the desk created the row), so grouping by user would
+     * collapse every walk-in into one customer — the venue owner, listed as its
+     * own best customer. Online bookings use the booker's account phone; walk-ins
+     * use the number the desk typed.
+     *
+     * Rows without any phone can't be told apart from each other, so they're
+     * counted in the totals but not listed as named customers.
+     */
+    public function customers(Request $request): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $q = trim((string) $request->query('q', ''));
+
+        $rows = app(PartnerSettlement::class)->bookings($partnerId)
+            ->whereIn(DB::raw('lower(status)'), self::PAID_STATUSES)
+            ->with('user:id,name,phone')
+            ->orderByDesc('created_at')
+            ->limit(5000)
+            ->get(['id', 'user_id', 'channel', 'guest_name', 'guest_phone', 'total_amount', 'slot_date', 'created_at']);
+
+        $byPhone = [];
+        $anonymous = 0;
+
+        foreach ($rows as $b) {
+            $isDesk = strtolower((string) $b->channel) === 'offline';
+
+            $phone = $this->digits($isDesk ? $b->guest_phone : ($b->user->phone ?? $b->guest_phone));
+            $name = trim((string) ($isDesk
+                ? ($b->guest_name ?: '')
+                : ($b->user->name ?? $b->guest_name ?? ''))) ?: 'Guest';
+
+            if ($phone === null) {
+                $anonymous++;
+                continue;
+            }
+
+            $when = ($b->slot_date ?? $b->created_at);
+
+            if (! isset($byPhone[$phone])) {
+                $byPhone[$phone] = [
+                    'name' => $name,
+                    'phone' => $phone,
+                    'bookings' => 0,
+                    'spent' => 0.0,
+                    'last_visit' => null,
+                    'first_visit' => null,
+                ];
+            }
+
+            $c = &$byPhone[$phone];
+            $c['bookings']++;
+            $c['spent'] += (float) $b->total_amount;
+            // Keep the most recently used name — people get re-typed at the desk.
+            if ($c['last_visit'] === null || ($when !== null && $when->gt($c['last_visit']))) {
+                $c['last_visit'] = $when;
+                $c['name'] = $name;
+            }
+            if ($c['first_visit'] === null || ($when !== null && $when->lt($c['first_visit']))) {
+                $c['first_visit'] = $when;
+            }
+            unset($c);
+        }
+
+        $all = array_values($byPhone);
+
+        if ($q !== '') {
+            $needle = mb_strtolower($q);
+            $all = array_values(array_filter($all, fn (array $c): bool => str_contains(mb_strtolower($c['name']), $needle)
+                || str_contains($c['phone'], preg_replace('/[^0-9]/', '', $q) ?: $needle)));
+        }
+
+        // Best customers first — the list is for "who should I look after".
+        usort($all, fn (array $x, array $y): int => $y['spent'] <=> $x['spent']);
+
+        $repeat = count(array_filter($all, fn (array $c): bool => $c['bookings'] > 1));
+
+        return response()->json([
+            'summary' => [
+                'total'     => count($all),
+                'repeat'    => $repeat,
+                'anonymous' => $anonymous,
+            ],
+            'data' => array_map(fn (array $c): array => [
+                'name'       => $c['name'],
+                'phone'      => $c['phone'],
+                'bookings'   => $c['bookings'],
+                'spent'      => round($c['spent'], 2),
+                'is_repeat'  => $c['bookings'] > 1,
+                'last_visit' => optional($c['last_visit'])->toDateString(),
+            ], array_slice($all, 0, 300)),
+        ]);
+    }
+
+    /** Digits-only phone, or null when there aren't enough to identify anyone. */
+    private function digits(?string $raw): ?string
+    {
+        $d = preg_replace('/[^0-9]/', '', (string) $raw);
+
+        return ($d !== null && strlen($d) >= 10) ? substr($d, -10) : null;
+    }
+
+    /**
      * GET /api/partner/payouts — the settlement home: balance, where the money is
      * sent, and the history of settlements.
      *

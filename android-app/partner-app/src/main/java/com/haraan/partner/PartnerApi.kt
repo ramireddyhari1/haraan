@@ -210,6 +210,23 @@ data class DayGrid(
     val courts: List<CourtCol> = emptyList(),
 )
 
+/** One customer of this venue, identified by phone across online + walk-in bookings. */
+data class CustomerRow(
+    val name: String,
+    val phone: String,
+    val bookings: Int,
+    val spent: Double,
+    val isRepeat: Boolean,
+    val lastVisit: String?,
+)
+
+data class CustomersPage(
+    val total: Int,
+    val repeat: Int,
+    val anonymous: Int,
+    val data: List<CustomerRow>,
+)
+
 /** Where settlements are sent. The destination itself is only ever masked. */
 data class PayoutAccount(
     val method: String,
@@ -544,6 +561,30 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 isOpen = o.optBoolean("is_open", true),
             )
         }
+    }
+
+    /** GET /api/partner/customers — who books here, keyed on phone. */
+    suspend fun customers(token: String, query: String = ""): CustomersPage = withContext(Dispatchers.IO) {
+        val suffix = if (query.isBlank()) "" else "?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val o = JSONObject(get("/api/partner/customers$suffix", token))
+        val s = o.optJSONObject("summary")
+        val arr = o.optJSONArray("data")
+        CustomersPage(
+            total = s?.optInt("total") ?: 0,
+            repeat = s?.optInt("repeat") ?: 0,
+            anonymous = s?.optInt("anonymous") ?: 0,
+            data = if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                val c = arr.getJSONObject(i)
+                CustomerRow(
+                    name = c.optString("name"),
+                    phone = c.optString("phone"),
+                    bookings = c.optInt("bookings"),
+                    spent = c.optDouble("spent", 0.0),
+                    isRepeat = c.optBoolean("is_repeat", false),
+                    lastVisit = c.optStringOrNull("last_visit"),
+                )
+            },
+        )
     }
 
     /** GET /api/partner/payouts — balance, settlement account, batch history. */
