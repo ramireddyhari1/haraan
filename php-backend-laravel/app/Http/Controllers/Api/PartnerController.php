@@ -8,6 +8,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\BookingPayment;
 use App\Models\Event;
+use App\Models\CustomerPackage;
+use App\Models\PackageRedemption;
+use App\Models\VenuePackage;
 use App\Models\PartnerPayoutAccount;
 use App\Models\PayoutBatch;
 use App\Models\User;
@@ -353,7 +356,9 @@ class PartnerController extends Controller
             // How the desk took the money. 'link' mints a Razorpay payment link and
             // leaves the booking unpaid until the payment webhook says otherwise;
             // 'later' records nothing at all.
-            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card,link,later'],
+            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card,link,later,package'],
+            // Which of the customer's passes to spend a session from.
+            'customerPackageId' => ['nullable', 'integer'],
         ]);
 
         // Scope the venue to the acting partner before booking — a caller must not be
@@ -379,7 +384,37 @@ class PartnerController extends Controller
 
         // Money that physically changed hands at the desk is recorded straight away;
         // the ledger recomputes amount_paid/payment_status in the same transaction.
-        if (in_array($method, ['cash', 'upi', 'card'], true) && $amount > 0) {
+        if ($method === 'package') {
+            // Spend a session instead of taking money. The pass was already paid
+            // for when it was sold, so the booking is settled without a payment.
+            $pkg = CustomerPackage::query()
+                ->where('partner_id', $partnerId)
+                ->when(! empty($data['customerPackageId']), fn ($q) => $q->where('id', $data['customerPackageId']))
+                ->when(empty($data['customerPackageId']), fn ($q) => $q->where('customer_phone', (string) $this->digits($data['guestPhone'] ?? '')))
+                ->with('package')->withCount('redemptions')
+                ->orderBy('expires_at')
+                ->get()
+                ->first(fn (CustomerPackage $c): bool => $c->isUsable());
+
+            if ($pkg === null) {
+                // Refuse rather than silently charge: the desk chose "use a pass",
+                // and quietly making it payable would be a different transaction.
+                $booking->delete();
+
+                return response()->json(['error' => 'No usable package for that customer.'], 422);
+            }
+
+            PackageRedemption::query()->create([
+                'customer_package_id' => $pkg->id,
+                'booking_id'          => $booking->id,
+            ]);
+
+            // Zero-rate the booking so it can't also appear as money owed.
+            $booking->total_amount = 0;
+            $booking->amount_paid = 0;
+            $booking->payment_status = 'paid';
+            $booking->save();
+        } elseif (in_array($method, ['cash', 'upi', 'card'], true) && $amount > 0) {
             $this->ledger->collect($booking, $amount, $method, $request->user());
             $booking->refresh();
         } elseif ($method === 'link' && $amount > 0) {
@@ -641,6 +676,166 @@ class PartnerController extends Controller
             'Content-Type'        => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
+    }
+
+    /** GET /api/partner/packages — the offers this venue sells, plus who's on one. */
+    public function packages(Request $request): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+
+        $packages = VenuePackage::query()
+            ->where('partner_id', $partnerId)
+            ->orderByDesc('is_active')->orderBy('price')
+            ->get()
+            ->map(fn (VenuePackage $p): array => [
+                'id'            => $p->id,
+                'name'          => $p->name,
+                'price'         => $p->price,
+                'sessions'      => $p->sessions,
+                'per_session'   => $p->perSession(),
+                'validity_days' => $p->validity_days,
+                'is_active'     => $p->is_active,
+            ]);
+
+        // Active holders — the desk's "who's on a pass" list.
+        $holders = CustomerPackage::query()
+            ->where('partner_id', $partnerId)
+            ->with('package:id,name')
+            ->withCount('redemptions')
+            ->orderByDesc('created_at')
+            ->limit(200)
+            ->get()
+            ->map(fn (CustomerPackage $c): array => $this->holderRow($c))
+            ->filter(fn (array $r): bool => $r['remaining'] > 0)
+            ->values();
+
+        return response()->json(['data' => $packages, 'holders' => $holders]);
+    }
+
+    /** POST /api/partner/packages — create or update an offer. */
+    public function savePackage(Request $request, ?string $id = null): JsonResponse
+    {
+        $data = $request->validate([
+            'name'         => ['required', 'string', 'max:120'],
+            'price'        => ['required', 'integer', 'min:1'],
+            'sessions'     => ['required', 'integer', 'min:1', 'max:500'],
+            'validityDays' => ['nullable', 'integer', 'min:1', 'max:1095'],
+            'venueId'      => ['nullable', 'integer'],
+            'isActive'     => ['nullable', 'boolean'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+
+        // A venue-scoped package must belong to this partner, or one tenant could
+        // attach an offer to another tenant's venue.
+        $venueId = null;
+        if (! empty($data['venueId'])) {
+            $venueId = (int) Venue::query()->where('partner_id', $partnerId)
+                ->findOrFail($data['venueId'])->id;
+        }
+
+        $attrs = [
+            'partner_id'    => $partnerId,
+            'venue_id'      => $venueId,
+            'name'          => $data['name'],
+            'price'         => $data['price'],
+            'sessions'      => $data['sessions'],
+            'validity_days' => $data['validityDays'] ?? null,
+            'is_active'     => $data['isActive'] ?? true,
+        ];
+
+        $package = $id === null
+            ? VenuePackage::query()->create($attrs)
+            : tap(VenuePackage::query()->where('partner_id', $partnerId)->findOrFail($id))->update($attrs);
+
+        return response()->json(['status' => 'ok', 'id' => $package->id], $id === null ? 201 : 200);
+    }
+
+    /**
+     * POST /api/partner/packages/{id}/sell — sell a package to a customer.
+     *
+     * Money is recorded the same way a walk-in's is, so package sales show up in
+     * the same takings the desk closes out against.
+     */
+    public function sellPackage(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'customerPhone' => ['required', 'string', 'max:20'],
+            'customerName'  => ['nullable', 'string', 'max:120'],
+            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+        $package = VenuePackage::query()->where('partner_id', $partnerId)->findOrFail($id);
+
+        $phone = $this->digits($data['customerPhone']);
+
+        if ($phone === null) {
+            return response()->json(['error' => 'A valid phone number is required.'], 422);
+        }
+
+        $sold = CustomerPackage::query()->create([
+            'venue_package_id' => $package->id,
+            'partner_id'       => $partnerId,
+            'customer_phone'   => $phone,
+            'customer_name'    => $data['customerName'] ?? null,
+            'sessions_total'   => $package->sessions,
+            'amount_paid'      => $package->price,
+            'payment_method'   => $data['paymentMethod'] ?? 'cash',
+            'expires_at'       => $package->validity_days !== null
+                ? now()->addDays($package->validity_days)
+                : null,
+        ]);
+
+        return response()->json([
+            'status' => 'ok',
+            'holder' => $this->holderRow($sold->fresh(['package'])->loadCount('redemptions')),
+        ], 201);
+    }
+
+    /**
+     * GET /api/partner/packages/holder?phone= — what this number has left.
+     * Drives the walk-in sheet's "use a session" option.
+     */
+    public function packageHolder(Request $request): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $phone = $this->digits((string) $request->query('phone', ''));
+
+        if ($phone === null) {
+            return response()->json(['data' => []]);
+        }
+
+        $rows = CustomerPackage::query()
+            ->where('partner_id', $partnerId)
+            ->where('customer_phone', $phone)
+            ->with('package:id,name')
+            ->withCount('redemptions')
+            ->get()
+            ->map(fn (CustomerPackage $c): array => $this->holderRow($c))
+            ->filter(fn (array $r): bool => $r['usable'])
+            ->values();
+
+        return response()->json(['data' => $rows]);
+    }
+
+    /** @return array<string, mixed> */
+    private function holderRow(CustomerPackage $c): array
+    {
+        $used = (int) ($c->redemptions_count ?? $c->used());
+
+        return [
+            'id'         => $c->id,
+            'name'       => $c->customer_name ?: 'Guest',
+            'phone'      => $c->customer_phone,
+            'package'    => $c->package?->name ?? 'Package',
+            'total'      => $c->sessions_total,
+            'used'       => $used,
+            'remaining'  => max($c->sessions_total - $used, 0),
+            'expires_at' => optional($c->expires_at)->toDateString(),
+            'expired'    => $c->isExpired(),
+            'usable'     => max($c->sessions_total - $used, 0) > 0 && ! $c->isExpired(),
+        ];
     }
 
     /**

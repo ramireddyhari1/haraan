@@ -841,9 +841,14 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showReports by remember { mutableStateOf(false) }
     var showPayouts by remember { mutableStateOf(false) }
     var showCustomers by remember { mutableStateOf(false) }
+    var showPackages by remember { mutableStateOf(false) }
     var showStaff by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    if (showPackages) {
+        PackagesScreen(api, token, onBack = { showPackages = false })
+        return
+    }
     if (showCustomers) {
         CustomersScreen(api, token, onBack = { showCustomers = false })
         return
@@ -986,6 +991,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     api, token, session.name ?: "Partner", lane,
                     onPayouts = if (session.can("reports")) ({ showPayouts = true }) else null,
                     onCustomers = { showCustomers = true },
+                    onPackages = if (session.can("pricing")) ({ showPackages = true }) else null,
                 ) { serverType ->
                     if (serverType != null) {
                         session.partnerType = serverType
@@ -1046,7 +1052,7 @@ private fun <T> RefreshableContent(key: Any?, load: suspend () -> T, content: @C
 private data class Tile(val icon: ImageVector, val label: String, val value: String, val hint: String)
 
 @Composable
-private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onLane: (String?) -> Unit) {
+private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onPackages: (() -> Unit)? = null, onLane: (String?) -> Unit) {
     RefreshableContent(token, load = { api.overview(token) }) { o ->
         // Report the server's authoritative type up so the tab bar matches.
         LaunchedEffect(o.type) { onLane(o.type) }
@@ -1088,6 +1094,9 @@ private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, on
             if (onCustomers != null) {
                 item { CustomersEntryCard(onCustomers) }
             }
+            if (onPackages != null) {
+                item { PackagesEntryCard(onPackages) }
+            }
             if (onPayouts != null) {
                 item { PayoutsEntryCard(onPayouts) }
             }
@@ -1113,6 +1122,27 @@ private fun CustomersEntryCard(onClick: () -> Unit) {
                 Text("Customers", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
                 Spacer(Modifier.height(1.dp))
                 Text("Who plays here, and how often", fontSize = 12.sp, color = AuthMuted)
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Dashboard shortcut into Packages. */
+@Composable
+private fun PackagesEntryCard(onClick: () -> Unit) {
+    PressableSurface(onClick = onClick) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFF3ECFF), Color(0xFFE6DBFF)))),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.ConfirmationNumber, contentDescription = null, tint = Color(0xFF6D28D9), modifier = Modifier.size(21.dp)) }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Packages", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                Spacer(Modifier.height(1.dp))
+                Text("Memberships & prepaid sessions", fontSize = 12.sp, color = AuthMuted)
             }
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
         }
@@ -1623,12 +1653,14 @@ private fun VenueDayScreen(
         WalkInDialog(
             slotLabel = slot.time ?: slot.label,
             amount = slot.price,
+            api = api,
+            token = token,
             busy = booking,
             onDismiss = { addForSlot = null },
-            onConfirm = { name, phone, method ->
+            onConfirm = { name, phone, method, passId ->
                 booking = true
                 scope.launch {
-                    runCatching { api.createWalkIn(token, venueId, slot.slotId, date, name, phone, null, method) }
+                    runCatching { api.createWalkIn(token, venueId, slot.slotId, date, name, phone, null, method, passId) }
                         .onSuccess { r ->
                             // Only a link needs watching; cash/UPI/card are already settled.
                             if (r.paymentLink != null) {
@@ -1645,12 +1677,14 @@ private fun VenueDayScreen(
         WalkInDialog(
             slotLabel = "${t.slot.time ?: t.slot.label} · ${t.courtName}",
             amount = t.price,
+            api = api,
+            token = token,
             busy = booking,
             onDismiss = { addForCell = null },
-            onConfirm = { name, phone, method ->
+            onConfirm = { name, phone, method, passId ->
                 booking = true
                 scope.launch {
-                    runCatching { api.createWalkIn(token, venueId, t.slot.slotId, date, name, phone, t.courtId, method) }
+                    runCatching { api.createWalkIn(token, venueId, t.slot.slotId, date, name, phone, t.courtId, method, passId) }
                         .onSuccess { r ->
                             // Only a link needs watching; cash/UPI/card are already settled.
                             if (r.paymentLink != null) {
@@ -1853,14 +1887,28 @@ private fun SlotCard(slot: DaySlot, blocked: Boolean, canBookings: Boolean, onAd
 private fun WalkInDialog(
     slotLabel: String,
     amount: Double,
+    api: PartnerApi,
+    token: String,
     busy: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, PayMethod) -> Unit,
+    onConfirm: (String, String, PayMethod, Long?) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var method by remember { mutableStateOf(PayMethod.CASH) }
+    var passes by remember { mutableStateOf<List<PackageHolder>>(emptyList()) }
     val view = LocalView.current
+
+    // A full number is enough to know whether this customer already holds a pass —
+    // the desk shouldn't have to remember, or charge someone who already paid.
+    LaunchedEffect(phone) {
+        passes = if (phone.length == 10) {
+            runCatching { api.packageHolder(token, phone) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        if (passes.isEmpty() && method == PayMethod.PACKAGE) method = PayMethod.CASH
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -1948,6 +1996,19 @@ private fun WalkInDialog(
             }
             Spacer(Modifier.height(8.dp))
             PayChip(PayMethod.LINK, method, Modifier.fillMaxWidth()) { method = it; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+            passes.firstOrNull()?.let { pass ->
+                Spacer(Modifier.height(8.dp))
+                PayChip(PayMethod.PACKAGE, method, Modifier.fillMaxWidth()) { method = it; view.performHapticFeedback(HapticFeedbackConstants.CONFIRM) }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(GREEN))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "${pass.packageName} · ${pass.remaining} of ${pass.total} left",
+                        fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = GREEN,
+                    )
+                }
+            }
 
             if (method == PayMethod.LINK) {
                 Spacer(Modifier.height(8.dp))
@@ -1964,7 +2025,7 @@ private fun WalkInDialog(
                 loading = busy,
             ) {
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                onConfirm(name.trim(), phone.trim(), method)
+                onConfirm(name.trim(), phone.trim(), method, passes.firstOrNull()?.id)
             }
             Spacer(Modifier.height(4.dp))
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
@@ -2584,6 +2645,223 @@ private fun shareCsv(context: Context, from: String, to: String, csv: String) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(send, "Share report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/**
+ * Packages — the memberships a venue sells, and who's currently on one.
+ * Selling here is what makes "Use a session" appear on the walk-in sheet.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PackagesScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+    var reload by remember { mutableStateOf(0) }
+    var creating by remember { mutableStateOf(false) }
+    var selling by remember { mutableStateOf<VenuePackageRow?>(null) }
+    val scope = rememberCoroutineScope()
+    val state by produceState<UiState<PackagesPage>>(UiState.Loading, reload) {
+        value = runCatchingUi { api.packages(token) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Packages", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+                actions = { HeaderIcon(Icons.Filled.Add, "New package") { creating = true }; Spacer(Modifier.width(4.dp)) },
+            )
+        },
+    ) { padding ->
+        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            Loaded(state) { p ->
+                LazyColumn(
+                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 28.dp),
+                ) {
+                    item { SectionLabel("WHAT YOU SELL") }
+                    if (p.packages.isEmpty()) {
+                        item {
+                            LayoutBox(Modifier.fillMaxWidth().premiumSurface().padding(20.dp)) {
+                                Text(
+                                    "No packages yet. Tap + to create one — e.g. 10 sessions for ₹4,000.",
+                                    fontSize = 13.sp, color = AuthMuted, lineHeight = 18.sp,
+                                )
+                            }
+                        }
+                    } else {
+                        items(p.packages) { pkg -> PackageCard(pkg) { selling = pkg } }
+                    }
+                    item { SectionLabel("ON A PASS (${p.holders.size})") }
+                    if (p.holders.isEmpty()) {
+                        item {
+                            LayoutBox(Modifier.fillMaxWidth().premiumSurface().padding(20.dp)) {
+                                Text("Nobody is on a package yet.", fontSize = 13.sp, color = AuthMuted)
+                            }
+                        }
+                    } else {
+                        items(p.holders) { h -> HolderCard(h) }
+                    }
+                }
+            }
+        }
+    }
+
+    if (creating) {
+        NewPackageDialog(
+            onDismiss = { creating = false },
+            onSave = { name, price, sessions, days ->
+                creating = false
+                scope.launch { runCatching { api.savePackage(token, name, price, sessions, days) }; reload++ }
+            },
+        )
+    }
+    selling?.let { pkg ->
+        SellPackageDialog(
+            pkg = pkg,
+            onDismiss = { selling = null },
+            onSell = { phone, name ->
+                selling = null
+                scope.launch { runCatching { api.sellPackage(token, pkg.id, phone, name) }; reload++ }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp, modifier = Modifier.padding(top = 4.dp))
+}
+
+@Composable
+private fun PackageCard(p: VenuePackageRow, onSell: () -> Unit) {
+    PressableSurface(onClick = onSell) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(p.name, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "${p.sessions} sessions · ₹${p.perSession}/session" +
+                        (p.validityDays?.let { " · ${it}d validity" } ?: " · no expiry"),
+                    fontSize = 12.sp, color = AuthMuted,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("₹" + formatInr(p.price.toDouble()), fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "SELL",
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep, letterSpacing = 0.8.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x142F6BFF)).padding(horizontal = 9.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HolderCard(h: PackageHolder) {
+    val frac = if (h.total > 0) h.remaining.toFloat() / h.total else 0f
+    LayoutBox(Modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(h.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
+                    Spacer(Modifier.height(1.dp))
+                    Text("${h.packageName} · +91 ${h.phone}", fontSize = 12.sp, color = AuthMuted, maxLines = 1)
+                }
+                Text("${h.remaining}/${h.total}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (h.expired) RED else GREEN)
+            }
+            Spacer(Modifier.height(10.dp))
+            LayoutBox(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFFEDF0F5))) {
+                LayoutBox(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(RoundedCornerShape(99.dp)).background(if (h.expired) RED else GREEN))
+            }
+            if (h.expiresAt != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (h.expired) "Expired ${h.expiresAt}" else "Valid until ${h.expiresAt}",
+                    fontSize = 11.5.sp, color = if (h.expired) RED else AuthMuted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewPackageDialog(onDismiss: () -> Unit, onSave: (String, Int, Int, Int?) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf("") }
+    var sessions by remember { mutableStateOf("") }
+    var days by remember { mutableStateOf("") }
+    val colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+    )
+    val valid = name.isNotBlank() && (price.toIntOrNull() ?: 0) > 0 && (sessions.toIntOrNull() ?: 0) > 0
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Text("New package", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(3.dp))
+            Text("A prepaid bundle of sessions customers can buy.", fontSize = 12.sp, color = AuthMuted)
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(name, { name = it }, label = { Text("Name") }, placeholder = { Text("10 Session Pass") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(price, { price = it.filter { c -> c.isDigit() }.take(7) }, label = { Text("Price ₹") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                OutlinedTextField(sessions, { sessions = it.filter { c -> c.isDigit() }.take(3) }, label = { Text("Sessions") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(days, { days = it.filter { c -> c.isDigit() }.take(4) }, label = { Text("Validity in days (blank = never expires)") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+            if (valid) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "That's ₹${(price.toInt() / sessions.toInt())} per session.",
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AuthAccentDeep,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Create package", enabled = valid, loading = false) {
+                onSave(name.trim(), price.toInt(), sessions.toInt(), days.toIntOrNull())
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
+@Composable
+private fun SellPackageDialog(pkg: VenuePackageRow, onDismiss: () -> Unit, onSell: (String, String) -> Unit) {
+    var phone by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    val colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+    )
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(22.dp)) {
+            Text("Sell ${pkg.name}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(3.dp))
+            Text("${pkg.sessions} sessions · ₹${formatInr(pkg.price.toDouble())}", fontSize = 12.5.sp, color = AuthMuted)
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(name, { name = it }, label = { Text("Customer name") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(phone, { phone = it.filter { c -> c.isDigit() }.take(10) }, label = { Text("Phone") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "The pass is tied to this number — it appears automatically when they next book.",
+                fontSize = 11.5.sp, color = AuthMuted, lineHeight = 16.sp,
+            )
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Sell for ₹" + formatInr(pkg.price.toDouble()), enabled = phone.length == 10 && name.isNotBlank(), loading = false) {
+                onSell(phone, name.trim())
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold) }
+        }
+    }
 }
 
 /**

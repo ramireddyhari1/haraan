@@ -161,6 +161,7 @@ enum class PayMethod(val api: String, val label: String) {
     UPI("upi", "UPI"),
     CARD("card", "Card"),
     LINK("link", "Payment link"),
+    PACKAGE("package", "Use a session"),
 }
 
 /** Outcome of creating a walk-in: the booking, plus a Razorpay link when asked for. */
@@ -209,6 +210,33 @@ data class DayGrid(
     val slots: List<DaySlot>,
     val courts: List<CourtCol> = emptyList(),
 )
+
+/** An offer the venue sells: "10 sessions for ₹4,000". */
+data class VenuePackageRow(
+    val id: Long,
+    val name: String,
+    val price: Int,
+    val sessions: Int,
+    val perSession: Int,
+    val validityDays: Int?,
+    val isActive: Boolean,
+)
+
+/** A customer who holds a pass, and what's left on it. */
+data class PackageHolder(
+    val id: Long,
+    val name: String,
+    val phone: String,
+    val packageName: String,
+    val total: Int,
+    val used: Int,
+    val remaining: Int,
+    val expiresAt: String?,
+    val expired: Boolean,
+    val usable: Boolean,
+)
+
+data class PackagesPage(val packages: List<VenuePackageRow>, val holders: List<PackageHolder>)
 
 /** One customer of this venue, identified by phone across online + walk-in bookings. */
 data class CustomerRow(
@@ -563,6 +591,62 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         }
     }
 
+    private fun parseHolder(o: JSONObject) = PackageHolder(
+        id = o.optLong("id"),
+        name = o.optString("name"),
+        phone = o.optString("phone"),
+        packageName = o.optString("package"),
+        total = o.optInt("total"),
+        used = o.optInt("used"),
+        remaining = o.optInt("remaining"),
+        expiresAt = o.optStringOrNull("expires_at"),
+        expired = o.optBoolean("expired", false),
+        usable = o.optBoolean("usable", false),
+    )
+
+    /** GET /api/partner/packages — offers this venue sells + who holds a pass. */
+    suspend fun packages(token: String): PackagesPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/packages", token))
+        val pk = o.optJSONArray("data")
+        val hd = o.optJSONArray("holders")
+        PackagesPage(
+            packages = if (pk == null) emptyList() else (0 until pk.length()).map { i ->
+                val p = pk.getJSONObject(i)
+                VenuePackageRow(
+                    id = p.optLong("id"),
+                    name = p.optString("name"),
+                    price = p.optInt("price"),
+                    sessions = p.optInt("sessions"),
+                    perSession = p.optInt("per_session"),
+                    validityDays = if (p.isNull("validity_days")) null else p.optInt("validity_days"),
+                    isActive = p.optBoolean("is_active", true),
+                )
+            },
+            holders = if (hd == null) emptyList() else (0 until hd.length()).map { parseHolder(hd.getJSONObject(it)) },
+        )
+    }
+
+    suspend fun savePackage(token: String, name: String, price: Int, sessions: Int, validityDays: Int?) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("name", name).put("price", price).put("sessions", sessions)
+            .put("validityDays", validityDays ?: JSONObject.NULL)
+        post("/api/partner/packages", payload.toString(), token)
+        Unit
+    }
+
+    suspend fun sellPackage(token: String, packageId: Long, phone: String, name: String, method: String = "cash") = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("customerPhone", phone).put("customerName", name).put("paymentMethod", method)
+        post("/api/partner/packages/$packageId/sell", payload.toString(), token)
+        Unit
+    }
+
+    /** What this number has left — drives "use a session" on the walk-in sheet. */
+    suspend fun packageHolder(token: String, phone: String): List<PackageHolder> = withContext(Dispatchers.IO) {
+        if (phone.length < 10) return@withContext emptyList()
+        val o = JSONObject(get("/api/partner/packages/holder?phone=$phone", token))
+        val arr = o.optJSONArray("data")
+        if (arr == null) emptyList() else (0 until arr.length()).map { parseHolder(arr.getJSONObject(it)) }
+    }
+
     /** GET /api/partner/customers — who books here, keyed on phone. */
     suspend fun customers(token: String, query: String = ""): CustomersPage = withContext(Dispatchers.IO) {
         val suffix = if (query.isBlank()) "" else "?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8")
@@ -711,12 +795,14 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         phone: String,
         courtId: Long? = null,
         method: PayMethod = PayMethod.CASH,
+        customerPackageId: Long? = null,
     ): WalkInResult = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("slotId", slotId).put("date", date)
             .put("guestName", name).put("guestPhone", phone)
             .put("paymentMethod", method.api)
         if (courtId != null) payload.put("courtId", courtId)
+        if (customerPackageId != null) payload.put("customerPackageId", customerPackageId)
         val o = JSONObject(post("/api/partner/venues/$venueId/bookings", payload.toString(), token))
         val b = o.optJSONObject("booking")
         WalkInResult(

@@ -420,6 +420,9 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/venues/{id}/slots/{slotId}', 'saveSlot')->whereNumber('id')->whereNumber('slotId');
             Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');
             Route::post('/venues/{id}/courts/{courtId}', 'saveCourt')->whereNumber('id')->whereNumber('courtId');
+            Route::post('/packages', 'savePackage');
+            Route::post('/packages/{id}', 'savePackage')->whereNumber('id');
+            Route::post('/packages/{id}/sell', 'sellPackage')->whereNumber('id');
         });
         Route::middleware('partner.can:bookings')->group(function (): void {
             Route::post('/venues/{id}/bookings', 'storeOfflineBooking')->whereNumber('id');
@@ -435,6 +438,8 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             // Settlement is money-sensitive: same 'reports' gate as Earnings, and
             // the destination itself is only ever returned masked.
             Route::get('/customers', 'customers');
+            Route::get('/packages', 'packages');
+            Route::get('/packages/holder', 'packageHolder');
             Route::get('/payouts', 'payouts');
             Route::post('/payouts/account', 'savePayoutAccount');
         });
