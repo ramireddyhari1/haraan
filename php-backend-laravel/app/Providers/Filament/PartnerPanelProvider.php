@@ -572,6 +572,9 @@ class PartnerPanelProvider extends PanelProvider
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
             ->pages([
                 Dashboard::class,
+                // The floor. Self-gates to branch lanes with the bookings
+                // capability, so event hosts and read-only staff never see it.
+                \App\Filament\Pages\Partner\PartnerDesk::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
                 \App\Filament\Pages\Partner\PartnerPayouts::class,
                 \App\Filament\Pages\Partner\PartnerReviews::class,

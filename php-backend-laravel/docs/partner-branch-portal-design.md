@@ -406,7 +406,24 @@ branches" rather than locking someone out of a console they still belong in.
 **P1 — Chain owner.** Branch comparison table, revenue/bookings/utilisation,
 underperforming-branch alerts. *Ships as: the owner intelligence layer.*
 
-**P2 — Café operations.** Walk-in-first desk, resources generalised beyond
+**P2 — Café operations.** 🟡 **Partly deployed** 2026-08-15 (web).
+
+✅ *Shipped* — `venue_courts.seats` + `.kind` (court | table | station | room |
+lane), so a unit can finally say "Table 04 · 4 seats" instead of being a
+nameless court; **Today's Desk** at `/partner/desk` — walk-in-first, live
+free/busy per unit, still-to-come list, and a seat-a-walk-in sheet that goes
+through `BookingService` so the desk obeys the same conflict rule as every
+other booking path. Party size is a soft guard: a unit with no stated capacity
+never blocks on it.
+
+The desk belongs to ONE branch and refuses to guess — on "All branches" it asks
+which floor you're standing on, because seating someone at the wrong outlet is
+worse than one extra click.
+
+⬜ *Remaining* — reservation-by-party-size (`Party of 4, 7:30 PM, 90 mins`),
+check-in from the desk, and the Android desk.
+
+**P2 — original scope.** Walk-in-first desk, resources generalised beyond
 courts, availability, check-in, simple table reservation, café events.
 *Ships as: a café can run its floor on Haraan.*
 

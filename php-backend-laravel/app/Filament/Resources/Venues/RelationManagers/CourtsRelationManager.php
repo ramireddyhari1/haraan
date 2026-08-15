@@ -36,8 +36,21 @@ class CourtsRelationManager extends RelationManager
                 TextInput::make('name')
                     ->required()
                     ->maxLength(255)
-                    ->placeholder('Court 1, Pitch A, Turf East…')
+                    ->placeholder('Court 1, Pitch A, Table 04, PS5 Station…')
                     ->helperText('The physical unit. If one ground is used for several sports, make ONE court and tick every sport below.'),
+                Select::make('kind')
+                    ->label('What is it')
+                    ->options(\App\Models\VenueCourt::KINDS)
+                    ->default('court')
+                    ->native(false)
+                    ->helperText('Drives the wording on the desk. A café books tables and stations; a turf books courts.'),
+                TextInput::make('seats')
+                    ->label('Seats')
+                    ->numeric()
+                    ->minValue(1)
+                    ->maxValue(99)
+                    ->placeholder('Leave blank if capacity is not a thing here')
+                    ->helperText('Party size this unit holds. Set for tables and rooms; leave blank for a pool table or a pitch — the desk then never blocks a booking on party size.'),
                 Select::make('sports')
                     ->label('Sports this court hosts')
                     ->multiple()

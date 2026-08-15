@@ -23,13 +23,23 @@ final class VenueCourt extends Model
     /** Clients refetch venue lists when a court changes. */
     protected string $contentDomain = 'venues';
 
+    /** What a bookable unit can be. Drives the desk's icon and wording. */
+    public const KINDS = [
+        'court' => 'Court',
+        'table' => 'Table',
+        'station' => 'Station',
+        'room' => 'Room',
+        'lane' => 'Lane',
+    ];
+
     protected $fillable = [
-        'venue_id', 'name', 'sports', 'price', 'sort_order', 'is_active',
+        'venue_id', 'name', 'seats', 'kind', 'sports', 'price', 'sort_order', 'is_active',
         'peak_price', 'peak_days', 'peak_start', 'peak_end',
     ];
 
     protected $casts = [
         'sports'    => 'array',
+        'seats'     => 'integer',
         'price'     => 'integer',
         'peak_price' => 'integer',
         'peak_days' => 'array',
@@ -40,6 +50,46 @@ final class VenueCourt extends Model
     public function venue(): BelongsTo
     {
         return $this->belongsTo(Venue::class);
+    }
+
+    /**
+     * What this unit is called — its own kind when set, else the lane's default.
+     *
+     * A row saved before kinds existed has none, and rather than guessing from
+     * the sport it falls back to the console's vocabulary: a turf reads "Court",
+     * a café reads "Table". Same row, different word, no data migration needed
+     * for a café that renames nothing.
+     */
+    public function kindLabel(?string $lane = null): string
+    {
+        if ($this->kind !== null && isset(self::KINDS[$this->kind])) {
+            return self::KINDS[$this->kind];
+        }
+
+        return $lane !== null && \App\Support\PartnerLane::isBranchLane($lane)
+            ? ucfirst(\App\Support\PartnerLane::resourceNoun($lane))
+            : 'Court';
+    }
+
+    /** "4 seats", or null when capacity isn't a meaningful property here. */
+    public function seatsLabel(): ?string
+    {
+        if ($this->seats === null || $this->seats < 1) {
+            return null;
+        }
+
+        return $this->seats.' '.($this->seats === 1 ? 'seat' : 'seats');
+    }
+
+    /** Whether this unit can hold a party of the given size. */
+    public function fitsParty(?int $partySize): bool
+    {
+        // No stated capacity means the desk isn't tracking it — never block on it.
+        if ($partySize === null || $this->seats === null || $this->seats < 1) {
+            return true;
+        }
+
+        return $this->seats >= $partySize;
     }
 
     /** Sports this court supports, trimmed and de-duplicated (may be empty → all venue sports). */
