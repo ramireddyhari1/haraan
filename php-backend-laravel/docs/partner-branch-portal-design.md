@@ -420,8 +420,17 @@ The desk belongs to ONE branch and refuses to guess — on "All branches" it ask
 which floor you're standing on, because seating someone at the wrong outlet is
 worse than one extra click.
 
-⬜ *Remaining* — reservation-by-party-size (`Party of 4, 7:30 PM, 90 mins`),
-check-in from the desk, and the Android desk.
+✅ *Also shipped* — **check-in from the desk** (idempotent, branch-scoped, gated
+on the `checkin` capability separately from `bookings`) and **book ahead**: give
+a time, a duration and a party size, and the desk is offered only what is
+genuinely free, smallest-fitting-unit first — so nobody burns the twelve-seater
+on a party of two. The "expected today" list deliberately includes bookings that
+have already started but not finished, because a party whose 7pm slot is running
+and who has just walked in is exactly who the desk needs on screen.
+
+⬜ *Remaining* — the Android desk. Party-size *reservations* are done; a full
+covers engine (waitlists, turn times, table-joining) remains deliberately
+out of scope.
 
 **P2 — original scope.** Walk-in-first desk, resources generalised beyond
 courts, availability, check-in, simple table reservation, café events.

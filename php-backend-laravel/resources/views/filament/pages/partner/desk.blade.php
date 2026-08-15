@@ -40,7 +40,10 @@
                 <span class="hrn-desk-val">{{ $s['upcoming'] }}</span>
                 <span class="hrn-desk-lbl">still to come</span>
             </div>
-            <div class="hrn-desk-branch">{{ $branch->branchName() }}</div>
+            <div class="hrn-desk-actions">
+                <button type="button" class="hrn-ahead-btn" wire:click="openReserve">Book ahead</button>
+                <span class="hrn-desk-branch">{{ $branch->branchName() }}</span>
+            </div>
         </div>
 
         <div class="hrn-desk-grid">
@@ -83,10 +86,10 @@
 
         @if ($this->upcoming())
             <div class="hrn-desk-next">
-                <h3>Still to come today</h3>
+                <h3>Expected today</h3>
                 <ul>
                     @foreach ($this->upcoming() as $b)
-                        <li>
+                        <li @class(['is-in' => $b['arrived']])>
                             <span class="hrn-next-at">{{ $b['at'] }}</span>
                             <span class="hrn-next-who">
                                 {{ $b['who'] }}
@@ -96,9 +99,69 @@
                                 ₹{{ number_format($b['amount']) }}
                                 @unless ($b['paid']) <span class="hrn-next-due">due</span> @endunless
                             </span>
+                            @if ($b['arrived'])
+                                {{-- Never colour alone: the state is a word. --}}
+                                <span class="hrn-next-in">Here</span>
+                            @elseif ($this->canCheckIn())
+                                <button type="button" class="hrn-in-btn" wire:click="checkIn({{ $b['id'] }})">
+                                    Arrived
+                                </button>
+                            @endif
                         </li>
                     @endforeach
                 </ul>
+            </div>
+        @endif
+
+        @if ($this->reserving)
+            @php($free = $this->freeUnitsAt())
+            <div class="hrn-sheet-scrim" wire:click="closeReserve"></div>
+            <div class="hrn-sheet" role="dialog" aria-modal="true" aria-label="Book ahead">
+                <h3>Book ahead</h3>
+                <p class="hrn-sheet-sub">Later today. We'll find a {{ $noun }} that fits.</p>
+
+                <div class="hrn-sheet-row">
+                    <div>
+                        <label>Time</label>
+                        <input type="text" wire:model.live="reserveAt" placeholder="7:30 PM">
+                    </div>
+                    <div>
+                        <label>Hours</label>
+                        <input type="number" min="1" max="12" wire:model.live="hours">
+                    </div>
+                </div>
+
+                <label>Party size <span>optional</span></label>
+                <input type="number" min="1" wire:model.live="partySize" placeholder="How many?">
+
+                {{-- Live: the desk sees what's actually open before committing. --}}
+                <div class="hrn-avail">
+                    @if ($free)
+                        <span class="hrn-avail-ok">{{ count($free) }} free</span>
+                        <select wire:model="reserveCourtId" aria-label="Which {{ $noun }}">
+                            <option value="">Best fit — {{ $free[0]['label'] }}</option>
+                            @foreach ($free as $u)
+                                <option value="{{ $u['id'] }}">{{ $u['label'] }}</option>
+                            @endforeach
+                        </select>
+                    @else
+                        <span class="hrn-avail-no">Nothing free for that window</span>
+                    @endif
+                </div>
+
+                <label>Name <span>optional</span></label>
+                <input type="text" wire:model="guestName" placeholder="Who's it for?">
+
+                <label>Phone <span>optional</span></label>
+                <input type="tel" wire:model="guestPhone" placeholder="10-digit number">
+
+                <div class="hrn-sheet-actions">
+                    <button type="button" class="hrn-btn-ghost" wire:click="closeReserve">Cancel</button>
+                    <button type="button" class="hrn-btn-go" wire:click="reserve"
+                            wire:loading.attr="disabled" @disabled(! $free)>
+                        Book it
+                    </button>
+                </div>
             </div>
         @endif
 
@@ -155,8 +218,26 @@
             font-variant-numeric:tabular-nums;}
         .hrn-desk-val.hrn-free{color:#16803C;}
         .hrn-desk-lbl{font-size:11px;color:#6b7688;text-transform:uppercase;letter-spacing:.04em;}
-        .hrn-desk-branch{margin-left:auto;font-size:12.5px;font-weight:700;color:#1e3a6b;
+        .hrn-desk-actions{margin-left:auto;display:flex;align-items:center;gap:10px;}
+        .hrn-desk-branch{font-size:12.5px;font-weight:700;color:#1e3a6b;
             background:#f2f6fd;border-radius:999px;padding:5px 12px;}
+        .hrn-ahead-btn{padding:8px 14px;border:0;border-radius:10px;cursor:pointer;
+            background:#0A66FF;color:#fff;font-size:12.5px;font-weight:700;}
+        .hrn-ahead-btn:hover{background:#1D4ED8;}
+
+        .hrn-in-btn{padding:5px 11px;border:0;border-radius:9px;cursor:pointer;
+            background:#16803C;color:#fff;font-size:11.5px;font-weight:700;}
+        .hrn-in-btn:hover{background:#12662f;}
+        .hrn-next-in{font-size:11px;font-weight:700;color:#16803C;
+            background:#e7f6ec;border-radius:999px;padding:3px 9px;}
+        .hrn-desk-next li.is-in .hrn-next-who{color:#6b7688;}
+
+        .hrn-avail{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;}
+        .hrn-avail select{flex:1;min-width:140px;padding:8px 10px;border-radius:10px;border:0;
+            font-size:13px;background:#f5f7fb;box-shadow:inset 0 0 0 1px #e2e8f0;color:#0b1220;}
+        .hrn-avail-ok{font-size:11.5px;font-weight:700;color:#16803C;
+            background:#e7f6ec;border-radius:999px;padding:4px 10px;white-space:nowrap;}
+        .hrn-avail-no{font-size:12px;font-weight:600;color:#b4530a;}
 
         .hrn-desk-grid{display:grid;gap:12px;
             grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));}
@@ -227,7 +308,9 @@
         .dark .hrn-desk-next li{border-bottom-color:#232c3b;}
         .dark .hrn-sheet input{background:#1c2432;box-shadow:inset 0 0 0 1px #2a3446;color:#eef2f8;}
         .dark .hrn-btn-ghost{background:#232c3b;color:#c7d0dd;}
-        .dark .hrn-desk-val.hrn-free{color:#5fd08a;}
+        .dark .hrn-desk-val.hrn-free,.dark .hrn-next-in,.dark .hrn-avail-ok{color:#5fd08a;}
+        .dark .hrn-next-in,.dark .hrn-avail-ok{background:#12321f;}
+        .dark .hrn-avail select{background:#1c2432;box-shadow:inset 0 0 0 1px #2a3446;color:#eef2f8;}
 
         @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important;}}
     </style>

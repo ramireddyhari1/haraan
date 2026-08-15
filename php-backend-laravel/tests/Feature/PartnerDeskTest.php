@@ -295,6 +295,191 @@ class PartnerDeskTest extends TestCase
         $this->assertDatabaseMissing('bookings', ['venue_court_id' => $theirs->id]);
     }
 
+    // ---------------------------------------------------------------
+    //  Check-in
+    // ---------------------------------------------------------------
+
+    private function reservation(string $start, string $end, array $overrides = []): Booking
+    {
+        return Booking::create(array_merge([
+            'quantity' => 2, 'total_amount' => 400, 'status' => 'CONFIRMED',
+            'booking_type' => 'venue', 'user_id' => $this->owner->id,
+            'venue_id' => $this->kora->id, 'venue_court_id' => $this->table4->id,
+            'slot_date' => today()->toDateString(),
+            'start_time' => $start, 'end_time' => $end,
+            'channel' => 'offline', 'guest_name' => 'Anika',
+        ], $overrides));
+    }
+
+    public function test_a_party_already_seated_still_appears_for_check_in(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+
+        // Running right now (19:00 is inside 6–8pm). They have just walked in,
+        // which is precisely when the desk needs them on screen.
+        $this->reservation('6:00 PM', '8:00 PM');
+
+        $this->assertCount(1, $this->desk()->upcoming());
+    }
+
+    public function test_checking_in_marks_them_arrived_and_is_idempotent(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+        $b = $this->reservation('9:00 PM', '11:00 PM');
+
+        Livewire::test(PartnerDesk::class)->call('checkIn', $b->id);
+
+        $b->refresh();
+        $this->assertNotNull($b->checked_in_at);
+        $this->assertSame(2, (int) $b->checked_in_count);
+
+        $first = $b->checked_in_at;
+
+        // A second tap must not double-count or move the timestamp.
+        Livewire::test(PartnerDesk::class)->call('checkIn', $b->id);
+        $b->refresh();
+
+        $this->assertSame(2, (int) $b->checked_in_count);
+        $this->assertEquals($first, $b->checked_in_at);
+    }
+
+    public function test_it_cannot_check_in_another_branchs_booking(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+        $theirs = $this->reservation('9:00 PM', '11:00 PM', ['venue_id' => $this->hsr->id, 'venue_court_id' => null]);
+
+        Livewire::test(PartnerDesk::class)->call('checkIn', $theirs->id);
+
+        $this->assertNull($theirs->fresh()->checked_in_at);
+    }
+
+    public function test_staff_without_checkin_cannot_mark_arrivals(): void
+    {
+        $deskOnly = User::create([
+            'name' => 'Bookings only', 'email' => 'bookonly@bigbean.test',
+            'password' => Hash::make('secret123'), 'role' => 'PARTNER',
+            'partner_type' => 'cafe', 'status' => 'active',
+            'parent_partner_id' => $this->owner->id,
+            'staff_permissions' => ['bookings'],
+        ]);
+        $deskOnly->assignedVenues()->sync([$this->kora->id]);
+
+        PartnerBranchContext::select($this->kora->id);
+        $b = $this->reservation('9:00 PM', '11:00 PM');
+
+        $this->actingAs($deskOnly);
+        PartnerBranchContext::flush();
+        PartnerBranchContext::select($this->kora->id);
+
+        Livewire::test(PartnerDesk::class)->call('checkIn', $b->id);
+
+        $this->assertNull($b->fresh()->checked_in_at);
+    }
+
+    // ---------------------------------------------------------------
+    //  Booking ahead
+    // ---------------------------------------------------------------
+
+    public function test_free_units_exclude_anything_overlapping_the_window(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+        $this->reservation('9:00 PM', '11:00 PM'); // Table 04 busy 9–11
+
+        $names = array_column($this->desk()->freeUnitsAt('9:30 PM', 1), 'name');
+
+        $this->assertNotContains('Table 04', $names);
+        $this->assertContains('Pool', $names);
+    }
+
+    public function test_a_booking_ending_exactly_at_the_start_does_not_block(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+        $this->reservation('7:00 PM', '9:00 PM');
+
+        // Half-open windows: 9pm is free the moment the 7–9 ends.
+        $names = array_column($this->desk()->freeUnitsAt('9:00 PM', 1), 'name');
+
+        $this->assertContains('Table 04', $names);
+    }
+
+    public function test_free_units_respect_party_size(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+
+        // Table 04 seats 4; Pool states no capacity so it never blocks.
+        $names = array_column($this->desk()->freeUnitsAt('8:00 PM', 1, 6), 'name');
+
+        $this->assertNotContains('Table 04', $names);
+        $this->assertContains('Pool', $names);
+    }
+
+    public function test_booking_ahead_picks_the_smallest_unit_that_fits(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+
+        $big = VenueCourt::create([
+            'venue_id' => $this->kora->id, 'name' => 'Long Table', 'kind' => 'table',
+            'seats' => 12, 'price' => 600, 'is_active' => true,
+        ]);
+
+        Livewire::test(PartnerDesk::class)
+            ->call('openReserve')
+            ->set('reserveAt', '8:00 PM')
+            ->set('hours', '2')
+            ->set('partySize', '3')
+            ->set('guestName', 'Dev')
+            ->call('reserve')
+            ->assertSet('reserving', false);
+
+        // Table 04 (4 seats) fits a party of three; the twelve-seater must not be
+        // burned on it while a four-top sits empty.
+        $this->assertDatabaseHas('bookings', [
+            'venue_court_id' => $this->table4->id,
+            'guest_name' => 'Dev',
+        ]);
+        $this->assertDatabaseMissing('bookings', ['venue_court_id' => $big->id]);
+    }
+
+    public function test_booking_ahead_refuses_when_nothing_fits(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+
+        // Occupy both units for the window.
+        $this->reservation('8:00 PM', '10:00 PM');
+        $pool = VenueCourt::where('name', 'Pool')->firstOrFail();
+        $this->reservation('8:00 PM', '10:00 PM', ['venue_court_id' => $pool->id, 'guest_name' => 'Taken']);
+
+        Livewire::test(PartnerDesk::class)
+            ->call('openReserve')
+            ->set('reserveAt', '8:30 PM')
+            ->set('hours', '1')
+            ->set('guestName', 'Nope')
+            ->call('reserve')
+            ->assertSet('reserving', true); // sheet stays open
+
+        $this->assertDatabaseMissing('bookings', ['guest_name' => 'Nope']);
+    }
+
+    public function test_booking_ahead_honours_an_explicit_unit_choice(): void
+    {
+        PartnerBranchContext::select($this->kora->id);
+        $pool = VenueCourt::where('name', 'Pool')->firstOrFail();
+
+        Livewire::test(PartnerDesk::class)
+            ->call('openReserve')
+            ->set('reserveAt', '8:00 PM')
+            ->set('hours', '1')
+            ->set('reserveCourtId', (string) $pool->id)
+            ->set('guestName', 'Chose pool')
+            ->call('reserve')
+            ->assertSet('reserving', false);
+
+        $this->assertDatabaseHas('bookings', [
+            'venue_court_id' => $pool->id,
+            'guest_name' => 'Chose pool',
+        ]);
+    }
+
     public function test_it_renders_the_floor(): void
     {
         PartnerBranchContext::select($this->kora->id);

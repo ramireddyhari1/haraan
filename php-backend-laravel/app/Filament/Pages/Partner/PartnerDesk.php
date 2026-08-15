@@ -60,6 +60,13 @@ class PartnerDesk extends Page
     /** Which unit the walk-in sheet is open for. */
     public $seatingCourtId = null;
 
+    /** Whether the "book for later" sheet is open, and its own fields. */
+    public $reserving = false;
+
+    public $reserveAt = '';
+
+    public $reserveCourtId = '';
+
     public static function shouldRegisterNavigation(): bool
     {
         return self::canAccess();
@@ -177,7 +184,14 @@ class PartnerDesk extends Page
         })->all();
     }
 
-    /** Reservations still to come today, across the whole branch. */
+    /**
+     * Who is still expected today — anything that hasn't finished yet.
+     *
+     * Deliberately NOT "starts after now": a party whose 7pm booking is already
+     * running but who hasn't been checked in is exactly who the desk needs in
+     * front of it. Filtering to future starts would drop them the moment their
+     * slot began, which is the moment they walk in.
+     */
     public function upcoming(): array
     {
         $branch = $this->branch();
@@ -195,9 +209,9 @@ class PartnerDesk extends Page
             ->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed', 'checked_in'])
             ->with('venueCourt:id,name')
             ->get()
-            ->filter(fn (Booking $b): bool => $this->startsAfter($b, $now))
+            ->filter(fn (Booking $b): bool => $this->notEnded($b, $now))
             ->sortBy('start_time')
-            ->take(8)
+            ->take(10)
             ->map(fn (Booking $b): array => [
                 'id' => $b->id,
                 'at' => $b->start_time,
@@ -206,6 +220,9 @@ class PartnerDesk extends Page
                 'where' => $b->venueCourt?->name,
                 'amount' => (float) $b->total_amount,
                 'paid' => strtolower((string) $b->payment_status) === 'paid',
+                // Attendance, which is a different question from whether the
+                // unit's window is running — someone can arrive early.
+                'arrived' => $b->checked_in_at !== null,
             ])
             ->values()
             ->all();
@@ -312,6 +329,234 @@ class PartnerDesk extends Page
         $this->closeSeat();
     }
 
+    // ---------------------------------------------------------------------
+    //  Check-in
+    // ---------------------------------------------------------------------
+
+    public function canCheckIn(): bool
+    {
+        return auth()->user()?->hasPartnerPermission('checkin') ?? false;
+    }
+
+    /**
+     * Mark an expected party as arrived.
+     *
+     * Idempotent — a second tap on a slow connection reports "already here"
+     * rather than double-counting, which matters because the desk is the one
+     * place people tap twice.
+     */
+    public function checkIn(int $bookingId): void
+    {
+        $branch = $this->branch();
+
+        if ($branch === null || ! $this->canCheckIn()) {
+            return;
+        }
+
+        // Scoped to THIS branch: a booking id alone must not let one desk mark
+        // another outlet's customer as arrived.
+        $booking = Booking::query()
+            ->where('venue_id', $branch->id)
+            ->where('booking_type', 'venue')
+            ->find($bookingId);
+
+        if ($booking === null) {
+            Notification::make()->title('That booking is not on this floor.')->danger()->send();
+
+            return;
+        }
+
+        if ($booking->checked_in_at !== null) {
+            Notification::make()->title(($booking->guest_name ?: 'They').' are already checked in.')->send();
+
+            return;
+        }
+
+        $booking->checked_in_count = max(1, (int) $booking->quantity);
+        $booking->checked_in_at = now();
+        $booking->save();
+
+        Notification::make()
+            ->title(($booking->guest_name ?: 'Guest').' checked in')
+            ->success()
+            ->send();
+    }
+
+    // ---------------------------------------------------------------------
+    //  Booking ahead
+    // ---------------------------------------------------------------------
+
+    public function openReserve(): void
+    {
+        $this->reserving = true;
+        $this->guestName = '';
+        $this->guestPhone = '';
+        $this->partySize = '';
+        $this->hours = '1';
+        $this->reserveAt = Carbon::now()->addHour()->startOfHour()->format('g:i A');
+        $this->reserveCourtId = '';
+    }
+
+    public function closeReserve(): void
+    {
+        $this->reserving = false;
+    }
+
+    /**
+     * Units genuinely free for a window, big enough for the party.
+     *
+     * This is the bit that earns the screen: a desk should not have to read a
+     * grid and do overlap arithmetic in its head while somebody waits. Ask for
+     * "4 people at 7:30 for 90 minutes" and get back only what actually works.
+     *
+     * @return array<int, array{id:int, name:string, seats:?int, label:string}>
+     */
+    public function freeUnitsAt(?string $at = null, ?int $hours = null, ?int $party = null): array
+    {
+        $branch = $this->branch();
+
+        if ($branch === null) {
+            return [];
+        }
+
+        $start = $this->timeToday($at ?? $this->reserveAt);
+
+        if ($start === null) {
+            return [];
+        }
+
+        $end = $start->copy()->addHours(max(1, $hours ?? (int) ($this->hours ?: 1)));
+        $party ??= ctype_digit((string) $this->partySize) ? (int) $this->partySize : null;
+
+        $taken = Booking::query()
+            ->where('booking_type', 'venue')
+            ->where('venue_id', $branch->id)
+            ->whereDate('slot_date', Carbon::today())
+            ->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed', 'checked_in'])
+            ->get(['venue_court_id', 'start_time', 'end_time'])
+            ->filter(function (Booking $b) use ($start, $end): bool {
+                [$s, $e] = $this->window($b);
+
+                // Half-open overlap: a booking ending exactly at our start is fine.
+                return $s !== null && $e !== null && $s->lt($end) && $e->gt($start);
+            })
+            ->pluck('venue_court_id')
+            ->filter()
+            ->unique()
+            ->all();
+
+        return VenueCourt::query()
+            ->where('venue_id', $branch->id)
+            ->where('is_active', true)
+            ->whereNotIn('id', $taken ?: [0])
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get()
+            ->filter(fn (VenueCourt $c): bool => $c->fitsParty($party))
+            // Smallest unit that still fits first — don't burn the twelve-seater
+            // on a party of two while a four-top sits empty.
+            ->sortBy(fn (VenueCourt $c): int => $c->seats ?? PHP_INT_MAX)
+            ->map(fn (VenueCourt $c): array => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'seats' => $c->seats,
+                'label' => $c->name.($c->seatsLabel() ? ' · '.$c->seatsLabel() : ''),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Book a unit for later today.
+     *
+     * The desk may name a unit; if it doesn't, the best-fitting free one is
+     * chosen. Either way the booking goes through BookingService, so the
+     * conflict rule decides — this method's availability check is a convenience
+     * for the human, never the guarantee.
+     */
+    public function reserve(BookingService $bookings): void
+    {
+        $branch = $this->branch();
+
+        if ($branch === null) {
+            return;
+        }
+
+        $start = $this->timeToday($this->reserveAt);
+
+        if ($start === null) {
+            Notification::make()->title('Give a start time, like 7:30 PM.')->warning()->send();
+
+            return;
+        }
+
+        $free = $this->freeUnitsAt();
+
+        if ($free === []) {
+            $party = trim((string) $this->partySize);
+
+            Notification::make()
+                ->title('Nothing free at '.$this->reserveAt)
+                ->body($party !== ''
+                    ? "No {$this->noun()} that seats {$party} is open for that window."
+                    : 'Every '.$this->noun().' is taken for that window.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $chosenId = ctype_digit((string) $this->reserveCourtId) ? (int) $this->reserveCourtId : null;
+        $chosen = $chosenId !== null
+            ? collect($free)->firstWhere('id', $chosenId)
+            : $free[0];
+
+        if ($chosen === null) {
+            Notification::make()->title('That '.$this->noun().' is no longer free for that window.')->warning()->send();
+
+            return;
+        }
+
+        try {
+            $booking = $bookings->createOfflineVenueBooking(
+                auth()->user(),
+                (int) $branch->id,
+                null,
+                Carbon::today()->toDateString(),
+                trim((string) $this->guestName) ?: null,
+                trim((string) $this->guestPhone) ?: null,
+                (int) $chosen['id'],
+                max(1, (int) ($this->hours ?: 1)),
+            );
+        } catch (\Throwable $e) {
+            Notification::make()->title('Could not book that')->body($e->getMessage())->danger()->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title('Booked '.$chosen['name'].' at '.$this->reserveAt)
+            ->body('₹'.number_format((float) $booking->total_amount))
+            ->success()
+            ->send();
+
+        $this->closeReserve();
+    }
+
+    /** "7:30 PM" → a Carbon today, or null when it isn't a time. */
+    private function timeToday(?string $label): ?Carbon
+    {
+        if ($label === null || trim($label) === '') {
+            return null;
+        }
+
+        $ts = strtotime(trim($label));
+
+        return $ts === false
+            ? null
+            : Carbon::today()->setTime((int) date('G', $ts), (int) date('i', $ts));
+    }
+
     /** Whether a booking's window covers the given moment. */
     private function covers(Booking $b, Carbon $at): bool
     {
@@ -325,6 +570,14 @@ class PartnerDesk extends Page
         [$start] = $this->window($b);
 
         return $start !== null && $start->gt($at);
+    }
+
+    /** Not finished yet — still the desk's problem. */
+    private function notEnded(Booking $b, Carbon $at): bool
+    {
+        [$start, $end] = $this->window($b);
+
+        return $start !== null && ($end === null || $end->gt($at));
     }
 
     /**
