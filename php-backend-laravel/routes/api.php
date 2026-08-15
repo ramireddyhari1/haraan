@@ -430,7 +430,13 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/bookings/{id}/payment-status', 'paymentStatus')->whereNumber('id');
         });
         Route::middleware('partner.can:checkin')->post('/check-in', 'checkInByCode');
-        Route::middleware('partner.can:reports')->get('/reports/bookings', 'bookingsReport');
+        Route::middleware('partner.can:reports')->group(function (): void {
+            Route::get('/reports/bookings', 'bookingsReport');
+            // Settlement is money-sensitive: same 'reports' gate as Earnings, and
+            // the destination itself is only ever returned masked.
+            Route::get('/payouts', 'payouts');
+            Route::post('/payouts/account', 'savePayoutAccount');
+        });
 
         // --- Staff management (owner-only; desk persons never hold 'staff') ---
         Route::middleware('partner.can:staff')->group(function (): void {

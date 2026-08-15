@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\BookingPayment;
 use App\Models\Event;
+use App\Models\PartnerPayoutAccount;
+use App\Models\PayoutBatch;
 use App\Models\User;
 use App\Models\Venue;
 use App\Models\VenueBlockedDate;
@@ -16,6 +18,7 @@ use App\Models\VenueSlot;
 use App\Services\BookingLedger;
 use App\Services\BookingNotifier;
 use App\Services\BookingService;
+use App\Services\PartnerSettlement;
 use App\Services\RazorpayGateway;
 use App\Support\BookingReport;
 use Illuminate\Http\JsonResponse;
@@ -638,6 +641,143 @@ class PartnerController extends Controller
             'Content-Type'        => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
+    }
+
+    /**
+     * GET /api/partner/payouts — the settlement home: balance, where the money is
+     * sent, and the history of settlements.
+     *
+     * The arithmetic comes from {@see PartnerSettlement} — the same service the web
+     * Payouts page and /control settle against, so a partner can never see one
+     * "available" figure in the app and a different one on the web.
+     */
+    public function payouts(Request $request): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $settlement = app(PartnerSettlement::class);
+        $s = $settlement->summary($partnerId);
+
+        $account = PartnerPayoutAccount::query()->where('partner_id', $partnerId)->first();
+
+        $batches = PayoutBatch::query()
+            ->where('partner_id', $partnerId)
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (PayoutBatch $b): array => [
+                'id'        => $b->id,
+                'amount'    => round((float) $b->amount, 2),
+                'status'    => $b->status,
+                'is_paid'   => $b->isPaid(),
+                'method'    => $b->method,
+                'reference' => $b->reference,
+                'period'    => $this->batchPeriod($b),
+                'date'      => optional($b->processed_at ?? $b->created_at)->toDateString(),
+            ]);
+
+        return response()->json([
+            'balance' => [
+                'available' => round($s['available'], 2),
+                'in_flight' => round($s['inFlight'], 2),
+                'settled'   => round($s['settled'], 2),
+                'collected' => round($s['collected'], 2),
+            ],
+            'account' => $account === null ? null : [
+                'method'         => $account->method,
+                'account_holder' => $account->account_holder,
+                'bank_name'      => $account->bank_name,
+                // The destination itself is masked — a stolen phone must not be able
+                // to read back where the venue's money goes. Changing it requires
+                // re-entering it in full, same rule as the web page.
+                'masked'         => $this->maskDestination($account),
+                'verified'       => $account->verified_at !== null,
+            ],
+            'batches' => $batches,
+        ]);
+    }
+
+    /**
+     * POST /api/partner/payouts/account — set where settlements are sent.
+     *
+     * Saving always clears `verified_at`: a destination that changed is a
+     * destination nobody has checked yet.
+     */
+    public function savePayoutAccount(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'method'        => ['required', 'string', 'in:bank,upi'],
+            'accountHolder' => ['required', 'string', 'max:120'],
+            'bankName'      => ['nullable', 'string', 'max:120'],
+            'accountNumber' => ['nullable', 'string', 'max:34'],
+            'ifsc'          => ['nullable', 'string', 'max:15'],
+            'upiVpa'        => ['nullable', 'string', 'max:120'],
+        ]);
+
+        // Each method needs its own destination, or the row is a promise to pay
+        // money to nowhere.
+        if ($data['method'] === 'bank') {
+            $request->validate([
+                'accountNumber' => ['required', 'string', 'min:6', 'max:34'],
+                'ifsc'          => ['required', 'string', 'min:6', 'max:15'],
+            ]);
+        } else {
+            $request->validate(['upiVpa' => ['required', 'string', 'min:3', 'max:120']]);
+        }
+
+        $partnerId = $request->user()->effectivePartnerId();
+
+        $account = PartnerPayoutAccount::updateOrCreate(
+            ['partner_id' => $partnerId],
+            [
+                'method'         => $data['method'],
+                'account_holder' => $data['accountHolder'],
+                'bank_name'      => $data['method'] === 'bank' ? ($data['bankName'] ?? null) : null,
+                'account_number' => $data['method'] === 'bank' ? $data['accountNumber'] : null,
+                'ifsc_code'      => $data['method'] === 'bank' ? strtoupper((string) $data['ifsc']) : null,
+                'upi_vpa'        => $data['method'] === 'upi' ? $data['upiVpa'] : null,
+                'verified_at'    => null,
+            ],
+        );
+
+        return response()->json([
+            'status'  => 'ok',
+            'account' => [
+                'method'         => $account->method,
+                'account_holder' => $account->account_holder,
+                'bank_name'      => $account->bank_name,
+                'masked'         => $this->maskDestination($account),
+                'verified'       => false,
+            ],
+        ]);
+    }
+
+    /** "HDFC •••• 4821" / "venue@upi" with the handle kept readable. */
+    private function maskDestination(PartnerPayoutAccount $a): string
+    {
+        if ($a->method === 'upi') {
+            $vpa = (string) $a->upi_vpa;
+            $at = strpos($vpa, '@');
+
+            if ($at === false || $at <= 2) {
+                return $vpa;
+            }
+
+            return substr($vpa, 0, 2).str_repeat('•', max($at - 2, 1)).substr($vpa, $at);
+        }
+
+        $num = preg_replace('/\s+/', '', (string) $a->account_number);
+        $tail = strlen((string) $num) > 4 ? substr((string) $num, -4) : (string) $num;
+
+        return trim(((string) $a->bank_name).' •••• '.$tail);
+    }
+
+    private function batchPeriod(PayoutBatch $b): ?string
+    {
+        if ($b->period_start === null || $b->period_end === null) {
+            return null;
+        }
+
+        return $b->period_start->format('d M').' – '.$b->period_end->format('d M');
     }
 
     /** GET /api/partner/venues/{id}/courts — courts with their base + peak pricing. */

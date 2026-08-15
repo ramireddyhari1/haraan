@@ -210,6 +210,36 @@ data class DayGrid(
     val courts: List<CourtCol> = emptyList(),
 )
 
+/** Where settlements are sent. The destination itself is only ever masked. */
+data class PayoutAccount(
+    val method: String,
+    val accountHolder: String,
+    val bankName: String?,
+    val masked: String,
+    val verified: Boolean,
+)
+
+/** One settlement transfer to the partner. */
+data class PayoutBatchRow(
+    val id: Long,
+    val amount: Double,
+    val status: String,
+    val isPaid: Boolean,
+    val reference: String?,
+    val period: String?,
+    val date: String?,
+)
+
+/** The settlement home: what's owed, where it goes, and what's already gone. */
+data class PayoutsPage(
+    val available: Double,
+    val inFlight: Double,
+    val settled: Double,
+    val collected: Double,
+    val account: PayoutAccount?,
+    val batches: List<PayoutBatchRow>,
+)
+
 /** A desk person under a partner owner. */
 data class StaffMember(val id: Long, val name: String, val email: String, val permissions: List<String>)
 
@@ -514,6 +544,65 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 isOpen = o.optBoolean("is_open", true),
             )
         }
+    }
+
+    /** GET /api/partner/payouts — balance, settlement account, batch history. */
+    suspend fun payouts(token: String): PayoutsPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/payouts", token))
+        val b = o.getJSONObject("balance")
+        val acc = o.optJSONObject("account")
+        val arr = o.optJSONArray("batches")
+        PayoutsPage(
+            available = b.optDouble("available", 0.0),
+            inFlight = b.optDouble("in_flight", 0.0),
+            settled = b.optDouble("settled", 0.0),
+            collected = b.optDouble("collected", 0.0),
+            account = acc?.let {
+                PayoutAccount(
+                    method = it.optString("method", "bank"),
+                    accountHolder = it.optString("account_holder"),
+                    bankName = it.optStringOrNull("bank_name"),
+                    masked = it.optString("masked"),
+                    verified = it.optBoolean("verified", false),
+                )
+            },
+            batches = if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                val x = arr.getJSONObject(i)
+                PayoutBatchRow(
+                    id = x.optLong("id"),
+                    amount = x.optDouble("amount", 0.0),
+                    status = x.optString("status"),
+                    isPaid = x.optBoolean("is_paid", false),
+                    reference = x.optStringOrNull("reference"),
+                    period = x.optStringOrNull("period"),
+                    date = x.optStringOrNull("date"),
+                )
+            },
+        )
+    }
+
+    /** Set where settlements are sent. Saving always clears verification. */
+    suspend fun savePayoutAccount(
+        token: String,
+        method: String,
+        accountHolder: String,
+        bankName: String?,
+        accountNumber: String?,
+        ifsc: String?,
+        upiVpa: String?,
+    ) = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("method", method)
+            .put("accountHolder", accountHolder)
+        if (method == "bank") {
+            payload.put("bankName", bankName ?: "")
+                .put("accountNumber", accountNumber ?: "")
+                .put("ifsc", ifsc ?: "")
+        } else {
+            payload.put("upiVpa", upiVpa ?: "")
+        }
+        post("/api/partner/payouts/account", payload.toString(), token)
+        Unit
     }
 
     /** GET the venue's courts with base + peak pricing. */

@@ -838,9 +838,14 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var detail by remember { mutableStateOf<AnalyticsTarget?>(null) }
     var manageVenue by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var showReports by remember { mutableStateOf(false) }
+    var showPayouts by remember { mutableStateOf(false) }
     var showStaff by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    if (showPayouts) {
+        PayoutsScreen(api, token, onBack = { showPayouts = false })
+        return
+    }
     if (showReports) {
         ReportsScreen(api, token, onBack = { showReports = false })
         return
@@ -933,7 +938,10 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 actions = {
                     BellIcon(unseenBookings) { tab = Tab.Sales; unseenBookings = 0 }
                     if (!session.isDesk) HeaderIcon(Icons.Filled.People, "Staff") { showStaff = true }
-                    if (session.can("reports")) HeaderIcon(Icons.Filled.Description, "Reports") { showReports = true }
+                    if (session.can("reports")) {
+                        HeaderIcon(Icons.Filled.Payments, "Payouts") { showPayouts = true }
+                        HeaderIcon(Icons.Filled.Description, "Reports") { showReports = true }
+                    }
                     Spacer(Modifier.width(2.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -968,7 +976,10 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 BookingBanner(msg) { bookingBanner = null; tab = Tab.Sales; unseenBookings = 0 }
             }
             when (tab) {
-                Tab.Home -> HomeTab(api, token, session.name ?: "Partner", lane) { serverType ->
+                Tab.Home -> HomeTab(
+                    api, token, session.name ?: "Partner", lane,
+                    onPayouts = if (session.can("reports")) ({ showPayouts = true }) else null,
+                ) { serverType ->
                     if (serverType != null) {
                         session.partnerType = serverType
                         lane = laneOf(serverType)
@@ -1028,7 +1039,7 @@ private fun <T> RefreshableContent(key: Any?, load: suspend () -> T, content: @C
 private data class Tile(val icon: ImageVector, val label: String, val value: String, val hint: String)
 
 @Composable
-private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onLane: (String?) -> Unit) {
+private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, onPayouts: (() -> Unit)? = null, onLane: (String?) -> Unit) {
     RefreshableContent(token, load = { api.overview(token) }) { o ->
         // Report the server's authoritative type up so the tab bar matches.
         LaunchedEffect(o.type) { onLane(o.type) }
@@ -1067,9 +1078,33 @@ private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, on
             item { GreetingHeader(name, subtitle) }
             item { RevenueHero(o) }
             item { StatStrip(tiles) }
+            if (onPayouts != null) {
+                item { PayoutsEntryCard(onPayouts) }
+            }
             if (effective != Lane.EVENT) {
                 item { BookingsMixCard(o) }
             }
+        }
+    }
+}
+
+/** Dashboard shortcut into Payouts — money owed deserves a row, not just a header icon. */
+@Composable
+private fun PayoutsEntryCard(onClick: () -> Unit) {
+    PressableSurface(onClick = onClick) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFE7F7EE), Color(0xFFD3F0E0)))),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Payments, contentDescription = null, tint = Color(0xFF0F766E), modifier = Modifier.size(21.dp)) }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Payouts", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                Spacer(Modifier.height(1.dp))
+                Text("Balance, settlement account & history", fontSize = 12.sp, color = AuthMuted)
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -2518,6 +2553,301 @@ private fun shareCsv(context: Context, from: String, to: String, csv: String) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(send, "Share report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/**
+ * Payouts — the settlement home: what the venue is owed, where it's sent, and
+ * what's already landed. Balance figures come from the same PartnerSettlement
+ * service the web page and /control settle against, so the app can never show a
+ * different "available" than the console.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+    var reload by remember { mutableStateOf(0) }
+    var editing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val state by produceState<UiState<PayoutsPage>>(UiState.Loading, reload) {
+        value = runCatchingUi { api.payouts(token) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Payouts", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+            )
+        },
+    ) { padding ->
+        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            Loaded(state) { p ->
+                LazyColumn(
+                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 28.dp),
+                ) {
+                    item { PayoutBalanceHero(p) }
+                    item { PayoutAccountCard(p.account) { editing = true } }
+                    item {
+                        Text(
+                            "SETTLEMENT HISTORY",
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            color = AuthMuted, letterSpacing = 1.4.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    if (p.batches.isEmpty()) {
+                        item {
+                            LayoutBox(Modifier.fillMaxWidth().premiumSurface().padding(20.dp)) {
+                                Text(
+                                    "No settlements yet. Money you collect shows as available until it's transferred.",
+                                    fontSize = 13.sp, color = AuthMuted, lineHeight = 18.sp,
+                                )
+                            }
+                        }
+                    } else {
+                        items(p.batches) { b -> PayoutBatchCard(b) }
+                    }
+                }
+            }
+        }
+    }
+
+    if (editing) {
+        PayoutAccountDialog(
+            onDismiss = { editing = false },
+            onSave = { method, holder, bank, acct, ifsc, vpa ->
+                editing = false
+                scope.launch {
+                    runCatching { api.savePayoutAccount(token, method, holder, bank, acct, ifsc, vpa) }
+                    reload++
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun PayoutBalanceHero(p: PayoutsPage) {
+    LayoutBox(
+        Modifier.fillMaxWidth()
+            .shadow(18.dp, RoundedCornerShape(22.dp), clip = false, spotColor = AuthInkTop)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
+    ) {
+        LayoutBox(
+            Modifier.matchParentSize().background(
+                Brush.radialGradient(listOf(Color(0x553B82F6), Color(0x00000000)), center = Offset(120f, 40f), radius = 520f)
+            )
+        )
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            Text("AVAILABLE TO SETTLE", color = Color(0xB3CFE0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            Text("₹" + formatInr(p.available), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp)
+            if (p.inFlight > 0) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33F59E0B)).padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFFFCD34D)))
+                    Spacer(Modifier.width(7.dp))
+                    Text("₹" + formatInr(p.inFlight) + " being transferred", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFFCD34D))
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth()) {
+                PayoutStat(Modifier.weight(1f), "Collected", p.collected)
+                LayoutBox(Modifier.width(1.dp).height(34.dp).background(Color(0x33FFFFFF)))
+                PayoutStat(Modifier.weight(1f), "Settled", p.settled)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PayoutStat(modifier: Modifier, label: String, value: Double) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("₹" + formatInr(value), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = Color(0x99CFE0FF), fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun PayoutAccountCard(account: PayoutAccount?, onEdit: () -> Unit) {
+    PressableSurface(onClick = onEdit) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF)))),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Payments, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(22.dp)) }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (account == null) "Add settlement account" else "Money is sent to",
+                    fontSize = 12.sp, color = AuthMuted,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    account?.masked ?: "No account yet — tap to add",
+                    fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1,
+                )
+                if (account != null) {
+                    Spacer(Modifier.height(6.dp))
+                    val tone = if (account.verified) GREEN else Color(0xFFB45309)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 9.dp, vertical = 4.dp),
+                    ) {
+                        LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(tone))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (account.verified) "Verified" else "Pending verification",
+                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tone,
+                        )
+                    }
+                }
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun PayoutBatchCard(b: PayoutBatchRow) {
+    val tone = if (b.isPaid) GREEN else Color(0xFFB45309)
+    LayoutBox(Modifier.fillMaxWidth().premiumSurface()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("₹" + formatInr(b.amount), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    listOfNotNull(b.date, b.period).joinToString(" · ").ifBlank { "—" },
+                    fontSize = 12.sp, color = AuthMuted,
+                )
+                if (!b.reference.isNullOrBlank()) {
+                    Spacer(Modifier.height(3.dp))
+                    Text("Ref ${b.reference}", fontSize = 11.sp, color = AuthMuted)
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(tone))
+                Spacer(Modifier.width(6.dp))
+                Text(b.status.replaceFirstChar { it.uppercase() }, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = tone)
+            }
+        }
+    }
+}
+
+/** Enter where settlements are sent. Never prefilled — changing the destination
+ *  means re-entering it, and saving clears verification. */
+@Composable
+private fun PayoutAccountDialog(
+    onDismiss: () -> Unit,
+    onSave: (method: String, holder: String, bank: String?, acct: String?, ifsc: String?, vpa: String?) -> Unit,
+) {
+    var method by remember { mutableStateOf("bank") }
+    var holder by remember { mutableStateOf("") }
+    var bank by remember { mutableStateOf("") }
+    var acct by remember { mutableStateOf("") }
+    var ifsc by remember { mutableStateOf("") }
+    var vpa by remember { mutableStateOf("") }
+    val view = LocalView.current
+
+    val colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+    )
+    val valid = holder.isNotBlank() && if (method == "bank") acct.length >= 6 && ifsc.length >= 6 else vpa.length >= 3
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White)
+                .verticalScroll(rememberScrollState()).padding(22.dp),
+        ) {
+            Text("Settlement account", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(3.dp))
+            Text("Where your collected money is transferred.", fontSize = 12.sp, color = AuthMuted)
+
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("bank" to "Bank account", "upi" to "UPI").forEach { (key, label) ->
+                    val on = method == key
+                    LayoutBox(
+                        Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                            .background(if (on) Color(0x142F6BFF) else Color(0xFFF8FAFC))
+                            .border(if (on) 1.5.dp else 1.dp, if (on) AuthAccent else Color(0x1F0F172A), RoundedCornerShape(12.dp))
+                            .clickable { method = key; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+                            .padding(vertical = 11.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(label, fontSize = 13.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) AuthAccentDeep else AuthInk)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            OutlinedTextField(
+                value = holder, onValueChange = { holder = it },
+                label = { Text("Account holder name") }, singleLine = true,
+                shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (method == "bank") {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = bank, onValueChange = { bank = it },
+                    label = { Text("Bank name") }, singleLine = true,
+                    shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = acct, onValueChange = { acct = it.filter { c -> c.isDigit() }.take(18) },
+                    label = { Text("Account number") }, singleLine = true,
+                    shape = RoundedCornerShape(12.dp), colors = colors,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = ifsc, onValueChange = { ifsc = it.uppercase().take(11) },
+                    label = { Text("IFSC code") }, singleLine = true,
+                    shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = vpa, onValueChange = { vpa = it },
+                    label = { Text("UPI ID") }, placeholder = { Text("name@bank") }, singleLine = true,
+                    shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Saving sends this for re-verification before the next settlement.",
+                fontSize = 11.5.sp, color = AuthMuted, lineHeight = 16.sp,
+            )
+
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Save account", enabled = valid, loading = false) {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                onSave(method, holder.trim(), bank.trim().ifBlank { null }, acct.trim().ifBlank { null }, ifsc.trim().ifBlank { null }, vpa.trim().ifBlank { null })
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
