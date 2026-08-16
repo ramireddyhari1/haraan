@@ -26,11 +26,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
@@ -56,15 +60,20 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
@@ -121,6 +130,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.style.TextOverflow
@@ -972,6 +982,39 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         return
     }
 
+    // The drawer is the app's one index: every destination and every tool lives
+    // in it, so nothing is reachable only by remembering which header glyph it
+    // hid behind. The topbar keeps just the bell, which is a live alert rather
+    // than a destination.
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+    fun closeDrawer() { drawerScope.launch { drawerState.close() } }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            PartnerDrawer(
+                session = session,
+                ctx = ctx,
+                lane = lane,
+                tabs = tabs,
+                current = tab,
+                branchId = branchId,
+                onTab = { picked -> tab = picked; closeDrawer() },
+                onBranch = { picked ->
+                    branchId = picked
+                    session.branchId = picked
+                    closeDrawer()
+                },
+                onCustomers = { showCustomers = true; closeDrawer() },
+                onPackages = if (session.can("pricing")) ({ showPackages = true; closeDrawer() }) else null,
+                onStaff = if (!session.isDesk) ({ showStaff = true; closeDrawer() }) else null,
+                onPayouts = if (session.can("reports")) ({ showPayouts = true; closeDrawer() }) else null,
+                onReports = if (session.can("reports")) ({ showReports = true; closeDrawer() }) else null,
+                onSignOut = { session.clear(); onSignedOut() },
+            )
+        },
+    ) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -979,13 +1022,28 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     containerColor = Color.White,
                     scrolledContainerColor = Color.White,
                 ),
+                navigationIcon = {
+                    IconButton(onClick = { drawerScope.launch { drawerState.open() } }) {
+                        Icon(
+                            Icons.Filled.Menu,
+                            contentDescription = "Menu",
+                            tint = AuthInk,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // The wordmark opens the drawer too: the brand is the one
+                        // thing always in the same place, so it is the most
+                        // findable target on the screen.
                         Image(
                             painter = painterResource(R.drawable.haraan_logo),
                             contentDescription = "Haraan",
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier.height(22.dp),
+                            modifier = Modifier
+                                .height(22.dp)
+                                .clickable { drawerScope.launch { drawerState.open() } },
                         )
                         ctx?.takeIf { it.isMultiBranch }?.let { known ->
                             Spacer(Modifier.width(8.dp))
@@ -998,23 +1056,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 },
                 actions = {
                     BellIcon(unseenBookings) { tab = Tab.Sales; unseenBookings = 0 }
-                    if (!session.isDesk) HeaderIcon(Icons.Filled.People, "Staff") { showStaff = true }
-                    if (session.can("reports")) {
-                        HeaderIcon(Icons.Filled.Payments, "Payouts") { showPayouts = true }
-                        HeaderIcon(Icons.Filled.Description, "Reports") { showReports = true }
-                    }
-                    Spacer(Modifier.width(2.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .padding(end = 10.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0x142F6BFF))
-                            .clickable { session.clear(); onSignedOut() }
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                    ) {
-                        Text("Sign out", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AuthAccentDeep)
-                    }
+                    Spacer(Modifier.width(4.dp))
                 },
             )
         },
@@ -1059,6 +1101,233 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             }
         }
     }
+    }
+}
+
+/**
+ * The slide-out index of the whole console.
+ *
+ * Three bands, in the order a partner actually thinks: where am I going
+ * (the tabs), what do I want to run (the tools that used to hide as topbar
+ * glyphs), and which outlet am I looking at. Sign out sits alone at the
+ * bottom so nobody hits it reaching for anything else.
+ *
+ * Every tool is passed as a nullable lambda: a null means this account can't
+ * do that, and the row simply isn't drawn — the drawer never shows a partner
+ * a door that would only tell them no.
+ */
+@Composable
+private fun PartnerDrawer(
+    session: Session,
+    ctx: PartnerContext?,
+    lane: Lane,
+    tabs: List<Tab>,
+    current: Tab,
+    branchId: Long?,
+    onTab: (Tab) -> Unit,
+    onBranch: (Long?) -> Unit,
+    onCustomers: () -> Unit,
+    onPackages: (() -> Unit)?,
+    onStaff: (() -> Unit)?,
+    onPayouts: (() -> Unit)?,
+    onReports: (() -> Unit)?,
+    onSignOut: () -> Unit,
+) {
+    ModalDrawerSheet(
+        drawerContainerColor = Color.White,
+        drawerShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
+        // The sheet's own status-bar inset is dropped so the navy identity block
+        // can run under the clock; the header re-applies it to its text.
+        windowInsets = WindowInsets(0, 0, 0, 0),
+        modifier = Modifier.widthIn(max = 320.dp),
+    ) {
+        Column(Modifier.fillMaxHeight()) {
+            DrawerHeader(session, ctx)
+
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 10.dp),
+            ) {
+                DrawerSection("Go to")
+                tabs.forEach { t ->
+                    DrawerRow(
+                        icon = iconFor(t),
+                        label = labelFor(t, lane),
+                        selected = t == current,
+                        onClick = { onTab(t) },
+                    )
+                }
+
+                val tools = listOfNotNull(
+                    Triple(Icons.Filled.People, "Customers", onCustomers),
+                    onPackages?.let { Triple(Icons.Filled.ConfirmationNumber, "Packages", it) },
+                    onStaff?.let { Triple(Icons.Filled.Badge, "Staff", it) },
+                    onPayouts?.let { Triple(Icons.Filled.Payments, "Payouts", it) },
+                    onReports?.let { Triple(Icons.Filled.Description, "Reports", it) },
+                )
+                if (tools.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    DrawerSection("Manage")
+                    tools.forEach { (icon, label, action) ->
+                        DrawerRow(icon = icon, label = label, selected = false, onClick = action)
+                    }
+                }
+
+                // Only a partner who actually runs several outlets gets a branch
+                // band; a single-venue account sees the drawer it always had.
+                ctx?.takeIf { it.isMultiBranch }?.let { known ->
+                    Spacer(Modifier.height(6.dp))
+                    DrawerSection("Branch")
+                    DrawerRow(
+                        icon = Icons.Filled.Place,
+                        label = "All branches",
+                        selected = branchId == null,
+                        trailing = { if (branchId == null) DrawerTick() },
+                        onClick = { onBranch(null) },
+                    )
+                    known.branches.forEach { b ->
+                        DrawerRow(
+                            icon = Icons.Filled.Place,
+                            label = b.branch,
+                            selected = branchId == b.id,
+                            trailing = { if (branchId == b.id) DrawerTick() },
+                            onClick = { onBranch(b.id) },
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = Hairline)
+            DrawerRow(
+                icon = Icons.AutoMirrored.Filled.Logout,
+                label = "Sign out",
+                selected = false,
+                tint = RED,
+                onClick = onSignOut,
+            )
+            Spacer(Modifier.height(6.dp).navigationBarsPadding())
+        }
+    }
+}
+
+/** Navy identity block: who is signed in, and at what altitude. */
+@Composable
+private fun DrawerHeader(session: Session, ctx: PartnerContext?) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(AuthInkTop, AuthInkMid)))
+            .statusBarsPadding()
+            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 20.dp),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.haraan_logo_white),
+            contentDescription = "Haraan",
+            contentScale = ContentScale.Fit,
+            colorFilter = ColorFilter.tint(Color.White),
+            modifier = Modifier.height(19.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            ctx?.businessName ?: session.name ?: "Partner",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DrawerChip(altitudeLabel(session, ctx))
+            ctx?.typeLabel?.let {
+                Spacer(Modifier.width(6.dp))
+                DrawerChip(it)
+            }
+        }
+    }
+}
+
+/** Reads the partner's altitude for the header chip. Owners see "Owner". */
+private fun altitudeLabel(session: Session, ctx: PartnerContext?): String = when {
+    ctx?.altitude == "desk" || session.isDesk -> "Desk"
+    ctx?.altitude == "manager" -> "Manager"
+    else -> "Owner"
+}
+
+@Composable
+private fun DrawerChip(text: String) {
+    Text(
+        text,
+        fontSize = 11.5.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Color(0xFFBFD0FF),
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0x2E4C7DFF))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun DrawerSection(label: String) {
+    Text(
+        label.uppercase(),
+        fontSize = 10.5.sp,
+        fontWeight = FontWeight.Bold,
+        color = AuthMuted,
+        modifier = Modifier.padding(start = 26.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
+    )
+}
+
+@Composable
+private fun DrawerTick() {
+    Icon(Icons.Filled.Check, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(17.dp))
+}
+
+/**
+ * One drawer line. Selection is carried by a tinted pill rather than a side
+ * rail so it reads the same as the branch chip in the topbar.
+ */
+@Composable
+private fun DrawerRow(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    tint: Color? = null,
+    trailing: @Composable (() -> Unit)? = null,
+) {
+    val fg = tint ?: if (selected) AuthAccentDeep else AuthInk
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Color(0x142F6BFF) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (selected || tint != null) fg else AuthMuted,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(
+            label,
+            fontSize = 14.5.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.invoke()
+    }
 }
 
 /**
@@ -1076,7 +1345,9 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
 private fun BranchSwitcher(ctx: PartnerContext, selected: Long?, onSelect: (Long?) -> Unit) {
     var open by remember { mutableStateOf(false) }
 
-    Box {
+    // LayoutBox, not Box: see CenteredPane — a bare `Box` here binds to a
+    // fillMaxSize() helper and takes the whole top bar with it.
+    LayoutBox {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -3979,14 +4250,23 @@ private fun ScanTab(api: PartnerApi, token: String) {
 @Composable
 private fun <T> Loaded(state: UiState<T>, content: @Composable (T) -> Unit) {
     when (state) {
-        is UiState.Loading -> Box { CircularProgressIndicator(Modifier.padding(32.dp)) }
+        is UiState.Loading -> CenteredPane { CircularProgressIndicator(Modifier.padding(32.dp)) }
         is UiState.Error -> EmptyState(state.message)
         is UiState.Data -> content(state.value)
     }
 }
 
+/**
+ * Fills the pane and centres one thing in it — the loading/empty pedestal.
+ *
+ * Deliberately NOT named `Box`: this file aliases the real layout Box to
+ * `LayoutBox`, so a helper called `Box` silently wins name resolution at every
+ * bare `Box { }` call site and swaps a wrap-content container for a
+ * `fillMaxSize()` one. That is exactly how the branch chip once stretched the
+ * whole top bar to full height and squeezed the home screen to nothing.
+ */
 @Composable
-private fun Box(content: @Composable () -> Unit) {
+private fun CenteredPane(content: @Composable () -> Unit) {
     Column(
         Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
