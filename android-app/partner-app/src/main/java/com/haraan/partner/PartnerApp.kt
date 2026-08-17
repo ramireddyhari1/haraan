@@ -46,7 +46,9 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.People
@@ -870,9 +872,19 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showCustomers by remember { mutableStateOf(false) }
     var showPackages by remember { mutableStateOf(false) }
     var showAcademy by remember { mutableStateOf(false) }
+    var showNotifications by remember { mutableStateOf(false) }
+    var showSupport by remember { mutableStateOf(false) }
     var showStaff by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    if (showNotifications) {
+        NotificationsScreen(api, token, onBack = { showNotifications = false })
+        return
+    }
+    if (showSupport) {
+        SupportScreen(api, token, onBack = { showSupport = false })
+        return
+    }
     if (showAcademy) {
         AcademyScreen(api, token, onBack = { showAcademy = false })
         return
@@ -1016,6 +1028,9 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 onStaff = if (!session.isDesk) ({ showStaff = true; closeDrawer() }) else null,
                 onPayouts = if (session.can("reports")) ({ showPayouts = true; closeDrawer() }) else null,
                 onReports = if (session.can("reports")) ({ showReports = true; closeDrawer() }) else null,
+                onAcademy = if (session.can("pricing")) ({ showAcademy = true; closeDrawer() }) else null,
+                onNotifications = { showNotifications = true; closeDrawer() },
+                onSupport = { showSupport = true; closeDrawer() },
                 onSignOut = { session.clear(); onSignedOut() },
             )
         },
@@ -1137,6 +1152,9 @@ private fun PartnerDrawer(
     onStaff: (() -> Unit)?,
     onPayouts: (() -> Unit)?,
     onReports: (() -> Unit)?,
+    onAcademy: (() -> Unit)?,
+    onNotifications: () -> Unit,
+    onSupport: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     ModalDrawerSheet(
@@ -1169,6 +1187,7 @@ private fun PartnerDrawer(
                 val tools = listOfNotNull(
                     Triple(Icons.Filled.People, "Customers", onCustomers),
                     onPackages?.let { Triple(Icons.Filled.ConfirmationNumber, "Packages", it) },
+                    onAcademy?.let { Triple(Icons.Filled.School, "Academy", it) },
                     onStaff?.let { Triple(Icons.Filled.Badge, "Staff", it) },
                     onPayouts?.let { Triple(Icons.Filled.Payments, "Payouts", it) },
                     onReports?.let { Triple(Icons.Filled.Description, "Reports", it) },
@@ -1180,6 +1199,11 @@ private fun PartnerDrawer(
                         DrawerRow(icon = icon, label = label, selected = false, onClick = action)
                     }
                 }
+
+                Spacer(Modifier.height(6.dp))
+                DrawerSection("Account")
+                DrawerRow(icon = Icons.Filled.Notifications, label = "Notifications", selected = false, onClick = onNotifications)
+                DrawerRow(icon = Icons.AutoMirrored.Filled.HelpOutline, label = "Support", selected = false, onClick = onSupport)
 
                 // Only a partner who actually runs several outlets gets a branch
                 // band; a single-venue account sees the drawer it always had.
@@ -3098,6 +3122,184 @@ private fun shareCsv(context: Context, from: String, to: String, csv: String) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(send, "Share report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/** Notifications — the bell inbox broadcast from the Haraan team. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NotificationsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+    var reload by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val state by produceState<UiState<NotificationsPage>>(UiState.Loading, reload) {
+        value = runCatchingUi { api.notifications(token) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Notifications", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+                actions = {
+                    val s = state
+                    if (s is UiState.Data && s.value.unread > 0) {
+                        TextButton(onClick = {
+                            scope.launch { runCatching { api.markNotificationsRead(token) }; reload++ }
+                        }) { Text("Mark all read", color = AuthAccent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            Loaded(state) { p ->
+                if (p.items.isEmpty()) {
+                    EmptyState("No notifications yet.")
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 28.dp),
+                    ) {
+                        items(p.items) { n ->
+                            LayoutBox(Modifier.fillMaxWidth().premiumSurface(16.dp)) {
+                                Row(Modifier.padding(15.dp)) {
+                                    // Unread gets a dot; read rows stay quiet.
+                                    LayoutBox(
+                                        Modifier.padding(top = 5.dp).size(8.dp).clip(RoundedCornerShape(99.dp))
+                                            .background(if (n.read) Color.Transparent else AuthAccent),
+                                    )
+                                    Spacer(Modifier.width(11.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            n.title,
+                                            fontSize = 14.5.sp,
+                                            fontWeight = if (n.read) FontWeight.SemiBold else FontWeight.Bold,
+                                            color = AuthInk,
+                                        )
+                                        if (!n.body.isNullOrBlank()) {
+                                            Spacer(Modifier.height(3.dp))
+                                            Text(n.body, fontSize = 12.5.sp, color = AuthMuted, lineHeight = 17.sp)
+                                        }
+                                        n.createdAt?.let {
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(it.take(10), fontSize = 11.sp, color = AuthMuted)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Support — the partner↔Haraan conversation, same thread the web panel shows. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SupportScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+    var reload by remember { mutableStateOf(0) }
+    var draft by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val state by produceState<UiState<List<SupportMessage>>>(UiState.Loading, reload) {
+        value = runCatchingUi { api.supportThread(token) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Support", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding).imePadding()) {
+            LayoutBox(Modifier.weight(1f)) {
+                Loaded(state) { msgs ->
+                    if (msgs.isEmpty()) {
+                        EmptyState("Ask us anything — we usually reply within a few hours.")
+                    } else {
+                        LazyColumn(
+                            Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 14.dp),
+                        ) {
+                            items(msgs) { m ->
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = if (m.fromAdmin) Arrangement.Start else Arrangement.End,
+                                ) {
+                                    Column(
+                                        Modifier.widthIn(max = 290.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (m.fromAdmin) Color.White else AuthAccent)
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    ) {
+                                        Text(
+                                            m.body,
+                                            fontSize = 13.5.sp, lineHeight = 19.sp,
+                                            color = if (m.fromAdmin) AuthInk else Color.White,
+                                        )
+                                        m.createdAt?.let {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                it.substring(11, 16.coerceAtMost(it.length)),
+                                                fontSize = 10.sp,
+                                                color = if (m.fromAdmin) AuthMuted else Color(0xB3FFFFFF),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().background(Color.White).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    placeholder = { Text("Type a message") },
+                    shape = RoundedCornerShape(22.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AuthAccent, cursorColor = AuthAccent,
+                        unfocusedBorderColor = Color(0x1F0F172A),
+                    ),
+                    maxLines = 4,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(9.dp))
+                LayoutBox(
+                    Modifier.size(46.dp).clip(RoundedCornerShape(99.dp))
+                        .background(if (draft.isNotBlank() && !sending) AuthAccent else Color(0xFFCBD5E1))
+                        .clickable(enabled = draft.isNotBlank() && !sending) {
+                            val body = draft.trim()
+                            draft = ""
+                            sending = true
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            scope.launch {
+                                runCatching { api.sendSupportMessage(token, body) }
+                                sending = false
+                                reload++
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) { Text("→", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+            }
+        }
+    }
 }
 
 /**

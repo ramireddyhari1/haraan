@@ -269,6 +269,20 @@ data class DayGrid(
     val courts: List<CourtCol> = emptyList(),
 )
 
+/** One bell-inbox notification from the Haraan team. */
+data class NotificationRow(
+    val id: Long,
+    val title: String,
+    val body: String?,
+    val read: Boolean,
+    val createdAt: String?,
+)
+
+data class NotificationsPage(val unread: Int, val items: List<NotificationRow>)
+
+/** One message in the partner↔admin support thread. */
+data class SupportMessage(val id: Long, val body: String, val fromAdmin: Boolean, val createdAt: String?)
+
 /** A coaching batch: coach, weekdays, time, monthly fee, roster health. */
 data class BatchRow(
     val id: Long,
@@ -749,6 +763,55 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         present = o.optBoolean("present", false),
         attended = o.optInt("attended"),
     )
+
+    /**
+     * GET /api/notifications — the bell inbox. Not under /api/partner: it's the
+     * shared broadcast inbox every signed-in account has, and a partner is one.
+     */
+    suspend fun notifications(token: String): NotificationsPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/notifications", token))
+        val arr = o.optJSONArray("notifications") ?: o.optJSONArray("data")
+        NotificationsPage(
+            unread = o.optInt("unread"),
+            items = if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                val n = arr.getJSONObject(i)
+                NotificationRow(
+                    id = n.optLong("id"),
+                    title = n.optString("title"),
+                    body = n.optStringOrNull("body"),
+                    read = n.optBoolean("read", false),
+                    createdAt = n.optStringOrNull("created_at"),
+                )
+            },
+        )
+    }
+
+    /** Mark every notification read (empty ids = all, per NotificationsController). */
+    suspend fun markNotificationsRead(token: String, ids: List<Long> = emptyList()) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("ids", JSONArray(ids))
+        post("/api/notifications/read", payload.toString(), token)
+        Unit
+    }
+
+    /** GET /api/support/thread — the partner↔admin conversation. */
+    suspend fun supportThread(token: String): List<SupportMessage> = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/support/thread", token))
+        val arr = o.optJSONArray("messages")
+        if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+            val m = arr.getJSONObject(i)
+            SupportMessage(
+                id = m.optLong("id"),
+                body = m.optString("body"),
+                fromAdmin = m.optString("from") == "admin",
+                createdAt = m.optStringOrNull("created_at"),
+            )
+        }
+    }
+
+    suspend fun sendSupportMessage(token: String, body: String) = withContext(Dispatchers.IO) {
+        post("/api/support/messages", JSONObject().put("body", body).toString(), token)
+        Unit
+    }
 
     /** GET /api/partner/academy — coaching batches with roster + fee health. */
     suspend fun academy(token: String): List<BatchRow> = withContext(Dispatchers.IO) {
