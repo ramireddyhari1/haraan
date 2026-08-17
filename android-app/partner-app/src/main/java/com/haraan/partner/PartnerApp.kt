@@ -1172,7 +1172,9 @@ private fun PartnerDrawer(
                 Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(vertical = 10.dp),
+                    // Bottom room so the last row can scroll clear of the pinned
+                    // Sign out strip instead of sitting under it.
+                    .padding(top = 6.dp, bottom = 18.dp),
             ) {
                 DrawerSection("Go to")
                 tabs.forEach { t ->
@@ -1193,14 +1195,14 @@ private fun PartnerDrawer(
                     onReports?.let { Triple(Icons.Filled.Description, "Reports", it) },
                 )
                 if (tools.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(2.dp))
                     DrawerSection("Manage")
                     tools.forEach { (icon, label, action) ->
                         DrawerRow(icon = icon, label = label, selected = false, onClick = action)
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(2.dp))
                 DrawerSection("Account")
                 DrawerRow(icon = Icons.Filled.Notifications, label = "Notifications", selected = false, onClick = onNotifications)
                 DrawerRow(icon = Icons.AutoMirrored.Filled.HelpOutline, label = "Support", selected = false, onClick = onSupport)
@@ -1245,35 +1247,66 @@ private fun PartnerDrawer(
 /** Navy identity block: who is signed in, and at what altitude. */
 @Composable
 private fun DrawerHeader(session: Session, ctx: PartnerContext?) {
-    Column(
+    val name = ctx?.businessName ?: session.name ?: "Partner"
+    // Same aurora as the login band and the revenue hero, so the drawer reads as
+    // part of the app rather than a stock Material panel.
+    LayoutBox(
         Modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(AuthInkTop, AuthInkMid)))
-            .statusBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 20.dp),
+            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
     ) {
-        Image(
-            painter = painterResource(R.drawable.haraan_logo_white),
-            contentDescription = "Haraan",
-            contentScale = ContentScale.Fit,
-            colorFilter = ColorFilter.tint(Color.White),
-            modifier = Modifier.height(19.dp),
+        LayoutBox(
+            Modifier.matchParentSize().background(
+                Brush.radialGradient(
+                    listOf(Color(0x553B82F6), Color(0x00000000)),
+                    center = Offset(90f, 40f), radius = 460f,
+                )
+            )
         )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            ctx?.businessName ?: session.name ?: "Partner",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            DrawerChip(altitudeLabel(session, ctx))
-            ctx?.typeLabel?.let {
-                Spacer(Modifier.width(6.dp))
-                DrawerChip(it)
+        Column(
+            Modifier.statusBarsPadding().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 15.dp),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.haraan_logo_white),
+                contentDescription = "Haraan",
+                contentScale = ContentScale.Fit,
+                colorFilter = ColorFilter.tint(Color.White),
+                modifier = Modifier.height(18.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            // Monogram beside the name (not centred on the whole block, which left
+            // it hanging below the text), chips on their own line underneath.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LayoutBox(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x2E7DA9FF))
+                        .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        name.trim().take(1).uppercase(),
+                        fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+                    )
+                }
+                Spacer(Modifier.width(11.dp))
+                Text(
+                    name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    letterSpacing = (-0.2).sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(11.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DrawerChip(altitudeLabel(session, ctx))
+                ctx?.typeLabel?.let {
+                    Spacer(Modifier.width(6.dp))
+                    DrawerChip(it)
+                }
             }
         }
     }
@@ -1302,13 +1335,22 @@ private fun DrawerChip(text: String) {
 
 @Composable
 private fun DrawerSection(label: String) {
-    Text(
-        label.uppercase(),
-        fontSize = 10.5.sp,
-        fontWeight = FontWeight.Bold,
-        color = AuthMuted,
-        modifier = Modifier.padding(start = 26.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
-    )
+    // Label + hairline: the rule is what makes these read as groups rather than
+    // stray small text floating above a flat list.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 21.dp, end = 20.dp, top = 8.dp, bottom = 4.dp),
+    ) {
+        Text(
+            label.uppercase(),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            color = Color(0xFF94A3B8),
+        )
+        Spacer(Modifier.width(10.dp))
+        LayoutBox(Modifier.weight(1f).height(1.dp).background(Hairline))
+    }
 }
 
 @Composable
@@ -1330,27 +1372,50 @@ private fun DrawerRow(
     trailing: @Composable (() -> Unit)? = null,
 ) {
     val fg = tint ?: if (selected) AuthAccentDeep else AuthInk
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.975f else 1f, label = "drawer-row")
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 1.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(13.dp))
             .background(if (selected) Color(0x142F6BFF) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .clickable(interactionSource = interaction, indication = null) {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onClick()
+            }
+            .padding(horizontal = 9.dp, vertical = 5.dp),
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (selected || tint != null) fg else AuthMuted,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(14.dp))
+        // A tonal container instead of a bare grey glyph — the same device the
+        // dashboard entry cards use, so the drawer belongs to the same app.
+        LayoutBox(
+            Modifier.size(32.dp).clip(RoundedCornerShape(10.dp))
+                .background(
+                    when {
+                        tint != null -> tint.copy(alpha = 0.10f)
+                        selected -> Color(0x1F2F6BFF)
+                        else -> Color(0x0A0F172A)
+                    }
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected || tint != null) fg else Color(0xFF64748B),
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
         Text(
             label,
             fontSize = 14.5.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             color = fg,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
