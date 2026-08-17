@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\BookingPayment;
 use App\Models\Event;
+use App\Models\BatchAttendance;
+use App\Models\BatchEnrollment;
 use App\Models\CustomerPackage;
 use App\Models\PackageRedemption;
 use App\Models\VenuePackage;
@@ -15,6 +17,7 @@ use App\Models\PartnerPayoutAccount;
 use App\Models\PayoutBatch;
 use App\Models\User;
 use App\Models\Venue;
+use App\Models\VenueBatch;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
@@ -820,6 +823,225 @@ class PartnerController extends Controller
             'Content-Type'        => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
+    }
+
+    /** GET /api/partner/academy — coaching batches with roster + fee health. */
+    public function academy(Request $request): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $today = Carbon::today();
+
+        $batches = VenueBatch::query()
+            ->where('partner_id', $partnerId)
+            ->withCount(['enrollments' => fn ($q) => $q->where('is_active', true)])
+            ->orderByDesc('is_active')->orderBy('name')
+            ->get()
+            ->map(function (VenueBatch $b) use ($today): array {
+                $overdue = BatchEnrollment::query()
+                    ->where('venue_batch_id', $b->id)->where('is_active', true)
+                    ->whereNotNull('paid_until')->whereDate('paid_until', '<', $today)
+                    ->count();
+
+                return [
+                    'id'          => $b->id,
+                    'name'        => $b->name,
+                    'coach'       => $b->coach_name,
+                    'sport'       => $b->sport,
+                    'days'        => $b->daysList(),
+                    'start_time'  => $b->start_time,
+                    'end_time'    => $b->end_time,
+                    'monthly_fee' => $b->monthly_fee,
+                    'capacity'    => $b->capacity,
+                    'students'    => (int) $b->enrollments_count,
+                    'overdue'     => $overdue,
+                    'runs_today'  => $b->runsOn($today),
+                    'is_active'   => $b->is_active,
+                ];
+            });
+
+        return response()->json(['data' => $batches]);
+    }
+
+    /** POST /api/partner/academy — create a batch. */
+    public function saveBatch(Request $request, ?string $id = null): JsonResponse
+    {
+        $data = $request->validate([
+            'name'       => ['required', 'string', 'max:120'],
+            'coachName'  => ['nullable', 'string', 'max:120'],
+            'sport'      => ['nullable', 'string', 'max:60'],
+            'days'       => ['nullable', 'array'],
+            'days.*'     => ['string', 'max:12'],
+            'startTime'  => ['nullable', 'string', 'max:5'],
+            'endTime'    => ['nullable', 'string', 'max:5'],
+            'monthlyFee' => ['required', 'integer', 'min:0'],
+            'capacity'   => ['nullable', 'integer', 'min:1', 'max:500'],
+            'venueId'    => ['nullable', 'integer'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+
+        $venueId = null;
+        if (! empty($data['venueId'])) {
+            $venueId = (int) Venue::query()->where('partner_id', $partnerId)->findOrFail($data['venueId'])->id;
+        }
+
+        $days = array_values(array_filter(array_map(
+            static fn ($d): string => ucfirst(strtolower(substr(trim((string) $d), 0, 3))),
+            $data['days'] ?? [],
+        )));
+
+        $attrs = [
+            'partner_id'  => $partnerId,
+            'venue_id'    => $venueId,
+            'name'        => $data['name'],
+            'coach_name'  => $data['coachName'] ?? null,
+            'sport'       => $data['sport'] ?? null,
+            'days'        => $days === [] ? null : $days,
+            'start_time'  => $data['startTime'] ?? null,
+            'end_time'    => $data['endTime'] ?? null,
+            'monthly_fee' => $data['monthlyFee'],
+            'capacity'    => $data['capacity'] ?? null,
+        ];
+
+        $batch = $id === null
+            ? VenueBatch::query()->create($attrs)
+            : tap(VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id))->update($attrs);
+
+        return response()->json(['status' => 'ok', 'id' => $batch->id], $id === null ? 201 : 200);
+    }
+
+    /**
+     * POST /api/partner/academy/{id}/enroll — put a student on a batch.
+     *
+     * Re-enrolling the same number EXTENDS the existing seat rather than adding a
+     * second one: a roster that counts one child twice is wrong in both directions
+     * (capacity and fees owed).
+     */
+    public function enrollStudent(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'studentName'  => ['required', 'string', 'max:120'],
+            'studentPhone' => ['required', 'string', 'max:20'],
+            'amountPaid'   => ['nullable', 'integer', 'min:0'],
+            'months'       => ['nullable', 'integer', 'min:1', 'max:24'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+        $batch = VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id);
+
+        $phone = $this->digits($data['studentPhone']);
+
+        if ($phone === null) {
+            return response()->json(['error' => 'A valid phone number is required.'], 422);
+        }
+
+        $months = $data['months'] ?? 1;
+        $existing = BatchEnrollment::query()
+            ->where('venue_batch_id', $batch->id)->where('student_phone', $phone)->first();
+
+        // Extend from whichever is later: today, or the date they're already paid to.
+        $base = $existing !== null && $existing->paid_until !== null && $existing->paid_until->isFuture()
+            ? $existing->paid_until->copy()
+            : Carbon::today();
+
+        $enrollment = BatchEnrollment::query()->updateOrCreate(
+            ['venue_batch_id' => $batch->id, 'student_phone' => $phone],
+            [
+                'partner_id'   => $partnerId,
+                'student_name' => $data['studentName'],
+                'amount_paid'  => ($existing->amount_paid ?? 0) + ($data['amountPaid'] ?? $batch->monthly_fee * $months),
+                'paid_until'   => $base->addMonths($months),
+                'is_active'    => true,
+            ],
+        );
+
+        return response()->json(['status' => 'ok', 'enrollment' => $this->enrollmentRow($enrollment, Carbon::today())], 201);
+    }
+
+    /** GET /api/partner/academy/{id}/roster?date= — students + who's marked present. */
+    public function batchRoster(Request $request, string $id): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $batch = VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id);
+
+        $date = $request->query('date');
+        $date = is_string($date) && strtotime($date) ? Carbon::parse($date) : Carbon::today();
+
+        $rows = BatchEnrollment::query()
+            ->where('venue_batch_id', $batch->id)->where('is_active', true)
+            ->orderBy('student_name')
+            ->get()
+            ->map(fn (BatchEnrollment $e): array => $this->enrollmentRow($e, $date));
+
+        return response()->json([
+            'batch' => ['id' => $batch->id, 'name' => $batch->name, 'coach' => $batch->coach_name],
+            'date'  => $date->toDateString(),
+            'runs_today' => $batch->runsOn($date),
+            'data'  => $rows,
+        ]);
+    }
+
+    /**
+     * POST /api/partner/academy/attendance — mark a student present or absent.
+     *
+     * Present is a row; absent is the absence of one. Marking twice is the same
+     * fact, so the unique index makes a double-tap idempotent rather than a
+     * duplicate attendance.
+     */
+    public function markAttendance(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'enrollmentId' => ['required', 'integer'],
+            'date'         => ['required', 'date'],
+            'present'      => ['required', 'boolean'],
+        ]);
+
+        $partnerId = $request->user()->effectivePartnerId();
+        $enrollment = BatchEnrollment::query()
+            ->where('partner_id', $partnerId)->findOrFail($data['enrollmentId']);
+
+        $date = Carbon::parse($data['date'])->toDateString();
+
+        if ($data['present']) {
+            // whereDate, not firstOrCreate: the column is cast to a date and can be
+            // stored with a time component, so an exact-match lookup misses the row
+            // that's already there and the insert then trips the unique index — a
+            // 500 for what is simply "already marked". The index still guards the
+            // data; this makes the double-tap a no-op instead of an error.
+            $already = BatchAttendance::query()
+                ->where('batch_enrollment_id', $enrollment->id)
+                ->whereDate('date', $date)
+                ->exists();
+
+            if (! $already) {
+                BatchAttendance::query()->create([
+                    'batch_enrollment_id' => $enrollment->id,
+                    'date'                => $date,
+                ]);
+            }
+        } else {
+            BatchAttendance::query()
+                ->where('batch_enrollment_id', $enrollment->id)
+                ->whereDate('date', $date)
+                ->delete();
+        }
+
+        return response()->json(['status' => 'ok', 'student' => $this->enrollmentRow($enrollment, Carbon::parse($date))]);
+    }
+
+    /** @return array<string, mixed> */
+    private function enrollmentRow(BatchEnrollment $e, Carbon $date): array
+    {
+        return [
+            'id'          => $e->id,
+            'name'        => $e->student_name,
+            'phone'       => $e->student_phone,
+            'paid_until'  => optional($e->paid_until)->toDateString(),
+            'overdue'     => $e->isOverdue(),
+            'present'     => BatchAttendance::query()
+                ->where('batch_enrollment_id', $e->id)->whereDate('date', $date->toDateString())->exists(),
+            'attended'    => $e->attendance()->count(),
+        ];
     }
 
     /** GET /api/partner/packages — the offers this venue sells, plus who's on one. */

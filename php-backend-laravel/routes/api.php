@@ -423,6 +423,9 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/venues/{id}/slots/{slotId}', 'saveSlot')->whereNumber('id')->whereNumber('slotId');
             Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');
             Route::post('/venues/{id}/courts/{courtId}', 'saveCourt')->whereNumber('id')->whereNumber('courtId');
+            Route::post('/academy', 'saveBatch');
+            Route::post('/academy/{id}/enroll', 'enrollStudent')->whereNumber('id');
+            Route::post('/academy/attendance', 'markAttendance');
             Route::post('/packages', 'savePackage');
             Route::post('/packages/{id}', 'savePackage')->whereNumber('id');
             Route::post('/packages/{id}/sell', 'sellPackage')->whereNumber('id');
@@ -441,6 +444,8 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             // Settlement is money-sensitive: same 'reports' gate as Earnings, and
             // the destination itself is only ever returned masked.
             Route::get('/customers', 'customers');
+            Route::get('/academy', 'academy');
+            Route::get('/academy/{id}/roster', 'batchRoster')->whereNumber('id');
             Route::get('/packages', 'packages');
             Route::get('/packages/holder', 'packageHolder');
             Route::get('/payouts', 'payouts');

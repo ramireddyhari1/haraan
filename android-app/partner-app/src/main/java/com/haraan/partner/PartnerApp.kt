@@ -869,9 +869,14 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showPayouts by remember { mutableStateOf(false) }
     var showCustomers by remember { mutableStateOf(false) }
     var showPackages by remember { mutableStateOf(false) }
+    var showAcademy by remember { mutableStateOf(false) }
     var showStaff by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    if (showAcademy) {
+        AcademyScreen(api, token, onBack = { showAcademy = false })
+        return
+    }
     if (showPackages) {
         PackagesScreen(api, token, session.branchId, onBack = { showPackages = false })
         return
@@ -1084,6 +1089,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     onPayouts = if (session.can("reports")) ({ showPayouts = true }) else null,
                     onCustomers = { showCustomers = true },
                     onPackages = if (session.can("pricing")) ({ showPackages = true }) else null,
+                    onAcademy = if (session.can("pricing")) ({ showAcademy = true }) else null,
                 ) { serverType ->
                     if (serverType != null) {
                         session.partnerType = serverType
@@ -1453,7 +1459,7 @@ private fun <T> RefreshableContent(key: Any?, load: suspend () -> T, content: @C
 private data class Tile(val icon: ImageVector, val label: String, val value: String, val hint: String)
 
 @Composable
-private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, venueId: Long? = null, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onPackages: (() -> Unit)? = null, onLane: (String?) -> Unit) {
+private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, venueId: Long? = null, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onPackages: (() -> Unit)? = null, onAcademy: (() -> Unit)? = null, onLane: (String?) -> Unit) {
     // The branch is part of the key, so picking one reloads rather than leaving
     // the previous outlet's numbers under a new title.
     RefreshableContent(token to venueId, load = { api.overview(token, venueId) }) { o ->
@@ -1510,6 +1516,9 @@ private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, ve
             if (onPackages != null) {
                 item { PackagesEntryCard(onPackages) }
             }
+            if (onAcademy != null) {
+                item { AcademyEntryCard(onAcademy) }
+            }
             if (onPayouts != null) {
                 item { PayoutsEntryCard(onPayouts) }
             }
@@ -1535,6 +1544,27 @@ private fun CustomersEntryCard(onClick: () -> Unit) {
                 Text("Customers", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
                 Spacer(Modifier.height(1.dp))
                 Text("Who plays here, and how often", fontSize = 12.sp, color = AuthMuted)
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Dashboard shortcut into Academy. */
+@Composable
+private fun AcademyEntryCard(onClick: () -> Unit) {
+    PressableSurface(onClick = onClick) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFE6F7EE), Color(0xFFD3F0E0)))),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.People, contentDescription = null, tint = Color(0xFF15803D), modifier = Modifier.size(21.dp)) }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Academy", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                Spacer(Modifier.height(1.dp))
+                Text("Coaching batches & attendance", fontSize = 12.sp, color = AuthMuted)
             }
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
         }
@@ -3068,6 +3098,373 @@ private fun shareCsv(context: Context, from: String, to: String, csv: String) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(send, "Share report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/**
+ * Academy — coaching batches, their roster, and daily attendance.
+ * The desk's morning job: open today's batch, tick who turned up.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AcademyScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
+    var reload by remember { mutableStateOf(0) }
+    var creating by remember { mutableStateOf(false) }
+    var openBatch by remember { mutableStateOf<BatchRow?>(null) }
+    val scope = rememberCoroutineScope()
+    val state by produceState<UiState<List<BatchRow>>>(UiState.Loading, reload) {
+        value = runCatchingUi { api.academy(token) }
+    }
+
+    openBatch?.let { b ->
+        BatchRosterScreen(api, token, b, onBack = { openBatch = null; reload++ })
+        return
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text("Academy", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+                actions = { HeaderIcon(Icons.Filled.Add, "New batch") { creating = true }; Spacer(Modifier.width(4.dp)) },
+            )
+        },
+    ) { padding ->
+        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            Loaded(state) { batches ->
+                if (batches.isEmpty()) {
+                    EmptyState("No coaching batches yet. Tap + to add one.")
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 28.dp),
+                    ) {
+                        items(batches) { b -> BatchCard(b) { openBatch = b } }
+                    }
+                }
+            }
+        }
+    }
+
+    if (creating) {
+        NewBatchDialog(
+            onDismiss = { creating = false },
+            onSave = { name, coach, days, start, end, fee, cap ->
+                creating = false
+                scope.launch { runCatching { api.saveBatch(token, name, coach, days, start, end, fee, cap) }; reload++ }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BatchCard(b: BatchRow, onClick: () -> Unit) {
+    PressableSurface(onClick = onClick) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(b.name, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
+                        if (b.runsToday) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "TODAY",
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GREEN, letterSpacing = 0.8.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x1A16A34A))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        listOfNotNull(
+                            b.coach,
+                            b.days.takeIf { it.isNotEmpty() }?.joinToString(", "),
+                            listOfNotNull(b.startTime, b.endTime).takeIf { it.size == 2 }?.joinToString("–"),
+                        ).joinToString(" · ").ifBlank { "No schedule set" },
+                        fontSize = 12.sp, color = AuthMuted, maxLines = 2,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("₹${b.monthlyFee}", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                    Text("per month", fontSize = 10.5.sp, color = AuthMuted)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x142F6BFF)).padding(horizontal = 9.dp, vertical = 4.dp),
+                ) {
+                    Icon(Icons.Filled.People, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "${b.students}" + (b.capacity?.let { "/$it" } ?: "") + " students",
+                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AuthAccentDeep,
+                    )
+                }
+                if (b.overdue > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626)).padding(horizontal = 9.dp, vertical = 4.dp),
+                    ) {
+                        LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(RED))
+                        Spacer(Modifier.width(6.dp))
+                        Text("${b.overdue} fees due", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = RED)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+/** Today's roster — tick who turned up. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BatchRosterScreen(api: PartnerApi, token: String, batch: BatchRow, onBack: () -> Unit) {
+    var dayMillis by remember { mutableStateOf(todayMillis()) }
+    var reload by remember { mutableStateOf(0) }
+    var enrolling by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val date = apiDate(dayMillis)
+    val state by produceState<UiState<RosterPage>>(UiState.Loading, dayMillis, reload) {
+        value = runCatchingUi { api.batchRoster(token, batch.id, date) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
+                title = { Text(batch.name, maxLines = 1, fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
+                },
+                actions = { HeaderIcon(Icons.Filled.Add, "Enrol student") { enrolling = true }; Spacer(Modifier.width(4.dp)) },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).premiumSurface(14.dp).padding(4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { dayMillis -= DAY_MS }) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous day", tint = AuthAccent) }
+                Text(prettyDate(dayMillis), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                IconButton(onClick = { dayMillis += DAY_MS }) { Icon(Icons.Filled.ChevronRight, contentDescription = "Next day", tint = AuthAccent) }
+            }
+            Loaded(state) { r ->
+                if (!r.runsToday) {
+                    Text(
+                        "This batch doesn't run on this day.",
+                        fontSize = 12.5.sp, color = AuthMuted,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp),
+                    )
+                }
+                if (r.students.isEmpty()) {
+                    EmptyState("No students enrolled yet. Tap + to add one.")
+                } else {
+                    val present = r.students.count { it.present }
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 28.dp),
+                    ) {
+                        item {
+                            Text(
+                                "$present of ${r.students.size} present",
+                                fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AuthMuted,
+                                modifier = Modifier.padding(bottom = 2.dp),
+                            )
+                        }
+                        items(r.students) { s ->
+                            StudentCard(s) { nowPresent ->
+                                view.performHapticFeedback(
+                                    if (nowPresent) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.KEYBOARD_TAP,
+                                )
+                                scope.launch {
+                                    runCatching { api.markAttendance(token, s.id, date, nowPresent) }
+                                    reload++
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (enrolling) {
+        EnrollStudentDialog(
+            fee = batch.monthlyFee,
+            onDismiss = { enrolling = false },
+            onEnroll = { name, phone, months ->
+                enrolling = false
+                scope.launch { runCatching { api.enrollStudent(token, batch.id, name, phone, months) }; reload++ }
+            },
+        )
+    }
+}
+
+@Composable
+private fun StudentCard(s: StudentRow, onToggle: (Boolean) -> Unit) {
+    LayoutBox(Modifier.fillMaxWidth().premiumSurface(16.dp)) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(
+                Modifier.size(40.dp).clip(RoundedCornerShape(99.dp))
+                    .background(if (s.present) Color(0x1A16A34A) else Color(0x0F0F172A)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    s.name.take(1).uppercase(),
+                    fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    color = if (s.present) GREEN else AuthMuted,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(s.name, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
+                    if (s.overdue) {
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            "FEE DUE",
+                            fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = RED, letterSpacing = 0.8.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${s.attended} classes" + (s.paidUntil?.let { " · paid to $it" } ?: ""),
+                    fontSize = 11.5.sp, color = AuthMuted, maxLines = 1,
+                )
+            }
+            // The tick is the whole job — big target, obvious state.
+            LayoutBox(
+                Modifier.size(38.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (s.present) GREEN else Color(0xFFF1F5F9))
+                    .clickable { onToggle(!s.present) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✓", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = if (s.present) Color.White else Color(0xFFB6C0D0))
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewBatchDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, String?, List<String>, String?, String?, Int, Int?) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var coach by remember { mutableStateOf("") }
+    var days by remember { mutableStateOf(setOf<String>()) }
+    var start by remember { mutableStateOf("06:00") }
+    var end by remember { mutableStateOf("07:00") }
+    var fee by remember { mutableStateOf("") }
+    var cap by remember { mutableStateOf("") }
+    val view = LocalView.current
+    val colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+    )
+    val valid = name.isNotBlank() && (fee.toIntOrNull() ?: -1) >= 0
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Text("New batch", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(3.dp))
+            Text("A recurring coaching class.", fontSize = 12.sp, color = AuthMuted)
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(name, { name = it }, label = { Text("Batch name") }, placeholder = { Text("Junior Badminton") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(coach, { coach = it }, label = { Text("Coach") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(16.dp))
+            Text("DAYS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp)
+            Spacer(Modifier.height(9.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                WEEK_DAYS.forEach { d ->
+                    val on = d in days
+                    LayoutBox(
+                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(10.dp))
+                            .background(if (on) AuthAccent else Color(0xFFF1F5F9))
+                            .clickable { days = if (on) days - d else days + d; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(d.take(1), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (on) Color.White else AuthMuted) }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(start, { start = it.take(5) }, label = { Text("From") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.weight(1f))
+                OutlinedTextField(end, { end = it.take(5) }, label = { Text("To") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(fee, { fee = it.filter { c -> c.isDigit() }.take(7) }, label = { Text("Fee ₹/month") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                OutlinedTextField(cap, { cap = it.filter { c -> c.isDigit() }.take(3) }, label = { Text("Capacity") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Create batch", enabled = valid, loading = false) {
+                onSave(name.trim(), coach.trim().ifBlank { null }, days.toList(), start.ifBlank { null }, end.ifBlank { null }, fee.toInt(), cap.toIntOrNull())
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
+@Composable
+private fun EnrollStudentDialog(fee: Int, onDismiss: () -> Unit, onEnroll: (String, String, Int) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var months by remember { mutableStateOf(1) }
+    val view = LocalView.current
+    val colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
+        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
+    )
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(22.dp)) {
+            Text("Enrol student", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(3.dp))
+            Text("Already enrolled? This extends their fees instead of adding them twice.", fontSize = 12.sp, color = AuthMuted, lineHeight = 16.sp)
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(name, { name = it }, label = { Text("Student name") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(phone, { phone = it.filter { c -> c.isDigit() }.take(10) }, label = { Text("Phone") }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = colors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(16.dp))
+            Text("MONTHS PAID", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp)
+            Spacer(Modifier.height(9.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 3, 6, 12).forEach { m ->
+                    val on = months == m
+                    LayoutBox(
+                        Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(10.dp))
+                            .background(if (on) Color(0x142F6BFF) else Color(0xFFF8FAFC))
+                            .border(if (on) 1.5.dp else 1.dp, if (on) AuthAccent else Color(0x1F0F172A), RoundedCornerShape(10.dp))
+                            .clickable { months = m; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("$m", fontSize = 13.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) AuthAccentDeep else AuthInk) }
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            GradientCta(text = "Enrol · ₹" + formatInr((fee.toLong() * months).toDouble()), enabled = name.isNotBlank() && phone.length == 10, loading = false) {
+                onEnroll(name.trim(), phone, months)
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold) }
+        }
+    }
 }
 
 /**

@@ -269,6 +269,42 @@ data class DayGrid(
     val courts: List<CourtCol> = emptyList(),
 )
 
+/** A coaching batch: coach, weekdays, time, monthly fee, roster health. */
+data class BatchRow(
+    val id: Long,
+    val name: String,
+    val coach: String?,
+    val sport: String?,
+    val days: List<String>,
+    val startTime: String?,
+    val endTime: String?,
+    val monthlyFee: Int,
+    val capacity: Int?,
+    val students: Int,
+    val overdue: Int,
+    val runsToday: Boolean,
+    val isActive: Boolean,
+)
+
+/** One student on a batch, for the roster + attendance sheet. */
+data class StudentRow(
+    val id: Long,
+    val name: String,
+    val phone: String,
+    val paidUntil: String?,
+    val overdue: Boolean,
+    val present: Boolean,
+    val attended: Int,
+)
+
+data class RosterPage(
+    val batchName: String,
+    val coach: String?,
+    val date: String,
+    val runsToday: Boolean,
+    val students: List<StudentRow>,
+)
+
 /** An offer the venue sells: "10 sessions for ₹4,000". */
 data class VenuePackageRow(
     val id: Long,
@@ -703,6 +739,87 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         expired = o.optBoolean("expired", false),
         usable = o.optBoolean("usable", false),
     )
+
+    private fun parseStudent(o: JSONObject) = StudentRow(
+        id = o.optLong("id"),
+        name = o.optString("name"),
+        phone = o.optString("phone"),
+        paidUntil = o.optStringOrNull("paid_until"),
+        overdue = o.optBoolean("overdue", false),
+        present = o.optBoolean("present", false),
+        attended = o.optInt("attended"),
+    )
+
+    /** GET /api/partner/academy — coaching batches with roster + fee health. */
+    suspend fun academy(token: String): List<BatchRow> = withContext(Dispatchers.IO) {
+        parseArray(get("/api/partner/academy", token)) { o ->
+            val d = o.optJSONArray("days")
+            BatchRow(
+                id = o.optLong("id"),
+                name = o.optString("name"),
+                coach = o.optStringOrNull("coach"),
+                sport = o.optStringOrNull("sport"),
+                days = if (d == null) emptyList() else (0 until d.length()).map { d.optString(it) },
+                startTime = o.optStringOrNull("start_time"),
+                endTime = o.optStringOrNull("end_time"),
+                monthlyFee = o.optInt("monthly_fee"),
+                capacity = if (o.isNull("capacity")) null else o.optInt("capacity"),
+                students = o.optInt("students"),
+                overdue = o.optInt("overdue"),
+                runsToday = o.optBoolean("runs_today", false),
+                isActive = o.optBoolean("is_active", true),
+            )
+        }
+    }
+
+    suspend fun saveBatch(
+        token: String,
+        name: String,
+        coach: String?,
+        days: List<String>,
+        startTime: String?,
+        endTime: String?,
+        monthlyFee: Int,
+        capacity: Int?,
+    ) = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("name", name)
+            .put("coachName", coach ?: JSONObject.NULL)
+            .put("days", JSONArray(days))
+            .put("startTime", startTime ?: JSONObject.NULL)
+            .put("endTime", endTime ?: JSONObject.NULL)
+            .put("monthlyFee", monthlyFee)
+            .put("capacity", capacity ?: JSONObject.NULL)
+        post("/api/partner/academy", payload.toString(), token)
+        Unit
+    }
+
+    /** Enrol a student. Re-enrolling the same number extends their seat. */
+    suspend fun enrollStudent(token: String, batchId: Long, name: String, phone: String, months: Int) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("studentName", name).put("studentPhone", phone).put("months", months)
+        post("/api/partner/academy/$batchId/enroll", payload.toString(), token)
+        Unit
+    }
+
+    suspend fun batchRoster(token: String, batchId: Long, date: String): RosterPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/academy/$batchId/roster?date=$date", token))
+        val b = o.optJSONObject("batch")
+        val arr = o.optJSONArray("data")
+        RosterPage(
+            batchName = b?.optString("name") ?: "Batch",
+            coach = b?.optStringOrNull("coach"),
+            date = o.optString("date"),
+            runsToday = o.optBoolean("runs_today", false),
+            students = if (arr == null) emptyList() else (0 until arr.length()).map { parseStudent(arr.getJSONObject(it)) },
+        )
+    }
+
+    /** Mark present/absent. Marking twice is the same fact — the server is idempotent. */
+    suspend fun markAttendance(token: String, enrollmentId: Long, date: String, present: Boolean) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("enrollmentId", enrollmentId).put("date", date).put("present", present)
+        post("/api/partner/academy/attendance", payload.toString(), token)
+        Unit
+    }
 
     /** GET /api/partner/packages — offers this venue sells + who holds a pass. */
     suspend fun packages(token: String, venueId: Long? = null): PackagesPage = withContext(Dispatchers.IO) {
