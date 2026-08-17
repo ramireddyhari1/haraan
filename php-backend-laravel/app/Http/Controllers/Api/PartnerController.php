@@ -273,7 +273,7 @@ class PartnerController extends Controller
 
         $bookings = Booking::query()
             ->where('event_id', $event->id)
-            ->with('user:id,name')
+            ->with(['user:id,name', 'payments'])
             ->latest()
             ->limit(50)
             ->get()
@@ -304,7 +304,7 @@ class PartnerController extends Controller
 
         $bookings = Booking::query()
             ->where('venue_id', $venue->id)
-            ->with('user:id,name')
+            ->with(['user:id,name', 'payments'])
             ->orderByDesc('slot_date')
             ->limit(50)
             ->get()
@@ -341,7 +341,7 @@ class PartnerController extends Controller
                     $q->orWhereHas('event', fn ($e) => $e->where('partner_id', $partnerId));
                 }
             })
-            ->with(['event:id,title', 'venue:id,name,branch_label', 'user:id,name'])
+            ->with(['event:id,title', 'venue:id,name,branch_label', 'user:id,name', 'payments'])
             ->latest()
             ->limit(100)
             ->get()
@@ -1879,6 +1879,12 @@ class PartnerController extends Controller
             'channel'      => $b->channel ?? 'online',
             'amount_paid'  => round((float) $b->amount_paid, 2),
             'payment_status' => $b->payment_status,
+            // HOW it was taken, not just whether. Reads the last collected row on
+            // the ledger; null means no money was ever recorded against this
+            // booking, which is a different statement from "unpaid by choice".
+            'payment_method' => $b->relationLoaded('payments')
+                ? $b->payments->last(fn ($p) => (float) $p->amount > 0)?->method
+                : null,
         ];
     }
 }

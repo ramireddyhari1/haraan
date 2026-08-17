@@ -195,6 +195,8 @@ data class BookingSummary(
     /** online | offline (walk-in). */
     val channel: String = "online",
     val paymentStatus: String = "paid",
+    /** cash | upi | card | online — null when no money was ever recorded. */
+    val paymentMethod: String? = null,
     val slotDate: String? = null,
     val slotLabel: String? = null,
 )
@@ -612,6 +614,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 customer = o.optString("customer", "Guest").ifBlank { "Guest" },
                 channel = o.optString("channel", "online"),
                 paymentStatus = o.optString("payment_status", "paid"),
+                paymentMethod = o.optStringOrNull("payment_method"),
                 slotDate = o.optStringOrNull("slot_date"),
                 slotLabel = o.optStringOrNull("slot_label"),
             )

@@ -5013,12 +5013,22 @@ private fun BookingRow(b: BookingSummary, showBranch: Boolean) {
                     fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
                     color = if (b.isCancelled) AuthMuted else AuthInk,
                 )
-                if (unpaid) {
+                // How it was taken, not just whether — the desk wants to see CASH
+                // vs UPI vs ONLINE at a glance. UNPAID is reserved for money that
+                // genuinely never arrived.
+                if (!b.isCancelled) {
+                    val method = b.paymentMethod?.uppercase()
+                    val (label, tone) = when {
+                        unpaid -> "UNPAID" to RED
+                        method != null -> method to GREEN
+                        b.amount <= 0 -> "PASS" to Color(0xFF6D28D9)
+                        else -> "PAID" to GREEN
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "UNPAID",
-                        fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = RED, letterSpacing = 0.6.sp,
-                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626))
+                        label,
+                        fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = tone, letterSpacing = 0.6.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.10f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
