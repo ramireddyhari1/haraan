@@ -125,6 +125,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.activity.compose.BackHandler
+import coil.compose.AsyncImage
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -2001,28 +2002,98 @@ private fun VenuesTab(api: PartnerApi, token: String, onOpen: (Long, String) -> 
 
 @Composable
 private fun VenueCard(v: VenueSummary, onClick: () -> Unit) {
-    PressableSurface(onClick = onClick) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            LayoutBox(
-                Modifier.size(46.dp).clip(RoundedCornerShape(13.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF)))),
-                contentAlignment = Alignment.Center,
+    PressableSurface(onClick = onClick, radius = 20.dp) {
+        Column {
+            // Photo band. No venue has an uploaded photo yet, so the fallback has to
+            // carry the design rather than look like a broken image: the brand navy
+            // with a soft glow and a large watermark glyph, which reads as a
+            // deliberate cover until a real photo is added in /control.
+            LayoutBox(Modifier.fillMaxWidth().height(132.dp)) {
+                if (!v.image.isNullOrBlank()) {
+                    AsyncImage(
+                        model = v.image,
+                        contentDescription = v.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                } else {
+                    LayoutBox(
+                        Modifier.matchParentSize()
+                            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
+                    ) {
+                        LayoutBox(
+                            Modifier.matchParentSize().background(
+                                Brush.radialGradient(
+                                    listOf(Color(0x553B82F6), Color(0x00000000)),
+                                    center = Offset(140f, 30f), radius = 420f,
+                                )
+                            )
+                        )
+                        // Bleeds off the right edge at low alpha so it reads as
+                        // texture behind the title, not an icon sitting in a box.
+                        Icon(
+                            Icons.Filled.Place,
+                            contentDescription = null,
+                            tint = Color(0x14FFFFFF),
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                                .offset(x = 26.dp, y = (-6).dp).size(150.dp),
+                        )
+                    }
+                }
+                // Scrim so the name stays readable over any photo, however bright.
+                LayoutBox(
+                    Modifier.matchParentSize().background(
+                        Brush.verticalGradient(listOf(Color(0x00000000), Color(0x40000000), Color(0xB3000000)))
+                    )
+                )
+                // Revenue rides top-right — the number the owner scans for.
+                Text(
+                    "₹" + formatInr(v.revenue),
+                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+                        .clip(RoundedCornerShape(999.dp)).background(Color(0x66000000))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+                Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
+                    Text(
+                        v.name,
+                        fontSize = 16.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+                        letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    v.location?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Place, contentDescription = null, tint = Color(0xCCFFFFFF), modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(it, fontSize = 12.sp, color = Color(0xCCFFFFFF), maxLines = 1)
+                        }
+                    }
+                }
+            }
+            // Footer strip: what the owner acts on.
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Place, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(23.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(v.name, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
-                Spacer(Modifier.height(1.dp))
-                Text(v.location ?: "—", fontSize = 12.5.sp, color = AuthMuted, maxLines = 1)
-                Spacer(Modifier.height(7.dp))
-                Text("${v.bookings} bookings", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AuthAccentDeep)
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(horizontalAlignment = Alignment.End) {
-                Text("₹" + formatInr(v.revenue), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-                Spacer(Modifier.height(4.dp))
-                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x142F6BFF))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Icon(Icons.Filled.ConfirmationNumber, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("${v.bookings} bookings", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep)
+                }
+                if (v.sports.isNotEmpty()) {
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        v.sports.first() + if (v.sports.size > 1) "  +${v.sports.size - 1}" else "",
+                        fontSize = 11.5.sp, color = AuthMuted, maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text("Open desk", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep)
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(17.dp))
             }
         }
     }

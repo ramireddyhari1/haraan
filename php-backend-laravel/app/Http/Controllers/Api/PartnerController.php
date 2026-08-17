@@ -1844,6 +1844,12 @@ class PartnerController extends Controller
             'code'     => $v->branch_code,
             'kind'     => $v->kind ?? 'sports',
             'location' => $v->location ?? null,
+            // Same resolver the public venue list uses, so the partner sees the
+            // exact photo customers see rather than a second source of truth.
+            'image'    => \App\Support\MediaUrl::resolve(
+                is_array($v->images) ? ($v->images[0] ?? null) : null,
+            ),
+            'sports'   => is_array($v->sports) ? array_values(array_filter($v->sports)) : [],
             'bookings' => (clone $paid)->count(),
             'revenue'  => round((float) (clone $paid)->sum('total_amount'), 2),
         ];

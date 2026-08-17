@@ -174,6 +174,9 @@ data class VenueSummary(
     val id: Long,
     val name: String,
     val location: String?,
+    /** First venue photo, already resolved to an absolute URL. Null = no photo yet. */
+    val image: String? = null,
+    val sports: List<String> = emptyList(),
     val bookings: Int,
     val revenue: Double,
 )
@@ -578,6 +581,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 id = o.optLong("id"),
                 name = o.optString("name"),
                 location = o.optStringOrNull("location"),
+                image = o.optStringOrNull("image"),
+                sports = o.optJSONArray("sports").let { a ->
+                    if (a == null) emptyList() else (0 until a.length()).map { a.optString(it) }
+                },
                 bookings = o.optInt("bookings"),
                 revenue = o.optDouble("revenue", 0.0),
             )
