@@ -75,6 +75,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -1085,15 +1086,42 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             )
         },
         bottomBar = {
-            NavigationBar {
-                tabs.forEach { t ->
-                    val label = labelFor(t, lane)
-                    NavigationBarItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Icon(iconFor(t), contentDescription = label) },
-                        label = { Text(label) },
-                    )
+            // Material3's defaults were leaking through here: the container took the
+            // lavender surface tint and the selected label picked up `secondary`
+            // (teal), neither of which is in this app's palette. Everything is
+            // stated explicitly so the bar matches the white topbar and blue accent.
+            Column {
+                HorizontalDivider(color = Hairline)
+                NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
+                    tabs.forEach { t ->
+                        val label = labelFor(t, lane)
+                        val isOn = tab == t
+                        NavigationBarItem(
+                            selected = isOn,
+                            onClick = {
+                                if (!isOn) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                tab = t
+                            },
+                            icon = {
+                                Icon(iconFor(t), contentDescription = label, modifier = Modifier.size(21.dp))
+                            },
+                            label = {
+                                Text(
+                                    label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = AuthAccentDeep,
+                                selectedTextColor = AuthAccentDeep,
+                                indicatorColor = Color(0x1F2F6BFF),
+                                unselectedIconColor = Color(0xFF94A3B8),
+                                unselectedTextColor = Color(0xFF94A3B8),
+                            ),
+                        )
+                    }
                 }
             }
         },
