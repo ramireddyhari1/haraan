@@ -117,6 +117,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import android.net.Uri
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -4914,10 +4917,83 @@ private fun ScanTab(api: PartnerApi, token: String) {
 @Composable
 private fun <T> Loaded(state: UiState<T>, content: @Composable (T) -> Unit) {
     when (state) {
-        is UiState.Loading -> CenteredPane { CircularProgressIndicator(Modifier.padding(32.dp)) }
+        // A skeleton of the shape that's coming, not a spinner in the void: the
+        // screen keeps its silhouette while the data lands, so switching sections
+        // reads as one continuous surface instead of a blank flash.
+        is UiState.Loading -> SkeletonList()
         is UiState.Error -> EmptyState(state.message)
-        is UiState.Data -> content(state.value)
+        is UiState.Data -> ScreenEnter { content(state.value) }
     }
+}
+
+/**
+ * The shared loading placeholder: card silhouettes with a light sweep moving
+ * across them. Sized like the real rows so nothing jumps when data arrives.
+ */
+@Composable
+private fun SkeletonList(rows: Int = 5) {
+    val t = rememberInfiniteTransition(label = "shimmer")
+    // Sweeps left→right forever; the gradient is wider than the card so the
+    // highlight travels through rather than pulsing in place.
+    val x by t.animateFloat(
+        initialValue = -700f,
+        targetValue = 1400f,
+        animationSpec = infiniteRepeatable(tween(1250, easing = LinearEasing)),
+        label = "sweep",
+    )
+    val sweep = Brush.linearGradient(
+        colors = listOf(Color(0xFFEDF1F7), Color(0xFFF7FAFE), Color(0xFFEDF1F7)),
+        start = Offset(x, 0f),
+        end = Offset(x + 700f, 0f),
+    )
+
+    Column(
+        Modifier.fillMaxSize().background(AuthPageBg).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        repeat(rows) { i ->
+            Row(
+                Modifier.fillMaxWidth().premiumSurface(16.dp).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LayoutBox(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(sweep))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    // Vary the widths so it reads as content, not a test pattern.
+                    LayoutBox(
+                        Modifier.fillMaxWidth(if (i % 2 == 0) 0.55f else 0.42f)
+                            .height(13.dp).clip(RoundedCornerShape(99.dp)).background(sweep),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LayoutBox(
+                        Modifier.fillMaxWidth(if (i % 2 == 0) 0.34f else 0.48f)
+                            .height(10.dp).clip(RoundedCornerShape(99.dp)).background(sweep),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                LayoutBox(Modifier.width(52.dp).height(15.dp).clip(RoundedCornerShape(99.dp)).background(sweep))
+            }
+        }
+    }
+}
+
+/**
+ * The entrance every screen's content gets: a short fade with a small rise.
+ * Keyed on nothing, so it plays once per composition — which is exactly when
+ * the user has just switched section and needs to see that something changed.
+ */
+@Composable
+private fun ScreenEnter(content: @Composable () -> Unit) {
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        anim.animateTo(1f, tween(durationMillis = 260, easing = FastOutSlowInEasing))
+    }
+    LayoutBox(
+        Modifier.graphicsLayer {
+            alpha = anim.value
+            translationY = (1f - anim.value) * 26f
+        },
+    ) { content() }
 }
 
 /**
