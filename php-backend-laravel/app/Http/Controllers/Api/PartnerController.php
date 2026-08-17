@@ -273,6 +273,7 @@ class PartnerController extends Controller
 
         $bookings = Booking::query()
             ->where('event_id', $event->id)
+            ->with('user:id,name')
             ->latest()
             ->limit(50)
             ->get()
@@ -303,6 +304,7 @@ class PartnerController extends Controller
 
         $bookings = Booking::query()
             ->where('venue_id', $venue->id)
+            ->with('user:id,name')
             ->orderByDesc('slot_date')
             ->limit(50)
             ->get()
@@ -339,7 +341,7 @@ class PartnerController extends Controller
                     $q->orWhereHas('event', fn ($e) => $e->where('partner_id', $partnerId));
                 }
             })
-            ->with(['event:id,title', 'venue:id,name,branch_label'])
+            ->with(['event:id,title', 'venue:id,name,branch_label', 'user:id,name'])
             ->latest()
             ->limit(100)
             ->get()
@@ -1868,6 +1870,15 @@ class PartnerController extends Controller
             'slot_date'    => optional($b->slot_date)->toDateString() ?? $b->slot_date,
             'slot_label'   => $b->slot_label,
             'created_at'   => optional($b->created_at)->toIso8601String(),
+            // Who it was for, and how it was taken — a desk feed of identical
+            // venue names tells the owner nothing about which booking is which.
+            // Guest fields first: an offline row's user_id is the PARTNER.
+            'customer'     => strtolower((string) $b->channel) === 'offline'
+                ? ($b->guest_name ?: 'Walk-in')
+                : ($b->attendee_name ?: $b->user?->name ?: 'Guest'),
+            'channel'      => $b->channel ?? 'online',
+            'amount_paid'  => round((float) $b->amount_paid, 2),
+            'payment_status' => $b->payment_status,
         ];
     }
 }

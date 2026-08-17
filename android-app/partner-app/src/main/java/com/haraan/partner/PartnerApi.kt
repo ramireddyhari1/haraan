@@ -191,6 +191,12 @@ data class BookingSummary(
     val label: String?,
     /** Which outlet took it. Null for event bookings, which have no branch. */
     val branch: String? = null,
+    val customer: String = "Guest",
+    /** online | offline (walk-in). */
+    val channel: String = "online",
+    val paymentStatus: String = "paid",
+    val slotDate: String? = null,
+    val slotLabel: String? = null,
 )
 
 /** Result of a scan-and-check-in. */
@@ -603,6 +609,11 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 checkedIn = o.optInt("checked_in"),
                 label = label,
                 branch = o.optStringOrNull("branch"),
+                customer = o.optString("customer", "Guest").ifBlank { "Guest" },
+                channel = o.optString("channel", "online"),
+                paymentStatus = o.optString("payment_status", "paid"),
+                slotDate = o.optStringOrNull("slot_date"),
+                slotLabel = o.optStringOrNull("slot_label"),
             )
         }
     }

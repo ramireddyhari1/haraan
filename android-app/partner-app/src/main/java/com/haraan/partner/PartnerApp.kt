@@ -4866,20 +4866,164 @@ private fun TiersCard(tiers: List<TierRow>) {
 @Composable
 private fun SalesTab(api: PartnerApi, token: String, venueId: Long? = null) {
     RefreshableContent(token to venueId, load = { api.bookings(token, venueId) }) { list ->
-        if (list.isEmpty()) EmptyState("No bookings yet") else
-            LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(list) { b ->
-                    // Viewing all branches, a feed of bare amounts is unreadable —
-                    // say which outlet each one came from.
-                    val where = if (venueId == null) b.branch else null
-                    ListCard(
-                        title = b.label ?: (b.ticketCode ?: "Booking #${b.id}"),
-                        subtitle = listOfNotNull(where, "${b.quantity} ×", b.status).joinToString(" · "),
-                        trailing = "₹" + formatInr(b.amount),
-                        footer = if (b.checkedIn > 0) "Checked in: ${b.checkedIn}" else b.ticketCode ?: "",
+        if (list.isEmpty()) {
+            EmptyState("No bookings yet")
+        } else {
+            // Grouped by day, because a flat feed of near-identical venue names
+            // can't answer the only question the owner opens this for: what came
+            // in today. Order is preserved — the API already sorts newest first.
+            val groups = remember(list) { list.groupBy { it.slotDate ?: "" }.toList() }
+            val owed = remember(list) {
+                list.filter { it.paymentStatus.lowercase() != "paid" && !it.isCancelled }
+            }
+
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 26.dp),
+            ) {
+                // Money still to collect leads — it's the only actionable total here.
+                if (owed.isNotEmpty()) {
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                .background(Color(0x14DC2626))
+                                .border(1.dp, Color(0x33DC2626), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(RED))
+                            Spacer(Modifier.width(9.dp))
+                            Text(
+                                "${owed.size} unpaid · ₹" + formatInr(owed.sumOf { it.amount }) + " to collect",
+                                fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = RED,
+                            )
+                        }
+                    }
+                }
+                groups.forEach { (date, rows) ->
+                    item(key = "h-$date") { BookingDayHeader(date, rows.sumOf { it.amount }) }
+                    items(rows, key = { it.id }) { b ->
+                        BookingRow(b, showBranch = venueId == null)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** True for a booking whose money no longer counts. */
+private val BookingSummary.isCancelled: Boolean
+    get() = status?.lowercase()?.let { it == "cancelled" || it == "refunded" || it == "failed" } == true
+
+/** "Today · ₹2,400" — a day's takings, so the list has a spine. */
+@Composable
+private fun BookingDayHeader(date: String, total: Double) {
+    val label = remember(date) { friendlyDay(date) }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.sp)
+        Spacer(Modifier.width(9.dp))
+        LayoutBox(Modifier.weight(1f).height(1.dp).background(Hairline))
+        Spacer(Modifier.width(9.dp))
+        Text("₹" + formatInr(total), fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+    }
+}
+
+/** TODAY / YESTERDAY / "SAT, 15 AUG" — relative where it helps, absolute otherwise. */
+private fun friendlyDay(date: String): String {
+    if (date.isBlank()) return "NO DATE"
+    val parsed = runCatching {
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(date)
+    }.getOrNull() ?: return date.uppercase()
+    val day = 86_400_000L
+    val today = todayMillis()
+    val diff = ((today - (parsed.time + 12 * 3600_000L)) / day)
+    return when (diff) {
+        0L -> "TODAY"
+        1L -> "YESTERDAY"
+        -1L -> "TOMORROW"
+        else -> java.text.SimpleDateFormat("EEE, dd MMM", java.util.Locale.getDefault())
+            .format(parsed).uppercase()
+    }
+}
+
+@Composable
+private fun BookingRow(b: BookingSummary, showBranch: Boolean) {
+    val walkIn = b.channel.lowercase() == "offline"
+    val unpaid = b.paymentStatus.lowercase() != "paid" && !b.isCancelled
+    LayoutBox(Modifier.fillMaxWidth().premiumSurface(16.dp)) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Initial, tinted by channel — walk-in vs online is the first thing
+            // the desk needs to tell apart.
+            LayoutBox(
+                Modifier.size(38.dp).clip(RoundedCornerShape(99.dp))
+                    .background(if (walkIn) Color(0x1A0EA5E9) else Color(0x142F6BFF)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    b.customer.trim().take(1).uppercase(),
+                    fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    color = if (walkIn) Color(0xFF0369A1) else AuthAccentDeep,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        b.customer,
+                        fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (b.isCancelled) {
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            b.status!!.uppercase(),
+                            fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = RED, letterSpacing = 0.6.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    } else if (b.checkedIn > 0) {
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            "✓ IN",
+                            fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = GREEN, letterSpacing = 0.6.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x1A16A34A))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    listOfNotNull(
+                        if (walkIn) "Walk-in" else "Online",
+                        b.slotLabel?.takeIf { it.isNotBlank() } ?: b.label,
+                        if (showBranch) b.branch else null,
+                    ).joinToString(" · "),
+                    fontSize = 11.5.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "₹" + formatInr(b.amount),
+                    fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                    color = if (b.isCancelled) AuthMuted else AuthInk,
+                )
+                if (unpaid) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "UNPAID",
+                        fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = RED, letterSpacing = 0.6.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
             }
+        }
     }
 }
 
