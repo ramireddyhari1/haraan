@@ -20,7 +20,8 @@ final class Venue extends Model
     protected $fillable = [
         'name', 'category', 'kind', 'branch_label', 'branch_code', 'capabilities',
         'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
-        'price', 'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
+        'price', 'convenience_fee_type', 'convenience_fee_value',
+        'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'is_bookable', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
         'hours_json', 'slot_minutes', 'cancel_free_hours', 'cancel_refund_percent',
@@ -279,5 +280,28 @@ final class Venue extends Model
     private static function toLabel(int $minutes): string
     {
         return date('g:i A', mktime(0, $minutes % (24 * 60)));
+    }
+
+    /**
+     * The partner-set booking fee charged on top of a slot subtotal. Same contract as
+     * {@see \App\Models\Event::convenienceFeeFor()} — none | flat | percent — so a reader
+     * only has to learn the idea once and the checkout maths matches across both flows.
+     *
+     * Always rounded to paise here, because the Razorpay order is built from this number:
+     * a lingering float would charge a different amount than the summary displayed.
+     */
+    public function convenienceFeeFor(float $subtotal): float
+    {
+        if ($subtotal <= 0) {
+            return 0.0;
+        }
+
+        $value = max(0.0, (float) $this->convenience_fee_value);
+
+        return match ($this->convenience_fee_type) {
+            'flat'    => round($value, 2),
+            'percent' => round($subtotal * $value / 100, 2),
+            default   => 0.0,
+        };
     }
 }

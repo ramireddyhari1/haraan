@@ -74,6 +74,11 @@ data class SocialState(
   val followsMe: Boolean,
   val isSelf: Boolean,
   val canFollow: Boolean,
+  /**
+   * Have I blocked them. Only ever MY block — the server never reports being blocked
+   * BY someone, because telling you a block exists hands you the thing it withholds.
+   */
+  val isBlocked: Boolean = false,
 )
 
 data class PlayerProfile(
@@ -86,6 +91,11 @@ data class PlayerProfile(
   val district: String?,
   val state: String?,
   val isOrganizer: Boolean,
+  /**
+   * Admin-granted blue tick (`/control` → People → Verified). Read-only here: nothing in
+   * the app can set it, which is what keeps the badge worth anything.
+   */
+  val isVerified: Boolean = false,
   val rankedXp: Int,
   val casualXp: Int,
   val trustScore: Int,
@@ -280,6 +290,7 @@ class ProfileRepository(
       district = json.optString("district", null).cleanNull(),
       state = json.optString("state", null).cleanNull(),
       isOrganizer = json.optBoolean("is_organizer", false),
+      isVerified = json.optBoolean("is_verified", false),
       rankedXp = json.optInt("ranked_xp", 0),
       casualXp = json.optInt("casual_xp", 0),
       trustScore = json.optInt("trust_score", 100),
@@ -306,6 +317,7 @@ class ProfileRepository(
           followsMe = s.optBoolean("follows_me", false),
           isSelf = s.optBoolean("is_self", false),
           canFollow = s.optBoolean("can_follow", false),
+          isBlocked = s.optBoolean("is_blocked", false),
         )
       },
       profileComplete = json.optBoolean("profile_complete", false),

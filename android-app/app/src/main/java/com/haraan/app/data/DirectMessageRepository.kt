@@ -27,12 +27,37 @@ data class ChatThread(
   val memberCount: Int = 0,
 )
 
+/**
+ * The message a reply is quoting, already flattened by the server.
+ *
+ * Carries the words, not a pointer: the quote has to render even when the original is far
+ * above the loaded page, and an unsent original resolves to [deleted] rather than vanishing.
+ */
+data class QuotedMessage(
+  val id: Long,
+  val body: String,
+  val deleted: Boolean,
+  val senderName: String?,
+  val mine: Boolean,
+)
+
+/** One emoji on a message: which, how many people, and whether one of them is you. */
+data class MessageReaction(val emoji: String, val count: Int, val mine: Boolean)
+
 data class ChatMessage(
   val id: Long,
   val body: String,
   /** True when this viewer sent it — decided by the SERVER, not by comparing ids here. */
   val mine: Boolean,
   val sentAt: String?,
+  /** Unsent by its author: the row survives to keep the thread's order, the words do not. */
+  val deleted: Boolean = false,
+  /** Emoji reactions, already grouped and counted by the server. */
+  val reactions: List<MessageReaction> = emptyList(),
+  /** Someone else's words, passed on. Shown as a small "Forwarded" label. */
+  val forwarded: Boolean = false,
+  /** What this message is replying to, flattened for the bubble. Null when it replies to nothing. */
+  val replyTo: QuotedMessage? = null,
   /** Who sent it — used to label incoming bubbles in a GROUP thread. */
   val senderName: String? = null,
   val senderAvatar: String? = null,
@@ -139,14 +164,47 @@ class DirectMessageRepository(
     }
   }
 
-  /** The thread, oldest first. Fetching also marks it read server-side. */
-  suspend fun messages(token: String, conversationId: Long): List<ChatMessage> = withContext(Dispatchers.IO) {
-    val c = conn("/api/dm/$conversationId/messages", "GET", token)
+  /**
+   * The thread, oldest first. Fetching also marks it read server-side.
+   *
+   * Pass [sinceId] to get only what has arrived after that message — what the open-thread
+   * poll uses, so a quiet conversation costs an empty array every few seconds instead of a
+   * fresh copy of all 300 messages.
+   */
+  /**
+   * A thread page, plus how far the OTHER side has got.
+   *
+   * Receipts come back as two timestamps for the whole conversation rather than a status on
+   * every message: the client compares them against each message's own time and gets the
+   * same answer in a fraction of the payload. Null in a group — see the controller.
+   */
+  data class ThreadPage(
+    val messages: List<ChatMessage>,
+    val theirDeliveredAt: String? = null,
+    val theirReadAt: String? = null,
+  )
+
+  /** Kept for callers that only want the lines. */
+  suspend fun messages(
+    token: String,
+    conversationId: Long,
+    sinceId: Long? = null,
+  ): List<ChatMessage> = page(token, conversationId, sinceId).messages
+
+  suspend fun page(
+    token: String,
+    conversationId: Long,
+    sinceId: Long? = null,
+  ): ThreadPage = withContext(Dispatchers.IO) {
+    val path = "/api/dm/$conversationId/messages" +
+      if (sinceId != null && sinceId > 0) "?since_id=$sinceId" else ""
+    val c = conn(path, "GET", token)
     try {
-      if (c.responseCode !in 200..299) return@withContext emptyList()
+      if (c.responseCode !in 200..299) return@withContext ThreadPage(emptyList())
       val body = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }
-      val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
-      buildList {
+      val root = JSONObject(body)
+      val arr = root.optJSONArray("results") ?: return@withContext ThreadPage(emptyList())
+      val lines = buildList {
         for (i in 0 until arr.length()) {
           val o = arr.getJSONObject(i)
           add(
@@ -155,25 +213,111 @@ class DirectMessageRepository(
               body = o.optString("body", ""),
               mine = o.optBoolean("mine", false),
               sentAt = o.optString("sent_at", null).cleanNull(),
+              deleted = o.optBoolean("deleted", false),
+              forwarded = o.optBoolean("forwarded", false),
+              replyTo = o.optJSONObject("reply_to")?.let { q ->
+                QuotedMessage(
+                  id = q.optLong("id"),
+                  body = q.optString("body", ""),
+                  deleted = q.optBoolean("deleted", false),
+                  senderName = q.optString("sender_name", null).cleanNull(),
+                  mine = q.optBoolean("mine", false),
+                )
+              },
+              reactions = (o.optJSONArray("reactions") ?: org.json.JSONArray()).let { arr ->
+                buildList {
+                  for (j in 0 until arr.length()) {
+                    val r = arr.optJSONObject(j) ?: continue
+                    val emoji = r.optString("emoji")
+                    if (emoji.isNotBlank()) {
+                      add(MessageReaction(emoji, r.optInt("count", 1), r.optBoolean("mine", false)))
+                    }
+                  }
+                }
+              },
               senderName = o.optString("sender_name", null).cleanNull(),
               senderAvatar = o.optString("sender_avatar", null).cleanNull(),
             )
           )
         }
       }
+      ThreadPage(
+        messages = lines,
+        theirDeliveredAt = root.optString("their_delivered_at", null).cleanNull(),
+        theirReadAt = root.optString("their_read_at", null).cleanNull(),
+      )
     } catch (_: Exception) {
-      emptyList()
+      ThreadPage(emptyList())
     } finally {
       c.disconnect()
     }
   }
 
+  /**
+   * Unsend one of your own messages. True when the server accepted it; false when it
+   * refused (not yours, or already gone) so the caller can say so instead of guessing.
+   */
+  suspend fun unsend(token: String, conversationId: Long, messageId: Long): Boolean =
+    withContext(Dispatchers.IO) {
+      val c = conn("/api/dm/$conversationId/messages/$messageId", "DELETE", token)
+      try {
+        c.responseCode in 200..299
+      } catch (_: Exception) {
+        false
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  /**
+   * React to a message, or clear your reaction by sending the same emoji again (or a blank).
+   * True when the server took it.
+   */
+  suspend fun react(token: String, conversationId: Long, messageId: Long, emoji: String): Boolean =
+    withContext(Dispatchers.IO) {
+      try {
+        val c = conn("/api/dm/$conversationId/messages/$messageId/reaction", "POST", token)
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use { it.write(JSONObject().put("emoji", emoji).toString().toByteArray()) }
+        val ok = c.responseCode in 200..299
+        c.disconnect()
+        ok
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+  /**
+   * Forward a message into another of your conversations. True when the server took it —
+   * it checks that you are in both threads.
+   */
+  suspend fun forward(token: String, messageId: Long, toConversationId: Long): Boolean =
+    withContext(Dispatchers.IO) {
+      try {
+        val c = conn("/api/dm/messages/$messageId/forward", "POST", token)
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use { it.write(JSONObject().put("to", toConversationId).toString().toByteArray()) }
+        val ok = c.responseCode in 200..299
+        c.disconnect()
+        ok
+      } catch (_: Exception) {
+        false
+      }
+    }
+
   /** Null means it did not send — the caller must not leave the bubble on screen. */
-  suspend fun send(token: String, conversationId: Long, body: String): ChatMessage? =
+  suspend fun send(
+    token: String,
+    conversationId: Long,
+    body: String,
+    replyToId: Long? = null,
+  ): ChatMessage? =
     withContext(Dispatchers.IO) {
       val c = conn("/api/dm/$conversationId/messages", "POST", token)
       try {
-        val payload = JSONObject().put("body", body).toString()
+        val payload = JSONObject().put("body", body).also { if (replyToId != null && replyToId > 0) it.put("reply_to_id", replyToId) }.toString()
         c.outputStream.use { it.write(payload.toByteArray()) }
         if (c.responseCode !in 200..299) return@withContext null
         val res = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }

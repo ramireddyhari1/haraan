@@ -315,6 +315,47 @@ final class BookingService
      *
      * @return array{coupon: Coupon|null, discount: float, message: string}
      */
+    /**
+     * The venue twin of {@see resolveCoupon()}. Same shape, same rejection messages, same
+     * cap on the discount — only the applicability check differs, because a coupon reaches
+     * turf through `scope`/`venue_id` rather than `event_id`.
+     *
+     * Kept as its own method rather than adding a nullable $venueId to the event resolver:
+     * that one is called from the ticket checkout and the coupon preview, and threading a
+     * second product through it is how the two flows start silently sharing bugs.
+     *
+     * @return array{coupon: ?Coupon, discount: float, message: string}
+     */
+    public function resolveVenueCoupon(User $user, int $venueId, ?string $code, float $subtotal, float $fee = 0.0): array
+    {
+        $reject = static fn (string $message): array => ['coupon' => null, 'discount' => 0.0, 'message' => $message];
+
+        $coupon = Coupon::findByCode($code);
+
+        if ($coupon === null || ! $coupon->isRedeemable()) {
+            return $reject('This code isn’t valid.');
+        }
+
+        if (! $coupon->appliesToVenue($venueId)) {
+            return $reject('This code isn’t valid for this venue.');
+        }
+
+        if (! $coupon->meetsMinOrder($subtotal)) {
+            return $reject('Applies on orders over ₹' . number_format((float) $coupon->min_order) . '.');
+        }
+
+        if (! $this->couponWithinPerCustomerLimit($coupon, (int) $user->id)) {
+            return $reject('You’ve already used this code.');
+        }
+
+        return [
+            'coupon'   => $coupon,
+            // Never discount below zero: the charge is subtotal + fee, so that is the cap.
+            'discount' => round(min($coupon->discountFor($subtotal), $subtotal + $fee), 2),
+            'message'  => 'Coupon applied.',
+        ];
+    }
+
     public function resolveCoupon(User $user, int $eventId, ?string $code, float $subtotal, float $fee = 0.0, ?int $tickets = null): array
     {
         $reject = static fn (string $message): array => ['coupon' => null, 'discount' => 0.0, 'message' => $message];
@@ -807,13 +848,18 @@ final class BookingService
         string $date,
         ?int $courtId = null,
         int $duration = 1,
+        bool $reserve = false,
+        ?string $couponCode = null,
     ): Booking {
         return $this->reserveVenue($venueId, $slotId, $courtId, $date, $duration, [
             'user_id'     => $user->id,
             'channel'     => 'online',
             'guest_name'  => null,
             'guest_phone' => null,
-        ]);
+            // Carried for the coupon's per-customer cap; only the online path can discount.
+            'user'        => $user,
+            'coupon_code' => $couponCode,
+        ], $reserve);
     }
 
     /**
@@ -839,6 +885,9 @@ final class BookingService
             'channel'     => 'offline',
             'guest_name'  => $guestName,
             'guest_phone' => $guestPhone,
+            // Desk bookings are priced by the partner at the counter, not by app coupons.
+            'user'        => null,
+            'coupon_code' => null,
         ]);
     }
 
@@ -847,15 +896,15 @@ final class BookingService
      * Validates the venue/slot/court, rejects blocked dates, enforces the court+window
      * overlap rule, and writes the confirmed booking — all inside one locked transaction.
      *
-     * @param array{user_id:int,channel:string,guest_name:?string,guest_phone:?string} $meta
+     * @param array{user_id:int,channel:string,guest_name:?string,guest_phone:?string,user?:?User,coupon_code?:?string} $meta
      */
-    private function reserveVenue(int $venueId, ?int $slotId, ?int $courtId, string $date, int $duration, array $meta): Booking
+    private function reserveVenue(int $venueId, ?int $slotId, ?int $courtId, string $date, int $duration, array $meta, bool $reserve = false): Booking
     {
         $duration = max(1, $duration);
         $date = date('Y-m-d', strtotime($date) ?: time());
 
         /** @var Booking $booking */
-        $booking = DB::transaction(function () use ($venueId, $slotId, $courtId, $date, $duration, $meta): Booking {
+        $booking = DB::transaction(function () use ($venueId, $slotId, $courtId, $date, $duration, $meta, $reserve): Booking {
             $venue = Venue::query()->lockForUpdate()->find($venueId);
 
             if ($venue === null || ! $venue->is_active) {
@@ -930,10 +979,37 @@ final class BookingService
 
             $this->assertCourtHourFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
 
+            // Subtotal → fee → discount, in that order, and `total_amount` is what the
+            // customer actually pays. The Razorpay order is built from this number, so the
+            // arithmetic lives here and nowhere else — a second copy in the controller is
+            // how a summary and a charge drift apart.
+            $subtotal = (float) ($perHour * $duration);
+            $fee      = $venue->convenienceFeeFor($subtotal);
+
+            $applied  = $meta['coupon_code'] !== null && $meta['user'] instanceof User
+                ? $this->resolveVenueCoupon($meta['user'], $venue->id, $meta['coupon_code'], $subtotal, $fee)
+                : ['coupon' => null, 'discount' => 0.0, 'message' => ''];
+            $discount = (float) $applied['discount'];
+
+            // A held (unpaid) booking must not burn a coupon use — that is counted on
+            // confirmation, so an abandoned checkout doesn't consume the code.
+            if ($applied['coupon'] !== null && ! $reserve) {
+                $applied['coupon']->increment('uses');
+            }
+
             return Booking::query()->create([
-                'quantity'       => 1,
-                'total_amount'   => (float) ($perHour * $duration),
-                'status'         => 'CONFIRMED',
+                'quantity'        => 1,
+                'convenience_fee' => $fee,
+                'discount'        => round($discount, 2),
+                'coupon_code'     => $applied['coupon']?->code,
+                'total_amount'    => max(0.0, round($subtotal + $fee - $discount, 2)),
+                // Paid online bookings are held PENDING until Razorpay confirms. The hold is
+                // load-bearing: occupyingStatuses() only counts a PENDING row while
+                // `reserved_until` is in the future, so an abandoned checkout frees the court
+                // by itself instead of blocking it forever. Desk/offline bookings and free
+                // slots skip the hold and confirm outright.
+                'status'         => $reserve ? 'PENDING' : 'CONFIRMED',
+                'reserved_until' => $reserve ? now()->addMinutes(self::RESERVATION_HOLD_MINUTES) : null,
                 'booking_type'   => 'venue',
                 'user_id'        => $meta['user_id'],
                 'event_id'       => null,

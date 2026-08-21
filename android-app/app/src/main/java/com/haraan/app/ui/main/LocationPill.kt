@@ -61,6 +61,7 @@ fun LocationPill(
         is LocationState.Resolved -> state.city
         LocationState.Locating -> "Locating…"
         LocationState.Denied -> "Enable location"
+        LocationState.ServicesOff -> "Location off"
         LocationState.Unavailable -> "Set location"
         else -> "Set location"
     }

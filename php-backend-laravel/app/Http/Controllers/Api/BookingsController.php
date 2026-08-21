@@ -10,6 +10,7 @@ use App\Http\Resources\BookingResource;
 use App\Models\Booking;
 use App\Models\Event;
 use App\Models\User;
+use App\Models\Venue;
 use App\Services\BookingNotifier;
 use App\Services\BookingService;
 use App\Services\RazorpayGateway;
@@ -277,6 +278,32 @@ final class BookingsController extends Controller
         // refused on a count nobody sent.
         $tickets  = $request->filled('tickets') ? max(0, (int) $request->input('tickets')) : null;
 
+        // A venueId routes to the venue resolver instead of the event one. Same endpoint on
+        // purpose: the client contract ("does this code work, and what would it save me?")
+        // is identical, and a second near-identical route is how the two drift apart.
+        $venueId = $request->filled('venueId') ? (int) $request->input('venueId') : 0;
+
+        if ($venueId > 0) {
+            $venue    = Venue::query()->find($venueId);
+            $venueFee = $venue?->convenienceFeeFor($subtotal) ?? 0.0;
+            $resolved = $this->bookings->resolveVenueCoupon($authUser, $venueId, $code, $subtotal, $venueFee);
+
+            return response()->json(
+                $resolved['coupon'] === null
+                    ? ['valid' => false, 'message' => $resolved['message']]
+                    : [
+                        'valid'    => true,
+                        'code'     => $resolved['coupon']->code,
+                        'type'     => $resolved['coupon']->type,
+                        'discount' => $resolved['discount'],
+                        // The fee is quoted back so the summary's arithmetic is the
+                        // server's, not a second copy computed in the app.
+                        'fee'      => $venueFee,
+                        'message'  => $resolved['message'],
+                    ]
+            );
+        }
+
         $event = $eventId > 0 ? Event::query()->find($eventId) : null;
         $fee   = $event !== null ? $event->convenienceFeeFor($subtotal) : 0.0;
 
@@ -311,10 +338,14 @@ final class BookingsController extends Controller
             'venueId'  => ['required', 'integer'],
             'slotId'   => ['nullable', 'integer'],
             'courtId'  => ['nullable', 'integer'],
-            'date'     => ['required', 'date'],
-            'duration' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'date'       => ['required', 'date'],
+            'duration'   => ['nullable', 'integer', 'min:1', 'max:12'],
+            'couponCode' => ['nullable', 'string', 'max:40'],
         ]);
 
+        // Reserve first, price second: the court is held while we talk to Razorpay, so two
+        // people tapping the same 7 PM slot can't both reach checkout. Mirrors the event
+        // order flow in store() — same reserve → pay → confirm handshake, same endpoints.
         $booking = $this->bookings->createVenueBooking(
             $authUser,
             (int) $data['venueId'],
@@ -322,12 +353,55 @@ final class BookingsController extends Controller
             (string) $data['date'],
             isset($data['courtId']) ? (int) $data['courtId'] : null,
             isset($data['duration']) ? (int) $data['duration'] : 1,
+            reserve: true,
+            // Priced server-side: the discount is resolved against the coupon's own rules,
+            // never taken from a client-supplied total.
+            couponCode: $data['couponCode'] ?? null,
         );
 
-        BookingNotifier::dispatch($booking);
+        $amountPaise = (int) round(((float) $booking->total_amount) * 100);
 
+        // Free slot (₹0 rate): nothing to charge, so confirm on the spot rather than
+        // sending the user to a checkout for zero rupees.
+        if ($amountPaise <= 0) {
+            $confirmed = $this->bookings->confirmReservation([$booking->id], null)->first() ?? $booking;
+
+            BookingNotifier::dispatch($confirmed);
+
+            return response()->json([
+                'message' => 'Venue booked',
+                'data'    => new BookingResource($confirmed),
+            ], 201);
+        }
+
+        try {
+            $order = $this->razorpay->createOrder(
+                $amountPaise,
+                'vnu_' . (int) $data['venueId'] . '_' . $booking->id,
+            );
+        } catch (RuntimeException $e) {
+            // Gateway down: drop the hold immediately. Leaving it would keep the court
+            // blocked for 15 minutes over an error the user cannot retry past.
+            $this->bookings->releaseReservation([$booking->id]);
+
+            $status = $e->getCode() >= 400 ? (int) $e->getCode() : 500;
+
+            return response()->json(['error' => $e->getMessage()], $status);
+        }
+
+        $this->bookings->attachOrderId(collect([$booking]), (string) $order['id']);
+
+        // NB: the booking notification fires on CONFIRM, not here — a PENDING hold is not
+        // a booking, and mailing "you're booked" before payment is how double-messaging starts.
         return response()->json([
-            'message' => 'Venue booked',
+            'message' => 'Payment required',
+            'payment' => [
+                'required' => true,
+                'key'      => $this->razorpay->publicKey(),
+                'orderId'  => $order['id'],
+                'amount'   => $order['amount'],
+                'currency' => $order['currency'],
+            ],
             'data'    => new BookingResource($booking),
         ], 201);
     }

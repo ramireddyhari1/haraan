@@ -20,6 +20,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
+import androidx.compose.runtime.remember
+import coil.compose.AsyncImage
+import com.haraan.app.data.ApiConfig
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
@@ -35,10 +41,24 @@ import com.haraan.app.ui.matches.CrexColors
 import com.haraan.app.ui.matches.MatchUiState
 import com.haraan.app.ui.matches.RecentOver
 import com.haraan.app.ui.theme.HaraanColors
+import com.haraan.app.ui.theme.premiumCardShadow
 
 // SIX → green, FOUR → blue, WICKET → solid red. Dots/singles stay neutral grey.
 private val SixGreen = HaraanColors.Success
 private val FourBlue = HaraanColors.EventsBlue
+
+// ── Broadcast lower-third palette ──────────────────────────────────────────────
+// The wicket card is INK with one lit red edge, not a red fill. A saturated two-stop
+// gradient slab is the loudest "generated UI" tell there is, and filling the whole card
+// red made every dismissal shout at the same volume as everything else on the screen.
+private val InkTop    = Color(0xFF1A202C)
+private val InkBottom = Color(0xFF0C1017)
+private val WicketRed = Color(0xFFE5484D)
+// The well a face sits in on the ink card. Opaque on purpose — the ring disc is directly
+// beneath it, so a translucent fill composites over RED and turns the whole face pink.
+private val InkFaceWell = Color(0xFF232B3A)
+// One amber for every extra (wd/nb/b/lb) instead of a pair of raw hex literals.
+private val ExtraAmber = Color(0xFFB45309)
 
 @Composable
 fun BallCircle(ball: String) {
@@ -80,6 +100,54 @@ fun BallCircle(ball: String) {
     }
 }
 
+/**
+ * A player's real face — the one thing on these cards that no generic template could
+ * produce, and the reason they stop reading as coloured boxes. Falls back to the initial
+ * on a tinted disc: never a stock silhouette, and never a letter floating in a
+ * translucent circle, which is the placeholder look these cards had before they carried
+ * a photo at all. The ring is a real ring (the disc underneath), so the photo is inset
+ * by it rather than painted over it.
+ */
+@Composable
+private fun PlayerFace(
+    photoUrl: String,
+    name: String,
+    size: Dp,
+    ring: Color,
+    ringWidth: Dp,
+    faceBg: Color,
+    initialColor: Color,
+) {
+    val url = remember(photoUrl) { ApiConfig.mediaUrl(photoUrl) }
+    val inner = size - ringWidth * 2
+    Box(
+        modifier = Modifier.size(size).clip(CircleShape).background(ring),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier.size(inner).clip(CircleShape).background(faceBg),
+            contentAlignment = Alignment.Center
+        ) {
+            if (url != null) {
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(inner).clip(CircleShape)
+                )
+            } else {
+                Text(
+                    name.trim().take(1).uppercase().ifBlank { "?" },
+                    color = initialColor,
+                    fontSize = (inner.value * 0.42f).sp,
+                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
     LazyColumn(
@@ -98,18 +166,18 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                         .background(CrexColors.Background)
                         .padding(bottom = 6.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(CrexColors.AccentYellow.copy(alpha = 0.1f))
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    // A status is a statement, not a zone — so it's a centred pill, not
+                    // another full-bleed tinted band competing with the feed.
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(
                             text = state.status,
-                            color = CrexColors.AccentYellow,
+                            color = ExtraAmber,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(CrexColors.AccentYellow.copy(alpha = 0.12f))
+                                .padding(horizontal = 14.dp, vertical = 5.dp)
                         )
                     }
                 }
@@ -262,7 +330,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
             items(state.commentary) { line ->
                 when {
                     line.kind == "header" -> CommentaryHeader(line.text)
-                    line.kind == "batter_in" -> NewBatterBanner(line)
+                    line.kind == "batter_in" -> NewBatterRow(line)
                     line.wicket -> WicketBanner(line, state)
                     else -> CommentaryRow(line)
                 }
@@ -286,15 +354,23 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
     }
 }
 
+/** An innings/over divider — a titled rule, not another full-width tinted band. */
 @Composable
 private fun CommentaryHeader(text: String) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(CrexColors.AccentBlue.copy(alpha = 0.08f))
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .background(CrexColors.Background)
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text, color = CrexColors.AccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text.uppercase(),
+            color = CrexColors.TextSecondary, fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f).height(1.dp).background(CrexColors.Border))
     }
 }
 
@@ -312,110 +388,172 @@ private fun WicketBanner(line: CommentaryLine, state: MatchUiState) {
     val batterName = fow?.batter?.takeIf { it.isNotBlank() }
     val bat = batterName?.let { name -> card?.batters?.firstOrNull { it.name == name } }
     val figures = bat?.let { "${it.runs} (${it.balls})" }
-    // The backend prepends "OUT! " to the dismissal — strip it for the sub-line.
-    val dismissal = line.text.removePrefix("OUT!").trim().ifBlank { "out" }
+    // The feed text reads "<bowler> to <batter>, OUT! <how>" — the card already carries
+    // WICKET, the batter and the figures, so only the "<how>" tail is new information.
+    // (removePrefix alone missed it: the OUT! sits mid-string, not at the front.) Falls
+    // back to the whole line if a source ever phrases a dismissal without the marker.
+    val dismissal = line.text
+        .substringAfter("OUT!", line.text)
+        .trim().removePrefix(",").trim()
+        .ifBlank { "out" }
     val scoreAtFall = fow?.let { "${it.score}-${it.wicketNo}" }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFFE23B3B), Color(0xFFB91C1C))))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .premiumCardShadow(radius = 16.dp, ambient = 14.dp, contact = 3.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.verticalGradient(listOf(InkTop, InkBottom)))
+            .drawBehind {
+                // The light the red edge throws across the panel, then the lit edge itself,
+                // then a hairline of top light — so the card reads as a lit surface with a
+                // source, not as a flat rectangle someone filled in.
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to WicketRed.copy(alpha = 0.13f),
+                        1f to Color.Transparent
+                    ),
+                    size = Size(40.dp.toPx(), size.height)
+                )
+                drawRect(color = WicketRed, size = Size(3.dp.toPx(), size.height))
+                drawLine(
+                    color = Color.White.copy(alpha = 0.07f),
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+            .padding(start = 13.dp, end = 13.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text((batterName ?: "?").first().uppercase(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("WICKET", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color.White).padding(horizontal = 5.dp, vertical = 1.dp)) {
-                    Text("OUT", color = Color(0xFFB91C1C), fontSize = 8.sp, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+        // The player is the subject of a dismissal, not the ball — so their face leads
+        // and the W rides it as a badge, notched out of the photo by an ink-coloured
+        // collar so the two never smudge into each other.
+        Box(contentAlignment = Alignment.BottomEnd) {
+            PlayerFace(
+                photoUrl = line.photoUrl,
+                name = batterName ?: line.battingName,
+                size = 40.dp,
+                ring = WicketRed,
+                ringWidth = 2.dp,
+                faceBg = InkFaceWell,
+                initialColor = Color.White.copy(alpha = 0.80f)
+            )
+            Box(
+                modifier = Modifier
+                    .offset(x = 3.dp, y = 2.dp)
+                    .size(19.dp).clip(CircleShape).background(InkBottom),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier.size(15.dp).clip(CircleShape).background(WicketRed),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "W", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold,
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
                 }
             }
-            Spacer(Modifier.height(3.dp))
-            Text(
-                buildString {
-                    append(batterName ?: line.battingName.ifBlank { "Batter" })
-                    if (figures != null) append("  $figures")
-                },
-                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1
-            )
-            Text(dismissal, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2)
+        }
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            // "WICKET" alone. The white OUT pill next to it said the same word twice,
+            // and the dismissal line below says it a third time.
+            Text("WICKET", color = WicketRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.4.sp)
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    batterName ?: line.battingName.ifBlank { "Batter" },
+                    color = Color.White, fontSize = 15.sp,
+                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    maxLines = 1
+                )
+                if (figures != null) {
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        figures,
+                        color = Color.White.copy(alpha = 0.62f), fontSize = 13.sp,
+                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                        modifier = Modifier.padding(bottom = 1.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(dismissal, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 2)
         }
         Spacer(Modifier.width(10.dp))
         Column(horizontalAlignment = Alignment.End) {
-            if (scoreAtFall != null) Text(scoreAtFall, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
-            if (line.over.isNotBlank()) Text("${line.over} ov", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            if (scoreAtFall != null) {
+                Text(
+                    scoreAtFall, color = Color.White, fontSize = 16.sp,
+                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
+            if (line.over.isNotBlank()) {
+                if (scoreAtFall != null) Spacer(Modifier.height(1.dp))
+                Text("${line.over} ov", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
 
 /**
- * Premium blue "new batter" card shown when a batter walks in. Career figures (RUNS /
- * BALLS / HS / AVG / SR) are the player's REAL totals from the ball log; guests or players
- * with no completed innings show a clean "first recorded innings" line instead of faked stats.
+ * A batter walking in is a fact, not a moment — so it's a feed ROW, sharing the over
+ * gutter and the ball column with every other delivery, and only the wicket above it
+ * gets a card. That difference in FORM is what stops the pair reading as one template
+ * printed in two colours, and it costs one row instead of two cards per dismissal.
  */
 @Composable
-private fun NewBatterBanner(line: CommentaryLine) {
-    val c = line.career
+private fun NewBatterRow(line: CommentaryLine) {
+    // Only a career with real deliveries behind it counts — an all-zero row is the same
+    // as having none, and printing zeroes would invent a career not yet played.
+    val c = line.career?.takeIf { it.innings > 0 || it.balls > 0 }
     val name = line.text.ifBlank { "New batter" }
-    Column(
+    // ONE true line, not a six-column stat strip. What you want to know about a batter
+    // walking in is whether they can bat, and runs + strike rate answer that.
+    val note = when {
+        c == null -> "first innings"
+        c.sr != null -> "${c.runs} runs · SR ${String.format("%.0f", c.sr)}"
+        c.highScore > 0 -> "${c.runs} runs · HS ${c.highScore}"
+        else -> "${c.runs} runs"
+    }
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))))
-            .padding(14.dp)
+            .background(CrexColors.Surface)
+            .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(name.first().uppercase(), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("NEW BATTER", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                Spacer(Modifier.height(2.dp))
-                Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1)
-            }
-            if (line.over.isNotBlank()) {
-                Text("${line.over} ov", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-
-        if (c != null && (c.innings > 0 || c.balls > 0)) {
-            Spacer(Modifier.height(12.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.15f)))
-            Spacer(Modifier.height(10.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatCol("INN", c.innings.toString())
-                StatCol("RUNS", c.runs.toString())
-                StatCol("BALLS", c.balls.toString())
-                StatCol("HS", c.highScore.toString())
-                StatCol("AVG", c.avg?.let { String.format("%.1f", it) } ?: "—")
-                StatCol("SR", c.sr?.let { String.format("%.1f", it) } ?: "—")
-            }
-        } else {
-            Spacer(Modifier.height(8.dp))
-            Text("First recorded innings", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        }
-    }
-}
-
-@Composable
-private fun StatCol(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
-        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+        Text(
+            line.over,
+            color = CrexColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(34.dp)
+        )
+        // The face takes the ball column's slot and size, so the column stays a column.
+        PlayerFace(
+            photoUrl = line.photoUrl,
+            name = name,
+            size = 28.dp,
+            ring = CrexColors.AccentBlue.copy(alpha = 0.45f),
+            ringWidth = 1.dp,
+            faceBg = CrexColors.Background,
+            initialColor = CrexColors.TextSecondary
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = CrexColors.TextPrimary, fontWeight = FontWeight.SemiBold)) { append(name) }
+                withStyle(SpanStyle(color = CrexColors.TextSecondary)) { append(" walks in · $note") }
+            },
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
@@ -425,7 +563,7 @@ private fun CommentaryRow(line: CommentaryLine) {
         line.wicket -> CrexColors.AccentRed to Color.White
         line.boundary -> CrexColors.SixBall.copy(alpha = 0.15f) to CrexColors.SixBall
         line.label == "0" -> CrexColors.Background to CrexColors.TextMuted
-        line.label.lowercase() in setOf("wd", "nb", "b", "lb") -> Color(0xFFFEF3C7) to Color(0xFF92400E)
+        line.label.lowercase() in setOf("wd", "nb", "b", "lb") -> ExtraAmber.copy(alpha = 0.12f) to ExtraAmber
         else -> CrexColors.Background to CrexColors.TextSecondary
     }
     Row(

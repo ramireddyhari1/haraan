@@ -32,6 +32,14 @@ final class DirectMessageService
             return false;
         }
 
+        // A block closes the conversation from either side. Blocking already tears down
+        // the mutual follow, so this is belt-and-braces — but it is the check that holds
+        // if a follow row ever survives, and messaging is the one place where being
+        // wrong is not a cosmetic bug.
+        if (User::blockExistsBetween($me, $them)) {
+            return false;
+        }
+
         return $me->isFollowing($them) && $them->isFollowing($me);
     }
 
@@ -135,12 +143,26 @@ final class DirectMessageService
      * the insert, so the list can never show a preview for a message that failed to
      * save — or miss one that succeeded.
      */
-    public function send(Conversation $conversation, User $sender, string $body): DirectMessage
-    {
-        return DB::transaction(function () use ($conversation, $sender, $body): DirectMessage {
+    public function send(
+        Conversation $conversation,
+        User $sender,
+        string $body,
+        ?int $replyToId = null,
+        bool $forwarded = false,
+    ): DirectMessage {
+        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded): DirectMessage {
+            // A reply may only quote a message from THIS conversation. Quoting across threads
+            // would put words from a conversation the reader isn't in onto their screen.
+            $replyTo = null;
+            if ($replyToId !== null) {
+                $replyTo = $conversation->messages()->whereKey($replyToId)->first()?->id;
+            }
+
             $message = $conversation->messages()->create([
                 'sender_id' => $sender->id,
                 'body' => $body,
+                'reply_to_id' => $replyTo,
+                'is_forwarded' => $forwarded,
             ]);
 
             $conversation->forceFill([
@@ -163,6 +185,160 @@ final class DirectMessageService
 
             return $message;
         });
+    }
+
+    /**
+     * Send, then tell everyone watching the thread that it moved.
+     *
+     * The broadcast happens AFTER the transaction commits — a listener that refetches the
+     * instant it hears must find the message already there, and a push from inside the
+     * transaction can arrive before the row is visible to other connections.
+     */
+    public function sendAndBroadcast(
+        Conversation $conversation,
+        User $sender,
+        string $body,
+        ?int $replyToId = null,
+        bool $forwarded = false,
+    ): DirectMessage {
+        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded);
+
+        \App\Events\ConversationUpdated::dispatch($conversation->id, $sender->id);
+
+        return $message;
+    }
+
+    /**
+     * Mark every thread as DELIVERED to [$user] up to now.
+     *
+     * Called when their app fetches the thread list: the messages are on their device, but
+     * they have not opened the conversation. That is exactly the gap between one tick and
+     * two, and without a separate stamp the second tick would be a lie dressed as a fact.
+     */
+    public function markDelivered(User $user): void
+    {
+        DB::table('conversation_participants')
+            ->where('user_id', $user->id)
+            ->update(['last_delivered_at' => now()]);
+    }
+
+    /**
+     * Unsend: clear the body, keep the row.
+     *
+     * The row survives so the thread keeps its order and every other client can be told
+     * the message is gone — a vanished row leaves a hole nobody can explain. The body is
+     * actually cleared, so "unsent" means unreadable, not merely hidden by a client that
+     * might be an old build.
+     *
+     * Returns false when the message is not this user's, or is already gone.
+     */
+    public function unsend(Conversation $conversation, User $user, int $messageId): bool
+    {
+        $message = $conversation->messages()
+            ->where('id', $messageId)
+            ->whereNull('deleted_at')
+            ->first();
+
+        if ($message === null || (int) $message->sender_id !== (int) $user->id) {
+            return false;
+        }
+
+        $message->forceFill(['body' => '', 'deleted_at' => now()])->save();
+
+        // The preview on the thread list quotes the last message; if that was this one, it
+        // has to stop quoting it.
+        if ((int) ($conversation->last_sender_id ?? 0) === (int) $user->id) {
+            $latest = $conversation->messages()->whereNull('deleted_at')->orderByDesc('id')->first();
+            $conversation->forceFill([
+                'last_message_preview' => $latest?->body ?? 'Message deleted',
+                'last_message_at' => $latest?->created_at ?? $conversation->last_message_at,
+                'last_sender_id' => $latest?->sender_id ?? $conversation->last_sender_id,
+            ])->save();
+        }
+
+        \App\Events\ConversationUpdated::dispatch($conversation->id, $user->id);
+
+        return true;
+    }
+
+    /**
+     * React to a message, or take your reaction back.
+     *
+     * One per person per message: sending a different emoji replaces yours, and sending the
+     * one you already chose clears it — which is what tapping the same face twice means to
+     * anyone who has used a messenger. An empty emoji clears it too, so the client has an
+     * explicit way to say "remove" without guessing.
+     *
+     * Returns false when the message is not in this conversation, or has been unsent.
+     */
+    public function react(Conversation $conversation, User $user, int $messageId, string $emoji): bool
+    {
+        $message = $conversation->messages()
+            ->where('id', $messageId)
+            ->whereNull('deleted_at')
+            ->first();
+
+        if ($message === null) {
+            return false;
+        }
+
+        $emoji = trim($emoji);
+        $existing = DB::table('message_reactions')
+            ->where('direct_message_id', $message->id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($emoji === '' || ($existing !== null && $existing->emoji === $emoji)) {
+            DB::table('message_reactions')
+                ->where('direct_message_id', $message->id)
+                ->where('user_id', $user->id)
+                ->delete();
+        } else {
+            DB::table('message_reactions')->updateOrInsert(
+                ['direct_message_id' => $message->id, 'user_id' => $user->id],
+                ['emoji' => $emoji, 'updated_at' => now(), 'created_at' => now()],
+            );
+        }
+
+        // Everyone in the thread should see it land, not on their next poll.
+        \App\Events\ConversationUpdated::dispatch($conversation->id, $user->id);
+
+        return true;
+    }
+
+    /**
+     * Forward one message into another conversation the sender is also in.
+     *
+     * The forward is a NEW message from whoever forwarded it, carrying only the words — not a
+     * pointer back to where it came from. Following such a pointer would expose a thread the
+     * reader may have no business seeing; "this isn't mine" is the honest half of a forwarded
+     * label, and it's the half that ships.
+     *
+     * Returns the new message, or null when the source is gone or the target isn't theirs.
+     */
+    public function forward(User $sender, int $messageId, int $toConversationId): ?DirectMessage
+    {
+        $source = DirectMessage::query()->whereKey($messageId)->whereNull('deleted_at')->first();
+        if ($source === null) {
+            return null;
+        }
+
+        // They must be in BOTH: the one they are copying from, and the one they are copying to.
+        $inSource = DB::table('conversation_participants')
+            ->where('conversation_id', $source->conversation_id)
+            ->where('user_id', $sender->id)
+            ->exists();
+        $target = Conversation::query()->whereKey($toConversationId)->first();
+        $inTarget = $target !== null && DB::table('conversation_participants')
+            ->where('conversation_id', $target->id)
+            ->where('user_id', $sender->id)
+            ->exists();
+
+        if (! $inSource || ! $inTarget) {
+            return null;
+        }
+
+        return $this->sendAndBroadcast($target, $sender, (string) $source->body, null, true);
     }
 
     /** Mark everything in [$conversation] read for [$user]. */

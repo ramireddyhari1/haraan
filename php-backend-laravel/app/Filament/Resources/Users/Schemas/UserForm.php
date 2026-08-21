@@ -70,6 +70,9 @@ class UserForm
                         TextInput::make('playing_style'),
                         Toggle::make('is_guest'),
                         Toggle::make('is_organizer'),
+                        Toggle::make('is_verified')
+                            ->label('Verified (blue tick)')
+                            ->helperText('Shows a blue tick beside this player\'s name in the app. Granted here only — nobody can set it on themselves.'),
                         TextInput::make('district'),
                         TextInput::make('state'),
                         TextInput::make('gender'),

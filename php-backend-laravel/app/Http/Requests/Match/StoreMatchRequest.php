@@ -27,7 +27,7 @@ final class StoreMatchRequest extends FormRequest
         return [
             // Which sport this match is. Defaults to cricket (the only sport with a full
             // create/toss/scorer flow) when omitted, so older clients keep working.
-            'sport'          => ['nullable', 'string', 'in:cricket,football,badminton,basketball'],
+            'sport'          => ['nullable', 'string', \Illuminate\Validation\Rule::in(\App\Support\SportRules::SUPPORTED)],
             'matchType'      => ['required', 'string', 'in:casual,league,tournament'],
             // Private = pure scoreboard: no XP, no rank, hidden from feeds, share-code access.
             'isPrivate'      => ['nullable', 'boolean'],
@@ -44,13 +44,18 @@ final class StoreMatchRequest extends FormRequest
             // What ends the match, in that sport's own terms. Shape depends on `kind`;
             // stored verbatim under `sport_state.format`.
             'format'                => ['nullable', 'array'],
-            'format.kind'           => ['required_with:format', 'string', 'in:cricket,football,badminton'],
+            'format.kind'           => ['required_with:format', 'string', \Illuminate\Validation\Rule::in(\App\Support\SportRules::SUPPORTED)],
             'format.overs'          => ['nullable', 'integer', 'min:1', 'max:50'],
             'format.ball'           => ['nullable', 'string', 'max:20'],
             'format.halves'         => ['nullable', 'integer', 'min:1', 'max:2'],
             'format.halfLengthMin'  => ['nullable', 'integer', 'min:5', 'max:45'],
             'format.bestOf'         => ['nullable', 'integer', 'in:1,3,5'],
-            'format.pointsTo'       => ['nullable', 'integer', 'in:11,15,21'],
+            // Rally sports run to 11 (table tennis), 15 (a volleyball decider), 21 (badminton)
+            // or 25 (volleyball). Tennis sends gamesTo instead.
+            'format.pointsTo'       => ['nullable', 'integer', 'in:11,15,21,25'],
+            'format.gamesTo'        => ['nullable', 'integer', 'in:4,6'],
+            'format.periods'        => ['nullable', 'integer', 'min:1', 'max:4'],
+            'format.periodLengthMin' => ['nullable', 'integer', 'min:3', 'max:45'],
             'format.doubles'        => ['nullable', 'boolean'],
             'venue'          => ['nullable', 'string', 'max:255'],
             // Area/Village is mandatory for public matches (they appear in the district

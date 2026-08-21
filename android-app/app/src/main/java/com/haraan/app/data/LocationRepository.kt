@@ -12,6 +12,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
@@ -23,7 +24,15 @@ sealed class LocationState {
     object Locating : LocationState()
     /** Permission was refused — prompt the user to grant it. */
     object Denied : LocationState()
-    /** Permission is granted but no fix could be obtained (GPS off / timed out). */
+    /**
+     * The device's own location switch is OFF. Distinct from [Unavailable] because the
+     * fix is different: no amount of retrying helps until the user turns it on, and an
+     * app that says "couldn't get a fix" while the master switch is off is sending
+     * people to look for a problem that isn't theirs to find.
+     */
+    object ServicesOff : LocationState()
+
+    /** Permission is granted, services are on, but no fix could be obtained. */
     object Unavailable : LocationState()
     data class Resolved(
         val city: String,
@@ -38,6 +47,19 @@ sealed class LocationState {
 data class CityOption(val name: String, val district: String = "")
 
 class LocationRepository(private val context: Context) {
+
+    private companion object {
+        /**
+         * Every await here is time-boxed, because none of these APIs promise to come
+         * back. `getCurrentLocation` waits for a fix that may never arrive indoors, and
+         * `Geocoder`'s listener can simply never fire — on an emulator both answer
+         * instantly from a mock provider, which is why this only ever bites real users.
+         * A wrong answer fast beats a spinner that never resolves.
+         */
+        const val QUICK_FIX_MS = 6_000L
+        const val GPS_FIX_MS = 12_000L
+        const val GEOCODE_MS = 5_000L
+    }
 
     private val prefs = context.getSharedPreferences("location_prefs", Context.MODE_PRIVATE)
 
@@ -125,18 +147,32 @@ class LocationRepository(private val context: Context) {
 
     suspend fun detectCurrent(): LocationState {
         if (!hasPermission()) return LocationState.Denied
+        // Ask BEFORE burning twelve seconds on a fix that cannot arrive.
+        if (!servicesEnabled()) return LocationState.ServicesOff
 
         val loc = currentFix() ?: return LocationState.Unavailable
 
-        val address = geocode(loc.latitude, loc.longitude)
-        val rawCity = address?.locality ?: address?.subAdminArea ?: ""
-        // Normalise to the catalog spelling so it matches how events store their city.
-        val city = CityCatalog.normalize(rawCity).ifBlank { "Unknown" }
-        val district = address?.subAdminArea ?: ""
-        // Precise area: neighbourhood → street → landmark. Skip if it echoes the city.
-        val area = listOfNotNull(address?.subLocality, address?.thoroughfare, address?.featureName)
+        // Name the coordinates. The platform geocoder first (free, offline-capable on
+        // devices that ship a backend), then the web API, and only "Unknown" if both
+        // fail — a real fix labelled "Unknown" reads to the user as no fix at all.
+        val address = withTimeoutOrNull(GEOCODE_MS) { geocode(loc.latitude, loc.longitude) }
+        var rawCity = address?.locality ?: address?.subAdminArea ?: ""
+        var district = address?.subAdminArea ?: ""
+        var area = listOfNotNull(address?.subLocality, address?.thoroughfare, address?.featureName)
             .firstOrNull { it.isNotBlank() && !it.equals(rawCity, ignoreCase = true) }
             ?: ""
+
+        if (rawCity.isBlank()) {
+            val web = com.haraan.app.ui.util.VenueMap.reverseGeocode(loc.latitude, loc.longitude)
+            if (web != null) {
+                rawCity = web.city.ifBlank { web.district }
+                if (district.isBlank()) district = web.district
+                if (area.isBlank() && !web.area.equals(rawCity, ignoreCase = true)) area = web.area
+            }
+        }
+
+        // Normalise to the catalog spelling so it matches how events store their city.
+        val city = CityCatalog.normalize(rawCity).ifBlank { "Unknown" }
         val plusCode = PlusCode.localCode(loc.latitude, loc.longitude)
 
         prefs.edit()
@@ -152,22 +188,53 @@ class LocationRepository(private val context: Context) {
     }
 
     /**
-     * Get a location fix. Prefers a *fresh* fix from the fused provider; falls back to
-     * its last-known, then the platform LocationManager (in case Play services is
-     * unavailable). Null when nothing can be obtained.
+     * Is the device's own location switch on? Nothing below works while it is off, and
+     * `getCurrentLocation` does not fail fast in that state — it simply never answers.
+     */
+    private fun servicesEnabled(): Boolean = try {
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            manager.isLocationEnabled
+        } else {
+            @Suppress("DEPRECATION")
+            manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                manager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+        }
+    } catch (e: Exception) {
+        // Can't tell — assume on and let the fix attempt be the judge, rather than
+        // blocking a user whose device just answers this question oddly.
+        true
+    }
+
+    /**
+     * Get a location fix, escalating and time-boxed at every step:
+     *
+     *  1. a quick balanced fix (wi-fi / cell — usually instant outdoors AND indoors),
+     *  2. the fused last-known (free and immediate when there is one),
+     *  3. a real GPS attempt, which is the slow one and so goes third, not first,
+     *  4. the platform LocationManager, for handsets where Play services is missing
+     *     or crippled — common on the budget devices this app is actually used on.
+     *
+     * The previous version awaited step 1 with NO timeout, so a phone that could not
+     * produce a balanced fix never reached steps 2-4 and the UI sat on "Reading GPS…"
+     * forever. City-level accuracy is all any caller needs, so the earliest answer wins.
      */
     @Suppress("MissingPermission")
     private suspend fun currentFix(): Location? =
-        fusedCurrent() ?: fusedLast() ?: legacyLast()
+        withTimeoutOrNull(QUICK_FIX_MS) { fusedCurrent(Priority.PRIORITY_BALANCED_POWER_ACCURACY) }
+            ?: fusedLast()
+            ?: withTimeoutOrNull(GPS_FIX_MS) { fusedCurrent(Priority.PRIORITY_HIGH_ACCURACY) }
+            ?: legacyLast()
 
     @Suppress("MissingPermission")
-    private suspend fun fusedCurrent(): Location? = suspendCancellableCoroutine { cont ->
+    private suspend fun fusedCurrent(priority: Int): Location? = suspendCancellableCoroutine { cont ->
         try {
             val client = LocationServices.getFusedLocationProviderClient(context)
             val cts = CancellationTokenSource()
-            client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
+            client.getCurrentLocation(priority, cts.token)
                 .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
                 .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+            // Also cancels on TIMEOUT, so an abandoned request stops holding the radio.
             cont.invokeOnCancellation { cts.cancel() }
         } catch (e: Exception) {
             if (cont.isActive) cont.resume(null)
@@ -195,9 +262,16 @@ class LocationRepository(private val context: Context) {
         null
     }
 
-    /** Reverse-geocode a fix; async API on Android 13+, sync (deprecated) below. */
+    /**
+     * Reverse-geocode a fix with the PLATFORM geocoder; async API on Android 13+, sync
+     * (deprecated) below. Returns null on any failure — the caller then falls back to
+     * the web API. Guarded on [Geocoder.isPresent], which is false on handsets that
+     * ship no geocoder backend at all and where this would otherwise always throw.
+     */
     private suspend fun geocode(lat: Double, lng: Double): Address? = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (!Geocoder.isPresent()) {
+            null
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             suspendCancellableCoroutine { cont ->
                 Geocoder(context).getFromLocation(lat, lng, 1, object : Geocoder.GeocodeListener {
                     override fun onGeocode(addresses: MutableList<Address>) {

@@ -495,9 +495,18 @@ private fun ScoringRibbon(modifier: Modifier = Modifier, state: MatchUiState, ba
             typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT_BOLD, android.graphics.Typeface.BOLD)
         }
         val segment = "$word        "
-        val segWidth = paint.measureText(segment).coerceAtLeast(1f)
         val perimeter = 2f * ((size.width - 2 * center) + (size.height - 2 * center))
-        val count = (perimeter / segWidth).toInt().coerceIn(2, 80) + 2
+        // Make the pattern tile the loop EXACTLY. A repeat that doesn't divide into the
+        // perimeter leaves a part-glyph sitting on the join, which renders as a small dark
+        // block on the left edge — the one flaw on an otherwise clean card. Stretching the
+        // letter spacing by a fraction of a pixel per character makes the repeat periodic,
+        // so the text meets itself with no seam at all.
+        val rawWidth = paint.measureText(segment).coerceAtLeast(1f)
+        val segs = Math.round(perimeter / rawWidth).coerceIn(2, 80)
+        val target = perimeter / segs
+        paint.letterSpacing += (target - rawWidth) / segment.length / paint.textSize
+        val segWidth = paint.measureText(segment).coerceAtLeast(1f)
+        val count = segs + 2
         val text = segment.repeat(count)
         val path = android.graphics.Path().apply {
             addRoundRect(

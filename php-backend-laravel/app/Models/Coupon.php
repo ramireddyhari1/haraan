@@ -13,13 +13,14 @@ final class Coupon extends Model
     use HasFactory;
 
     protected $fillable = [
-        'event_id', 'code', 'type', 'discount', 'max_discount', 'min_order', 'min_tickets',
+        'event_id', 'venue_id', 'scope', 'code', 'type', 'discount', 'max_discount', 'min_order', 'min_tickets',
         'max_uses', 'per_customer_limit', 'uses', 'active', 'expires_at', 'multi_event',
         'eligibility', 'phone_numbers', 'restrict_dates', 'valid_dates', 'restrict_times', 'valid_times',
     ];
 
     protected $casts = [
         'event_id'           => 'integer',
+        'venue_id'           => 'integer',
         'discount'           => 'float',
         'max_discount'       => 'float',
         'min_order'          => 'float',
@@ -93,10 +94,33 @@ final class Coupon extends Model
     /**
      * True when this coupon may be used for the given event. A global coupon
      * (`event_id` null) applies everywhere; a scoped coupon only to its event.
+     *
+     * A venue-only code never applies to an event, even unscoped — otherwise widening
+     * the model would have silently made every turf discount valid on ticket sales.
      */
     public function appliesToEvent(?int $eventId): bool
     {
+        if ($this->scope === 'venue') {
+            return false;
+        }
+
         return $this->event_id === null || (int) $this->event_id === (int) $eventId;
+    }
+
+    /**
+     * True when this coupon may be used for the given venue booking.
+     *
+     * Opt-in by design: `scope` defaults to `event`, so every coupon that existed before
+     * venues could be discounted stays events-only. A code reaches turf only when someone
+     * deliberately set it to `venue` (optionally pinned to one venue) or `all`.
+     */
+    public function appliesToVenue(?int $venueId): bool
+    {
+        if ($this->scope !== 'venue' && $this->scope !== 'all') {
+            return false;
+        }
+
+        return $this->venue_id === null || (int) $this->venue_id === (int) $venueId;
     }
 
     /** Find a coupon by code (case-insensitive), or null. */

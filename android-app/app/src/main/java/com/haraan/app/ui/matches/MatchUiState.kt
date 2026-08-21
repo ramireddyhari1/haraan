@@ -52,6 +52,8 @@ data class CommentaryLine(
     val boundary: Boolean,
     val battingName: String,
     val playerId: String = "",
+    /** The player's real profile photo, when they have one. Blank for guests. */
+    val photoUrl: String = "",
     val career: CareerBatting? = null
 )
 data class InningsExtras(val total: Int, val wides: Int, val noBalls: Int, val byes: Int, val legByes: Int)
@@ -134,6 +136,13 @@ data class MatchUiState(
      */
     val football: FootballState? = null,
 
+    /**
+     * The scoreboard for volleyball, basketball, kabaddi, tennis and table tennis — the
+     * sports that are neither cricket's ball-by-ball nor football's goal tally. Null for
+     * those two, so a screen picks its board by which one is present.
+     */
+    val board: SportBoard? = null,
+
     // ── Result verification (create → verify → XP) ──
     /** Backend verification state: "" (n/a), "pending", "settled", or "expired". */
     val verificationStatus: String = "",
@@ -168,6 +177,12 @@ data class MatchUiState(
     val toss: String = "",
     /** Ground / turf name. */
     val venue: String = "",
+    /**
+     * The Haraan venue this match was BOOKED at - blank for every other match.
+     * Server-resolved from the confirmed booking, never from the typed venue text.
+     */
+    val venueBadgeName: String = "",
+    val venueBadgeArea: String = "",
     /** Format / competition label, e.g. "20 Over Match". */
     val competition: String = "",
 

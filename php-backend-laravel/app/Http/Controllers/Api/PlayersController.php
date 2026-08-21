@@ -115,6 +115,9 @@ final class PlayersController extends Controller
             'primary_sport'    => $user->primary_sport,
             'sport_attributes' => $user->sport_attributes,
             'is_organizer'     => (bool) ($user->is_organizer ?? false),
+            // Blue tick. Admin-granted in /control — the app only ever reads it, so a
+            // profile can't award itself one.
+            'is_verified'      => (bool) ($user->is_verified ?? false),
             'profile_complete' => $user->isActionboardProfileComplete(),
             // Account privacy (Instagram-style). Private accounts are hidden from the Home feed.
             'is_private'       => ! $user->privacy_public_profile,
@@ -211,6 +214,7 @@ final class PlayersController extends Controller
     private function socialState(User $user, mixed $viewer): array
     {
         $isSelf = $viewer instanceof User && (int) $viewer->id === (int) $user->id;
+        $blocked = $viewer instanceof User && ! $isSelf && $viewer->hasBlocked($user);
 
         return [
             'followers_count' => $user->followers()->count(),
@@ -222,8 +226,13 @@ final class PlayersController extends Controller
             // client cannot work that out from is_following alone.
             'follows_me'      => $viewer instanceof User && ! $isSelf && $user->isFollowing($viewer),
             'is_self'         => $isSelf,
-            // A signed-out viewer has no follow state to act on at all.
-            'can_follow'      => $viewer instanceof User && ! $isSelf,
+            // A signed-out viewer has no follow state to act on at all, and neither has
+            // anyone looking at a profile they've blocked — the button becomes Unblock.
+            'can_follow'      => $viewer instanceof User && ! $isSelf && ! $blocked,
+            // Only the viewer's OWN block is reported. Telling someone they have been
+            // blocked hands them the information a block exists to withhold, so
+            // `is_blocked_by` is deliberately absent from every payload.
+            'is_blocked'      => $blocked,
         ];
     }
 
@@ -688,6 +697,111 @@ final class PlayersController extends Controller
     }
 
     /** Who follows this player. */
+    /**
+     * Block a player. Instant and private: no review, no notification to them. The
+     * model tears down the follow rows in both directions, so this also answers
+     * "why did my follower count drop".
+     */
+    public function block(Request $request, string $playerId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $target = $this->resolvePlayer($playerId);
+
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        if (! $me->block($target)) {
+            return response()->json(['error' => 'You cannot block yourself'], 422);
+        }
+
+        return response()->json([
+            'player_id'  => $target->player_id,
+            'is_blocked' => true,
+            // Both sides were severed, so the client's cached follow state is now wrong.
+            'is_following' => false,
+            'follows_me'   => false,
+            'followers_count' => $target->followers()->count(),
+        ]);
+    }
+
+    /** Lift a block. Follows are not restored — following again is a fresh decision. */
+    public function unblock(Request $request, string $playerId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $target = $this->resolvePlayer($playerId);
+
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        $me->unblock($target);
+
+        return response()->json([
+            'player_id'  => $target->player_id,
+            'is_blocked' => false,
+            'is_following' => $me->isFollowing($target),
+            'follows_me'   => $target->isFollowing($me),
+            'followers_count' => $target->followers()->count(),
+        ]);
+    }
+
+    /**
+     * Report a player to the moderation queue.
+     *
+     * One OPEN report per pair: re-reporting the same person while the first is still
+     * unreviewed updates that report rather than filling the queue with duplicates a
+     * moderator has to read through. The response is the same either way, so the
+     * reporter never learns whether their earlier report is still open.
+     */
+    public function report(Request $request, string $playerId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $target = $this->resolvePlayer($playerId);
+
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        if ((int) $target->id === (int) $me->id) {
+            return response()->json(['error' => 'You cannot report yourself'], 422);
+        }
+
+        $data = $request->validate([
+            'reason'  => ['required', 'string', \Illuminate\Validation\Rule::in(\App\Models\PlayerReport::REASONS)],
+            'details' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        \App\Models\PlayerReport::updateOrCreate(
+            [
+                'reporter_id' => $me->id,
+                'reported_id' => $target->id,
+                'status'      => 'open',
+            ],
+            [
+                'reason'  => $data['reason'],
+                'details' => $data['details'] ?? null,
+            ],
+        );
+
+        return response()->json(['reported' => true]);
+    }
+
     public function followers(Request $request, string $playerId): JsonResponse
     {
         return $this->followList($request, $playerId, 'followers');

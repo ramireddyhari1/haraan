@@ -80,12 +80,16 @@ data class LoginUiState(
     val phoneCodeSent: Boolean get() = phoneVerificationId != null || phoneWaToken != null
 }
 
-class LoginViewModel : ViewModel() {
+/**
+ * How long the success confirmation holds before the app takes over.
+ *
+ * Top-level rather than private to the ViewModel because `LoginSuccessPanel` animates
+ * against this exact number — its hand-off meter fills over the same window. If the two
+ * drift apart the meter either finishes early (dead time) or gets cut mid-fill.
+ */
+internal const val SUCCESS_BEAT_MS = 1250L
 
-    private companion object {
-        /** How long the success confirmation holds before the app takes over. */
-        const val SUCCESS_BEAT_MS = 900L
-    }
+class LoginViewModel : ViewModel() {
 
     private val authRepository = HaraanAuthRepository()
     private val _uiState = MutableStateFlow(LoginUiState())
@@ -101,6 +105,26 @@ class LoginViewModel : ViewModel() {
 
     fun onNameChange(input: String) {
         _uiState.update { it.copy(name = input, errorMessage = null) }
+    }
+
+    /**
+     * Wipe the screen back to a fresh sign-in.
+     *
+     * This ViewModel outlives any single visit to the login screen — it belongs to the
+     * host, not to the composable, and all four `LoginRoute` call sites take the default
+     * `viewModel()`. So a completed sign-in leaves `stage = Success` (and a dead token)
+     * sitting in it. The next time the login screen appears — after a SIGN OUT, on "Add
+     * account", or at the checkout gate — it would render the confirmation panel for a
+     * session that already ended and then hang there forever: nothing is in flight, so
+     * nothing ever calls `onSuccess`, and Back is disabled on that stage, so the only way
+     * out is to kill the app.
+     *
+     * Reset on the way IN rather than on the way out, so it still holds when a previous
+     * visit was torn down mid-flight (process death, a cancelled sign-in, a crash during
+     * the hand-off).
+     */
+    fun resetForNewSignIn() {
+        _uiState.value = LoginUiState()
     }
 
     /**

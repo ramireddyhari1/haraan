@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
+use App\Models\MatchViewer;
 use App\Models\User;
 use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
@@ -69,7 +70,31 @@ class LiveMatchController extends Controller
                 }
             }
             $overs = (string) ($m->overs ?? '');
-            $scoreText = (string) ($m->score_text ?: '');
+
+            // `score_text` is a CRICKET score ("120/4"), and only cricket can carry the
+            // batting side's wickets in it. Every other sport has its scoreline derived
+            // into home_score/away_score, where score_text holds the whole line ("2 - 1")
+            // — using it here printed that whole line as team 1's score and left team 2
+            // showing a bare number, so a 49-50 basketball game read "49 - 50 | 50".
+            $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
+            // A set sport's scoreline is SETS won, so a match in its first set reads "0 - 0"
+            // even while a rally is being played — the card looked idle on a live game. The
+            // points in the current set go in the small slot cricket uses for overs, so the
+            // card reads "0 (2)" — sets big, rally beneath, which is how these sports are
+            // actually scored.
+            $setRally = ['', ''];
+            if (! $isCricket) {
+                $state = is_array($m->sport_state) ? $m->sport_state : [];
+                $current = $state['current'] ?? null;
+                $points = $state['points'] ?? null;   // tennis: the 15/30/40 ladder
+                if (is_array($points) && count($points) >= 2) {
+                    $setRally = [(string) $points[0], (string) $points[1]];
+                } elseif (is_array($current) && count($current) >= 2
+                    && ((int) $current[0] > 0 || (int) $current[1] > 0)) {
+                    $setRally = [(string) $current[0], (string) $current[1]];
+                }
+            }
+            $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
             $homeScore = ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0);
             $awayScore = ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0);
             return [
@@ -82,8 +107,8 @@ class LiveMatchController extends Controller
                 'team2Emblem' => (string) ($m->away_emblem ?? ''),
                 'score1'      => $homeScore,
                 'score2'      => $awayScore,
-                'overs1'      => $battingTeam === 2 ? '' : $overs,
-                'overs2'      => $battingTeam === 2 ? $overs : '',
+                'overs1'      => $isCricket ? ($battingTeam === 2 ? '' : $overs) : $setRally[0],
+                'overs2'      => $isCricket ? ($battingTeam === 2 ? $overs : '') : $setRally[1],
                 'battingTeam' => $battingTeam,
                 'status'      => (string) ($m->status ?? ''),
                 // Which sport this is, so the app's Cricket/Badminton/Football boards
@@ -92,6 +117,9 @@ class LiveMatchController extends Controller
                 // from the only board that currently works.
                 'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
                 'venue'       => (string) ($m->venue ?? ''),
+                // Set only when this match sits on a confirmed Haraan booking — the card
+                // shows the venue's real name in place of the typed one when it is.
+                'venueBadge'  => $this->venueBadge($m),
                 'competition' => (string) ($m->competition ?? ''),
                 'isLive'      => strtolower((string) $m->status) === 'live',
                 'visibility'  => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
@@ -192,6 +220,226 @@ class LiveMatchController extends Controller
     }
 
     /**
+     * Presence heartbeat for the Match Details screen: "I'm watching this match", answered
+     * with how many people are watching it right now.
+     * POST /api/live-matches/{id}/watching
+     *
+     * Deliberately NOT folded into the detail payload above: that response is ETag'd, and a
+     * count that ticks on its own would turn every 12s score poll from a 304 into a full
+     * re-download. This is a tiny separate call the app makes only while a match is live.
+     */
+    public function watching(Request $request, string $id): JsonResponse
+    {
+        $match = LiveMatch::find($id);
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found.'], 404);
+        }
+
+        $viewer = $request->attributes->get('auth_user');
+        $viewer = $viewer instanceof User ? $viewer : null;
+        // Same visibility gate as show(): presence must not confirm a hidden match exists.
+        if (!$match->isVisibleTo($viewer)) {
+            return response()->json(['error' => 'Match not found.'], 404);
+        }
+
+        return $this->recordWatcher($request, $match, $viewer);
+    }
+
+    /**
+     * Presence heartbeat for a PRIVATE match opened by share code — same contract as
+     * watching(), with the code as the grant.
+     * POST /api/live-matches/code/{code}/watching
+     */
+    public function watchingByCode(Request $request, string $code): JsonResponse
+    {
+        $match = LiveMatch::byJoinCode($code)->where('is_private', true)->first();
+        if ($match === null) {
+            return response()->json(['error' => 'No match found for that code.'], 404);
+        }
+
+        $viewer = $request->attributes->get('auth_user');
+        $viewer = $viewer instanceof User ? $viewer : null;
+
+        return $this->recordWatcher($request, $match, $viewer);
+    }
+
+    /** Upsert this viewer's presence row and answer with the live audience size. */
+    private function recordWatcher(Request $request, LiveMatch $match, ?User $viewer): JsonResponse
+    {
+        $count = MatchViewer::heartbeat(
+            (int) $match->id,
+            $this->viewerKey($request, $viewer),
+            $viewer?->id,
+        );
+
+        return response()->json([
+            'watching' => $count,
+            // So a client can pace itself off the server's window instead of hardcoding it.
+            'windowSeconds' => MatchViewer::PRESENCE_WINDOW_SECONDS,
+            // Whether this viewer may open the audience list. Answered here rather than made
+            // the app's business, so the rule lives in one place and the app can't award
+            // itself the privilege by flipping a local flag.
+            'canSeeViewers' => $viewer !== null && (bool) $viewer->is_verified,
+        ]);
+    }
+
+    /**
+     * Who is watching this match right now.
+     * GET /api/live-matches/{id}/viewers
+     *
+     * A verified account gets to see the room. Everybody else gets the number and nothing
+     * else — the count is public, the audience is not.
+     *
+     * Signed-in viewers appear as themselves: the same name, handle, photo and tick their
+     * public profile already shows, and nothing that isn't on it. Everyone else appears as
+     * "Haraan Guest" — no install id, no IP, no device, nothing that could be turned back
+     * into a person. That is the whole point of the guest row: the count stays honest
+     * without the anonymous half of the audience being identified to anyone.
+     */
+    public function viewers(Request $request, string $id): JsonResponse
+    {
+        $match = LiveMatch::find($id);
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found.'], 404);
+        }
+
+        $viewer = $request->attributes->get('auth_user');
+        $viewer = $viewer instanceof User ? $viewer : null;
+        if (!$match->isVisibleTo($viewer)) {
+            return response()->json(['error' => 'Match not found.'], 404);
+        }
+
+        return $this->audience($match, $viewer);
+    }
+
+    /** The same list for a private match opened by share code. */
+    public function viewersByCode(Request $request, string $code): JsonResponse
+    {
+        $match = LiveMatch::byJoinCode($code)->where('is_private', true)->first();
+        if ($match === null) {
+            return response()->json(['error' => 'No match found for that code.'], 404);
+        }
+
+        $viewer = $request->attributes->get('auth_user');
+        $viewer = $viewer instanceof User ? $viewer : null;
+
+        return $this->audience($match, $viewer);
+    }
+
+    /** Assemble the audience, gated on the blue tick. */
+    private function audience(LiveMatch $match, ?User $viewer): JsonResponse
+    {
+        if ($viewer === null || !$viewer->is_verified) {
+            return response()->json([
+                'error' => 'Only verified accounts can see who is watching.',
+            ], 403);
+        }
+
+        $rows = MatchViewer::query()
+            ->where('match_id', $match->id)
+            ->present()
+            ->with('user:id,name,username,avatar,is_verified')
+            ->orderByDesc('last_seen_at')
+            ->limit(100)
+            ->get();
+
+        $people = [];
+        $guests = 0;
+        foreach ($rows as $row) {
+            $user = $row->user;
+            if ($user === null) {
+                $guests++;
+                continue;
+            }
+            $people[] = [
+                'user_id'     => (int) $user->id,
+                'name'        => (string) ($user->name ?? ''),
+                'username'    => (string) ($user->username ?? ''),
+                'avatar'      => \App\Support\MediaUrl::resolve($user->avatar),
+                'is_verified' => (bool) $user->is_verified,
+                'is_guest'    => false,
+                'is_you'      => (int) $user->id === (int) $viewer->id,
+            ];
+        }
+
+        // The anonymous half of the room, as rows rather than a footnote — the list should
+        // add up to the number on the chip, or it reads as though people went missing.
+        for ($i = 0; $i < $guests; $i++) {
+            $people[] = [
+                'user_id'     => null,
+                'name'        => 'Haraan Guest',
+                'username'    => '',
+                'avatar'      => null,
+                'is_verified' => false,
+                'is_guest'    => true,
+                'is_you'      => false,
+            ];
+        }
+
+        return response()->json([
+            'watching'      => $rows->count(),
+            'signedIn'      => $rows->count() - $guests,
+            'guests'        => $guests,
+            'windowSeconds' => MatchViewer::PRESENCE_WINDOW_SECONDS,
+            'viewers'       => $people,
+        ]);
+    }
+
+    /**
+     * The Haraan-venue badge for a match, or null.
+     *
+     * Resolved ONLY from `venue_booking_id` → a CONFIRMED booking → that booking's venue.
+     * Deliberately never from the free-text `venue` column: that field is whatever the creator
+     * typed, so keying a trust mark off it would let anyone earn one by spelling a turf's name
+     * correctly. The same booking is what already auto-verifies the match at x1.25 XP
+     * (VenueVerificationService — "the moat"); this just makes that visible, so the badge can
+     * never disagree with the trust the platform already granted.
+     *
+     * There is no negative counterpart. A match on a maidan is not "unverified" — it is the
+     * normal case, and marking it would be an insult dressed up as a feature.
+     */
+    private function venueBadge(LiveMatch $match): ?array
+    {
+        $booking = \App\Services\VenueVerificationService::findValidBooking($match->venue_booking_id);
+        if ($booking === null) {
+            return null;
+        }
+
+        $venue = $booking->venue;
+        if ($venue === null || trim((string) $venue->name) === '') {
+            return null;
+        }
+
+        return [
+            'venueId' => (int) $venue->id,
+            'name'    => (string) $venue->name,
+            // The area, so the chip can stay short and still say WHERE.
+            'area'    => (string) ($venue->location ?? ''),
+        ];
+    }
+
+    /**
+     * A stable, non-identifying key for whoever is asking. Signed-in viewers are keyed by
+     * user id (so the same person on phone and web counts once). Guests send the app's
+     * random install id, which we hash — and if there's none, we fall back to a hash of
+     * ip + user-agent. No raw IP is ever stored.
+     */
+    private function viewerKey(Request $request, ?User $viewer): string
+    {
+        if ($viewer !== null) {
+            return 'u:' . $viewer->id;
+        }
+
+        $client = (string) ($request->input('viewer') ?? '');
+        $client = preg_replace('/[^A-Za-z0-9_-]/', '', $client) ?? '';
+        if ($client !== '') {
+            return 'd:' . substr(hash('sha256', $client), 0, 40);
+        }
+
+        return 'a:' . substr(hash('sha256', $request->ip() . '|' . (string) $request->userAgent()), 0, 40);
+    }
+
+    /**
      * Public accessor for the assembled detail payload, so the server-rendered web
      * match pages can render from the exact same data the app's Match Details screen
      * consumes (score, live crease, replayed innings cards, commentary feed).
@@ -251,7 +499,12 @@ class LiveMatchController extends Controller
 
         // Only the match creator may score it — this gates the "Score" button in the
         // app's Match Details header. Absent/false for everyone else (and guests).
-        $canScore = $viewer !== null && (int) $match->user_id === (int) $viewer->id;
+        // The creator may score their own match — until it is finished. A completed match
+        // still offered the Score button, and points recorded there would edit a result
+        // that has already been frozen and (once settled) paid out XP against.
+        $canScore = $viewer !== null
+            && (int) $match->user_id === (int) $viewer->id
+            && strtolower((string) $match->status) !== 'completed';
 
         // Replay once, then derive the live partnership + last wicket from the current innings.
         $cards = $this->buildInningsCards($match);
@@ -322,8 +575,13 @@ class LiveMatchController extends Controller
             'football' => strtolower((string) $match->sport) === 'football'
                 ? app(\App\Services\MatchEventRecorder::class)->footballPayload($match)
                 : null,
+            // The rally / points board — volleyball, basketball, kabaddi, tennis, table
+            // tennis. Null for cricket and football, which each have their own shape
+            // above, so a client can switch on whichever one is present.
+            'board' => app(\App\Services\MatchEventRecorder::class)->boardPayload($match),
             'formatLabel' => (string) ($match->competition ?? ''),
             'venue' => (string) ($match->venue ?? ''),
+            'venueBadge' => $this->venueBadge($match),
             'inningsLabel' => (string) ($match->status ?? ''),
             'battingTeam' => $battingTeam,
             // How many innings have begun (one 'start' action each) — lets the scorer know
@@ -377,6 +635,12 @@ class LiveMatchController extends Controller
         $bowler = '';
         $legalBalls = 0;
         $careerCache = []; // id -> real career line (looked up once per match build)
+        $photoCache  = []; // id -> profile photo URL (same, one lookup per player)
+        // The crease is tracked by NAME for the commentary text and by ID for the face —
+        // a dismissal card needs the out batter's id to fetch their photo, and the id is
+        // the only thing that survives two players sharing a name.
+        $strikerId = null;
+        $nonStrikerId = null;
 
         foreach ($actions as $act) {
             $type = (string) $act->action_type;
@@ -386,16 +650,18 @@ class LiveMatchController extends Controller
                 $inningsNo++;
                 $bt = (int) ($p['batting_team'] ?? 1);
                 $battingName = (string) ($bt === 2 ? ($match->away_full ?: $match->away) : ($match->home_full ?: $match->home));
-                $striker = $this->resolvePlayerName($match, $p['striker_id'] ?? null);
-                $nonStriker = $this->resolvePlayerName($match, $p['non_striker_id'] ?? null);
+                $strikerId = $p['striker_id'] ?? null;
+                $nonStrikerId = $p['non_striker_id'] ?? null;
+                $striker = $this->resolvePlayerName($match, $strikerId);
+                $nonStriker = $this->resolvePlayerName($match, $nonStrikerId);
                 $bowler = $this->resolvePlayerName($match, $p['bowler_id'] ?? null);
                 $legalBalls = 0;
                 $feed[] = ['innings' => $inningsNo, 'over' => '', 'kind' => 'header',
                     'text' => "Innings $inningsNo — $battingName", 'label' => '', 'runs' => 0,
                     'wicket' => false, 'boundary' => false, 'battingName' => $battingName];
                 // Opening pair: each opener is a "new batter" arriving at the crease.
-                $feed[] = $this->batterInLine($inningsNo, '', $striker, $p['striker_id'] ?? null, $battingName, $careerCache);
-                $feed[] = $this->batterInLine($inningsNo, '', $nonStriker, $p['non_striker_id'] ?? null, $battingName, $careerCache);
+                $feed[] = $this->batterInLine($inningsNo, '', $striker, $strikerId, $battingName, $careerCache, $photoCache);
+                $feed[] = $this->batterInLine($inningsNo, '', $nonStriker, $nonStrikerId, $battingName, $careerCache, $photoCache);
                 continue;
             }
             if ($type === 'change_bowler') {
@@ -404,7 +670,11 @@ class LiveMatchController extends Controller
             }
             if ($type === 'change_batsman') {
                 $name = $this->resolvePlayerName($match, $p['id'] ?? null);
-                if (($p['role'] ?? 'striker') === 'striker') $striker = $name; else $nonStriker = $name;
+                if (($p['role'] ?? 'striker') === 'striker') {
+                    $striker = $name; $strikerId = $p['id'] ?? null;
+                } else {
+                    $nonStriker = $name; $nonStrikerId = $p['id'] ?? null;
+                }
                 continue;
             }
 
@@ -428,6 +698,7 @@ class LiveMatchController extends Controller
             $ballInOver = ($legalBalls % 6) + 1;
             $overMark = "$overNo.$ballInOver";
             $outBatter = $striker;
+            $outBatterId = $strikerId;
 
             $feed[] = [
                 'innings'  => $inningsNo,
@@ -439,6 +710,11 @@ class LiveMatchController extends Controller
                 'wicket'   => $wicket,
                 'boundary' => ($type === 'runs' && ($runsOffBat === 4 || $runsOffBat === 6)),
                 'battingName' => $battingName,
+                // The out batter's identity + real face travel with the wicket so the app
+                // can put the player, not a monogram, on the dismissal card. Resolved only
+                // on wickets — no other ball renders a card to hang a photo on.
+                'playerId' => $wicket ? (string) ($outBatterId ?? '') : '',
+                'photo'    => $wicket ? $this->avatarFor($outBatterId, $photoCache) : null,
             ];
 
             if ($isLegal) {
@@ -447,16 +723,23 @@ class LiveMatchController extends Controller
 
             // Strike rotation (so the next line names the right batter).
             $runsToSwap = ($type === 'bye' || $type === 'legbye') ? $extras : $runsOffBat;
-            if ($runsToSwap % 2 === 1) { [$striker, $nonStriker] = [$nonStriker, $striker]; }
+            if ($runsToSwap % 2 === 1) {
+                [$striker, $nonStriker] = [$nonStriker, $striker];
+                [$strikerId, $nonStrikerId] = [$nonStrikerId, $strikerId];
+            }
             if ($wicket) {
                 $newId = $p['new_batsman_id'] ?? null;
+                $strikerId = $newId;
                 $striker = $this->resolvePlayerName($match, $newId);
                 // The incoming batter walks in — emit their "new batter" card at this over.
                 if ($striker !== '') {
-                    $feed[] = $this->batterInLine($inningsNo, $overMark, $striker, $newId, $battingName, $careerCache);
+                    $feed[] = $this->batterInLine($inningsNo, $overMark, $striker, $newId, $battingName, $careerCache, $photoCache);
                 }
             }
-            if ($isLegal && $legalBalls % 6 === 0) { [$striker, $nonStriker] = [$nonStriker, $striker]; }
+            if ($isLegal && $legalBalls % 6 === 0) {
+                [$striker, $nonStriker] = [$nonStriker, $striker];
+                [$strikerId, $nonStrikerId] = [$nonStrikerId, $strikerId];
+            }
         }
 
         return array_reverse($feed);
@@ -466,7 +749,7 @@ class LiveMatchController extends Controller
      * Build a "new batter" feed entry. Carries the batter's real career line (or null when
      * they're a guest / have no completed matches yet) so the app can show RUNS/BALLS/AVG.
      */
-    private function batterInLine(int $inningsNo, string $over, string $name, $id, string $battingName, array &$cache): array
+    private function batterInLine(int $inningsNo, string $over, string $name, $id, string $battingName, array &$cache, array &$photoCache): array
     {
         return [
             'innings'     => $inningsNo,
@@ -479,8 +762,27 @@ class LiveMatchController extends Controller
             'boundary'    => false,
             'battingName' => $battingName,
             'playerId'    => (string) ($id ?? ''),
+            'photo'       => $this->avatarFor($id, $photoCache),
             'career'      => $this->careerFor($id, $cache),
         ];
+    }
+
+    /**
+     * A player's real profile photo for a player id, memoised per match build. Null for
+     * guests, unregistered names, and anyone who simply hasn't uploaded one — the app
+     * falls back to initials rather than a stock silhouette.
+     */
+    private function avatarFor($id, array &$cache): ?string
+    {
+        $key = trim((string) ($id ?? ''));
+        if ($key === '' || strtolower($key) === 'null') {
+            return null;
+        }
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
+        }
+        $raw = \App\Models\User::where('player_id', $key)->value('avatar');
+        return $cache[$key] = \App\Support\MediaUrl::resolve($raw !== null ? (string) $raw : null);
     }
 
     /** Real career batting for a player id, memoised per match build. Null if none/guest. */

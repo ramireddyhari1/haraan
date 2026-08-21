@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\User;
+use App\Support\SportRules;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -46,6 +47,13 @@ class MatchEventRecorder
                 'recorded_by' => $by?->id,
             ], $attributes));
 
+            // A match with a recorded point IS live. Only cricket ever said so: its toss
+            // flow sets the status, and every other sport reached the scorer without one —
+            // so football and the five rally/points sports sat at "Scheduled" in the feed
+            // while their score climbed. Derived, not guessed, and never resurrects a match
+            // somebody has already finished.
+            $this->promoteToLive($locked);
+
             $this->resync($locked);
 
             return $event->refresh();
@@ -54,6 +62,23 @@ class MatchEventRecorder
         // that refetches always sees the just-recorded event.
         \App\Events\MatchUpdated::dispatch($match->id);
         return $event;
+    }
+
+    /**
+     * Move a match to Live the moment it is actually being played.
+     *
+     * Anything already Live or Completed is left alone: the first keeps its state, and the
+     * second must not be dragged back into the live feed by a late correction to the log.
+     */
+    private function promoteToLive(LiveMatch $match): void
+    {
+        $status = strtolower(trim((string) $match->status));
+
+        if ($status === 'live' || $status === 'completed') {
+            return;
+        }
+
+        $match->forceFill(['status' => 'Live'])->save();
     }
 
     /** Remove an event (a mis-tap) and re-derive the score. */
@@ -112,26 +137,23 @@ class MatchEventRecorder
             ->inOrder()
             ->get();
 
-        $home = 0;
-        $away = 0;
+        // Every sport that is not cricket scores through one engine, which replays the
+        // whole event log rather than patching a running total. Football's tally, a
+        // basketball three-pointer, a volleyball set that resets the rally count and a
+        // tennis game climbing 15/30/40 are all the same operation to the caller.
+        $board = app(SportScoreEngine::class)->compute($match, $events);
 
-        foreach ($events as $event) {
-            if ($this->countsForHome($event)) {
-                $home++;
-            } elseif ($this->countsForAway($event)) {
-                $away++;
-            }
-
-            // Only write when it actually changed — this runs on every event.
-            if ($event->home_score !== $home || $event->away_score !== $away) {
-                $event->forceFill(['home_score' => $home, 'away_score' => $away])->saveQuietly();
-            }
-        }
+        // The engine owns the derived half of sport_state (sets, periods, serve); the
+        // manual half — the creator's format, a football clock a scorer is nudging — is
+        // merged UNDER it so a recompute can never wipe what only a human can know.
+        $state = is_array($match->sport_state) ? $match->sport_state : [];
+        $state = array_merge($state, $board['state']);
 
         $match->forceFill([
-            'home_score' => $home,
-            'away_score' => $away,
-            'score_text' => "{$home} - {$away}",
+            'home_score' => $board['home'],
+            'away_score' => $board['away'],
+            'score_text' => $board['scoreText'],
+            'sport_state' => $state,
         ])->save();
 
         return $match;
@@ -215,6 +237,102 @@ class MatchEventRecorder
                 ->values()
                 ->all(),
         ];
+    }
+
+    /**
+     * The board a rally / points sport's detail screen renders.
+     *
+     * Football keeps its own richer payload (scorers, cards, subs, stats). Everything
+     * else shares this one, because a volleyball set list and a basketball quarter line
+     * are the same shape wearing different labels — and one payload means one place to
+     * fix when a label is wrong.
+     *
+     * @return array<string, mixed>|null  null for cricket and football, which have theirs
+     */
+    public function boardPayload(LiveMatch $match): ?array
+    {
+        $sport = SportRules::normalise((string) ($match->sport ?: 'cricket'));
+        $family = SportRules::family($sport);
+
+        if ($sport === 'cricket' || $family === SportRules::TALLY) {
+            return null;
+        }
+
+        $events = MatchEvent::query()
+            ->where('live_match_id', $match->id)
+            ->inOrder()
+            ->get();
+
+        $state = is_array($match->sport_state) ? $match->sport_state : [];
+
+        // Newest first: a live board is read from the top, and the most recent point is
+        // the one anybody is looking for.
+        $feed = $events
+            ->filter(fn (MatchEvent $e): bool => in_array($e->kind, [MatchEvent::POINT, MatchEvent::PERIOD], true))
+            ->sortByDesc('sequence')
+            ->take(40)
+            ->map(fn (MatchEvent $e): array => [
+                'sequence' => $e->sequence,
+                'side' => $e->side,
+                'kind' => $e->kind,
+                'detail' => $e->detail,
+                'player' => $e->player_name,
+                'home_score' => $e->home_score,
+                'away_score' => $e->away_score,
+                'value' => $e->kind === MatchEvent::POINT
+                    ? SportRules::pointValue($sport, $e->detail)
+                    : 0,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'sport' => $sport,
+            'family' => $family,
+            'sets' => $state['sets'] ?? [],
+            'current' => $state['current'] ?? null,
+            'games' => $state['games'] ?? null,
+            'points' => $state['points'] ?? null,
+            'target' => $state['target'] ?? null,
+            'best_of' => $state['best_of'] ?? SportRules::defaultBestOf($sport),
+            'set_noun' => $state['set_noun'] ?? SportRules::setNoun($sport),
+            'serving' => $state['serving'] ?? null,
+            'period' => $state['period'] ?? null,
+            'period_label' => $state['period_label'] ?? null,
+            'periods' => $state['periods'] ?? [],
+            'scorers' => $this->pointScorers($events, $sport),
+            'feed' => $feed,
+        ];
+    }
+
+    /**
+     * Who has scored, and how much — the "top scorers" line a points sport lives on.
+     * Only named players count: a scorer tapping fast without picking a name still moves
+     * the score, and inventing an "Unknown" leaderboard entry for those would be worse
+     * than showing a shorter, true list.
+     *
+     * @param  \Illuminate\Support\Collection<int, MatchEvent>  $events
+     * @return array<int, array<string, mixed>>
+     */
+    private function pointScorers($events, string $sport): array
+    {
+        return $events
+            ->filter(fn (MatchEvent $e): bool => $e->kind === MatchEvent::POINT
+                && in_array($e->side, ['home', 'away'], true)
+                && trim((string) $e->player_name) !== '')
+            ->groupBy(fn (MatchEvent $e): string => $e->side.'|'.$e->player_name)
+            ->map(function ($rows) use ($sport): array {
+                $first = $rows->first();
+
+                return [
+                    'side' => $first->side,
+                    'name' => (string) $first->player_name,
+                    'points' => $rows->sum(fn (MatchEvent $e): int => SportRules::pointValue($sport, $e->detail)),
+                ];
+            })
+            ->sortByDesc('points')
+            ->values()
+            ->all();
     }
 
     /**

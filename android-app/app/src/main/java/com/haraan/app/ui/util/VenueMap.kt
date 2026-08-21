@@ -87,4 +87,62 @@ object VenueMap {
             loc.getDouble("lat") to loc.getDouble("lng")
         }.getOrNull()
     }
+
+    /** A place resolved from coordinates. Any field may be blank. */
+    data class Place(val city: String, val district: String, val area: String)
+
+    /**
+     * Reverse-geocode over the Geocoding WEB API.
+     *
+     * This exists because the on-device [android.location.Geocoder] is unreliable on
+     * real handsets in a way it never is on an emulator: it needs a geocoder backend
+     * the OEM may not ship, and its RPC throws IOException whenever the network is
+     * poor. When it fails the app has real coordinates but no name for them, and the
+     * user is shown "Unknown" — a fix that looks like no fix. Same key and endpoint as
+     * [geocode], just the reverse direction.
+     */
+    suspend fun reverseGeocode(lat: Double, lng: Double): Place? = withContext(Dispatchers.IO) {
+        if (!hasKey) return@withContext null
+        val url = Uri.parse("https://maps.googleapis.com/maps/api/geocode/json").buildUpon()
+            .appendQueryParameter("latlng", "$lat,$lng")
+            .appendQueryParameter("key", key)
+            .build()
+            .toString()
+        runCatching {
+            val json = JSONObject(URL(url).readText())
+            if (json.optString("status") != "OK") return@runCatching null
+            val results = json.getJSONArray("results")
+            if (results.length() == 0) return@runCatching null
+
+            // Scan EVERY result, not just the first: the first is usually a street
+            // address whose components stop at the street, while the locality lives on
+            // a later, coarser result. Taking result[0] alone is why a naive port of
+            // this returns a house number and no city.
+            var city = ""
+            var district = ""
+            var area = ""
+            for (i in 0 until results.length()) {
+                val components = results.getJSONObject(i).optJSONArray("address_components") ?: continue
+                for (j in 0 until components.length()) {
+                    val c = components.getJSONObject(j)
+                    val name = c.optString("long_name")
+                    if (name.isBlank()) continue
+                    val types = c.optJSONArray("types") ?: continue
+                    val typeList = buildList { for (t in 0 until types.length()) add(types.optString(t)) }
+                    when {
+                        city.isBlank() && "locality" in typeList -> city = name
+                        city.isBlank() && "postal_town" in typeList -> city = name
+                        district.isBlank() && "administrative_area_level_2" in typeList -> district = name
+                        area.isBlank() && ("sublocality_level_1" in typeList || "sublocality" in typeList) -> area = name
+                        area.isBlank() && "neighborhood" in typeList -> area = name
+                    }
+                }
+                if (city.isNotBlank() && district.isNotBlank() && area.isNotBlank()) break
+            }
+
+            // A district with no locality still names the place better than "Unknown".
+            if (city.isBlank() && district.isBlank() && area.isBlank()) null
+            else Place(city, district, area)
+        }.getOrNull()
+    }
 }

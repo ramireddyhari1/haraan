@@ -113,9 +113,13 @@ private val OnHeroDim = Color(0xFFB6C4E4)
 @Composable
 fun FootballMatchScreen(
     state: MatchUiState,
+    /** People watching this match right now (server-counted presence); 0 hides the chip. */
+    watching: Int = 0,
     onBack: () -> Unit = {},
     /** Opens the scorer for this match — shown as a "Score" button to the creator. */
     onScore: () -> Unit = {},
+    /** Null unless this viewer may see who is watching. */
+    onWatchers: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val football = state.football ?: FootballState()
@@ -173,7 +177,9 @@ fun FootballMatchScreen(
             heightDp = with(density) { heroHeight.floatValue.toDp() },
             progress = progress,
             canScore = state.canScore,
+            watching = watching,
             onScore = onScore,
+            onWatchers = onWatchers,
             onTranslate = { showLangSheet = true },
         )
 
@@ -285,7 +291,9 @@ private fun CollapsingFootballHero(
     heightDp: androidx.compose.ui.unit.Dp,
     progress: Float,   // 0 = fully expanded, 1 = fully collapsed
     canScore: Boolean = false,
+    watching: Int = 0,
     onScore: () -> Unit = {},
+    onWatchers: (() -> Unit)? = null,
     onTranslate: () -> Unit = {},
 ) {
     val homeScore = football.timeline.lastOrNull()?.homeScore ?: 0
@@ -355,6 +363,17 @@ private fun CollapsingFootballHero(
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // Live audience, in the hero's own palette — the light slate chip the
+                // cricket header uses would vanish on this gradient.
+                if (state.isLive && watching > 0) {
+                    WatchingPill(
+                        watching,
+                        background = Color.White.copy(alpha = 0.16f),
+                        contentColor = OnHero,
+                        onClick = onWatchers,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (canScore) {
                     Row(
                         modifier = Modifier
@@ -423,6 +442,17 @@ private fun CollapsingFootballHero(
                 if (state.isLive) {
                     Spacer(Modifier.width(8.dp))
                     Box(Modifier.size(6.dp).clip(CircleShape).background(Red))
+                    // The count survives the collapse too — just as the bare number, since
+                    // this bar has room for a glyph, not a chip.
+                    if (watching > 0) {
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            compactViewerCount(watching),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = OnHeroDim,
+                        )
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 Text(state.team2, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnHero, maxLines = 1, textAlign = TextAlign.End)
@@ -584,8 +614,6 @@ private fun HeroClock(label: String, isLive: Boolean) {
 
 @Composable
 private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats: () -> Unit) {
-    val homeScore = football.timeline.lastOrNull()?.homeScore ?: 0
-    val awayScore = football.timeline.lastOrNull()?.awayScore ?: 0
     val stats = football.stats
     // The three headline stats to preview here (the full set lives in the Stats tab).
     val previewRows = stats?.takeIf { it.hasAny }?.groups
@@ -598,21 +626,24 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // ── Result headline — the goals bar. ──
+        // ── Goals — the lead, and the only thing on this tab that IS the match. ──
+        //
+        // There used to be a "Result" card above this holding a single bar that read
+        // 5 vs 2 — the exact scoreline printed in 40sp figures in the hero two inches
+        // higher. A summary that opens by restating the number you just read is what
+        // makes a screen feel generated: every section the same white card, each one
+        // paraphrasing the last. Who scored and when is the story; it goes first.
         item {
             Card {
-                CardTitle("Result")
-                Spacer(Modifier.height(14.dp))
-                StatBar("Goals", homeScore, awayScore, state.team1Color, state.team2Color)
-            }
-        }
-
-        // ── Goals ──
-        item {
-            Card {
-                CardTitle("Goals")
-                Spacer(Modifier.height(10.dp))
                 val goals = football.goals
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CardTitle("Goals")
+                    if (goals.isNotEmpty()) {
+                        Spacer(Modifier.width(7.dp))
+                        Text("${goals.size}", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Faint)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
                 if (goals.isEmpty()) {
                     Text(t("No goals yet."), fontSize = 13.5.sp, color = Muted)
                 } else {
@@ -647,13 +678,26 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
             }
         }
 
-        // ── Match info ──
+        // ── Match info — deliberately NOT a card. ──
+        //
+        // Where the match was played and what format it ran is reference material, not a
+        // module with the same visual weight as the goals that decided it. Giving it the
+        // same white panel as everything above flattens the page into a stack of
+        // identical boxes; as quiet footer rows it reads as the fine print it is.
         item {
-            Card {
-                CardTitle("Match info")
+            Spacer(Modifier.height(4.dp))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Text(
+                    t("Match info").uppercase(),
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Faint, letterSpacing = 0.9.sp,
+                )
                 Spacer(Modifier.height(10.dp))
-                if (state.venue.isNotBlank()) { InfoRow("Venue", state.venue); Spacer(Modifier.height(8.dp)) }
-                InfoRow("Format", state.footballFormatLabel()); Spacer(Modifier.height(8.dp))
+                if (state.venue.isNotBlank()) {
+                    InfoRow("Venue", state.venue)
+                    HairlineDivider()
+                }
+                InfoRow("Format", state.footballFormatLabel())
+                HairlineDivider()
                 InfoRow("Status", if (state.isLive) "In play" else state.status.ifBlank { "Full time" })
             }
         }
@@ -1069,6 +1113,12 @@ private fun Card(content: @Composable ColumnScope.() -> Unit) {
 @Composable
 private fun CardTitle(text: String) {
     Text(t(text), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+}
+
+/** The thin rule between the Match info footer rows. */
+@Composable
+private fun HairlineDivider() {
+    Box(Modifier.fillMaxWidth().padding(vertical = 9.dp).height(1.dp).background(Hairline))
 }
 
 @Composable

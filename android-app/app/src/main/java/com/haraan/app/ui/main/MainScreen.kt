@@ -87,7 +87,9 @@ import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SportsFootball
 import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.material.icons.filled.SportsBasketball
+import androidx.compose.material.icons.filled.SportsKabaddi
 import androidx.compose.material.icons.filled.SportsVolleyball
+import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
@@ -562,9 +564,10 @@ internal fun MainAppContainer(
   }
   var showLocationSheet by remember { mutableStateOf(false) }
   com.haraan.app.ui.DismissOnBack(showLocationSheet) { showLocationSheet = false }
-  // Search radius for nearby content; 0 == "Any distance". Default 30 km so GameHub
-  // venues show what's genuinely near the user out of the box.
-  var searchRadiusKm by remember { mutableStateOf(30) }
+  // Search radius for nearby content; 0 == "Any distance". Fixed at 30 km: it's a
+  // tuning knob, not a decision worth putting in front of someone who only wants to
+  // set their city, so the location sheet no longer exposes it.
+  val searchRadiusKm = 30
   // Pull the latest city catalog (cities.json) once so the picker + normaliser are current.
   LaunchedEffect(Unit) { runCatching { locationRepository.refreshCatalog() } }
 
@@ -599,8 +602,6 @@ internal fun MainAppContainer(
     LocationPickerSheet(
       state = locationState,
       recents = locationRepository.recents(),
-      selectedRadiusKm = searchRadiusKm,
-      onRadiusChange = { searchRadiusKm = it },
       onUseCurrentLocation = { requestCurrentLocation() },
       onSelectCity = { option ->
         // Show the city immediately, then upgrade it with Google-geocoded coordinates
@@ -1068,6 +1069,15 @@ internal fun MainAppContainer(
         // search row before this.
         onToggleFollow = { follow ->
           com.haraan.app.data.PlayerRepository().setFollowing(token.orEmpty(), playerId, follow)
+        },
+        // Safety actions live in the profile's top-bar overflow.
+        onSetBlocked = { blocked ->
+          val signedIn = com.haraan.app.data.TokenStore.getSignedInToken(localContext)
+          if (signedIn == null) null else com.haraan.app.data.PlayerRepository().setBlocked(signedIn, playerId, blocked)
+        },
+        onReport = { reason, details ->
+          val signedIn = com.haraan.app.data.TokenStore.getSignedInToken(localContext)
+          signedIn != null && com.haraan.app.data.PlayerRepository().reportPlayer(signedIn, playerId, reason, details)
         },
         modifier = Modifier.statusBarsPadding(),
       )
@@ -1708,7 +1718,11 @@ private fun GameHubTabScreen(
   // A full-screen overlay must swallow Back, or dismissing the search closes the app.
   com.haraan.app.ui.DismissOnBack(showSearch) { showSearch = false }
 
-  val sports = listOf("All", "Cricket", "Football", "Badminton", "Basketball")
+  // Server keys, not labels — the ActionBoard card filters `it.sport` on this value.
+  val sports = listOf(
+    "All", "cricket", "football", "basketball",
+    "volleyball", "kabaddi", "tennis", "table_tennis", "badminton",
+  )
   
   // Real live matches for the ActionBoard card — no scripted/mock fallback. Empty when
   // nothing is live, so the card shows an honest "no live matches" state instead. Loaded in
@@ -2057,7 +2071,7 @@ private fun GameHubTabScreen(
           } else {
             Text(
               text = if (selectedSport == "All") "No live matches right now · tap to open the board"
-                     else "No live $selectedSport matches right now · tap to open the board",
+                     else "No live ${sportDisplayName(selectedSport)} matches right now · tap to open the board",
               color = HaraanColors.TextSecondary,
               style = HaraanTypography.BodyMedium,
               modifier = Modifier.padding(top = 8.dp)
@@ -2091,14 +2105,19 @@ private fun GameHubTabScreen(
         items(sports.size) { i ->
           val sport = sports[i]
           val isSelected = sport == selectedSport
+          val sportLabel = sportDisplayName(sport)
           
           val icon = when (sport) {
             "All" -> Icons.Default.List
-            "Cricket" -> Icons.Default.SportsCricket
-            "Football" -> Icons.Default.SportsFootball
-            "Badminton" -> Icons.Default.SportsTennis
-            "Basketball" -> Icons.Default.SportsBasketball
-            else -> Icons.Default.SportsBasketball
+            "cricket" -> Icons.Default.SportsCricket
+            "football" -> Icons.Default.SportsFootball
+            "basketball" -> Icons.Default.SportsBasketball
+            "volleyball" -> Icons.Default.SportsVolleyball
+            "kabaddi" -> Icons.Default.SportsKabaddi
+            // Tennis, table tennis and badminton are all racket sports and Material has
+            // one racket glyph — using it three times is honest; inventing a difference
+            // where the icon set has none is not.
+            else -> Icons.Default.SportsTennis
           }
 
           // Smooth select crossfade + tactile press-scale.
@@ -2145,7 +2164,7 @@ private fun GameHubTabScreen(
                 modifier = Modifier.size(16.dp)
               )
               Text(
-                text = sport,
+                text = sportLabel,
                 color = chipContent,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium
@@ -3578,6 +3597,8 @@ private fun CrexMatchesScreen(
   var scheduledSubTab by remember { mutableStateOf(0) }
   var openMatches by remember { mutableStateOf<List<com.haraan.app.data.OpenMatch>?>(null) }
   var incomingJoinRequests by remember { mutableStateOf<List<com.haraan.app.data.IncomingJoinRequest>>(emptyList()) }
+  // The join-request inbox, opened from the row on the Chat tab.
+  var showJoinRequests by remember { mutableStateOf(false) }
   var joinReload by remember { mutableStateOf(0) }
   // After a match is created, drive the toss flow (coin flip → bat/bowl → opening lineup → start).
   var tossSetup by remember { mutableStateOf<com.haraan.app.ui.matches.TossSetup?>(null) }
@@ -3741,13 +3762,15 @@ private fun CrexMatchesScreen(
     }
   }
 
-  // Incoming join requests to the viewer's matches (drives the "Mine" inbox + badge).
-  LaunchedEffect(selectedTab, joinReload) {
-    if (selectedTab == 2) {
-      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-      incomingJoinRequests = if (token == null) emptyList()
-        else runCatching { matchRepository.getIncomingJoinRequests(token) }.getOrDefault(emptyList())
-    }
+  // Incoming join requests to the viewer's matches.
+  //
+  // No longer gated on the Scheduled tab: they are shown on the CHAT tab now, so gating the
+  // fetch on a board tab meant the row simply never appeared unless you had first visited
+  // Scheduled — the data was never fetched, so there was nothing to draw.
+  LaunchedEffect(joinReload) {
+    val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+    incomingJoinRequests = if (token == null) emptyList()
+      else runCatching { matchRepository.getIncomingJoinRequests(token) }.getOrDefault(emptyList())
   }
 
   // Open matches near the viewer — loaded when the "Open near me" sub-tab is showing.
@@ -3884,7 +3907,10 @@ private fun CrexMatchesScreen(
           // three primary nav slots. Shown only on Live/Finished: District and State
           // are leaderboards that do not filter by sport, and a chip row that did
           // nothing there would be a dead control.
-          if (selectedTab <= 1) {
+          // Shown on Live/Finished (the feeds) and on District/State (the boards, which
+          // rank by sport since the XP ledger started recording it). Scheduled keeps its
+          // own Mine / Open-near-me toggle, and its cards carry a sport badge instead.
+          if (selectedTab != 2) {
             SportFilterRow(
               selected = selectedSport,
               onSelected = { selectedSport = it },
@@ -3928,48 +3954,44 @@ private fun CrexMatchesScreen(
             }
           }
         } else if (selectedTab == 1) {
-          // ── FINISHED: completed results only. No real finished-match feed is wired
-          // yet, so every sport shows an honest empty state (no demo results). ──
-          item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
+          // ── FINISHED: completed results, from the SAME feed the Live tab reads. ──
+          //
+          // This tab was hardcoded to an empty state with a note saying no finished feed
+          // existed. It did: `/api/live-matches` returns completed matches too, and the
+          // app already had them in hand — the Live tab simply filters them out. So every
+          // finished match in the district was invisible, on a tab whose only job is to
+          // show them.
+          val finishedFeed = liveFeed?.let { rows ->
+            rows
+              .filter { !it.isLive && it.status.lowercase() in setOf("completed", "finished") }
+              .filter { selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true) }
+          }
+          when {
+            finishedFeed == null -> item { GameHubFeedSkeleton() }
+            finishedFeed.isEmpty() -> item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
+            else -> {
+              item { CrexLeagueTitle("Recent results") }
+              item { LiveFeedGroup(rows = finishedFeed, onMatchClick = onMatchClick) }
+              item { Spacer(modifier = Modifier.height(8.dp)) }
+            }
+          }
         } else if (selectedTab == 2) {
           // ── SCHEDULED: "Mine" = your not-yet-started matches + incoming join requests;
           // "Open near me" = nearby matches looking for players you can request to join. ──
           item {
             ScheduledSubToggle(
               selected = scheduledSubTab,
-              requestCount = incomingJoinRequests.size,
+              // Join requests live on the Chat tab now, so badging "Mine" with their count
+              // would point at a list that no longer contains them.
+              requestCount = 0,
               onSelect = { scheduledSubTab = it },
             )
             Spacer(modifier = Modifier.height(6.dp))
           }
           if (scheduledSubTab == 0) {
-            // Incoming join-request inbox (owner accepts → player joins a squad).
-            if (incomingJoinRequests.isNotEmpty()) {
-              item { CrexLeagueTitle("Join requests") }
-              items(incomingJoinRequests, key = { "req-" + it.id }) { r ->
-                JoinRequestCard(
-                  request = r,
-                  onAccept = {
-                    scope.launch {
-                      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-                      if (token != null && matchRepository.respondToJoinRequest(token, r.id, accept = true)) {
-                        Toast.makeText(context, "${r.playerName} added to the match.", Toast.LENGTH_SHORT).show()
-                        joinReload++; scheduledReload++
-                      } else Toast.makeText(context, "Couldn't accept. Try again.", Toast.LENGTH_SHORT).show()
-                    }
-                  },
-                  onDecline = {
-                    scope.launch {
-                      val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-                      if (token != null) matchRepository.respondToJoinRequest(token, r.id, accept = false)
-                      joinReload++
-                    }
-                  },
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-              }
-              item { Spacer(modifier = Modifier.height(6.dp)) }
-            }
+            // Join requests used to live here. They moved to the Chat tab: a request is
+            // someone reaching out and waiting on an answer, which is what that screen is
+            // for — and three taps into a sub-tab is where they went unanswered.
             val scheduled = scheduledMatches
             when {
               scheduled == null -> item { GameHubFeedSkeleton() }
@@ -4036,6 +4058,7 @@ private fun CrexMatchesScreen(
               isStateBoard = false,
               location = districtSummary?.district,
               onPlayerClick = { selectedLeaderboardPlayer = it },
+              sport = selectedSport,
             )
           }
         } else if (selectedTab == 4) {
@@ -4044,6 +4067,7 @@ private fun CrexMatchesScreen(
               isStateBoard = true,
               location = districtSummary?.state,
               onPlayerClick = { selectedLeaderboardPlayer = it },
+              sport = selectedSport,
             )
           }
         }
@@ -4055,6 +4079,81 @@ private fun CrexMatchesScreen(
       // in this Box so it sits over the board, above the bar. A single conversation is
       // still a pushed screen with its own back button, rendered outside the scaffold.
       if (showChatList) {
+        // Join requests, opened from the Chat tab's row. A full screen rather than a
+        // sheet: accepting one puts a stranger in your squad, which deserves the room to
+        // read who they are and what they said.
+        if (showJoinRequests) {
+          com.haraan.app.ui.DismissOnBack(true) { showJoinRequests = false }
+          androidx.compose.foundation.layout.Column(
+            Modifier
+              .fillMaxSize()
+              .background(Color.White)
+              .zIndex(6f),
+          ) {
+            Row(
+              Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Box(
+                Modifier.size(38.dp).clip(CircleShape).background(HaraanColors.Field)
+                  .pressable { showJoinRequests = false },
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  Icons.Default.ArrowBack,
+                  "Back",
+                  tint = HaraanColors.TextPrimary,
+                  modifier = Modifier.size(18.dp),
+                )
+              }
+              Spacer(Modifier.width(12.dp))
+              Text(
+                "Join requests",
+                color = HaraanColors.TextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+              )
+            }
+            if (incomingJoinRequests.isEmpty()) {
+              Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                  "No one is waiting on you.",
+                  color = HaraanColors.TextSecondary,
+                  fontSize = 13.5.sp,
+                )
+              }
+            } else {
+              androidx.compose.foundation.lazy.LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+              ) {
+                items(incomingJoinRequests, key = { "req-" + it.id }) { r ->
+                  JoinRequestCard(
+                    request = r,
+                    onAccept = {
+                      scope.launch {
+                        val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                        if (token != null && matchRepository.respondToJoinRequest(token, r.id, accept = true)) {
+                          Toast.makeText(context, "${r.playerName} added to the match.", Toast.LENGTH_SHORT).show()
+                          joinReload++; scheduledReload++
+                        } else Toast.makeText(context, "Couldn't accept. Try again.", Toast.LENGTH_SHORT).show()
+                      }
+                    },
+                    onDecline = {
+                      scope.launch {
+                        val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                        if (token != null) matchRepository.respondToJoinRequest(token, r.id, accept = false)
+                        joinReload++
+                      }
+                    },
+                  )
+                  Spacer(modifier = Modifier.height(10.dp))
+                }
+              }
+            }
+          }
+        }
+
         com.haraan.app.ui.social.ChatListScreen(
           load = {
             val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
@@ -4063,6 +4162,8 @@ private fun CrexMatchesScreen(
           },
           onOpenThread = { openThread = it },
           onNewGroup = { requireRankedAccess { showNewGroup = true } },
+          joinRequests = incomingJoinRequests,
+          onOpenRequests = { showJoinRequests = true },
           // Hardware back from the Chat tab returns to the board.
           onClose = { showChatList = false },
           showBack = false,
@@ -4242,6 +4343,18 @@ private fun CrexMatchesScreen(
                       squadA = draft.squadA.toList(),
                       squadB = draft.squadB.toList(),
                     )
+                    return@launch
+                  }
+
+                  // Volleyball, basketball, kabaddi, tennis and table tennis have no toss
+                  // and no innings — the match simply starts. Falling through to the block
+                  // below would have opened a CRICKET coin flip on a volleyball match, so
+                  // they go straight to their own detail screen, where the creator's Score
+                  // button opens the right keypad for the sport.
+                  val boardSports = setOf("volleyball", "basketball", "kabaddi", "tennis", "table_tennis")
+                  if (draft.sport.lowercase() in boardSports) {
+                    if (result.isPrivate && result.joinCode.isNotBlank()) createdJoinCode = result.joinCode
+                    onMatchClick(result.matchId.toString())
                     return@launch
                   }
 
@@ -4443,6 +4556,17 @@ private fun CrexMatchesScreen(
         onToggleFollow = { follow ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) null else playerRepository.setFollowing(token, playerId, follow)
+        },
+        // Safety actions live in the profile's top-bar overflow. Both need a SIGNED-IN
+        // token specifically — a guest token would 401, and the menu hides the items
+        // rather than offering an action that cannot work.
+        onSetBlocked = { blocked ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setBlocked(token, playerId, blocked)
+        },
+        onReport = { reason, details ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          token != null && playerRepository.reportPlayer(token, playerId, reason, details)
         },
         onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
         onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
@@ -4650,6 +4774,17 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) null else playerRepository.setFollowing(token, player.playerId, follow)
         },
+        // Safety actions live in the profile's top-bar overflow. Both need a SIGNED-IN
+        // token specifically — a guest token would 401, and the menu hides the items
+        // rather than offering an action that cannot work.
+        onSetBlocked = { blocked ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setBlocked(token, player.playerId, blocked)
+        },
+        onReport = { reason, details ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          token != null && playerRepository.reportPlayer(token, player.playerId, reason, details)
+        },
         onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
         onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
         onMessage = { pid, name ->
@@ -4678,19 +4813,63 @@ private fun CrexMatchesScreen(
     // bottom bar and drops the top back bar. Messages list does the same. A single open
     // conversation stays a pushed screen with a back button.
     openThread?.let { thread ->
+      // Receipts for the open thread, refreshed by every fetch below.
+      var threadDeliveredAt by remember(thread.id) { mutableStateOf<String?>(null) }
+      var threadReadAt by remember(thread.id) { mutableStateOf<String?>(null) }
+      // Where a message can be forwarded: the viewer own threads, fetched once when this
+      // one opens. Empty on failure, which simply hides the Forward action rather than
+      // offering a picker that cannot deliver.
+      val chatThreads by produceState(initialValue = emptyList<com.haraan.app.data.ChatThread>(), thread.id) {
+        val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+        value = if (token == null) {
+          emptyList()
+        } else {
+          (dmRepository.threads(token) as? com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready)
+            ?.threads.orEmpty()
+        }
+      }
       com.haraan.app.ui.social.ChatThreadScreen(
         title = thread.name,
         avatar = thread.avatar,
         isGroup = thread.isGroup,
         subtitle = if (thread.isGroup && thread.memberCount > 0) "${thread.memberCount} members" else null,
-        load = {
+        // The unread count as it stood when the row was tapped — the thread draws a
+        // "where you left off" line from it, and opening marks it read server-side.
+        unreadCount = thread.unreadCount,
+        conversationId = thread.id,
+        // How far the other side has got. Held here rather than inside the thread screen
+        // because it arrives with the SAME fetch as the messages — one call answers both.
+        theirDeliveredAt = threadDeliveredAt,
+        theirReadAt = threadReadAt,
+        load = { sinceId ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token == null) emptyList() else dmRepository.messages(token, thread.id)
+          if (token == null) {
+            emptyList()
+          } else {
+            val page = dmRepository.page(token, thread.id, sinceId)
+            threadDeliveredAt = page.theirDeliveredAt
+            threadReadAt = page.theirReadAt
+            page.messages
+          }
         },
-        send = { body ->
+        onUnsend = { messageId ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token == null) null else dmRepository.send(token, thread.id, body)
+          token != null && dmRepository.unsend(token, thread.id, messageId)
         },
+        onReact = { messageId, emoji ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          token != null && dmRepository.react(token, thread.id, messageId, emoji)
+        },
+        send = { body, replyToId ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.send(token, thread.id, body, replyToId)
+        },
+        onForward = { messageId, target ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          token != null && dmRepository.forward(token, messageId, target)
+        },
+        // Everything except the thread you are already in.
+        forwardTargets = chatThreads.filter { it.id != thread.id },
         // Only groups can be left; leaving refreshes the list so the row disappears.
         onLeave = if (thread.isGroup) {
           {
@@ -4700,7 +4879,13 @@ private fun CrexMatchesScreen(
             ok
           }
         } else null,
-        onClose = { openThread = null },
+        onClose = {
+          openThread = null
+          // Leaving a thread has almost certainly changed the list behind it — the unread
+          // badge is cleared and the preview may be a message you just sent. Without this
+          // the list kept showing what it loaded when the tab was first opened.
+          chatReload++
+        },
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -6547,6 +6732,8 @@ private fun CrexLeaderboardSection(
   isStateBoard: Boolean,
   location: String? = null,
   onPlayerClick: (LeaderboardPlayer) -> Unit = {},
+  /** Which sport the board ranks. "All" is the cross-sport board, as before. */
+  sport: String = "All",
 ) {
   val categories = listOf("Batters", "Bowlers", "All-rounders")
   var selectedCategoryIndex by remember { mutableStateOf(0) }
@@ -6560,12 +6747,12 @@ private fun CrexLeaderboardSection(
   // screen until the fresh one arrives).
   var boardTick by remember { mutableStateOf(0) }
   AutoRefresh(intervalMs = 0L) { boardTick++ }
-  val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard, boardTick) {
+  val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard, boardTick, sport) {
     value = if (location.isNullOrBlank()) {
       null
     } else {
       leaderboardRepo
-        .fetchBoard(if (isStateBoard) "state" else "district", location)
+        .fetchBoard(if (isStateBoard) "state" else "district", location, sport = sport)
         .map { row ->
           LeaderboardPlayer(
             name = row.name,
@@ -6661,7 +6848,15 @@ private fun CrexLeaderboardSection(
     }
 
     if (players.isEmpty()) {
-      CrexTabEmpty("No ranked players in this ${if (isStateBoard) "state" else "district"} yet")
+      // Naming the sport matters here: "no ranked players in this district" reads as a
+      // dead district when it really means nobody has played ranked KABADDI here yet.
+      CrexTabEmpty(
+        if (sport.equals("All", ignoreCase = true)) {
+          "No ranked players in this ${if (isStateBoard) "state" else "district"} yet"
+        } else {
+          "No ranked ${sportDisplayName(sport)} players in this ${if (isStateBoard) "state" else "district"} yet"
+        }
+      )
     }
   }
 }
@@ -7641,7 +7836,9 @@ private fun ScheduledMatchCard(
       Spacer(Modifier.width(8.dp))
       ScheduledCrest(match.teamBEmblem, Color(0xFFF59E0B), match.teamB)
     }
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(11.dp))
+    SportBadge(match.sport)
+    Spacer(Modifier.height(11.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
       Icon(
         if (isReady) Icons.Default.PlayArrow else Icons.Default.Event,
@@ -7871,8 +8068,49 @@ private fun OpenMatchCard(
       Spacer(Modifier.width(9.dp))
       ScheduledCrest(match.team2Emblem, Color(0xFFF59E0B), match.team2)
     }
+    // When it kicks off. A match with no time is a "play now" one, and says so rather than
+    // showing a blank line or a made-up date.
+    val kickOff = remember(match.scheduledAtIso) {
+      val iso = match.scheduledAtIso
+      if (iso.isNullOrBlank()) "Starting soon"
+      else runCatching {
+        val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(iso)
+        java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(parsed!!)
+      }.getOrDefault("Scheduled")
+    }
+    Spacer(Modifier.height(11.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(Icons.Default.Event, null, tint = blue, modifier = Modifier.size(15.dp))
+      Spacer(Modifier.width(7.dp))
+      Text(
+        kickOff,
+        color = HaraanColors.TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        maxLines = 1, overflow = TextOverflow.Ellipsis,
+      )
+    }
+    // Where. Venue and area are separate fields and either can be blank, so they are
+    // joined only when both are actually there.
+    val place = listOf(match.venue, match.locality)
+      .map { it.trim() }
+      .filter { it.isNotEmpty() }
+      .distinct()
+      .joinToString(" · ")
+    if (place.isNotEmpty()) {
+      Spacer(Modifier.height(7.dp))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.Place, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(
+          place,
+          color = HaraanColors.TextSecondary, fontSize = 12.5.sp,
+          maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
     Spacer(Modifier.height(13.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
+      SportBadge(match.sport)
+      Spacer(Modifier.width(8.dp))
       MetaPill(
         "${match.slotsNeeded} " + if (match.slotsNeeded == 1) "spot left" else "spots left",
         color = green, bg = green.copy(alpha = 0.12f), icon = Icons.Filled.Groups,
@@ -7881,6 +8119,9 @@ private fun OpenMatchCard(
         Spacer(Modifier.width(8.dp))
         MetaPill("$it km", color = HaraanColors.TextSecondary, bg = Color(0xFFF1F3F7), icon = Icons.Filled.Place)
       }
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
       Spacer(Modifier.weight(1f))
       when (match.myStatus) {
         "pending" -> Box(
@@ -8080,8 +8321,12 @@ private fun MatchLiveContent(
   team1: String, team1Logo: String, score1: String, overs1: String,
   team2: String, team2Logo: String, score2: String, overs2: String,
   statusLine: String, statusSub: String,
-  matchContext: String, venue: String,
+  venue: String,
   battingTeam: Int,
+  /** cricket | football | badminton — named on the card so the mixed feed is readable. */
+  sport: String = "cricket",
+  /** Drives the beacon, the status colour and the pulse. Never inferred from the label. */
+  isLive: Boolean = false,
   // Cricket-only: when set, a not-yet-batting side shows "Yet to bat" instead of 0.
   // Off for other sports where "0" is a real score (football goals, NBA points…).
   cricketInnings: Boolean = false,
@@ -8089,6 +8334,9 @@ private fun MatchLiveContent(
   // shown with the venue on the meta line.
   district: String = "",
   locality: String = "",
+  // The Haraan venue this match was BOOKED at — blank for every other match, which is
+  // most of them. Never derived from the typed venue text; see the API's venueBadge.
+  venueBadge: String = "",
   // True when the viewer created this match — tints the row and shows a "YOU" badge so
   // they can spot their own match in the feed.
   isMine: Boolean = false,
@@ -8134,14 +8382,18 @@ private fun MatchLiveContent(
           modifier = Modifier.size(13.dp),
         )
       }
-      // Live beacon: a red dot inside a soft red halo.
-      Box(contentAlignment = Alignment.Center) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(Color(0x33E11D2A)))
-        Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFE11D2A)))
+      // Live beacon: a red dot inside a soft red halo. GATED on isLive — this used to
+      // render unconditionally, so a Scheduled match showed a red "LIVE" here while its
+      // own status column said "Scheduled" two inches to the right.
+      if (isLive) {
+        Box(contentAlignment = Alignment.Center) {
+          Box(Modifier.size(10.dp).clip(CircleShape).background(Color(0x33E11D2A)))
+          Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFE11D2A)))
+        }
+        Text("LIVE", color = Color(0xFFE11D2A), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
       }
-      Text("LIVE", color = Color(0xFFE11D2A), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
-      Box(Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFCBD5E1)))
-      Text(matchContext.uppercase(), color = Color(0xFF2563EB), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+      // The format label that used to sit here has moved into the status column, under
+      // the sport badge — it was being printed twice on every card.
       // Location — the local-identity signal: the most specific place we have (village/
       // locality, else a real venue) + the stamped district, with the bare "Custom Match"
       // placeholder dropped. Hidden when we have nothing.
@@ -8153,31 +8405,43 @@ private fun MatchLiveContent(
       val far = distanceKm?.let { if (it < 1.0) "under 1 km" else "${"%.1f".format(it)} km" }
       val placeText = listOfNotNull(place, district.takeIf { it.isNotBlank() }).joinToString(" · ")
       if (placeText.isNotBlank() || far != null) {
-        Box(Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFCBD5E1)))
+        // A separator only earns its place BETWEEN two things. Gate it on something
+        // actually preceding it, or a scheduled match opens its strip with a stray
+        // floating dot and a live one shows two in a row.
+        if (isLive || isFeatured) {
+          Box(Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFCBD5E1)))
+        }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-          Icon(
-            imageVector = Icons.Outlined.LocationOn,
-            contentDescription = null,
-            tint = Color(0xFF94A3B8),
-            modifier = Modifier.size(12.dp),
-          )
-          Spacer(Modifier.width(3.dp))
-          // Place + district ellipsise (weight, fill=false) so they yield space…
-          if (placeText.isNotBlank()) {
-            Text(
-              placeText,
-              color = Color(0xFF94A3B8),
-              fontSize = 11.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-              modifier = Modifier.weight(1f, fill = false),
+          if (venueBadge.isNotBlank()) {
+            // A match played on a booked Haraan court says so, by NAME. This is the only
+            // visible sign of the thing that already earns the match x1.25 XP and skips
+            // captain confirmation, so it belongs where a viewer decides what to open.
+            HaraanVenueChip(venueBadge, Modifier.weight(1f, fill = false))
+          } else {
+            Icon(
+              imageVector = Icons.Outlined.LocationOn,
+              contentDescription = null,
+              tint = Color(0xFF94A3B8),
+              modifier = Modifier.size(12.dp),
             )
+            Spacer(Modifier.width(3.dp))
+            // Place + district ellipsise (weight, fill=false) so they yield space…
+            if (placeText.isNotBlank()) {
+              Text(
+                placeText,
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+              )
+            }
           }
           // …while the distance keeps its intrinsic width and is never clipped. A
           // touch darker + semibold so it reads as the primary signal on the line.
           if (far != null) {
             Text(
-              (if (placeText.isNotBlank()) " · " else "") + far,
+              (if (placeText.isNotBlank() && venueBadge.isBlank()) " · " else "  ") + far,
               color = Color(0xFF475569),
               fontSize = 11.sp,
               fontWeight = FontWeight.SemiBold,
@@ -8232,29 +8496,159 @@ private fun MatchLiveContent(
       Box(modifier = Modifier.padding(horizontal = 14.dp).width(1.dp).height(60.dp).background(Color(0xFFF0F2F5)))
 
       Column(
-        modifier = Modifier.width(90.dp),
+        modifier = Modifier.width(100.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
       ) {
+        // What sport this is, said plainly. The feed mixes cricket, football and
+        // badminton in one column, and the scores alone don't tell them apart — "20"
+        // and "5 - 2" both just look like numbers until you know which game you're
+        // reading. Same icon + word as the filter chips above, so the chip you tapped
+        // and the card it produced look like the same object.
+        SportBadge(sport)
+
+        Spacer(Modifier.height(8.dp))
+
+        // Was one green for every state, so a Scheduled match looked as "go" as a live
+        // one. State now picks the colour, and red matches the beacon on the strip above.
+        val statusColor = when {
+          isLive -> Color(0xFFE11D2A)
+          statusLine.equals("Scheduled", ignoreCase = true) -> Color(0xFF2563EB)
+          else -> Color(0xFF475569)
+        }
+        // Declared unconditionally (a transition can't be created inside an `if`) and
+        // only read while live: the word breathes so "LIVE" is legible as a state from
+        // across the room, without a second animated beacon competing with the first.
+        val livePulse = rememberInfiniteTransition(label = "liveStatusPulse")
+        val liveAlpha by livePulse.animateFloat(
+          initialValue = 1f,
+          targetValue = 0.55f,
+          animationSpec = infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+          label = "liveStatusAlpha",
+        )
         Text(
           text = statusLine,
-          color = Color(0xFF15803D),
+          color = statusColor,
           fontSize = 13.sp,
           fontWeight = FontWeight.ExtraBold,
           textAlign = TextAlign.Center,
           letterSpacing = (-0.1).sp,
+          modifier = if (isLive) Modifier.graphicsLayer { alpha = liveAlpha } else Modifier,
         )
-        Spacer(Modifier.height(3.dp))
-        Text(
-          text = statusSub,
-          color = Color(0xFF94A3B8),
-          fontSize = 11.sp,
-          textAlign = TextAlign.Center,
-          lineHeight = 15.sp,
-        )
+
+        // Only the part the badge doesn't already say. "Football" under a FOOTBALL badge
+        // is noise; "20 overs" under a CRICKET one is the match length.
+        val formatLine = matchFormatLabel(statusSub, sport)
+        if (formatLine.isNotBlank()) {
+          Spacer(Modifier.height(3.dp))
+          Text(
+            text = formatLine,
+            color = Color(0xFF94A3B8),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            lineHeight = 15.sp,
+          )
+        }
       }
     }
   }
+}
+
+/**
+ * The sport, named and iconed, on the match card.
+ *
+ * Deliberately the same lockup as [SportFilterRow]'s chips — blue sport glyph, short
+ * word — so filtering by Cricket and then reading a Cricket card feel like the same
+ * object rather than two unrelated designs. One neutral treatment for every sport
+ * instead of a colour per sport: the card already spends red on LIVE, amber on
+ * featured and blue on YOU, and a fourth hue turns the strip into confetti.
+ */
+@Composable
+private fun SportBadge(sport: String) {
+  Row(
+    modifier = Modifier
+      // The same faint lift the idle filter chips carry, so it reads as a physical tag
+      // sitting on the card rather than text printed onto it.
+      .shadow(
+        elevation = 2.dp,
+        shape = RoundedCornerShape(50),
+        clip = false,
+        ambientColor = Color.Black.copy(alpha = 0.05f),
+        spotColor = Color.Black.copy(alpha = 0.10f),
+      )
+      .clip(RoundedCornerShape(50))
+      .background(Color.White)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(50))
+      .padding(horizontal = 8.dp, vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(
+      imageVector = sportVector(sport),
+      contentDescription = null,
+      tint = HaraanColors.EventsBlue,
+      modifier = Modifier.size(12.dp),
+    )
+    Spacer(Modifier.width(4.dp))
+    Text(
+      text = sportDisplayName(sport).uppercase(),
+      color = HaraanColors.TextPrimary,
+      fontSize = 9.sp,
+      fontWeight = FontWeight.ExtraBold,
+      letterSpacing = 0.5.sp,
+      maxLines = 1,
+    )
+  }
+}
+
+/**
+ * Icon for a sport. An unrecognised sport gets the neutral scoreboard glyph rather
+ * than falling through to the cricket bat — a badminton match wearing a bat is worse
+ * than one wearing nothing in particular.
+ */
+private fun sportVector(sport: String) = when (sport.trim().lowercase()) {
+  "cricket" -> Icons.Filled.SportsCricket
+  "football" -> Icons.Filled.SportsFootball
+  "basketball" -> Icons.Filled.SportsBasketball
+  "volleyball" -> Icons.Filled.SportsVolleyball
+  "kabaddi" -> Icons.Filled.SportsKabaddi
+  // Tennis, table tennis and badminton share Material's one racket glyph — three sports
+  // wearing the same honest icon beats inventing a distinction the icon set doesn't have.
+  "tennis", "table_tennis" -> Icons.Filled.SportsTennis
+  "badminton" -> Icons.Filled.SportsTennis
+  else -> Icons.Filled.SportsScore
+}
+
+private fun sportDisplayName(sport: String): String = when (sport.trim().lowercase()) {
+  "all" -> "All"
+  "cricket" -> "Cricket"
+  "football" -> "Football"
+  "badminton" -> "Badminton"
+  "volleyball" -> "Volleyball"
+  "basketball" -> "Basketball"
+  "kabaddi" -> "Kabaddi"
+  "tennis" -> "Tennis"
+  // The wire key has an underscore; nobody should ever read that on screen.
+  "table_tennis" -> "Table Tennis"
+  else -> sport.trim().replaceFirstChar { it.uppercase() }.ifBlank { "Match" }
+}
+
+/**
+ * The line under the sport badge: what the badge does NOT already say.
+ *
+ * `competition` is a mixed bag — "20 Over Match" on cricket, literally "Football" on
+ * football, sometimes a stale cricket string on a mis-tagged football match (see
+ * FootballMatchScreen.footballFormatLabel). Echoing the sport under a badge naming the
+ * same sport is the kind of duplication that makes a card look auto-generated, so drop
+ * it; keep the overs, which are real information.
+ */
+private fun matchFormatLabel(competition: String, sport: String): String {
+  val c = competition.trim()
+  if (c.isBlank()) return ""
+  if (c.equals(sportDisplayName(sport), ignoreCase = true)) return ""
+  Regex("""^(\d+)\s*over""", RegexOption.IGNORE_CASE).find(c)?.let { hit ->
+    return "${hit.groupValues[1]} overs"
+  }
+  return c
 }
 
 // Renders a list of real live-feed rows as one grouped surface. Shared by the
@@ -8288,12 +8682,17 @@ private fun LiveFeedGroup(
         overs2 = if (battingSecond) m.overs1 else m.overs2,
         statusLine = if (m.isLive) "LIVE" else m.status.ifBlank { "Scheduled" },
         statusSub = m.competition,
-        matchContext = m.competition.ifBlank { "Match" },
+        sport = m.sport,
+        isLive = m.isLive,
         venue = m.venue,
         district = m.district,
         locality = m.locality,
+        venueBadge = m.venueBadgeName,
         battingTeam = 1,
-        cricketInnings = true,
+        // Cricket-only wording. It was hardcoded true, so a volleyball match with no points
+        // yet announced "Yet to bat" — cricket furniture on a court sport. Every other
+        // sport shows the real 0, which is a true score there.
+        cricketInnings = m.sport.equals("cricket", ignoreCase = true),
         isMine = m.isMine,
         isFeatured = m.isFeatured,
         distanceKm = m.distanceKm,
@@ -8418,6 +8817,43 @@ private fun MatchScoreRow(
         }
       }
     }
+  }
+}
+
+/**
+ * "Played on a booked Haraan court" — the venue's real name, in the brand's own blue.
+ *
+ * A stadium glyph rather than the blue tick, on purpose: the tick means a verified PERSON, and
+ * reusing it for a place makes both mean less. Deliberately a chip and not a coloured band
+ * behind the row — this card already carries a live beacon, a distance, a YOU badge and a
+ * sport chip, and a fifth full-width surface would read as an ad slot instead of a mark of
+ * trust. It appears on very few matches, which is exactly what makes it worth anything.
+ */
+@Composable
+private fun HaraanVenueChip(name: String, modifier: Modifier = Modifier) {
+  Row(
+    modifier = modifier
+      .clip(RoundedCornerShape(6.dp))
+      .background(Color(0xFF2563EB).copy(alpha = 0.10f))
+      .border(1.dp, Color(0xFF2563EB).copy(alpha = 0.22f), RoundedCornerShape(6.dp))
+      .padding(horizontal = 6.dp, vertical = 3.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(
+      imageVector = Icons.Filled.Stadium,
+      contentDescription = "Haraan venue",
+      tint = Color(0xFF2563EB),
+      modifier = Modifier.size(11.dp),
+    )
+    Spacer(Modifier.width(5.dp))
+    Text(
+      name,
+      color = Color(0xFF1D4ED8),
+      fontSize = 10.5.sp,
+      fontWeight = FontWeight.Bold,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }
 
@@ -8729,10 +9165,12 @@ private fun CrexUpcomingMatchCard(
  * sentence: with the "All" chip active the old string read "No live All matches yet".
  */
 private fun emptyLiveLabel(sport: String): String =
-  if (sport == "All") "No live matches right now" else "No live $sport matches right now"
+  if (sport == "All") "No live matches right now"
+  else "No live ${sportDisplayName(sport)} matches right now"
 
 private fun emptyFinishedLabel(sport: String): String =
-  if (sport == "All") "No finished matches yet" else "No finished $sport matches yet"
+  if (sport == "All") "No finished matches yet"
+  else "No finished ${sportDisplayName(sport)} matches yet"
 
 /**
  * Sport filter for the board. Was three slots in the PRIMARY navigation, which made
@@ -8744,11 +9182,19 @@ private fun emptyFinishedLabel(sport: String): String =
  */
 @Composable
 private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
+  // (label shown, key the server uses, icon). The KEY is what gets selected: table tennis
+  // is "table_tennis" on the wire, so filtering on the pretty label would quietly match
+  // nothing and the board would look empty for that sport.
   val sports = listOf(
-    "All" to null,
-    "Cricket" to Icons.Filled.SportsCricket,
-    "Football" to Icons.Filled.SportsFootball,
-    "Badminton" to Icons.Filled.SportsTennis,
+    Triple("All", "All", null),
+    Triple("Cricket", "cricket", Icons.Filled.SportsCricket),
+    Triple("Football", "football", Icons.Filled.SportsFootball),
+    Triple("Basketball", "basketball", Icons.Filled.SportsBasketball),
+    Triple("Volleyball", "volleyball", Icons.Filled.SportsVolleyball),
+    Triple("Kabaddi", "kabaddi", Icons.Filled.SportsKabaddi),
+    Triple("Tennis", "tennis", Icons.Filled.SportsTennis),
+    Triple("Table Tennis", "table_tennis", Icons.Filled.SportsTennis),
+    Triple("Badminton", "badminton", Icons.Filled.SportsTennis),
   )
   Row(
     modifier = Modifier
@@ -8760,8 +9206,8 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
     horizontalArrangement = Arrangement.spacedBy(9.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    sports.forEach { (label, icon) ->
-      val isSel = label == selected
+    sports.forEach { (label, key, icon) ->
+      val isSel = key == selected
       // Animated fill + a soft lift so the chips feel like physical, tappable objects rather
       // than flat outlines: selected chips carry a blue-tinted glow, idle chips a faint
       // neutral shadow that separates them from the light page.
@@ -8786,7 +9232,7 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
             if (isSel) Color.Transparent else HaraanColors.BorderLight,
             RoundedCornerShape(50),
           )
-          .pressable { onSelected(label) }
+          .pressable { onSelected(key) }
           .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {

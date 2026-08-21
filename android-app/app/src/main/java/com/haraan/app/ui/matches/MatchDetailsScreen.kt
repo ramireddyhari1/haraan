@@ -47,6 +47,8 @@ fun MatchDetailsScreen(
     // as a full-screen overlay so the match creator can score an existing match without
     // going back through the create wizard.
     var footballScoring by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    // Same idea for volleyball / basketball / kabaddi / tennis / table tennis.
+    var sportScoring by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val matchRepo = androidx.compose.runtime.remember { com.haraan.app.data.MatchRepository() }
     val detailScope = rememberCoroutineScope()
 
@@ -87,6 +89,52 @@ fun MatchDetailsScreen(
         viewModel.refresh(id = matchId, code = joinCode, token = token)
     }
 
+    // Live presence — the "X watching" count in the header. Beating IS the membership:
+    // the server holds each viewer for a short window, so backgrounding the app (which
+    // stops this lifecycle-aware loop), leaving the screen, or losing signal all drop the
+    // viewer out on their own, with no goodbye call to miss.
+    val watching by viewModel.watching.collectAsState()
+    // Whether this viewer may open the audience — the server's answer, from the last beat.
+    val canSeeViewers by viewModel.canSeeViewers.collectAsState()
+    val viewerList by viewModel.viewers.collectAsState()
+    var showViewers by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    // Only a verified viewer gets a callback at all, so the chip is inert for everyone else
+    // rather than tappable and then refused.
+    val openViewers: (() -> Unit)? = if (canSeeViewers) {
+        {
+            showViewers = true
+            detailScope.launch {
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                viewModel.loadViewers(id = matchId, code = joinCode, token = tok)
+            }
+        }
+    } else {
+        null
+    }
+    val liveNow = (uiState as? MatchScreenState.Success)?.data?.isLive == true
+    // First beat the moment we know the match is live — AutoRefresh's own opening call
+    // usually lands while the detail is still loading, when we can't tell yet.
+    LaunchedEffect(matchId, joinCode, liveNow) {
+        if (liveNow) {
+            viewModel.heartbeat(
+                id = matchId,
+                code = joinCode,
+                viewerKey = com.haraan.app.data.InstallId.get(loadContext),
+                token = com.haraan.app.data.TokenStore.getSignedInToken(loadContext),
+            )
+        }
+    }
+    AutoRefresh(20_000L, true, matchId, joinCode) {
+        val s = viewModel.uiState.value
+        if (s !is MatchScreenState.Success || !s.data.isLive) return@AutoRefresh
+        viewModel.heartbeat(
+            id = matchId,
+            code = joinCode,
+            viewerKey = com.haraan.app.data.InstallId.get(loadContext),
+            token = com.haraan.app.data.TokenStore.getSignedInToken(loadContext),
+        )
+    }
+
     // Compact "premium" content scale: shrink every dp + sp uniformly so the screen
     // doesn't feel oversized on compact / lower-density devices. Dial via the factor.
     val baseDensity = LocalDensity.current
@@ -111,12 +159,39 @@ fun MatchDetailsScreen(
                 Text("No match data available", color = Color.Gray, fontSize = 16.sp)
             }
         }
+        // Each new sport gets its OWN detail screen. A volleyball set list, a basketball box
+        // score, a kabaddi raid ledger and a tennis scoreboard grid are different objects —
+        // one shared "generic match" layout would describe none of them properly. They do
+        // share the server-derived board underneath, so all five stay in step.
+        is MatchScreenState.Success if state.data.board != null -> {
+            val d = state.data
+            val b = d.board!!
+            val openScorer = { sportScoring = true }
+            when (b.sport.lowercase()) {
+                "volleyball" -> VolleyballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                "basketball" -> BasketballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                "kabaddi" -> KabaddiMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                "tennis" -> TennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                // Badminton shares table tennis' shape — rally points into games — so it
+                // shares the screen, which names whichever sport it is actually showing.
+                "table_tennis", "badminton" ->
+                    TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                else -> TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+            }
+        }
         is MatchScreenState.Success if state.data.sport.equals("football", ignoreCase = true) -> {
             // Football gets its own screen. The five tabs below are cricket's — Info,
             // Commentary, Live, Scorecard, MVP only mean anything for a ball-by-ball
             // sport, and a football match rendered through them showed a scorecard
             // with every number blank.
-            FootballMatchScreen(state = state.data, onBack = onBack, onScore = { footballScoring = true }, modifier = modifier)
+            FootballMatchScreen(
+                state = state.data,
+                watching = watching,
+                onBack = onBack,
+                onScore = { footballScoring = true },
+                onWatchers = openViewers,
+                modifier = modifier,
+            )
         }
         is MatchScreenState.Success -> {
             // Open on Commentary by default (index 1 in tabsList).
@@ -146,7 +221,14 @@ fun MatchDetailsScreen(
                 androidx.compose.foundation.lazy.LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     item {
                         // Hero with parallax offset
-                        MatchHeader(state = state.data, scrollOffset = scrollOffset, onScoreClick = onOpenScorer, onBack = onBack)
+                        MatchHeader(
+                            state = state.data,
+                            watching = watching,
+                            scrollOffset = scrollOffset,
+                            onScoreClick = onOpenScorer,
+                            onBack = onBack,
+                            onWatchersClick = openViewers,
+                        )
                     }
 
                     stickyHeader {
@@ -182,6 +264,55 @@ fun MatchDetailsScreen(
             }
         }
     }
+    }
+
+    // Who is watching — one sheet for every sport, cricket included, because the eye chip
+    // means the same thing on all of them.
+    if (showViewers) {
+        MatchViewersSheet(
+            watching = watching,
+            viewers = viewerList,
+            onDismiss = { showViewers = false; viewModel.clearViewers() },
+        )
+    }
+
+    // The rally / points scorer, hosted the same way football's is. It posts events and
+    // re-reads the board the server derives — it never sends a score.
+    val boardState = uiState
+    if (sportScoring && boardState is MatchScreenState.Success && boardState.data.board != null) {
+        val d = boardState.data
+        SportScorerScreen(
+            state = d,
+            board = d.board!!,
+            onPoint = { side, detail, player ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                val ok = tok != null && matchRepo.recordPoint(tok, matchId, side, detail, player)
+                if (ok) {
+                    viewModel.refresh(id = matchId, code = joinCode, token = tok)
+                }
+                ok
+            },
+            onUndo = { side ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                val ok = tok != null && matchRepo.undoMatchEvent(tok, matchId, side) != null
+                if (ok) {
+                    viewModel.refresh(id = matchId, code = joinCode, token = tok)
+                }
+                ok
+            },
+            onFinish = {
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                tok != null && matchRepo.completeMatch(tok, matchId)
+            },
+            onDone = {
+                sportScoring = false
+                detailScope.launch {
+                    val tok = com.haraan.app.data.TokenStore.getToken(loadContext)
+                    viewModel.refresh(id = matchId, code = joinCode, token = tok)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 
     // Football scorer overlay — the "Score" button on a football detail opens it here,

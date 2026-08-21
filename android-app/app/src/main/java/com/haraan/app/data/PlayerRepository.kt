@@ -324,6 +324,73 @@ class PlayerRepository(
     }
 
   /**
+   * Block or unblock a player. Returns the block state the SERVER settled on, or null
+   * if the call never landed — the caller rolls its optimistic toggle back on null,
+   * because a screen that says "Blocked" when nothing was blocked is a safety lie.
+   *
+   * A block also severs the follow in both directions server-side, so callers should
+   * treat their cached follow state as stale afterwards.
+   */
+  suspend fun setBlocked(token: String, playerId: String, blocked: Boolean): Boolean? =
+    withContext(Dispatchers.IO) {
+      val path = if (blocked) "block" else "unblock"
+      val encoded = URLEncoder.encode(playerId.trim(), "UTF-8")
+      val connection = (URL("${baseUrl.trimEnd('/')}/api/players/$encoded/$path").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10000
+        readTimeout = 10000
+        doOutput = true
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      try {
+        connection.outputStream.use { it.write("{}".toByteArray()) }
+        if (connection.responseCode !in 200..299) return@withContext null
+        val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+        JSONObject(body).optBoolean("is_blocked", blocked)
+      } catch (_: Exception) {
+        null
+      } finally {
+        connection.disconnect()
+      }
+    }
+
+  /**
+   * Report a player to the moderation queue. [reason] is one of the machine keys the
+   * server accepts (spam / harassment / fake_profile / inappropriate / cheating /
+   * other) — the human wording lives in the app so it can change without a deploy.
+   *
+   * Reporting the same person twice while the first report is still open updates it
+   * rather than queueing a duplicate, so the caller never has to guard against repeats.
+   */
+  suspend fun reportPlayer(token: String, playerId: String, reason: String, details: String?): Boolean =
+    withContext(Dispatchers.IO) {
+      val encoded = URLEncoder.encode(playerId.trim(), "UTF-8")
+      val connection = (URL("${baseUrl.trimEnd('/')}/api/players/$encoded/report").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10000
+        readTimeout = 10000
+        doOutput = true
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      try {
+        val payload = JSONObject().apply {
+          put("reason", reason)
+          if (!details.isNullOrBlank()) put("details", details.trim())
+        }
+        connection.outputStream.use { it.write(payload.toString().toByteArray()) }
+        connection.responseCode in 200..299
+      } catch (_: Exception) {
+        false
+      } finally {
+        connection.disconnect()
+      }
+    }
+
+  /**
    * The photo grid on [playerId]'s profile, newest first.
    *
    * Token is optional because the grid is public — a guest opening a shared profile still

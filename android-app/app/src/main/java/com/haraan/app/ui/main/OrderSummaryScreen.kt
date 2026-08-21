@@ -449,7 +449,7 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
  * Open the Razorpay Standard Checkout sheet for a reserved order. The result is delivered to
  * the host Activity (MainActivity implements the listener) and routed back via [PaymentBridge].
  */
-private fun openRazorpayCheckout(
+internal fun openRazorpayCheckout(
     activity: Activity,
     pr: BookingResult.PaymentRequired,
     name: String,

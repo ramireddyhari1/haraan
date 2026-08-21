@@ -33,12 +33,25 @@ class LeaderboardRepository(
    * @param scope "district" | "state" | "india"
    * @param location district or state name (required for district/state)
    */
-  suspend fun fetchBoard(scope: String, location: String?, limit: Int = 50): List<LeaderboardRow> =
+  /**
+   * @param sport one sport key ("volleyball"), or "All"/null for the cross-sport board.
+   *   The ledger only learned which sport an XP award came from on 2026-08-20, so rows
+   *   awarded before that all read as cricket — which is what they were.
+   */
+  suspend fun fetchBoard(
+    scope: String,
+    location: String?,
+    limit: Int = 50,
+    sport: String? = null,
+  ): List<LeaderboardRow> =
     withContext(Dispatchers.IO) {
       try {
         val q = StringBuilder("?limit=$limit")
         if (!location.isNullOrBlank()) {
           q.append("&location=").append(URLEncoder.encode(location, "UTF-8"))
+        }
+        if (!sport.isNullOrBlank() && !sport.equals("All", ignoreCase = true)) {
+          q.append("&sport=").append(URLEncoder.encode(sport.lowercase(), "UTF-8"))
         }
         val connection = (URL("${baseUrl.trimEnd('/')}/api/leaderboards/$scope$q").openConnection() as HttpURLConnection).apply {
           requestMethod = "GET"

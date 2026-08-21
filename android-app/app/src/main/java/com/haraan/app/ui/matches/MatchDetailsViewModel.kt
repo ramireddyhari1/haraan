@@ -26,6 +26,25 @@ class MatchDetailsViewModel : ViewModel() {
     val liveAds: StateFlow<List<AdItem>> = _liveAds.asStateFlow()
 
     /**
+     * How many people are watching this match right now, as the server counted them on our
+     * last presence heartbeat. 0 until the first beat lands, and it holds its last value on
+     * a failed beat rather than dropping to zero.
+     */
+    private val _watching = MutableStateFlow(0)
+    val watching: StateFlow<Int> = _watching.asStateFlow()
+
+    /**
+     * Whether this viewer may open the audience — the server's answer, carried from the last
+     * heartbeat. Verified accounts get the room; everybody else gets the number.
+     */
+    private val _canSeeViewers = MutableStateFlow(false)
+    val canSeeViewers: StateFlow<Boolean> = _canSeeViewers.asStateFlow()
+
+    /** The audience itself, loaded only when the viewer actually opens it. */
+    private val _viewers = MutableStateFlow<List<com.haraan.app.data.MatchViewerItem>?>(null)
+    val viewers: StateFlow<List<com.haraan.app.data.MatchViewerItem>?> = _viewers.asStateFlow()
+
+    /**
      * Load a match for the detail screen. Pass a [code] to open a PRIVATE match by
      * its share code (no auth needed); otherwise it loads by [id] (the [token]
      * keeps a LOCAL match in the viewer's own district reachable).
@@ -62,6 +81,52 @@ class MatchDetailsViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Tell the server this viewer is on the match, and take back the current audience size.
+     * Called on open and then on a timer while the match is live and the screen is
+     * foregrounded; stopping the beats is how the viewer "leaves".
+     *
+     * [token] should be a real signed-in token or null — the guest placeholder would only
+     * get rejected, and a guest is counted by [viewerKey] anyway.
+     */
+    fun heartbeat(id: String?, code: String?, viewerKey: String, token: String?) {
+        viewModelScope.launch {
+            val beat = repo.sendWatchHeartbeat(
+                matchId = id.orEmpty(),
+                code = code.orEmpty(),
+                viewerKey = viewerKey,
+                token = token,
+            )
+            if (beat != null) {
+                _watching.value = beat.watching
+                _canSeeViewers.value = beat.canSeeViewers
+            }
+        }
+    }
+
+    /**
+     * Pull the list of people on this match right now.
+     *
+     * Only called when the viewer opens the sheet, and again while it is open — the audience
+     * is a live thing, but nobody needs it fetched in the background for a sheet they never
+     * opened. `null` means "not loaded / failed"; an empty list means the room really is
+     * empty, and the sheet says two different things for the two.
+     */
+    fun loadViewers(id: String?, code: String?, token: String?) {
+        viewModelScope.launch {
+            _viewers.value = repo.getMatchViewers(
+                matchId = id.orEmpty(),
+                code = code.orEmpty(),
+                token = token,
+            )
+        }
+    }
+
+    /** Drop the list when the sheet closes, so reopening never shows a stale room. */
+    fun clearViewers() {
+        _viewers.value = null
+    }
+
     private suspend fun fetchParsed(id: String?, code: String?, token: String?): MatchUiState? {
         val json = when {
             !code.isNullOrBlank() -> repo.getLiveMatchByCode(code)
@@ -94,6 +159,7 @@ class MatchDetailsViewModel : ViewModel() {
             // every match — football included — opened the cricket scorecard.
             sport = o.optString("sport", "cricket").ifBlank { "cricket" },
             football = parseFootball(o.optJSONObject("football")),
+            board = parseSportBoard(o.optJSONObject("board")),
 
             // ── Rich live fields the backend already sends in the flat payload. ──
             // Stats arrive as strings ("34 (19)", "1-41 (3.5)"); MatchStatsMapper
@@ -114,6 +180,8 @@ class MatchDetailsViewModel : ViewModel() {
             opponentScore = o.optString("opponentScore"),
             toss = o.optString("toss"),
             venue = o.optString("venue"),
+            venueBadgeName = o.optJSONObject("venueBadge")?.optString("name").orEmpty(),
+            venueBadgeArea = o.optJSONObject("venueBadge")?.optString("area").orEmpty(),
             competition = o.optString("formatLabel"),
             battingTeam = o.optInt("battingTeam", 1),
             innings = o.optInt("innings", 1),
@@ -180,6 +248,7 @@ class MatchDetailsViewModel : ViewModel() {
                 boundary = o.optBoolean("boundary"),
                 battingName = o.optString("battingName"),
                 playerId = o.optString("playerId"),
+                photoUrl = o.optString("photo"),
                 career = career,
             )
         }

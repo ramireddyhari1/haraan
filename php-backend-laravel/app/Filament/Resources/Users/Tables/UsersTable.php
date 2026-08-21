@@ -9,6 +9,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -110,6 +111,13 @@ class UsersTable
                     ->numeric()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+                // The blue tick, grantable straight from the list — verifying someone is a
+                // one-flip decision an operator makes while looking at the row, not a
+                // reason to open an edit form. Visible by default so it can be audited at
+                // a glance ("who did we verify?").
+                ToggleColumn::make('is_verified')
+                    ->label('Verified')
+                    ->sortable(),
             ])
             ->filters([
                 // Drill-in for the "New this week" KPI tile above the table.

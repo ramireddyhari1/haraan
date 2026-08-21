@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.SportsCricket
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,7 +39,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun MatchHeader(state: MatchUiState, modifier: Modifier = Modifier, scrollOffset: Int = 0, onScoreClick: () -> Unit = {}, onBack: () -> Unit = {}) {
+fun MatchHeader(
+    state: MatchUiState,
+    modifier: Modifier = Modifier,
+    /** People watching this match right now (server-counted presence); 0 hides the chip. */
+    watching: Int = 0,
+    scrollOffset: Int = 0,
+    onScoreClick: () -> Unit = {},
+    onBack: () -> Unit = {},
+    /** Null unless this viewer may see who is watching. */
+    onWatchersClick: (() -> Unit)? = null,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -73,6 +84,12 @@ fun MatchHeader(state: MatchUiState, modifier: Modifier = Modifier, scrollOffset
                 if (state.isLive) {
                     Spacer(Modifier.width(8.dp))
                     LivePill()
+                    // Only while live, and only once the server has actually counted
+                    // somebody — an empty eye next to a live badge reads as "nobody cares".
+                    if (watching > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        WatchingPill(watching, onClick = onWatchersClick)
+                    }
                 }
             }
 
@@ -133,6 +150,67 @@ private fun LivePill() {
         Box(Modifier.size(6.dp).clip(CircleShape).background(CrexColors.LivePulse.copy(alpha = dotAlpha)))
         Text("LIVE", color = CrexColors.LivePulse, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
     }
+}
+
+/**
+ * The live audience chip — an eye and how many people are on this match right now, counted
+ * server-side from presence heartbeats (not a total-views number dressed up as one).
+ *
+ * Kept deliberately quiet: the red LIVE badge next to it is the accent, this is the
+ * supporting line. Colours are parameters because the football hero it also sits in is a
+ * dark gradient, where the light slate chip would disappear.
+ */
+@Composable
+fun WatchingPill(
+    count: Int,
+    modifier: Modifier = Modifier,
+    background: Color = Color(0xFFF1F5FA),
+    contentColor: Color = Color(0xFF475569),
+    /**
+     * Opens the audience. Passed only for a verified viewer, so the chip is inert for
+     * everyone else rather than tappable-and-then-refused.
+     */
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(background)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            Icons.Outlined.Visibility,
+            contentDescription = "$count watching now",
+            tint = contentColor,
+            modifier = Modifier.size(13.dp)
+        )
+        Text(
+            compactViewerCount(count),
+            color = contentColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.1.sp
+        )
+    }
+}
+
+/**
+ * Exact up to 999, then 1.2K / 24K / 1.3M — a header chip has room for a number, not for
+ * seven digits, and past a thousand nobody is reading the last three anyway.
+ */
+fun compactViewerCount(count: Int): String = when {
+    count < 1_000 -> count.toString()
+    count < 1_000_000 -> trimmedUnit(count / 1_000f, "K")
+    else -> trimmedUnit(count / 1_000_000f, "M")
+}
+
+/** 1.0K reads worse than 1K; drop a trailing .0, and stop showing decimals past 10. */
+private fun trimmedUnit(value: Float, unit: String): String {
+    val text = if (value < 10f) String.format(java.util.Locale.US, "%.1f", value) else value.toInt().toString()
+    return text.removeSuffix(".0") + unit
 }
 
 @Composable

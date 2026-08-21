@@ -1,8 +1,19 @@
 package com.haraan.app.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+// Aliased: this file already has a `Stroke` colour constant for hairline borders.
+import androidx.compose.ui.graphics.drawscope.Stroke as StrokeStyle
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.RepeatMode
@@ -86,6 +97,17 @@ fun LoginRoute(
     modifier: Modifier = Modifier,
     viewModel: LoginViewModel = viewModel()
 ) {
+    // Every visit to this screen starts clean. The ViewModel is retained by the host and
+    // survives the screen, so without this a previous sign-in's `stage = Success` is still
+    // in it and the confirmation panel renders for a session that already ended — the
+    // sign-out hang. See LoginViewModel.resetForNewSignIn().
+    //
+    // Deliberately `remember`, not `LaunchedEffect`: remember runs DURING composition, so
+    // the reset lands before the first state read below. A LaunchedEffect would run after
+    // the first frame and flash the stale panel on the way in. Keyed on the ViewModel so it
+    // re-runs when the screen is genuinely re-entered, never on a plain recomposition.
+    remember(viewModel) { viewModel.resetForNewSignIn() }
+
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -589,7 +611,8 @@ fun LoginScreen(
                                         value = uiState.otp,
                                         onValueChange = onOtpChange,
                                         isError = !uiState.errorMessage.isNullOrEmpty(),
-                                        onDone = { if (uiState.isOtpValid) onVerifyPhoneCode() }
+                                        onDone = { if (uiState.isOtpValid) onVerifyPhoneCode() },
+                                        isVerifying = uiState.isLoading
                                     )
 
                                     // Auto-submit the moment the 6-digit code is complete — the user
@@ -959,44 +982,123 @@ fun LoginScreen(
     }
 }
 
+// The splash's entrance curve, reused so the two brand moments move the same way.
+private val BeatEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+
 /**
  * The confirmation beat shown between a successful sign-in and the app taking over.
  * Green, not blue: on this screen blue means "act", green means "committed" — the
  * user has nothing left to do here.
  *
- * The check scales in once (spring, no bounce loop) so the moment registers without
- * turning into an animation the user has to wait through; [LoginViewModel] holds the
- * navigation for the same beat, so the panel is never cut off mid-transition.
+ * The previous version popped a static tick into a tinted circle and printed two lines.
+ * It was *correct* and it felt like nothing: one frame of movement, then a wait with no
+ * shape to it. This is the same information given a sequence — the disc lands, a ring
+ * closes around it, the tick is DRAWN rather than revealed, the copy rises after, and a
+ * meter fills over exactly [SUCCESS_BEAT_MS] so the hold before hand-off reads as
+ * progress instead of lag. One confirm haptic fires with the landing, so the moment is
+ * felt as well as seen.
+ *
+ * Everything is time-boxed inside the beat the ViewModel holds for — nothing here can
+ * delay entry to the app, and nothing gets cut off mid-stroke.
  */
 @Composable
 private fun LoginSuccessPanel(name: String) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-    val scale by animateFloatAsState(
-        targetValue = if (shown) 1f else 0.6f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "checkScale"
-    )
+    val view = LocalView.current
+    val disc = remember { Animatable(0f) }   // the badge lands
+    val halo = remember { Animatable(0f) }   // one ring pushes outward and fades
+    val ring = remember { Animatable(0f) }   // the outline closes around it
+    val tick = remember { Animatable(0f) }   // the check draws itself
+    val head = remember { Animatable(0f) }   // headline rises
+    val sub = remember { Animatable(0f) }    // sub-line follows
+    val meter = remember { Animatable(0f) }  // hand-off progress
+
+    LaunchedEffect(Unit) {
+        // Fires with the landing, not on entry to the screen: this is the one moment on
+        // the whole flow that deserves a confirm-weight buzz.
+        view.performHapticFeedback(Feel.COMMIT)
+        launch { meter.animateTo(1f, tween(SUCCESS_BEAT_MS.toInt(), easing = LinearEasing)) }
+        launch { halo.animateTo(1f, tween(620, easing = FastOutSlowInEasing)) }
+        launch { disc.animateTo(1f, spring(dampingRatio = 0.58f, stiffness = 700f)) }
+        launch {
+            delay(90)
+            ring.animateTo(1f, tween(400, easing = BeatEasing))
+        }
+        launch {
+            delay(300)
+            tick.animateTo(1f, tween(360, easing = BeatEasing))
+        }
+        launch {
+            delay(390)
+            head.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+        }
+        launch {
+            delay(500)
+            sub.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+        }
+    }
+
+    // Rebuilt per frame from the canvas size, but the objects themselves are kept —
+    // allocating a Path and a PathMeasure on every draw is how a 60fps beat starts
+    // dropping frames on a mid-range phone.
+    val tickPath = remember { Path() }
+    val tickMeasure = remember { PathMeasure() }
+    val tickSegment = remember { Path() }
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = GapL),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .graphicsLayer { scaleX = scale; scaleY = scale }
-                .clip(CircleShape)
-                .background(SuccessTint),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = null,
-                tint = Success,
-                modifier = Modifier.size(34.dp)
-            )
+        Canvas(modifier = Modifier.size(96.dp)) {
+            val centre = Offset(size.width / 2f, size.height / 2f)
+            val r = size.minDimension / 2f * 0.62f
+
+            // Halo: a single ring pushing out and fading. One pulse, not a loop — a
+            // repeating pulse would keep asking for attention after the moment passed.
+            if (halo.value > 0f && halo.value < 1f) {
+                drawCircle(
+                    color = Success.copy(alpha = 0.28f * (1f - halo.value)),
+                    radius = r * (1f + 0.5f * halo.value),
+                    center = centre,
+                    style = StrokeStyle(width = 2.dp.toPx())
+                )
+            }
+
+            drawCircle(color = SuccessTint, radius = r * disc.value, center = centre)
+
+            if (ring.value > 0f) {
+                drawArc(
+                    color = Success,
+                    startAngle = -90f,
+                    sweepAngle = 360f * ring.value,
+                    useCenter = false,
+                    topLeft = Offset(centre.x - r, centre.y - r),
+                    size = Size(r * 2f, r * 2f),
+                    style = StrokeStyle(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+
+            if (tick.value > 0f) {
+                tickPath.reset()
+                tickPath.moveTo(centre.x - r * 0.42f, centre.y + r * 0.02f)
+                tickPath.lineTo(centre.x - r * 0.12f, centre.y + r * 0.34f)
+                tickPath.lineTo(centre.x + r * 0.44f, centre.y - r * 0.32f)
+
+                tickMeasure.setPath(tickPath, false)
+                tickSegment.reset()
+                tickMeasure.getSegment(0f, tickMeasure.length * tick.value, tickSegment, true)
+
+                drawPath(
+                    path = tickSegment,
+                    color = Success,
+                    style = StrokeStyle(
+                        width = 4.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round
+                    )
+                )
+            }
         }
+
         Spacer(Modifier.height(GapM))
         Text(
             // The name is only known when they just signed up; returning users get the
@@ -1005,7 +1107,11 @@ private fun LoginSuccessPanel(name: String) {
             fontSize = TitleSize,
             fontWeight = FontWeight.Bold,
             color = Text1,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.graphicsLayer {
+                alpha = head.value
+                translationY = (1f - head.value) * 16.dp.toPx()
+            }
         )
         Spacer(Modifier.height(GapS))
         Text(
@@ -1013,8 +1119,34 @@ private fun LoginSuccessPanel(name: String) {
             fontSize = CaptionSize,
             fontWeight = FontWeight.Normal,
             color = Text2,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.graphicsLayer {
+                alpha = sub.value
+                translationY = (1f - sub.value) * 12.dp.toPx()
+            }
         )
+
+        Spacer(Modifier.height(GapM))
+        // The wait made legible. Same device as the brand splash's meter: the hold has
+        // a visible end, so it reads as the app loading rather than the screen stalling.
+        Box(
+            modifier = Modifier
+                .width(132.dp)
+                .height(3.dp)
+                .clip(RoundedCornerShape(99.dp))
+                .background(Success.copy(alpha = 0.16f))
+        ) {
+            Box(
+                modifier = Modifier
+                    // fillMaxHeight BEFORE the fractional width — fillMaxSize() here
+                    // would re-set the width and the meter would read as complete from
+                    // frame one. Same trap as BrandSplash.
+                    .fillMaxHeight()
+                    .fillMaxWidth(meter.value)
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(Success)
+            )
+        }
     }
 }
 
@@ -1150,6 +1282,7 @@ private fun OtpCells(
     onValueChange: (String) -> Unit,
     isError: Boolean,
     onDone: () -> Unit,
+    isVerifying: Boolean = false,
     count: Int = 6,
 ) {
     val focus = remember { FocusRequester() }
@@ -1180,6 +1313,19 @@ private fun OtpCells(
         }
     }
 
+    // While the code is in flight the row used to sit there, complete and inert, with
+    // only the button label changing to "Verifying…". A light sweeps across the digits
+    // instead, so the wait happens where the user is already looking. Declared
+    // unconditionally — a transition can't be created inside an `if` — and only read
+    // while verifying.
+    val checking = rememberInfiniteTransition(label = "otpChecking")
+    val wave by checking.animateFloat(
+        initialValue = -1f,
+        targetValue = count.toFloat() + 1f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing), RepeatMode.Restart),
+        label = "otpWave"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1192,6 +1338,10 @@ private fun OtpCells(
             repeat(count) { i ->
                 val char = value.getOrNull(i)
                 val filled = char != null
+                // 1 when the sweep is over this cell, 0 once it's a cell away.
+                val lit = if (isVerifying && !isError) {
+                    (1f - kotlin.math.abs(wave - i)).coerceIn(0f, 1f)
+                } else 0f
                 // The caret cell is the next empty one, and stays put once the code is
                 // complete so the row never looks unfocused mid-verify.
                 val isCaret = i == value.length.coerceAtMost(count - 1) && value.length < count
@@ -1209,15 +1359,24 @@ private fun OtpCells(
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp)
-                        .graphicsLayer { scaleX = pop; scaleY = pop }
+                        .graphicsLayer {
+                            // The sweep lifts each cell a touch as it passes. Tiny on
+                            // purpose: this is a "working on it" cue, not a bounce.
+                            val s = pop + 0.045f * lit
+                            scaleX = s
+                            scaleY = s
+                            translationY = -3.dp.toPx() * lit
+                        }
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (filled) Color.White else Color(0xFFF8FAFC))
                         .border(
-                            width = if (isError || isCaret) 1.5.dp else 1.dp,
+                            width = if (isError || isCaret || lit > 0.35f) 1.5.dp else 1.dp,
                             color = when {
                                 isError -> Danger
                                 isCaret -> Accent
-                                filled -> Text3.copy(alpha = 0.55f)
+                                filled -> androidx.compose.ui.graphics.lerp(
+                                    Text3.copy(alpha = 0.55f), Accent, lit
+                                )
                                 else -> Stroke
                             },
                             shape = RoundedCornerShape(14.dp)

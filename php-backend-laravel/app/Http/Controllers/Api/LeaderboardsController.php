@@ -42,6 +42,7 @@ final class LeaderboardsController extends Controller
             $month !== null ? (string) $month : null,
             $location !== null ? (string) $location : null,
             $limit,
+            sport: $request->query('sport'),
         );
 
         return response()->json([

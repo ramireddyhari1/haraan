@@ -36,6 +36,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AlertDialog
@@ -97,6 +102,7 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -136,6 +142,7 @@ private val Text1     = HaraanColors.TextPrimary
 private val Text2     = HaraanColors.TextSecondary
 private val Text3     = HaraanColors.TextMuted
 private val Stroke    = HaraanColors.BorderLight
+private val Danger    = HaraanColors.Danger
 // Achievement metals stay local: they are medal materials, not brand colours, and
 // nothing outside this screen uses them.
 private val Bronze    = Color(0xFFCD7F32)
@@ -614,10 +621,25 @@ fun PlayerProfileScreen(
      * into the account roster. Fires on every load; the caller makes it idempotent.
      */
     onProfileLoaded: ((PlayerProfile) -> Unit)? = null,
+    /**
+     * Block or unblock this player, returning the state the SERVER settled on (null =
+     * the call failed). Null callback hides the item — there is nothing to block on
+     * your own profile, and a signed-out viewer has no graph to act on.
+     */
+    onSetBlocked: (suspend (Boolean) -> Boolean?)? = null,
+    /** File a report. Returns whether it landed. Null hides the item. */
+    onReport: (suspend (reason: String, details: String?) -> Boolean)? = null,
 ) {
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
+    // Hoisted so the top-bar overflow can raise the same share sheet the profile owns.
+    var showShare by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
+    var showReport by remember { mutableStateOf(false) }
+    var confirmBlock by remember { mutableStateOf(false) }
+    val screenScope = rememberCoroutineScope()
+    val screenContext = LocalContext.current
 
     LaunchedEffect(reloadKey) {
         // Only blank to a spinner on the FIRST load. A pull-to-refresh keeps the
@@ -642,7 +664,27 @@ fun PlayerProfileScreen(
             .background(Surface)
     ) {
         if (showTopBar) {
-            TopBar(title = "Player Profile", leadingIcon = Icons.AutoMirrored.Filled.ArrowBack, onLeading = onBack)
+            // Name the person, not the screen type. "Player Profile" is a label for a
+            // template; once the profile has loaded, the bar can say whose it is — and
+            // it stays generic while loading rather than flashing a wrong name.
+            val loaded = (state as? ProfileState.Loaded)?.profile
+            // The handle is the identity people actually share, so it leads. Most accounts
+            // still have none, and a bar reading "@" of nothing helps nobody — those fall
+            // back to the display name, and only a profile that hasn't loaded is generic.
+            val barTitle = loaded?.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
+                ?: loaded?.name?.takeIf { it.isNotBlank() }
+                ?: "Player Profile"
+            // The overflow exists only on somebody ELSE's loaded profile: there is
+            // nothing to block or report on your own, and nothing to act on until the
+            // profile has said who this is.
+            val otherPlayer = loaded != null && loaded.social?.isSelf != true && !isSelf
+            TopBar(
+                title = barTitle,
+                leadingIcon = Icons.AutoMirrored.Filled.ArrowBack,
+                onLeading = onBack,
+                verified = loaded?.isVerified == true,
+                onMore = if (otherPlayer) ({ showMore = true }) else null,
+            )
         }
 
         when (val s = state) {
@@ -672,8 +714,82 @@ fun PlayerProfileScreen(
                 onOpenFollowers = onOpenFollowers,
                 onOpenFollowing = onOpenFollowing,
                 onMessage = onMessage,
+                onSetBlocked = onSetBlocked,
+                showShare = showShare,
+                onShowShare = { showShare = it },
             )
         }
+    }
+
+    val loadedProfile = (state as? ProfileState.Loaded)?.profile
+    if (showMore && loadedProfile != null) {
+        val alreadyBlocked = loadedProfile.social?.isBlocked == true
+        ProfileMoreSheet(
+            name = loadedProfile.name,
+            blocked = alreadyBlocked,
+            canBlock = onSetBlocked != null,
+            canReport = onReport != null,
+            onShare = { showMore = false; showShare = true },
+            onBlock = {
+                showMore = false
+                // Blocking is destructive and silent — it tears down both follows and
+                // the other person is never told, so it gets a confirmation. Unblocking
+                // only restores the status quo, so it does not.
+                if (alreadyBlocked) {
+                    screenScope.launch {
+                        val settled = onSetBlocked?.invoke(false)
+                        if (settled == null) {
+                            Toast.makeText(screenContext, "Couldn't unblock. Check your connection.", Toast.LENGTH_LONG).show()
+                        } else {
+                            reloadKey++
+                        }
+                    }
+                } else {
+                    confirmBlock = true
+                }
+            },
+            onReport = { showMore = false; showReport = true },
+            onDismiss = { showMore = false },
+        )
+    }
+
+    if (confirmBlock && loadedProfile != null) {
+        BlockConfirmDialog(
+            name = loadedProfile.name,
+            onDismiss = { confirmBlock = false },
+            onConfirm = {
+                confirmBlock = false
+                screenScope.launch {
+                    val settled = onSetBlocked?.invoke(true)
+                    if (settled == null) {
+                        Toast.makeText(screenContext, "Couldn't block. Check your connection.", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(screenContext, "Blocked.", Toast.LENGTH_SHORT).show()
+                        // The server severed both follows, so the cached counts are now
+                        // wrong. Re-read the profile rather than patching it locally.
+                        reloadKey++
+                    }
+                }
+            },
+        )
+    }
+
+    if (showReport && loadedProfile != null) {
+        ReportSheet(
+            name = loadedProfile.name,
+            onDismiss = { showReport = false },
+            onSubmit = { reason, details ->
+                showReport = false
+                screenScope.launch {
+                    val ok = onReport?.invoke(reason, details) ?: false
+                    Toast.makeText(
+                        screenContext,
+                        if (ok) "Report sent. Our team will review it." else "Couldn't send that report. Please try again.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            },
+        )
     }
 }
 
@@ -694,9 +810,12 @@ private fun ProfileContent(
     onOpenFollowers: ((playerId: String, name: String) -> Unit)? = null,
     onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
     onMessage: ((playerId: String, name: String) -> Unit)? = null,
+    onSetBlocked: (suspend (Boolean) -> Boolean?)? = null,
+    /** Owned by the screen so the top-bar overflow can raise the same sheet. */
+    showShare: Boolean = false,
+    onShowShare: (Boolean) -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
-    var showShare by remember { mutableStateOf(false) }
     var showEditProfile by remember { mutableStateOf(false) }
     // Which content tab is open: 0 = Matches, 1 = Stats, 2 = About, 3 = Posts.
     var selectedTab by remember { mutableStateOf(0) }
@@ -787,6 +906,9 @@ private fun ProfileContent(
                 matches = matchesPlayed(p),
                 followers = p.social?.followersCount ?: 0,
                 following = p.social?.followingCount ?: 0,
+                // The server's own answer when it has one; the caller's flag is the
+                // fallback for a profile opened before `social` loaded.
+                isSelf = p.social?.isSelf ?: isSelf,
                 onCopyId = { clipboard.setText(AnnotatedString(p.playerId)) },
                 onOpenFollowers = onOpenFollowers?.let { cb -> { cb(p.playerId, p.name) } },
                 onOpenFollowing = onOpenFollowing?.let { cb -> { cb(p.playerId, p.name) } },
@@ -800,8 +922,9 @@ private fun ProfileContent(
             ProfileActions(
                 p = p,
                 onToggleFollow = onToggleFollow,
-                onShare = { showShare = true },
+                onShare = { onShowShare(true) },
                 onMessage = onMessage,
+                onSetBlocked = onSetBlocked,
                 onEdit = if (isSelf) ({ showEditProfile = true }) else null,
             )
         }
@@ -910,7 +1033,7 @@ private fun ProfileContent(
     }
     }
 
-    if (showShare) ShareCardSheet(p, e, onDismiss = { showShare = false })
+    if (showShare) ShareCardSheet(p, e, onDismiss = { onShowShare(false) })
     if (showEditProfile) {
         EditProfileSheet(
             currentName = p.name,
@@ -1082,13 +1205,35 @@ private fun ProfileTabs(selected: Int, onSelect: (Int) -> Unit) {
 /** Honest per-tab empty state — never a spinner or a lie about having content. */
 @Composable
 private fun TabEmpty(title: String, sub: String) {
+    // An empty tab used to be one grey sentence floating 44dp down an otherwise blank
+    // screen, which is what "cheap" looks like: nothing holds the eye, so the emptiness
+    // reads as the page failing rather than as a player with no history yet. A quiet
+    // rounded panel gives the words something to sit on without inventing content.
     Column(
-        Modifier.fillMaxWidth().padding(top = 44.dp, bottom = 24.dp, start = 24.dp, end = 24.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 22.dp, bottom = 20.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(HaraanColors.Field.copy(alpha = 0.55f))
+            .padding(horizontal = 22.dp, vertical = 26.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(title, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Text(sub, color = Text2, fontSize = 13.5.sp, lineHeight = 19.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Box(
+            Modifier.size(42.dp).clip(CircleShape).background(Surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Insights, null, tint = Text3, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(title, color = Text1, fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(5.dp))
+        Text(
+            sub,
+            color = Text2,
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
     }
 }
 
@@ -1103,11 +1248,14 @@ private fun ProfileActions(
     onToggleFollow: (suspend (Boolean) -> Boolean?)?,
     onShare: () -> Unit,
     onMessage: ((playerId: String, name: String) -> Unit)? = null,
+    onSetBlocked: (suspend (Boolean) -> Boolean?)? = null,
     onEdit: (() -> Unit)? = null,
 ) {
     val social = p.social ?: return
     val scope = rememberCoroutineScope()
     val view = LocalView.current
+    val context = LocalContext.current
+    var unblocking by remember(p.playerId) { mutableStateOf(false) }
     var following by remember(p.playerId, social.isFollowing) { mutableStateOf(social.isFollowing) }
     var busy by remember(p.playerId) { mutableStateOf(false) }
     // Message shows only when BOTH follow each other — exactly when the server permits a
@@ -1115,7 +1263,26 @@ private fun ProfileActions(
     val mutual = following && social.followsMe
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (social.canFollow && onToggleFollow != null) {
+        // A blocked profile has no follow state to offer — the server refuses it — so the
+        // row becomes the one action that IS available. Without this the row renders
+        // nothing at all and the screen is a dead end you can only back out of.
+        if (social.isBlocked) {
+            ActionButton(
+                modifier = Modifier.weight(1f),
+                label = if (unblocking) "Unblocking…" else "Unblock",
+                filled = false,
+                enabled = !unblocking && onSetBlocked != null,
+            ) {
+                unblocking = true
+                scope.launch {
+                    val settled = onSetBlocked?.invoke(false)
+                    unblocking = false
+                    if (settled == null) {
+                        Toast.makeText(context, "Couldn't unblock. Check your connection.", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        } else if (social.canFollow && onToggleFollow != null) {
             ActionButton(
                 modifier = Modifier.weight(1f),
                 label = if (following) "Following" else "Follow",
@@ -1134,9 +1301,29 @@ private fun ProfileActions(
                     busy = false
                 }
             }
-            if (mutual && onMessage != null) {
-                ActionButton(modifier = Modifier.weight(1f), label = "Message", filled = false) {
-                    onMessage(p.playerId, p.name)
+            // Message appears only once you've followed. Before that the row is the one
+            // action the screen is actually for; Share moved to the top-bar overflow, so
+            // it no longer needs to pad this row out.
+            if (following && onMessage != null) {
+                ActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = "Message",
+                    filled = false,
+                    // The server refuses a conversation unless you BOTH follow. The button
+                    // holds its place so the row doesn't jump the moment they follow back,
+                    // but it reads as unavailable and says why instead of opening a thread
+                    // that would be rejected.
+                    dim = !mutual,
+                ) {
+                    if (mutual) {
+                        onMessage(p.playerId, p.name)
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "You can message ${p.name.trim().ifBlank { "them" }} once they follow you back.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
             }
         } else if (social.isSelf) {
@@ -1155,6 +1342,8 @@ private fun ActionButton(
     label: String,
     filled: Boolean,
     enabled: Boolean = true,
+    /** Reads as unavailable but still takes a tap, so it can explain itself. */
+    dim: Boolean = false,
     haptic: Int? = Feel.SELECT,
     onClick: () -> Unit,
 ) {
@@ -1175,7 +1364,198 @@ private fun ActionButton(
             .padding(vertical = 11.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = if (filled) Color.White else Text1, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(
+            label,
+            color = when {
+                filled -> Color.White
+                dim -> Text3
+                else -> Text1
+            },
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/**
+ * The top-bar overflow on someone else's profile.
+ *
+ * A sheet rather than a dropdown: these are three unequal actions, one of them
+ * destructive, and a 4dp-tall dropdown row is the wrong target for the one you must
+ * not hit by accident. Block is drawn in the destructive colour and sits LAST, below
+ * a rule, so the harmless action isn't adjacent to the irreversible one.
+ */
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun ProfileMoreSheet(
+    name: String,
+    blocked: Boolean,
+    canBlock: Boolean,
+    canReport: Boolean,
+    onShare: () -> Unit,
+    onBlock: () -> Unit,
+    onReport: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Surface) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+            SheetRow(Icons.Default.Share, "Share profile", onClick = onShare)
+            if (canReport) {
+                SheetRow(Icons.Default.Flag, "Report", onClick = onReport)
+            }
+            if (canBlock) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).height(1.dp).background(Stroke))
+                SheetRow(
+                    if (blocked) Icons.Default.LockOpen else Icons.Default.Block,
+                    if (blocked) "Unblock ${name.trim().ifBlank { "player" }}" else "Block ${name.trim().ifBlank { "player" }}",
+                    destructive = !blocked,
+                    onClick = onBlock,
+                )
+            }
+        }
+    }
+}
+
+/** One row in a sheet: icon, label, whole row is the target. */
+@Composable
+private fun SheetRow(
+    icon: ImageVector,
+    label: String,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val tint = if (destructive) Danger else Text1
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressable(onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(label, color = tint, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
+/**
+ * Blocking is silent and severs both follows, so it says exactly what will happen
+ * before it happens rather than asking "Are you sure?" about an unnamed consequence.
+ */
+@Composable
+private fun BlockConfirmDialog(name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val who = name.trim().ifBlank { "this player" }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = { Text("Block $who?", color = Text1, fontWeight = FontWeight.Bold) },
+        text = {
+            Text(
+                "You will stop following each other and neither of you can message the " +
+                    "other. They are not told you blocked them. You can unblock any time.",
+                color = Text2,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Block", color = Danger, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Text2) } },
+    )
+}
+
+/**
+ * Report a player. A reason is required — an unlabelled report is one a moderator has
+ * to guess at — and the free-text box stays optional so filing one is never a chore.
+ */
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun ReportSheet(
+    name: String,
+    onDismiss: () -> Unit,
+    onSubmit: (reason: String, details: String?) -> Unit,
+) {
+    // Keys the server validates against; the wording is the app's to change.
+    val reasons = listOf(
+        "spam" to "Spam or scam",
+        "harassment" to "Harassment or bullying",
+        "fake_profile" to "Fake or impersonating profile",
+        "inappropriate" to "Inappropriate content",
+        "cheating" to "Cheating in matches",
+        "other" to "Something else",
+    )
+    var chosen by remember { mutableStateOf<String?>(null) }
+    var details by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Surface) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 28.dp)) {
+            Text("Report ${name.trim().ifBlank { "player" }}", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Reports go to our team. They are not told who reported them.",
+                color = Text2,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+
+            reasons.forEach { (key, label) ->
+                val selected = chosen == key
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) BlueBright.copy(alpha = 0.08f) else Color.Transparent)
+                        .pressable { chosen = key }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(19.dp)
+                            .clip(CircleShape)
+                            .background(if (selected) BlueBright else Color.Transparent)
+                            .then(if (selected) Modifier else Modifier.border(1.5.dp, Stroke, CircleShape)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (selected) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                    }
+                    Spacer(Modifier.width(13.dp))
+                    Text(
+                        label,
+                        color = if (selected) Text1 else Text2,
+                        fontSize = 14.5.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = details,
+                onValueChange = { if (it.length <= 1000) details = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Anything else we should know? (optional)", color = Text3, fontSize = 13.5.sp) },
+                minLines = 2,
+                maxLines = 4,
+                shape = RoundedCornerShape(10.dp),
+            )
+
+            Spacer(Modifier.height(16.dp))
+            // Submit stays inert until a reason is picked — a report with no reason is
+            // one a moderator has to guess at, so it is not worth accepting.
+            ActionButton(
+                modifier = Modifier.fillMaxWidth(),
+                label = "Submit report",
+                filled = chosen != null,
+                enabled = chosen != null,
+                dim = chosen == null,
+            ) {
+                chosen?.let { onSubmit(it, details.takeIf { d -> d.isNotBlank() }) }
+            }
+        }
     }
 }
 
@@ -1197,9 +1577,15 @@ private fun SocialCount(value: Int, label: String, onClick: (() -> Unit)? = null
             Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         },
     ) {
-        Text("${AnimatedInt(value)}", color = valueColor, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = labelColor, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+        Text("${AnimatedInt(value)}", color = valueColor, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label.uppercase(),
+            color = labelColor,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.7.sp,
+        )
     }
 }
 
@@ -1416,6 +1802,12 @@ private fun HeroCard(
     matches: Int,
     followers: Int,
     following: Int,
+    /**
+     * Whose profile this is. Several things here are addressed to the owner — the
+     * completion ring and the "finish setting up" line — and reading them on a stranger's
+     * profile is nonsense ("Complete your profile: Set district" about someone else).
+     */
+    isSelf: Boolean,
     onCopyId: () -> Unit,
     onOpenFollowers: (() -> Unit)? = null,
     onOpenFollowing: (() -> Unit)? = null,
@@ -1424,26 +1816,40 @@ private fun HeroCard(
     // right, then name / tier / handle / location as plain text below — no blue card.
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.Top) {
-            // Avatar with a blue profile-completion ring on a light track.
+            // Avatar. The blue arc is a COMPLETION meter, so it only means something on
+            // your own profile — on someone else's it's a progress bar for a chore that
+            // isn't yours. There, the ring is a plain hairline that just frames the photo.
             Box(contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(88.dp)) {
+                Canvas(Modifier.size(92.dp)) {
                     val sw = 3.5.dp.toPx()
                     drawArc(
                         color = HaraanColors.Field,
                         startAngle = -90f, sweepAngle = 360f, useCenter = false,
                         style = DrawStroke(width = sw, cap = StrokeCap.Round),
                     )
-                    drawArc(
-                        color = BlueBright,
-                        startAngle = -90f, sweepAngle = 360f * (e.profilePct / 100f), useCenter = false,
-                        style = DrawStroke(width = sw, cap = StrokeCap.Round),
-                    )
+                    if (isSelf) {
+                        drawArc(
+                            color = BlueBright,
+                            startAngle = -90f, sweepAngle = 360f * (e.profilePct / 100f), useCenter = false,
+                            style = DrawStroke(width = sw, cap = StrokeCap.Round),
+                        )
+                    }
                 }
                 val photo = avatarModel(p.avatar)
                 Box(
-                    Modifier.size(74.dp).clip(CircleShape).background(HaraanColors.Field),
+                    Modifier.size(78.dp).clip(CircleShape).background(HaraanColors.Field),
                     contentAlignment = Alignment.Center,
                 ) {
+                    // The monogram is drawn UNDERNEATH the photo, not as an either/or.
+                    // A profile whose avatar URL 404s (or is still loading) used to render
+                    // as a blank grey disc — the single cheapest-looking thing on the
+                    // screen, and it happens on real accounts.
+                    Text(
+                        p.name.take(1).uppercase().ifBlank { "?" },
+                        color = BlueBright,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                     if (photo != null) {
                         AsyncImage(
                             model = photo,
@@ -1451,8 +1857,6 @@ private fun HeroCard(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize().clip(CircleShape),
                         )
-                    } else {
-                        Text(p.name.take(1).uppercase().ifBlank { "?" }, color = BlueBright, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 // Level rides the avatar corner, ringed in the page colour so it reads as
@@ -1467,15 +1871,34 @@ private fun HeroCard(
             Spacer(Modifier.width(18.dp))
             // Name moved UP beside the avatar, with the three counts directly beneath it.
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.name.ifBlank { "Player" }, color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    Spacer(Modifier.width(8.dp))
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) { Text(e.tier.uppercase(), color = BlueBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp) }
-                    if (p.isOrganizer) { Spacer(Modifier.width(6.dp)); Pill("ORGANIZER", Gold, GoldTint) }
+                // Name owns its own line. Sharing it with the tier chip left real names
+                // like "HARIHARAN REDDY RAMIREDDY" clipped to "HARIHARAN REDDY …" — the
+                // person's name is the one thing on this screen that must not be cut.
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        p.name.ifBlank { "Player" },
+                        color = Text1,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp,
+                        maxLines = 2,
+                        lineHeight = 22.sp,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (p.isVerified) {
+                        Spacer(Modifier.width(6.dp))
+                        // Nudged down to sit on the first line's baseline rather than the
+                        // middle of a name that wrapped to two.
+                        Icon(
+                            Icons.Default.Verified,
+                            contentDescription = "Verified",
+                            tint = BlueBright,
+                            modifier = Modifier.padding(top = 3.dp).size(18.dp),
+                        )
+                    }
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1488,45 +1911,63 @@ private fun HeroCard(
             }
         }
 
-        // @handle · location, then the bio — plain text under the header, like Instagram.
+        // The player's OWN words first, then the metadata that describes them.
+        //
+        // The bio used to sit under the "@handle · district" line, which put the one
+        // sentence the person actually wrote below a line the system generated — and left
+        // it stranded between two grey rows. Now it reads straight off the name: bio,
+        // then handle + location, then the credentials row.
         val handle = p.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
         val loc = listOfNotNull(p.district, p.state).joinToString(", ")
         val sub = listOfNotNull(handle, loc.ifBlank { null }).joinToString("  ·  ")
-        if (sub.isNotBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Text(sub, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        }
         if (!p.bio.isNullOrBlank()) {
-            Spacer(Modifier.height(if (sub.isNotBlank()) 5.dp else 10.dp))
+            Spacer(Modifier.height(10.dp))
             Text(p.bio!!, color = Text1, fontSize = 13.5.sp, lineHeight = 18.sp)
         }
+        if (sub.isNotBlank()) {
+            Spacer(Modifier.height(if (!p.bio.isNullOrBlank()) 5.dp else 10.dp))
+            Text(sub, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
 
-        // Trust + ID — copyable, muted, on white. The row answers the tap (haptic + tick).
+        // Trust + ID + tier — the three "credentials" facts on one line. The tier chip used
+        // to sit under the name, where it pushed the counts down and competed with the
+        // person's own name; here it reads with the other things the system says ABOUT the
+        // player. It sits OUTSIDE the pressable so it can't be mistaken for part of the
+        // copy-the-ID target.
         Spacer(Modifier.height(8.dp))
         var copied by remember { mutableStateOf(false) }
         LaunchedEffect(copied) { if (copied) { delay(1600); copied = false } }
-        Row(
-            Modifier.pressable(haptic = Feel.COMMIT) { onCopyId(); copied = true }.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Default.Shield, null, tint = if (copied) Green else Text3, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(5.dp))
-            Text("Trust ${p.trustScore}", color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.width(8.dp))
-            Text("·", color = Text3, fontSize = 12.5.sp)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (copied) "Copied to clipboard" else "ID ${p.playerId}",
-                color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1,
-            )
-            Spacer(Modifier.width(6.dp))
-            Icon(
-                if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                if (copied) "Copied" else "Copy",
-                tint = Text3, modifier = Modifier.size(13.dp),
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.pressable(haptic = Feel.COMMIT) { onCopyId(); copied = true }.padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Shield, null, tint = if (copied) Green else Text3, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("Trust ${p.trustScore}", color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(8.dp))
+                Text("·", color = Text3, fontSize = 12.5.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (copied) "Copied to clipboard" else "ID ${p.playerId}",
+                    color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                )
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                    if (copied) "Copied" else "Copy",
+                    tint = Text3, modifier = Modifier.size(13.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Box(
+                Modifier.clip(RoundedCornerShape(6.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
+            ) { Text(e.tier.uppercase(), color = BlueBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp) }
+            if (p.isOrganizer) { Spacer(Modifier.width(6.dp)); Pill("ORGANIZER", Gold, GoldTint) }
         }
-        if (e.profilePct < 100 && e.profileSteps.isNotEmpty()) {
+        // Setup nudge — yours only. It used to render on every profile, so opening a
+        // stranger told you to go "Set state · Set district" about a person you don't know.
+        if (isSelf && e.profilePct < 100 && e.profileSteps.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text("Complete your profile:  ${e.profileSteps.joinToString("  ·  ")}", color = Text3, fontSize = 11.5.sp)
         }
@@ -1744,10 +2185,17 @@ private fun RecentMatchRow(m: RecentMatch) {
             Text(m.title, color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Pill(m.matchType.uppercase(), Text2, Bg)
-                Spacer(Modifier.width(6.dp))
-                val (tColor, tBg) = trustColors(m.trustLevel)
-                Pill(if (m.isRanked) "RANKED" else "CASUAL", tColor, tBg)
+                val typeLabel = m.matchType.uppercase()
+                Pill(typeLabel, Text2, Bg)
+                // A casual match carries matchType "casual" AND isRanked=false, which
+                // printed "CASUAL  CASUAL" side by side on every one of them. The second
+                // chip only earns its place when it says something the first didn't.
+                val rankedLabel = if (m.isRanked) "RANKED" else "CASUAL"
+                if (!rankedLabel.equals(typeLabel, ignoreCase = true)) {
+                    Spacer(Modifier.width(6.dp))
+                    val (tColor, tBg) = trustColors(m.trustLevel)
+                    Pill(rankedLabel, tColor, tBg)
+                }
                 if (m.won) { Spacer(Modifier.width(6.dp)); Pill("WON", Green, GreenTint) }
                 if (m.mom) { Spacer(Modifier.width(6.dp)); Pill("MOM", Gold, GoldTint) }
             }
@@ -1758,7 +2206,15 @@ private fun RecentMatchRow(m: RecentMatch) {
 
 // ─────────────────────────────────────────────────────────── Shared bits ────────
 @Composable
-private fun TopBar(title: String, leadingIcon: ImageVector, onLeading: () -> Unit) {
+private fun TopBar(
+    title: String,
+    leadingIcon: ImageVector,
+    onLeading: () -> Unit,
+    /** Draws the blue tick right after the title — same badge the hero shows. */
+    verified: Boolean = false,
+    /** Opens the overflow. Null draws no button at all, rather than a dead one. */
+    onMore: (() -> Unit)? = null,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -1777,7 +2233,33 @@ private fun TopBar(title: String, leadingIcon: ImageVector, onLeading: () -> Uni
             Icon(leadingIcon, "Back", tint = Text1, modifier = Modifier.size(18.dp))
         }
         Spacer(Modifier.width(12.dp))
-        Text(title, color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        // A bar label, not a headline: the profile's own name sits right below it, and at
+        // 18sp bold the two competed. Single line — a long name used to run off the edge.
+        Text(
+            title,
+            color = Text1,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (verified) {
+            Spacer(Modifier.width(5.dp))
+            Icon(Icons.Default.Verified, "Verified", tint = BlueBright, modifier = Modifier.size(16.dp))
+        }
+        if (onMore != null) {
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onMore),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.MoreVert, "More options", tint = Text1, modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 

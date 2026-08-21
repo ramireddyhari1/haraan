@@ -114,6 +114,18 @@ object RealtimeClient {
                     }
                     if (domain.isNotBlank()) dispatch(appContext, domain)
                 }
+                "conversation.updated" -> {
+                    // Chat's nudge. The frame deliberately carries no message body — the
+                    // channel is public — so the listener refetches over the authenticated
+                    // endpoint and the server remains the source of what was said.
+                    val data = frame.opt("data")
+                    val id = when (data) {
+                        is JSONObject -> data.optString("id")
+                        is String -> JSONObject(data).optString("id")
+                        else -> ""
+                    }
+                    if (id.isNotBlank()) ChatRealtimeBus.emit(id)
+                }
                 "match.updated" -> {
                     val data = frame.opt("data")
                     val id = when (data) {

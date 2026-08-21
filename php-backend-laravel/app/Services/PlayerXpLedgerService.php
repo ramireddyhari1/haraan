@@ -75,6 +75,9 @@ final class PlayerXpLedgerService
                 MatchXpLedger::create([
                     'player_id'            => $pid,
                     'match_id'             => $match->id,
+                    // Stamped at award time so a leaderboard can be asked for one sport
+                    // without joining every match row in the month.
+                    'sport'                => strtolower((string) ($match->sport ?: 'cricket')),
                     'xp'                   => $xp,
                     'base_xp'              => $match->base_xp,
                     'trust_level'          => $trust,

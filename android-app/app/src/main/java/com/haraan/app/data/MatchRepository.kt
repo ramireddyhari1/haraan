@@ -9,6 +9,26 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
+/**
+ * One presence heartbeat's answer: the audience size, and whether this viewer is allowed to
+ * see who it is made of. The permission is the SERVER's answer, carried rather than decided —
+ * the app has no business ruling on its own blue tick.
+ */
+data class WatchBeat(val watching: Int, val canSeeViewers: Boolean)
+
+/**
+ * One person in the room. A guest carries no identity at all — the server sends the row as
+ * "Haraan Guest" with nothing attached, so there is nothing here to leak.
+ */
+data class MatchViewerItem(
+  val name: String,
+  val username: String,
+  val avatar: String,
+  val verified: Boolean,
+  val guest: Boolean,
+  val you: Boolean,
+)
+
 data class CreateMatchResult(
   val matchId: Long,
   val title: String,
@@ -59,6 +79,16 @@ data class LiveMatchRow(
   val team2Logo: String = "",
   val team1Emblem: String = "",
   val team2Emblem: String = "",
+  /**
+   * The Haraan venue this match was BOOKED at, blank for every other match.
+   *
+   * Server-resolved from the confirmed booking, never from the typed venue text — the badge
+   * has to be earned by a real booking or it is worth nothing. Blank is the normal case: a
+   * match on a maidan is not lesser, it just has no venue to name.
+   */
+  val venueBadgeName: String = "",
+  val venueBadgeArea: String = "",
+  val venueBadgeId: Int = 0,
   /** True when the signed-in viewer created this match (server-scoped) — tags "mine" in the feed. */
   val isMine: Boolean = false,
   /**
@@ -348,6 +378,9 @@ class MatchRepository(
           visibility = o.optString("visibility", "LOCAL"),
           district = o.optString("district", ""),
           locality = o.optString("locality", ""),
+          venueBadgeName = o.optJSONObject("venueBadge")?.optString("name").orEmpty(),
+          venueBadgeArea = o.optJSONObject("venueBadge")?.optString("area").orEmpty(),
+          venueBadgeId = o.optJSONObject("venueBadge")?.optInt("venueId") ?: 0,
           battingTeam = o.optInt("battingTeam", 1),
           team1Logo = o.optString("team1Logo", ""),
           team2Logo = o.optString("team2Logo", ""),
@@ -537,6 +570,89 @@ class MatchRepository(
     ConditionalHttp.getText("${baseUrl.trimEnd('/')}/api/live-matches/code/$clean")
   }
 
+  /**
+   * POST /api/live-matches/{id}/watching — "I'm watching this match", answered with how
+   * many people are on it right now.
+   *
+   * Presence, not a view counter: the server holds each viewer for a short window and the
+   * app re-beats while the detail screen is open and foregrounded, so leaving needs no
+   * call — the beat just stops. [viewerKey] is the random install id, which is all a
+   * signed-out viewer is identified by. Pass [code] for a private match opened by share
+   * code (its viewers never have the id).
+   *
+   * Returns null on any failure, so a caller keeps the last count on screen instead of
+   * flashing a zero at a match a hundred people are watching.
+   */
+  suspend fun sendWatchHeartbeat(
+    matchId: String,
+    code: String = "",
+    viewerKey: String,
+    token: String? = null,
+  ): WatchBeat? = withContext(Dispatchers.IO) {
+    val clean = code.trim().uppercase()
+    val path = when {
+      clean.isNotEmpty() -> "/api/live-matches/code/$clean/watching"
+      matchId.isNotBlank() -> "/api/live-matches/$matchId/watching"
+      else -> return@withContext null
+    }
+    try {
+      val result = postJson(path, JSONObject().put("viewer", viewerKey), token)
+      if (result.code !in 200..299) return@withContext null
+      val json = JSONObject(result.body)
+      val count = json.optInt("watching", -1)
+      if (count < 0) return@withContext null
+      WatchBeat(count, json.optBoolean("canSeeViewers", false))
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  /**
+   * GET /api/live-matches/{id}/viewers — who is in the room right now.
+   *
+   * Verified accounts only; the server answers 403 for everybody else, which is why the
+   * app never decides this for itself. Signed-in viewers come back as themselves, and the
+   * rest as "Haraan Guest" rows the server has already stripped of anything identifying —
+   * the app receives no install id, address or device for them, and so cannot leak one.
+   *
+   * Returns null on any failure, so the sheet says it couldn't load rather than claiming
+   * an empty room.
+   */
+  suspend fun getMatchViewers(
+    matchId: String,
+    code: String = "",
+    token: String? = null,
+  ): List<MatchViewerItem>? = withContext(Dispatchers.IO) {
+    val clean = code.trim().uppercase()
+    val path = when {
+      clean.isNotEmpty() -> "/api/live-matches/code/$clean/viewers"
+      matchId.isNotBlank() -> "/api/live-matches/$matchId/viewers"
+      else -> return@withContext null
+    }
+    try {
+      val body = ConditionalHttp.getText("${baseUrl.trimEnd('/')}$path", token)
+        ?: return@withContext null
+      val arr = JSONObject(body).optJSONArray("viewers") ?: return@withContext emptyList()
+      buildList {
+        for (i in 0 until arr.length()) {
+          val o = arr.optJSONObject(i) ?: continue
+          add(
+            MatchViewerItem(
+              name = o.optString("name"),
+              username = o.optString("username"),
+              avatar = o.optString("avatar").takeIf { it.isNotBlank() && it != "null" }.orEmpty(),
+              verified = o.optBoolean("is_verified", false),
+              guest = o.optBoolean("is_guest", false),
+              you = o.optBoolean("is_you", false),
+            )
+          )
+        }
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
   suspend fun sendScoreAction(
     token: String,
     matchId: String,
@@ -547,6 +663,33 @@ class MatchRepository(
       if (response.code in 200..299) response.body else null
     } catch (_: Exception) {
       null
+    }
+  }
+
+  /**
+   * Record one point for a rally / points sport (volleyball, basketball, kabaddi, tennis,
+   * table tennis).
+   *
+   * [detail] is what the point WAS — "3" for a three-pointer, "all_out" for a kabaddi all
+   * out, blank for sports where every point is worth one. The server turns that into a
+   * value; the phone never sends a score, so a double-tap or a retry can't inflate one.
+   */
+  suspend fun recordPoint(
+    token: String,
+    matchId: String,
+    side: String,
+    detail: String = "",
+    player: String? = null,
+  ): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val body = JSONObject()
+        .put("kind", "point")
+        .put("side", side)
+      if (detail.isNotBlank()) body.put("detail", detail)
+      if (!player.isNullOrBlank()) body.put("player_name", player)
+      postJson("/api/matches/$matchId/events", body, token).code in 200..299
+    } catch (_: Exception) {
+      false
     }
   }
 
@@ -681,7 +824,11 @@ class MatchRepository(
     return arr
   }
 
-  private fun postJson(path: String, jsonBody: JSONObject, token: String): HttpResult {
+  /**
+   * [token] is optional: the public endpoints (presence) accept a guest, and sending no
+   * Authorization header at all is safer than sending one the server will reject.
+   */
+  private fun postJson(path: String, jsonBody: JSONObject, token: String?): HttpResult {
     val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"
       doOutput = true
@@ -689,7 +836,7 @@ class MatchRepository(
       readTimeout = 15000
       setRequestProperty("Content-Type", "application/json")
       setRequestProperty("Accept", "application/json")
-      setRequestProperty("Authorization", "Bearer $token")
+      if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
     }
 
     connection.outputStream.use { outputStream ->

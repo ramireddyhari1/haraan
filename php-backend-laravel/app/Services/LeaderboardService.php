@@ -30,8 +30,13 @@ final class LeaderboardService
      * @param  string|null  $location  required for state/district scope
      * @return list<array<string, mixed>>
      */
-    public function monthly(string $scope, ?string $month = null, ?string $location = null, int $limit = 100): array
-    {
+    public function monthly(
+        string $scope,
+        ?string $month = null,
+        ?string $location = null,
+        int $limit = 100,
+        ?string $sport = null,
+    ): array {
         $month = $month ?: Carbon::now()->format('Y-m');
 
         $query = DB::table('match_xp_ledger as l')
@@ -41,6 +46,13 @@ final class LeaderboardService
             ->where('u.is_guest', false)
             ->whereNotNull('u.district')
             ->whereNotNull('u.state');
+
+        // One sport, when asked for. "all" and a missing value both mean every sport —
+        // the board is cross-sport by default, which is what it has always been.
+        $sport = $sport !== null ? strtolower(trim($sport)) : null;
+        if ($sport !== null && $sport !== '' && $sport !== 'all') {
+            $query->where('l.sport', $sport);
+        }
 
         if ($scope === 'state' && $location !== null) {
             $query->where('u.state', $location);

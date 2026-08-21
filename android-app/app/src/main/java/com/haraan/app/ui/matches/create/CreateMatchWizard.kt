@@ -68,7 +68,10 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SportsBasketball
 import androidx.compose.material.icons.filled.SportsCricket
+import androidx.compose.material.icons.filled.SportsKabaddi
+import androidx.compose.material.icons.filled.SportsVolleyball
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -192,6 +195,35 @@ sealed interface MatchFormat {
             "bestOf" to bestOf,
             "pointsTo" to pointsTo,
             "doubles" to doubles,
+        )
+    }
+
+    /**
+     * Rally sports: volleyball and table tennis (badminton keeps its own class, which came
+     * first). One shape, because "best of N sets to P points" is the entire rule set — what
+     * differs between them is the numbers, and those come from the presets.
+     */
+    data class Rally(val sport: String, val bestOf: Int, val pointsTo: Int) : MatchFormat {
+        override val summaryLine: String get() =
+            (if (bestOf == 1) "one set" else "best of $bestOf") + " to $pointsTo"
+        override fun toServerMap(): Map<String, Any> =
+            mapOf("kind" to sport, "bestOf" to bestOf, "pointsTo" to pointsTo)
+    }
+
+    /** Tennis: sets of GAMES, not sets of points — its own shape because it counts its own way. */
+    data class Tennis(val bestOf: Int, val gamesTo: Int) : MatchFormat {
+        override val summaryLine: String get() = "best of $bestOf sets to $gamesTo games"
+        override fun toServerMap(): Map<String, Any> =
+            mapOf("kind" to "tennis", "bestOf" to bestOf, "gamesTo" to gamesTo)
+    }
+
+    /** Basketball and kabaddi: periods of a fixed length, with points scored inside them. */
+    data class Periods(val sport: String, val periods: Int, val periodLengthMin: Int) : MatchFormat {
+        override val summaryLine: String get() = "$periods x $periodLengthMin min"
+        override fun toServerMap(): Map<String, Any> = mapOf(
+            "kind" to sport,
+            "periods" to periods,
+            "periodLengthMin" to periodLengthMin,
         )
     }
 }
@@ -325,12 +357,117 @@ data class SportSpec(
             showPlayersStepper = false,
         )
 
+        val Volleyball = SportSpec(
+            key = "volleyball",
+            displayName = "Volleyball",
+            icon = Icons.Filled.SportsVolleyball,
+            casualLabel = "Casual / Court",
+            casualTagline = "Friendly, self-scored",
+            casualPlural = "friendlies",
+            rulesSubtitle = "How many sets it takes, and how many a side.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("Indoor 6s", "Best of 5 to 25", MatchFormat.Rally("volleyball", 5, 25), playersPerSide = 6),
+                FormatPreset("Beach", "Best of 3 to 21", MatchFormat.Rally("volleyball", 3, 21), playersPerSide = 2),
+                FormatPreset("Quick", "One set to 25", MatchFormat.Rally("volleyball", 1, 25), playersPerSide = 6),
+            ),
+            defaultFormat = MatchFormat.Rally("volleyball", 5, 25),
+            defaultPlayersPerSide = 6,
+            playersRange = 2..8,
+        )
+
+        val Basketball = SportSpec(
+            key = "basketball",
+            displayName = "Basketball",
+            icon = Icons.Filled.SportsBasketball,
+            casualLabel = "Casual / Street",
+            casualTagline = "Pick-up, self-scored",
+            casualPlural = "pick-up games",
+            rulesSubtitle = "How many quarters, how long, and how many a side.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("Full court 5s", "4 x 10 min", MatchFormat.Periods("basketball", 4, 10), playersPerSide = 5),
+                FormatPreset("3x3 half court", "2 x 10 min", MatchFormat.Periods("basketball", 2, 10), playersPerSide = 3),
+                FormatPreset("Quick run", "2 x 8 min", MatchFormat.Periods("basketball", 2, 8), playersPerSide = 5),
+            ),
+            defaultFormat = MatchFormat.Periods("basketball", 4, 10),
+            defaultPlayersPerSide = 5,
+            playersRange = 3..6,
+        )
+
+        val Kabaddi = SportSpec(
+            key = "kabaddi",
+            displayName = "Kabaddi",
+            icon = Icons.Filled.SportsKabaddi,
+            casualLabel = "Casual / Gully",
+            casualTagline = "Friendly, self-scored",
+            casualPlural = "gully games",
+            rulesSubtitle = "How long each half runs, and how many on the mat.",
+            teamsTitle = "Teams & squads",
+            teamsSubtitle = "Name both sides. Search players by @username or name.",
+            presets = listOf(
+                FormatPreset("Standard 7s", "2 x 20 min", MatchFormat.Periods("kabaddi", 2, 20), playersPerSide = 7),
+                FormatPreset("Short", "2 x 10 min", MatchFormat.Periods("kabaddi", 2, 10), playersPerSide = 7),
+                FormatPreset("Small side", "2 x 15 min", MatchFormat.Periods("kabaddi", 2, 15), playersPerSide = 5),
+            ),
+            defaultFormat = MatchFormat.Periods("kabaddi", 2, 20),
+            defaultPlayersPerSide = 7,
+            playersRange = 4..7,
+        )
+
+        val Tennis = SportSpec(
+            key = "tennis",
+            displayName = "Tennis",
+            icon = Icons.Filled.SportsTennis,
+            casualLabel = "Friendly / Club",
+            casualTagline = "Knock-about, self-scored",
+            casualPlural = "friendlies",
+            rulesSubtitle = "Singles or doubles, and how many sets it takes.",
+            teamsTitle = "Players",
+            teamsSubtitle = "Who is playing? Search by @username or name.",
+            presets = listOf(
+                FormatPreset("Singles", "Best of 3 sets", MatchFormat.Tennis(3, 6), playersPerSide = 1),
+                FormatPreset("Doubles", "Best of 3 sets", MatchFormat.Tennis(3, 6), playersPerSide = 2),
+                FormatPreset("Short set", "One set to 4", MatchFormat.Tennis(1, 4), playersPerSide = 1),
+            ),
+            defaultFormat = MatchFormat.Tennis(3, 6),
+            defaultPlayersPerSide = 1,
+            playersRange = 1..2,
+            showPlayersStepper = false,
+        )
+
+        val TableTennis = SportSpec(
+            key = "table_tennis",
+            displayName = "Table Tennis",
+            icon = Icons.Filled.SportsTennis,
+            casualLabel = "Friendly / Club",
+            casualTagline = "Knock-about, self-scored",
+            casualPlural = "friendlies",
+            rulesSubtitle = "Singles or doubles, and how many games it takes.",
+            teamsTitle = "Players",
+            teamsSubtitle = "Who is playing? Search by @username or name.",
+            presets = listOf(
+                FormatPreset("Singles", "Best of 5 to 11", MatchFormat.Rally("table_tennis", 5, 11), playersPerSide = 1),
+                FormatPreset("Doubles", "Best of 5 to 11", MatchFormat.Rally("table_tennis", 5, 11), playersPerSide = 2),
+                FormatPreset("Quick", "Best of 3 to 11", MatchFormat.Rally("table_tennis", 3, 11), playersPerSide = 1),
+            ),
+            defaultFormat = MatchFormat.Rally("table_tennis", 5, 11),
+            defaultPlayersPerSide = 1,
+            playersRange = 1..2,
+            showPlayersStepper = false,
+        )
+
         /**
          * Every sport that can be created AND scored end to end. The sport step offers
          * exactly these, which is why the wizard no longer needs a "coming soon" gate:
          * an unsupported sport can't be chosen in the first place.
          */
-        val supported: List<SportSpec> = listOf(Cricket, Football, Badminton)
+        val supported: List<SportSpec> = listOf(
+            Cricket, Football, Badminton,
+            Volleyball, Basketball, Kabaddi, Tennis, TableTennis,
+        )
 
         fun forKey(sport: String): SportSpec =
             supported.firstOrNull { it.key == sport.lowercase() } ?: Cricket
@@ -616,6 +753,9 @@ private fun formatComplete(f: MatchFormat): Boolean = when (f) {
     is MatchFormat.Cricket -> f.overs > 0
     is MatchFormat.Football -> f.halves > 0 && f.halfLengthMin > 0
     is MatchFormat.Badminton -> f.bestOf > 0 && f.pointsTo > 0
+    is MatchFormat.Rally -> f.bestOf > 0 && f.pointsTo > 0
+    is MatchFormat.Tennis -> f.bestOf > 0 && f.gamesTo > 0
+    is MatchFormat.Periods -> f.periods > 0 && f.periodLengthMin > 0
 }
 
 /** What the footer names as missing when [formatComplete] fails, in that sport's words. */
@@ -623,6 +763,11 @@ private fun formatMissingLabel(f: MatchFormat): String = when (f) {
     is MatchFormat.Cricket -> "the number of overs"
     is MatchFormat.Football -> "the half length"
     is MatchFormat.Badminton -> "the number of games"
+    // Each sport is named in its own words — "the number of sets" means nothing to
+    // someone setting up a basketball game.
+    is MatchFormat.Rally -> if (f.sport == "table_tennis") "the number of games" else "the number of sets"
+    is MatchFormat.Tennis -> "the number of sets"
+    is MatchFormat.Periods -> if (f.sport == "basketball") "the quarter length" else "the half length"
 }
 
 private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
@@ -1156,6 +1301,58 @@ private fun FormatPicker(draft: CreateMatchDraft) {
                     onSelect = { draft.format = f.copy(pointsTo = it) },
                 )
             }
+            is MatchFormat.Rally -> {
+                FieldLabel(if (f.sport == "table_tennis") "Games to win the match" else "Sets to win the match")
+                Stepper(
+                    value = f.bestOf,
+                    // Sets are played in odd numbers so a match cannot end level.
+                    onChange = { draft.format = f.copy(bestOf = it.coerceIn(1, 7).let { n -> if (n % 2 == 0) n - 1 else n }) },
+                    min = 1, max = 7,
+                    suffix = "",
+                )
+                Spacer(Modifier.height(14.dp))
+                FieldLabel("Points per set")
+                Stepper(
+                    value = f.pointsTo,
+                    onChange = { draft.format = f.copy(pointsTo = it.coerceIn(5, 25)) },
+                    min = 5, max = 25,
+                    suffix = "pts",
+                )
+            }
+            is MatchFormat.Tennis -> {
+                FieldLabel("Sets to win the match")
+                Stepper(
+                    value = f.bestOf,
+                    onChange = { draft.format = f.copy(bestOf = it.coerceIn(1, 5).let { n -> if (n % 2 == 0) n - 1 else n }) },
+                    min = 1, max = 5,
+                    suffix = "",
+                )
+                Spacer(Modifier.height(14.dp))
+                FieldLabel("Games per set")
+                Stepper(
+                    value = f.gamesTo,
+                    onChange = { draft.format = f.copy(gamesTo = it.coerceIn(4, 6)) },
+                    min = 4, max = 6,
+                    suffix = "gm",
+                )
+            }
+            is MatchFormat.Periods -> {
+                FieldLabel(if (f.sport == "basketball") "Quarters" else "Halves")
+                Stepper(
+                    value = f.periods,
+                    onChange = { draft.format = f.copy(periods = it.coerceIn(1, 4)) },
+                    min = 1, max = 4,
+                    suffix = "",
+                )
+                Spacer(Modifier.height(14.dp))
+                FieldLabel(if (f.sport == "basketball") "Minutes per quarter" else "Minutes per half")
+                Stepper(
+                    value = f.periodLengthMin,
+                    onChange = { draft.format = f.copy(periodLengthMin = it.coerceIn(3, 45)) },
+                    min = 3, max = 45,
+                    suffix = "min",
+                )
+            }
         }
     }
 
@@ -1353,8 +1550,10 @@ private fun MatchLocationField(
                     denied = true
                     error = "Location permission is off."
                 }
+                com.haraan.app.data.LocationState.ServicesOff ->
+                    error = "Location is switched off on this device. Turn it on in Settings, then try again."
                 com.haraan.app.data.LocationState.Unavailable ->
-                    error = "No GPS signal yet. Turn on location and try again."
+                    error = "No GPS signal yet. Step outside or wait a moment, then try again."
                 else -> error = "Couldn't read your location. Try again."
             }
             loading = false

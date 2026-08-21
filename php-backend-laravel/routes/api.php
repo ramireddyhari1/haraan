@@ -219,6 +219,19 @@ Route::get('/live-matches/code/{code}', [LiveMatchController::class, 'showByCode
 Route::middleware('auth.jwt.optional')->group(function (): void {
     Route::get('/live-matches', [LiveMatchController::class, 'index']);
     Route::get('/live-matches/{id}', [LiveMatchController::class, 'show'])->whereNumber('id');
+
+    // Live presence — the eye + count on the match detail header. Optional auth so guests
+    // are counted too (keyed by the app's install id, never a raw IP). The code variant
+    // covers private matches, whose viewers only ever hold the share code.
+    // The limit is per IP for guests, so it has to clear a whole ground's worth of phones
+    // on one Wi-Fi beating every 20s (3/min each) — 120/min leaves room for ~40 of them.
+    Route::middleware('throttle:120,1')->group(function (): void {
+        Route::post('/live-matches/{id}/watching', [LiveMatchController::class, 'watching'])->whereNumber('id');
+        Route::post('/live-matches/code/{code}/watching', [LiveMatchController::class, 'watchingByCode']);
+        // Who is in the room — verified accounts only; the controller enforces it.
+        Route::get('/live-matches/{id}/viewers', [LiveMatchController::class, 'viewers'])->whereNumber('id');
+        Route::get('/live-matches/code/{code}/viewers', [LiveMatchController::class, 'viewersByCode']);
+    });
 });
 
 // -------------------------------------------------------------------------
@@ -274,6 +287,12 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     Route::post('/{player}/unfollow', [PlayersController::class, 'unfollow']);
     Route::get('/{player}/followers', [PlayersController::class, 'followers']);
     Route::get('/{player}/following', [PlayersController::class, 'following']);
+
+    // Safety actions. Same POST-twin dialect as unfollow, for the same reason.
+    Route::post('/{player}/block', [PlayersController::class, 'block']);
+    Route::delete('/{player}/block', [PlayersController::class, 'unblock']);
+    Route::post('/{player}/unblock', [PlayersController::class, 'unblock']);
+    Route::post('/{player}/report', [PlayersController::class, 'report']);
 });
 
 // -------------------------------------------------------------------------
@@ -290,6 +309,12 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
     Route::post('/with/{playerId}', [\App\Http\Controllers\Api\DirectMessageController::class, 'with']);
     Route::get('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'messages'])->whereNumber('id');
     Route::post('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'send'])->whereNumber('id');
+    // Unsend your own message — the long-press action. Sender-only, enforced in the service.
+    Route::delete('/{id}/messages/{message}', [\App\Http\Controllers\Api\DirectMessageController::class, 'unsend'])->whereNumber('id')->whereNumber('message');
+    // React to a message — the emoji row on long press. Same emoji again clears it.
+    Route::post('/{id}/messages/{message}/reaction', [\App\Http\Controllers\Api\DirectMessageController::class, 'react'])->whereNumber('id')->whereNumber('message');
+    // Forward a message into another of your conversations.
+    Route::post('/messages/{message}/forward', [\App\Http\Controllers\Api\DirectMessageController::class, 'forward'])->whereNumber('message');
     Route::post('/{id}/leave', [\App\Http\Controllers\Api\DirectMessageController::class, 'leave'])->whereNumber('id');
 });
 

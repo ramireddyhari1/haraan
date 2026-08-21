@@ -257,6 +257,13 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             return false;
         }
 
+        // A block refuses the follow from BOTH sides: the blocker obviously can't follow
+        // someone they blocked, and the blocked person must not be able to re-attach
+        // themselves either — otherwise blocking only holds until they tap Follow again.
+        if (self::blockExistsBetween($this, $player)) {
+            return false;
+        }
+
         $this->following()->syncWithoutDetaching([$player->id]);
 
         return true;
@@ -270,6 +277,78 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     public function isFollowing(self $player): bool
     {
         return $this->following()->whereKey($player->id)->exists();
+    }
+
+    // -------------------------------------------------------------------------
+    //  Blocks — the safety half of the social graph
+    // -------------------------------------------------------------------------
+
+    /** Players this user has blocked. */
+    public function blockedPlayers(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'player_blocks', 'blocker_id', 'blocked_id')
+            ->withTimestamps();
+    }
+
+    /** Players who have blocked this user. Never exposed to them — gates only. */
+    public function blockedByPlayers(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'player_blocks', 'blocked_id', 'blocker_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Block a player. Idempotent, and it SEVERS the relationship both ways rather than
+     * just recording an intention — leaving the follow rows in place would keep their
+     * matches in your feed and yours in theirs, which is not what anyone means by block.
+     * Returns false when the block was refused (yourself).
+     */
+    public function block(self $player): bool
+    {
+        if ($player->id === $this->id) {
+            return false;
+        }
+
+        $this->blockedPlayers()->syncWithoutDetaching([$player->id]);
+
+        // Both directions. A block is not a mute.
+        $this->following()->detach($player->id);
+        $player->following()->detach($this->id);
+
+        return true;
+    }
+
+    /** Lift a block. Follows are NOT restored — that's the other person's choice again. */
+    public function unblock(self $player): void
+    {
+        $this->blockedPlayers()->detach($player->id);
+    }
+
+    public function hasBlocked(self $player): bool
+    {
+        return $this->blockedPlayers()->whereKey($player->id)->exists();
+    }
+
+    public function isBlockedBy(self $player): bool
+    {
+        return $this->blockedByPlayers()->whereKey($player->id)->exists();
+    }
+
+    /**
+     * Is there a block between these two in EITHER direction? This is the check every
+     * gate wants: a one-directional test lets the blocked party keep acting on the
+     * blocker, which is the whole thing being prevented.
+     */
+    public static function blockExistsBetween(self $a, self $b): bool
+    {
+        return \Illuminate\Support\Facades\DB::table('player_blocks')
+            ->where(function ($q) use ($a, $b): void {
+                $q->where('blocker_id', $a->id)->where('blocked_id', $b->id);
+            })
+            ->orWhere(function ($q) use ($a, $b): void {
+                $q->where('blocker_id', $b->id)->where('blocked_id', $a->id);
+            })
+            ->exists();
     }
 
     /** Venues this desk person is explicitly limited to (Phase 3 scoping). */
@@ -418,6 +497,10 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'casual_xp',
         'trust_score',
         'is_organizer',
+        // Admin-granted blue tick. Only /control writes these — no API path sets them,
+        // which is the whole point of a verification badge.
+        'is_verified',
+        'verified_at',
     ];
 
     /**
@@ -567,6 +650,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             if (! $user->is_guest && $user->exists && self::isPlaceholderPlayerId($user->player_id)) {
                 $user->player_id = self::memberId((int) $user->id);
             }
+
+            // Keep "since when" honest without asking the operator to fill in a date: the
+            // stamp follows the flag wherever it's flipped (list toggle, edit form, tinker).
+            if ($user->isDirty('is_verified')) {
+                $user->verified_at = $user->is_verified ? now() : null;
+            }
         });
     }
 
@@ -583,6 +672,8 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return [
             'email_verified_at' => 'datetime',
             'last_seen_at'      => 'datetime',
+            'is_verified'       => 'boolean',
+            'verified_at'       => 'datetime',
             'password'          => 'hashed',
             'date_of_birth'     => 'date',
             'sport_attributes'  => 'array',

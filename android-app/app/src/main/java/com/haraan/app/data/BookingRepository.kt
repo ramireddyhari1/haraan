@@ -286,6 +286,12 @@ class BookingRepository(
     val code: String?,
     val discount: Double,
     val message: String,
+    /**
+     * The booking fee the server quoted for this subtotal. Taken from the response rather
+     * than recomputed here so the summary's arithmetic is the server's — the app must
+     * never display a total the charge won't match.
+     */
+    val fee: Double = 0.0,
   )
 
   /**
@@ -303,11 +309,14 @@ class BookingRepository(
     eventId: Int? = null,
     subtotal: Double = 0.0,
     tickets: Int = 0,
+    /** Set for a venue-slot checkout; routes the check to the venue coupon rules. */
+    venueId: Int? = null,
   ): CouponResult = withContext(Dispatchers.IO) {
     try {
       val body = JSONObject().apply {
         put("code", code)
         if (eventId != null && eventId > 0) put("eventId", eventId)
+        if (venueId != null && venueId > 0) put("venueId", venueId)
         if (subtotal > 0.0) put("subtotal", subtotal)
         // Coupons can require a minimum number of tickets, not just a minimum spend.
         if (tickets > 0) put("tickets", tickets)
@@ -329,6 +338,7 @@ class BookingRepository(
         code = json.optString("code").takeIf { it.isNotBlank() },
         discount = json.optDouble("discount", 0.0),
         message = json.optString("message", "This code isn’t valid."),
+        fee = json.optDouble("fee", 0.0),
       )
     } catch (e: Exception) {
       CouponResult(false, null, 0.0, e.message ?: "Couldn’t check that code.")
@@ -347,6 +357,7 @@ class BookingRepository(
     date: String,
     courtId: Int? = null,
     duration: Int = 1,
+    couponCode: String? = null,
   ): BookingResult = withContext(Dispatchers.IO) {
     try {
       val jsonBody = JSONObject().apply {
@@ -355,6 +366,7 @@ class BookingRepository(
         if (slotId != null) put("slotId", slotId)
         if (courtId != null) put("courtId", courtId)
         put("duration", duration)
+        couponCode?.takeIf { it.isNotBlank() }?.let { put("couponCode", it) }
       }
 
       val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/venue").openConnection() as HttpURLConnection).apply {
@@ -374,14 +386,33 @@ class BookingRepository(
       connection.disconnect()
 
       if (code in 200..299) {
-        val data = JSONObject(body).getJSONObject("data")
+        val root = JSONObject(body)
+        val data = root.getJSONObject("data")
+        val payment = root.optJSONObject("payment")
+        if (payment != null && payment.optBoolean("required", false)) {
+          // The slot is held PENDING for 15 minutes while checkout runs; confirming or
+          // releasing goes through the SAME /api/bookings/confirm | /release endpoints the
+          // event flow uses, since both key off razorpay_order_id.
+          BookingResult.PaymentRequired(
+            razorpayKey = payment.optString("key"),
+            orderId = payment.optString("orderId"),
+            amountPaise = payment.optLong("amount"),
+            currency = payment.optString("currency", "INR"),
+            bookingId = data.optInt("id"),
+          )
+        } else {
         BookingResult.Success(
           bookingId = data.optInt("id", 0),
           quantity = data.optInt("quantity", 1),
           totalAmount = data.optString("totalAmount", "0"),
           status = data.optString("status", "CONFIRMED"),
-          message = JSONObject(body).optString("message", "Venue booked."),
+          message = root.optString("message", "Venue booked."),
+          // Venue bookings get a ticket_code too (Booking::creating mints one for every
+          // booking), so the slip's QR is the same scannable `haraan:ticket:<code>` the
+          // check-in scanner resolves — not decoration.
+          ticketCode = data.optString("ticketCode").takeIf { it.isNotBlank() && it != "null" },
         )
+        }
       } else {
         BookingResult.Error(parseErrorMessage(body, "Booking failed (Status code: $code)"))
       }
