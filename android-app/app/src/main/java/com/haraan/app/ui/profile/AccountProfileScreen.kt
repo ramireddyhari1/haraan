@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SupportAgent
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -53,6 +55,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -299,7 +306,7 @@ fun AccountProfileScreen(
     }
 
     if (showPrivacy) {
-        PrivacySettingsScreen(onClose = { showPrivacy = false }, modifier = modifier)
+        PrivacySettingsScreen(onClose = { showPrivacy = false }, onSignOut = onSignOut, modifier = modifier)
         return
     }
 
@@ -1134,7 +1141,7 @@ private fun LegalScreen(slug: String, onClose: () -> Unit, modifier: Modifier = 
  * that lies about what the server stored is worse than a slow one.
  */
 @Composable
-private fun PrivacySettingsScreen(onClose: () -> Unit, modifier: Modifier = Modifier) {
+private fun PrivacySettingsScreen(onClose: () -> Unit, onSignOut: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -1223,10 +1230,248 @@ private fun PrivacySettingsScreen(onClose: () -> Unit, modifier: Modifier = Modi
                             ) { save("discoverable", it) { p, v -> p.copy(discoverable = v) } }
                         }
                     }
+                    // Deletion sits at the FOOT of Privacy, behind everything else, because
+                    // haraan.app/account/delete tells people to look for it here — Google
+                    // fetches that page at review time, so the two must agree. It is also
+                    // the correct place: it is the last and largest privacy control there is.
+                    item { Spacer(Modifier.height(GroupGap)); SectionTitle("Delete account") }
+                    item {
+                        Spacer(Modifier.height(HeadingGap))
+                        DeleteAccountSection(onSignOut = onSignOut)
+                    }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             }
         }
+    }
+}
+
+/**
+ * Account → Privacy → Delete account. The in-app half of what Google Play requires;
+ * haraan.app/account/delete is the twin for someone who has already uninstalled.
+ *
+ * The card states what goes and what stays BEFORE the button, because the honest answer
+ * is not "everything": bookings and payments survive as financial records that have to be
+ * kept, with nothing on them pointing at a person any more. A screen that says "delete
+ * everything" and then keeps rows would be the kind of promise that fails a review — and
+ * deserves to.
+ */
+@Composable
+private fun DeleteAccountSection(onSignOut: () -> Unit) {
+    var confirming by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(DangerBg)
+            .border(1.dp, Danger.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.WarningAmber, null, tint = Danger, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("This cannot be undone", color = Danger, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Deleting your account removes your name, email, phone, photo and player profile, " +
+                "and takes you off every leaderboard and search. Your matches stay on record " +
+                "without your name on them.",
+            color = Text2, fontSize = 13.sp, lineHeight = 19.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Bookings and payments are kept — tax law requires it — but nothing on them points " +
+                "at you any more. You will be signed out on every device.",
+            color = Text3, fontSize = 12.sp, lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Danger)
+                .clickable { confirming = true }
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.DeleteForever, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("Delete my account", color = Color.White, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+
+    if (confirming) {
+        DeleteAccountDialog(onDismiss = { confirming = false }, onDeleted = onSignOut)
+    }
+}
+
+/**
+ * Type-to-confirm. A single red button is one mis-tap away from an irreversible act, so
+ * the word has to be typed — the same bar the server sets by refusing a DELETE that does
+ * not carry an explicit confirmation flag.
+ */
+@Composable
+private fun DeleteAccountDialog(onDismiss: () -> Unit, onDeleted: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var typed by remember { mutableStateOf("") }
+    var reason by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val armed = typed.trim().equals("DELETE", ignoreCase = true) && !busy
+
+    Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
+        Column(
+            Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.White)
+                .padding(20.dp),
+        ) {
+            Text("Delete your account?", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "This erases your profile and signs you out everywhere. It cannot be undone.",
+                color = Text2, fontSize = 13.sp, lineHeight = 19.sp,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Text("Type DELETE to confirm", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            ConfirmField(
+                value = typed,
+                onValueChange = { typed = it; error = null },
+                placeholder = "DELETE",
+                caps = true,
+                enabled = !busy,
+            )
+
+            Spacer(Modifier.height(12.dp))
+            Text("Why are you leaving? (optional)", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            ConfirmField(
+                value = reason,
+                onValueChange = { reason = it },
+                placeholder = "Tell us if you like",
+                caps = false,
+                enabled = !busy,
+            )
+
+            error?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = Danger, fontSize = 12.5.sp, lineHeight = 18.sp)
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(enabled = !busy) { onDismiss() }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Keep my account", color = Text2, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        // Stays visibly inert until the word is typed, rather than looking
+                        // ready and then refusing.
+                        .background(if (armed) Danger else Danger.copy(alpha = 0.35f))
+                        .clickable(enabled = armed) {
+                            busy = true
+                            error = null
+                            scope.launch {
+                                val token = TokenStore.getToken(context) ?: ""
+                                val outcome = com.haraan.app.data.AccountDeletionRepository()
+                                    .delete(token, reason)
+                                when (outcome) {
+                                    is com.haraan.app.data.DeleteAccountOutcome.Deleted -> {
+                                        // Forget every stored session on this device. The
+                                        // switcher keeps its own roster beside the token, and
+                                        // an entry left behind would offer a door into a row
+                                        // that no longer belongs to anyone.
+                                        com.haraan.app.data.AccountStore.clearAll(context)
+                                        Toast.makeText(
+                                            context,
+                                            "Your account has been deleted.",
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                        onDismiss()
+                                        onDeleted()
+                                    }
+                                    is com.haraan.app.data.DeleteAccountOutcome.Refused -> {
+                                        busy = false
+                                        error = outcome.message
+                                    }
+                                    is com.haraan.app.data.DeleteAccountOutcome.Failed -> {
+                                        busy = false
+                                        error = outcome.message
+                                    }
+                                }
+                            }
+                        }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    } else {
+                        Text("Delete", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A filled pill input — the app's input shape everywhere else, not a boxed form field. */
+@Composable
+private fun ConfirmField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    caps: Boolean,
+    enabled: Boolean,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Bg)
+            .border(1.dp, Stroke, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        if (value.isEmpty()) {
+            Text(placeholder, color = Text3, fontSize = 14.sp)
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            enabled = enabled,
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                color = Text1,
+                fontSize = 14.sp,
+                fontWeight = if (caps) FontWeight.Bold else FontWeight.Normal,
+            ),
+            keyboardOptions = KeyboardOptions(
+                capitalization = if (caps) KeyboardCapitalization.Characters else KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Done,
+            ),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(BlueBright),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

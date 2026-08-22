@@ -84,6 +84,14 @@ final class AccountEraser
             // A random unusable password, so no credential path can reach the row.
             $updates['password'] = bcrypt(Str::random(64));
 
+            // Kill every live API token. Purging `sessions` above only signs out the
+            // WEBSITE — the app authenticates with a JWT, which keeps validating against
+            // this row (it still exists; it is anonymised, not deleted) until it expires
+            // days later. Moving token_version is the only thing that revokes those; see
+            // JwtService::versionMatches. Without it "delete my account" left the app that
+            // asked for it still signed in and still able to call the API.
+            $updates['token_version'] = (int) ($user->token_version ?? 0) + 1;
+
             $updates['status'] = 'deleted';
 
             // Take them out of every public surface: leaderboards, search, profiles.
