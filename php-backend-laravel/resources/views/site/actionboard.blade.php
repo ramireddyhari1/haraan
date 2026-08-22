@@ -173,10 +173,59 @@
             && ($o === '' || $o === '0' || str_starts_with($o, '0.0'));
     };
 
-    $abGroups = [];
-    // A single location-ordered list. Named for what it is — calling it "Featured"
-    // when it holds everything would be a lie.
-    if ($abFeedRows->isNotEmpty()) $abGroups[] = ['title' => 'Matches near you', 'rows' => $abFeedRows];
+    // ONE ranked list arrives, holding everything visible — in-progress, upcoming AND
+    // completed. The Live tab used to render all of it, so finished matches sat under a
+    // "Matches near you" heading forever; they belong on the Finished tab, which was a
+    // hardcoded empty state even though the data was already in hand (the app fixed the
+    // same bug on its side — see MainScreen.kt's Finished tab).
+    $abIsDone = fn (array $m): bool => in_array(strtolower((string) ($m['status'] ?? '')), ['completed', 'finished'], true);
+    $abLiveRows     = $abFeedRows->reject($abIsDone)->values();
+    $abFinishedRows = $abFeedRows->filter($abIsDone)->values();
+
+    // Port of SportFilterRow. Sport is a FILTER over the one list, not a destination —
+    // it used to be three slots in the bottom bar (Cricket / Badminton / Football), which
+    // made the board's top-level structure "which sport am I looking at", left five of the
+    // eight sports the app scores with no way in at all, and switched by hiding the feed
+    // behind a fabricated "No live X matches yet" line rather than filtering anything.
+    //
+    // [key on the wire, label a human reads]. The KEY is what the cards carry: table
+    // tennis is "table_tennis", so filtering on the pretty label would match nothing and
+    // the board would look empty for that sport.
+    $abSports = [
+        ['All', 'All'],
+        ['cricket', 'Cricket'],
+        ['football', 'Football'],
+        ['basketball', 'Basketball'],
+        ['volleyball', 'Volleyball'],
+        ['kabaddi', 'Kabaddi'],
+        ['tennis', 'Tennis'],
+        ['table_tennis', 'Table Tennis'],
+        ['badminton', 'Badminton'],
+    ];
+
+    // Hand-drawn sport glyphs, one stroke family (1.9px, round caps) so the chips read as
+    // one set. The app leans on Material, which has no shuttlecock and makes tennis, table
+    // tennis and badminton share a single racket; drawn here, each sport gets its own mark.
+    $abSportSvg = function (string $key): string {
+        $a = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"';
+        $paths = [
+            // stumps + ball
+            'cricket' => '<path d="M8.4 20V7.2M12 20V7.2M15.6 20V7.2"/><path d="M7.2 6.6h9.6"/><circle cx="19.4" cy="16.8" r="2.1"/>',
+            // ball with the classic pentagon panel
+            'football' => '<circle cx="12" cy="12" r="8.6"/><path d="M12 7.4l3.5 2.5-1.3 4H9.8l-1.3-4z"/><path d="M12 7.4V3.4M15.5 9.9l3.7-1.2M14.2 13.9l2.3 3.2M9.8 13.9l-2.3 3.2M8.5 9.9L4.8 8.7"/>',
+            'basketball' => '<circle cx="12" cy="12" r="8.6"/><path d="M12 3.4v17.2M3.4 12h17.2"/><path d="M6.1 5.7c2.6 2 4.2 4.1 4.2 6.3s-1.6 4.3-4.2 6.3M17.9 5.7c-2.6 2-4.2 4.1-4.2 6.3s1.6 4.3 4.2 6.3"/>',
+            'volleyball' => '<circle cx="12" cy="12" r="8.6"/><path d="M11.3 3.5c-2.4 3.5-3.3 7.4-2.5 11.6"/><path d="M20.4 9.8c-4 .3-7.3 1.8-9.9 4.5-1.4 1.5-2.5 3.4-3.1 5.4"/><path d="M18.3 19c-.7-3.9-2.5-7-5.3-9.4-1.6-1.4-3.6-2.4-5.7-3"/>',
+            // two players locked in a raid — the one sport here that is people, not a ball
+            'kabaddi' => '<circle cx="7.2" cy="6.2" r="2.1"/><path d="M7.2 8.6v4.2M7.2 12.8l-2.2 4.6M7.2 12.8l2.2 4.6M7.6 10.3l4 1.3"/><circle cx="16.8" cy="6.2" r="2.1"/><path d="M16.8 8.6v4.2M16.8 12.8l2.2 4.6M16.8 12.8l-2.2 4.6M16.4 10.3l-4 1.3"/>',
+            // strung racket, angled, with its ball
+            'tennis' => '<ellipse cx="13.6" cy="8.8" rx="4" ry="5.1" transform="rotate(45 13.6 8.8)"/><path d="M11.2 6.4l4.8 4.8M16 6.4l-4.8 4.8"/><path d="M10.4 12L5.6 16.8"/><circle cx="18.6" cy="17.2" r="2"/>',
+            // paddle (solid face, flared grip) so it never reads as the tennis racket
+            'table_tennis' => '<g transform="rotate(-20 11 12)"><circle cx="10.4" cy="8.6" r="5.2"/><path d="M10.4 13.9v5.5M8.9 19.6h3"/></g><circle cx="18.8" cy="13.2" r="1.8"/>',
+            // shuttlecock: cork + skirt
+            'badminton' => '<circle cx="17.2" cy="17.2" r="2.3"/><path d="M15.6 15.6L5.2 10.2M15.6 15.6L10.2 5.2M5.2 10.2A4.6 4.6 0 0 1 10.2 5.2M14.3 14.3L8.6 8.6"/>',
+        ];
+        return isset($paths[$key]) ? '<svg ' . $a . ' aria-hidden="true">' . $paths[$key] . '</svg>' : '';
+    };
 
     $abMedals = [
         1 => ['grad' => 'linear-gradient(180deg,#FFF3C0,#F3CB57,#CF9A1C)', 'rim' => '#FFEBA6', 'ink' => '#5A3F00'],
@@ -230,102 +279,54 @@
             </button>
             <span class="mab__ind" id="mabInd"></span>
         </div>
+
+        {{-- Sport chips (SportFilterRow). Shown on the two feeds only: District and
+             State are XP boards the web ranks without a sport, and a chip row that
+             filtered nothing there would be a dead control. --}}
+        <div class="mab__sports" id="mabSports" role="tablist" aria-label="Sport">
+            @foreach ($abSports as [$abKey, $abLabel])
+                @php $abGlyph = $abSportSvg($abKey); @endphp
+                <button class="mab__sport{{ $loop->first ? ' is-on' : '' }}" type="button"
+                        role="tab" aria-selected="{{ $loop->first ? 'true' : 'false' }}"
+                        data-sport="{{ $abKey }}" data-label="{{ $abLabel }}"
+                        onclick="mabSport('{{ $abKey }}', this)">
+                    {!! $abGlyph !!}{{ $abLabel }}
+                </button>
+            @endforeach
+        </div>
     </div>
 
     <div class="mab__body">
-        {{-- ── TAB 0: LIVE ─────────────────────────────────────────────── --}}
+        {{-- ── TAB 0: LIVE — in progress, and what is coming up ───────── --}}
         <div class="mab__panel is-on" id="mabPanel0">
-            <div class="mab__cricket">
-                @forelse ($abGroups as $group)
-                    <div class="mab__ltitle"><span class="mab__ldot"></span><span class="mab__ltxt">{{ $group['title'] }}</span><span class="mab__lsee">See all</span></div>
-                    <div class="mab__group">
-                        @foreach ($group['rows'] as $gi => $m)
-                            @php
-                                // Batting side on top (LiveFeedGroup) — top row is always the batting one.
-                                $swap = ($m['battingTeam'] ?? 1) === 2;
-                                $t1 = $swap ? $m['team2'] : $m['team1'];  $t2 = $swap ? $m['team1'] : $m['team2'];
-                                $s1 = $swap ? $m['score2'] : $m['score1']; $s2 = $swap ? $m['score1'] : $m['score2'];
-                                $o1 = $swap ? $m['overs2'] : $m['overs1']; $o2 = $swap ? $m['overs1'] : $m['overs2'];
-                                $c1 = $abCode($t1); $c2 = $abCode($t2);
-                                $icon1 = hrn_team_icon($swap ? ($m['team2Logo'] ?? '') : ($m['team1Logo'] ?? ''), $swap ? ($m['team2Emblem'] ?? '') : ($m['team1Emblem'] ?? ''));
-                                $icon2 = hrn_team_icon($swap ? ($m['team1Logo'] ?? '') : ($m['team2Logo'] ?? ''), $swap ? ($m['team1Emblem'] ?? '') : ($m['team2Emblem'] ?? ''));
-                                $yet2 = $abYetToBat($s2, $o2);
-                                $place = $m['locality'] !== '' ? $m['locality'] : (strcasecmp($m['venue'], 'Custom Match') !== 0 ? $m['venue'] : '');
-                                $loc = implode(' · ', array_filter([$place, $m['district']]));
-                            @endphp
-                            @if ($gi > 0)<div class="mab__gdiv"></div>@endif
-                            <a class="mab__match" href="{{ route('site.gamehub.actionboard.match', ['id' => $m['id']]) }}">
-                                <div class="mab__mctx">
-                                    {{-- Admin-featured: a star, not a section. Visible to everyone. --}}
-                                    @if ($m['isFeatured'] ?? false)
-                                        <span class="mab__star" title="Featured by Haraan" aria-label="Featured">
-                                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.58 1.11 6.47L12 17.45 6.19 20.5 7.3 14.03 2.6 9.45l6.5-.95L12 2.6z"></path></svg>
-                                        </span>
-                                    @endif
-                                    @if ($m['isLive'])
-                                        <span class="mab__beacon"><span></span></span>
-                                        <span class="mab__mlive">LIVE</span>
-                                    @else
-                                        <span class="mab__msched">{{ strtoupper($m['status'] ?: 'SCHEDULED') }}</span>
-                                    @endif
-                                    <span class="mab__mdot"></span>
-                                    <span class="mab__mcomp">{{ strtoupper($m['competition'] !== '' ? $m['competition'] : 'Match') }}</span>
-                                    @if ($loc !== '')
-                                        <span class="mab__mdot"></span>
-                                        <span class="mab__mloc">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
-                                            {{ $loc }}
-                                        </span>
-                                    @endif
-                                    {{-- Only ever a measured distance — never a guess. --}}
-                                    @if (($m['distanceKm'] ?? null) !== null)
-                                        <span class="mab__mdot"></span>
-                                        <span class="mab__mkm">{{ $m['distanceKm'] < 1 ? 'Under 1 km' : $m['distanceKm'] . ' km' }}</span>
-                                    @endif
-                                    @if ($m['isMine'])
-                                        <span class="mab__you">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path></svg>
-                                            YOU
-                                        </span>
-                                    @endif
-                                </div>
-                                <div class="mab__hair"></div>
-                                <div class="mab__mbody">
-                                    <div class="mab__mteams">
-                                        <div class="mab__trow">
-                                            <span class="mab__tlogo {{ $icon1 !== '' ? 'has-img' : '' }}" style="background: {{ $icon1 !== '' ? '#fff' : $abColor($t1) }}">@if($icon1 !== '')<img src="{{ $icon1 }}" alt="{{ $c1 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c1,0,3) }}'))">@else{{ mb_substr($c1, 0, 3) }}@endif</span>
-                                            <span class="mab__tname is-bat">{{ $c1 }}</span>
-                                            <span class="mab__tscore is-bat">{{ $s1 }}@if ($o1 !== '')<small>{{ $o1 }}</small>@endif</span>
-                                        </div>
-                                        <div class="mab__trow">
-                                            <span class="mab__tlogo is-dim {{ $icon2 !== '' ? 'has-img' : '' }}" style="background: {{ $icon2 !== '' ? '#fff' : $abColor($t2) }}">@if($icon2 !== '')<img src="{{ $icon2 }}" alt="{{ $c2 }}" loading="lazy" onerror="this.replaceWith(document.createTextNode('{{ mb_substr($c2,0,3) }}'))">@else{{ mb_substr($c2, 0, 3) }}@endif</span>
-                                            <span class="mab__tname is-dim">{{ $c2 }}</span>
-                                            @if ($yet2)
-                                                <span class="mab__tyet">Yet to bat</span>
-                                            @else
-                                                <span class="mab__tscore is-dim">{{ $s2 }}@if ($o2 !== '')<small>{{ $o2 }}</small>@endif</span>
-                                            @endif
-                                        </div>
-                                    </div>
-                                    <div class="mab__vdiv"></div>
-                                    <div class="mab__mstat">
-                                        <b>{{ $m['isLive'] ? 'LIVE' : ($m['status'] !== '' ? $m['status'] : 'Scheduled') }}</b>
-                                        <span>{{ $m['competition'] }}</span>
-                                    </div>
-                                </div>
-                            </a>
-                        @endforeach
-                    </div>
-                @empty
-                    <div class="mab__empty">No live matches in your area yet</div>
-                @endforelse
+            <div class="mab__ltitle" @if ($abLiveRows->isEmpty()) hidden @endif>
+                <span class="mab__ldot"></span><span class="mab__ltxt">Matches near you</span><span class="mab__lsee">See all</span>
             </div>
-            <div class="mab__othersport mab__empty" hidden></div>
+            <div class="mab__group">
+                @foreach ($abLiveRows as $m)
+                    @include('site.partials.actionboard-match-card', ['m' => $m])
+                @endforeach
+            </div>
+            {{-- The sport must not leak into the sentence: with "All" active the line
+                 would otherwise read "No live All matches right now". --}}
+            <div class="mab__empty" data-all="No live matches right now"
+                 data-tpl="No live {sport} matches right now"
+                 @if ($abLiveRows->isNotEmpty()) hidden @endif>No live matches right now</div>
         </div>
 
-        {{-- ── TAB 1: FINISHED — no real finished-match feed is wired yet. ── --}}
+        {{-- ── TAB 1: FINISHED — results, from the SAME feed the Live tab reads ── --}}
         <div class="mab__panel" id="mabPanel1">
-            <div class="mab__empty" data-tpl="No finished {sport} matches yet">No finished Cricket matches yet</div>
+            <div class="mab__ltitle" @if ($abFinishedRows->isEmpty()) hidden @endif>
+                <span class="mab__ldot"></span><span class="mab__ltxt">Recent results</span><span class="mab__lsee">See all</span>
+            </div>
+            <div class="mab__group">
+                @foreach ($abFinishedRows as $m)
+                    @include('site.partials.actionboard-match-card', ['m' => $m])
+                @endforeach
+            </div>
+            <div class="mab__empty" data-all="No finished matches yet"
+                 data-tpl="No finished {sport} matches yet"
+                 @if ($abFinishedRows->isNotEmpty()) hidden @endif>No finished matches yet</div>
         </div>
 
         {{-- ── TAB 2 / 3: DISTRICT & STATE boards ──────────────────────── --}}
@@ -435,29 +436,7 @@
         @endforeach
     </div>
 
-    {{-- Floating bottom bar — the app's CrexBottomBar. --}}
-    <nav class="mab__nav" aria-label="ActionBoard">
-        <a class="mab__navi" href="{{ route('site.gamehub') }}">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"></path></svg>
-            Home
-        </a>
-        <button class="mab__navi is-on" type="button" data-sport="Cricket" onclick="mabSport('Cricket', this)">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.05,12.81L6.56,4.32c-0.39-0.39-1.02-0.39-1.41,0L2.32,7.15c-0.39,0.39-0.39,1.02,0,1.41l8.49,8.49c0.39,0.39,1.02,0.39,1.41,0l2.83-2.83C15.44,13.83,15.44,13.2,15.05,12.81z"></path><rect x="16.17" y="16.17" width="2" height="6" transform="matrix(0.7071 -0.7071 0.7071 0.7071 -8.5264 17.7562)"></rect><circle cx="18.5" cy="5.5" r="3.5"></circle></svg>
-            Cricket
-        </button>
-        <button class="mab__navi" type="button" data-sport="Badminton" onclick="mabSport('Badminton', this)">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.52,2.49c-2.34-2.34-6.62-1.87-9.55,1.06c-1.6,1.6-2.52,3.87-2.54,5.46c-0.02,1.58,0.26,3.89-1.35,5.5l-4.24,4.24l1.42,1.42l4.24-4.24c1.61-1.61,3.92-1.33,5.5-1.35s3.86-0.94,5.46-2.54C21.38,9.11,21.86,4.83,19.52,2.49z M10.32,11.68c-1.53-1.53-1.05-4.61,1.06-6.72s5.18-2.59,6.72-1.06c1.53,1.53,1.05,4.61-1.06,6.72S11.86,13.21,10.32,11.68z"></path><path d="M18,17c0.53,0,1.04,0.21,1.41,0.59c0.78,0.78,0.78,2.05,0,2.83C19.04,20.79,18.53,21,18,21s-1.04-0.21-1.41-0.59c-0.78-0.78-0.78-2.05,0-2.83C16.96,17.21,17.47,17,18,17 M18,15c-1.02,0-2.05,0.39-2.83,1.17c-1.56,1.56-1.56,4.09,0,5.66C15.95,22.61,16.98,23,18,23s2.05-0.39,2.83-1.17c1.56-1.56,1.56-4.09,0-5.66C20.05,15.39,19.02,15,18,15L18,15z"></path></svg>
-            Badminton
-        </button>
-        <button class="mab__navi" type="button" data-sport="Football" onclick="mabSport('Football', this)">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.02,15.62c-0.08,2.42,0.32,4.34,0.67,4.69s2.28,0.76,4.69,0.67L3.02,15.62z"></path><path d="M13.08,3.28C10.75,3.7,8.29,4.62,6.46,6.46s-2.76,4.29-3.18,6.62l7.63,7.63c2.34-0.41,4.79-1.34,6.62-3.18s2.76-4.29,3.18-6.62L13.08,3.28z M9.9,15.5l-1.4-1.4l5.6-5.6l1.4,1.4L9.9,15.5z"></path><path d="M20.98,8.38c0.08-2.42-0.32-4.34-0.67-4.69s-2.28-0.76-4.69-0.67L20.98,8.38z"></path></svg>
-            Football
-        </button>
-        <a class="mab__navi" href="/profile">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg>
-            Player
-        </a>
-    </nav>
+    @include('site.partials.mab-bottombar', ['active' => 'Matches'])
 </div>
 
     <!-- Custom Top Navigation Header (Desktop) -->
@@ -2779,6 +2758,37 @@ main.container {
         height: 1px; background: #E2E8F0;
     }
 
+    /* ── Sport chips (SportFilterRow) ────────────────────────────────── */
+    .mab__sports {
+        display: flex; align-items: center; gap: 9px;
+        margin: 0 -16px; padding: 10px 16px 8px;
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        /* The Android edge-stretch has no orientation, so a horizontal strip inside a
+           vertical page bounces the whole board sideways; contain it here. */
+        overscroll-behavior-x: contain;
+    }
+    .mab__sports::-webkit-scrollbar { display: none; }
+    .mab__sport {
+        flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+        height: 34px; padding: 0 16px; border-radius: 50px; cursor: pointer;
+        background: #fff; border: 1px solid #E7ECF3; color: #0F172A;
+        font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .05);
+        transition: background .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease;
+    }
+    .mab__sport svg { width: 16px; height: 16px; flex: 0 0 auto; color: #2563EB; transition: color .18s ease; }
+    /* Selected chip carries the blue glow the app's chips lift with. */
+    .mab__sport.is-on { background: #2563EB; border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(37, 99, 235, .38); }
+    .mab__sport.is-on svg { color: #fff; }
+    .mab.is-board .mab__sports { display: none; }
+
+    /* `hidden` must actually hide: every one of these carries a `display` of its own,
+       which outranks the UA sheet's [hidden] { display: none } and leaves the element
+       on screen. Filtering the feed depends on this rule. */
+    .mab__sports[hidden], .mab__sport[hidden], .mab__match[hidden],
+    .mab__ltitle[hidden], .mab__empty[hidden], .mab__group[hidden] { display: none !important; }
+
     /* ── Panels ──────────────────────────────────────────────────────── */
     .mab__body { padding: 4px 16px 0; }
     .mab__panel { display: none; }
@@ -2965,24 +2975,6 @@ main.container {
     .mab__lxp b { display: block; font-size: 18px; font-weight: 800; letter-spacing: -.5px; color: #0A0A0A; font-variant-numeric: tabular-nums; }
     .mab__lxp span { display: block; margin-top: 1px; font-size: 8.5px; font-weight: 600; letter-spacing: .5px; color: #9A9AA8; }
 
-    /* ── Floating bottom bar (CrexBottomBar) ─────────────────────────── */
-    .mab__nav {
-        position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 70;
-        height: 72px; background: #fff; border-radius: 26px; border: 1px solid #EDEFF3;
-        box-shadow: 0 7px 22px rgba(0, 0, 0, .09);
-        display: flex; align-items: center; justify-content: space-around;
-        padding: 0 4px;
-        padding-bottom: env(safe-area-inset-bottom, 0);
-    }
-    .mab__navi {
-        background: none; border: 0; cursor: pointer; text-decoration: none;
-        display: flex; flex-direction: column; align-items: center; gap: 3px;
-        font-size: 10px; font-weight: 500; color: #9AA0AC; width: 19%;
-        padding: 6px 0; font-family: inherit;
-    }
-    .mab__navi svg { width: 24px; height: 24px; transition: transform .25s cubic-bezier(.3, 1.4, .6, 1); }
-    .mab__navi.is-on { color: #2563EB; font-weight: 700; }
-    .mab__navi.is-on svg { transform: scale(1.14) translateY(-3px); }
 }
 </style>
 
@@ -2992,7 +2984,8 @@ main.container {
     if (!mab) return;
 
     var currentTab = 0;
-    var currentSport = 'Cricket';
+    var currentSport = 'All';       // wire key of the active chip
+    var currentSportLabel = 'All';  // what a human reads, for the empty line
 
     // App bar lifts (frost + elevation) once content scrolls beneath it.
     var bar = document.getElementById('mabBar');
@@ -3018,22 +3011,49 @@ main.container {
         window.scrollTo({ top: 0 });
     };
 
-    // Bottom-bar sport switch — only Cricket has a real feed today; other sports
-    // show an honest empty state instead of fabricated fixtures (app parity).
-    window.mabSport = function (sport, btn) {
-        currentSport = sport;
-        mab.querySelectorAll('.mab__navi[data-sport]').forEach(function (b) {
-            b.classList.toggle('is-on', b === btn);
+    // Sport chip switch. This used to hide the whole feed and print "No live X matches
+    // yet" for anything that wasn't Cricket — the board never filtered, it just pretended
+    // the other sports had nothing in them. Now the rows carry their sport and the chips
+    // filter what is actually there.
+    window.mabSport = function (key, btn) {
+        currentSport = key;
+        currentSportLabel = (btn && btn.dataset.label) || key;
+        mab.querySelectorAll('.mab__sport').forEach(function (b) {
+            var on = b === btn;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
         });
-        var cricket = mab.querySelector('.mab__cricket');
-        var other = mab.querySelector('.mab__othersport');
-        var isCricket = sport === 'Cricket';
-        cricket.hidden = !isCricket;
-        other.hidden = isCricket;
-        if (!isCricket) other.textContent = 'No live ' + sport + ' matches yet';
-        var fin = document.querySelector('#mabPanel1 .mab__empty');
-        fin.textContent = fin.dataset.tpl.replace('{sport}', sport);
+        mabFilter();
+        // Keep the chosen chip in view: the strip scrolls, so one picked at its far end
+        // would otherwise sit half off-screen once the list underneath redraws.
+        if (btn && btn.scrollIntoView) {
+            btn.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+        }
     };
+
+    // Show the cards that match the chip, and let each panel's own empty line speak when
+    // none do — one filter over the Live and Finished feeds, which share a card partial.
+    function mabFilter() {
+        ['mabPanel0', 'mabPanel1'].forEach(function (id) {
+            var panel = document.getElementById(id);
+            if (!panel) return;
+            var shown = 0;
+            panel.querySelectorAll('.mab__match[data-sport]').forEach(function (card) {
+                var ok = currentSport === 'All' || card.dataset.sport === currentSport;
+                card.hidden = !ok;
+                if (ok) shown++;
+            });
+            var title = panel.querySelector('.mab__ltitle');
+            if (title) title.hidden = shown === 0;
+            var empty = panel.querySelector('.mab__empty');
+            if (empty) {
+                empty.hidden = shown > 0;
+                empty.textContent = currentSport === 'All'
+                    ? empty.dataset.all
+                    : empty.dataset.tpl.replace('{sport}', currentSportLabel);
+            }
+        });
+    }
 
     // Join a private match by its share code (the code itself is the grant).
     window.mabJoinByCode = function () {

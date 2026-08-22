@@ -743,6 +743,10 @@ final class PublicWebController extends Controller
                 $scoreText = (string) ($m->score_text ?: '');
                 return [
                     'id'          => (string) $m->id,
+                    // Which sport this match is — the key the app filters on ("table_tennis",
+                    // not "Table Tennis"). Without it the web board could only ever pretend
+                    // to switch sports, because every row looked like cricket.
+                    'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
                     'team1'       => (string) $m->home,
                     'team2'       => (string) $m->away,
                     // Team crests: uploaded logo path/URL + default emblem key (action1..4)

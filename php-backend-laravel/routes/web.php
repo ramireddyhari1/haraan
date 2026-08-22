@@ -157,6 +157,27 @@ Route::middleware('auth')->controller(\App\Http\Controllers\Web\EventBookingCont
     Route::get('/bookings/{id}/pass', 'pass')->whereNumber('id')->name('site.booking.pass');
 });
 
+// The app's two social destinations, now that the ActionBoard's bottom bar points at
+// them: Home is the photo feed, Chat is player-to-player DMs. Both read the same tables
+// the JWT API serves the app — a session instead of a token is the only difference.
+Route::controller(\App\Http\Controllers\Web\SocialFeedController::class)->group(function (): void {
+    // Reading the feed is public (the app's is too — the posts on it are public accounts'
+    // by definition); acting on a post is not.
+    Route::get('/feed', 'index')->name('site.feed');
+    Route::get('/feed/posts/{id}/comments', 'comments')->whereNumber('id')->name('site.feed.comments');
+    Route::middleware('auth')->group(function (): void {
+        Route::post('/feed/posts/{id}/like', 'toggleLike')->whereNumber('id')->name('site.feed.like');
+        Route::post('/feed/posts/{id}/comments', 'addComment')->whereNumber('id')->name('site.feed.comment');
+    });
+});
+
+Route::middleware('auth')->controller(\App\Http\Controllers\Web\PlayerChatController::class)->group(function (): void {
+    Route::get('/chat', 'index')->name('site.chat');
+    Route::get('/chat/{id}', 'show')->whereNumber('id')->name('site.chat.thread');
+    Route::post('/chat/{id}/messages', 'send')->whereNumber('id')->name('site.chat.send');
+    Route::get('/chat/{id}/poll', 'poll')->whereNumber('id')->name('site.chat.poll');
+});
+
 // Header inbox lanes — the web twins of the app's chat + bell icons. Both read the
 // same tables the JWT API serves the app, so a conversation or a notification looks
 // the same wherever the user opens it.
