@@ -58,12 +58,29 @@ object GoogleSignInHelper {
     // reports it as "no credential", which is indistinguishable from owning no Google account.
     val picker = GetSignInWithGoogleOption.Builder(clientId).build()
     return when (val second = attempt(context, picker)) {
-      is Attempt.Done -> second.result
-      Attempt.NoCredential -> GoogleSignInResult.Error(
-        "Google sign-in isn't available on this device. Please continue with email or phone."
-      )
+      // A cancellation HERE is not the same as a cancellation anywhere else. Pass 1 already
+      // reported that this account is not authorised for us, so the user has just picked an
+      // account out of the full picker — they did not back out. When Play Services then fails
+      // to mint the token (an unregistered signing SHA-1 is the usual cause) the picker simply
+      // closes with no credential, and Credential Manager hands that back as a cancellation.
+      // Reporting it as one leaves the user staring at the login screen having tapped their
+      // own account and been told nothing at all, which is the exact bug this fixes.
+      is Attempt.Done ->
+        if (second.result is GoogleSignInResult.Cancelled) unavailable() else second.result
+      Attempt.NoCredential -> unavailable()
     }
   }
+
+  /**
+   * What we can honestly say when Google refuses. The cause is almost always on the Google
+   * Cloud side — this build's package + signing certificate not being registered as an
+   * Android OAuth client in the same project as the Web client ID — which is nothing the
+   * person holding the phone can act on, so the message points at the doors that do work
+   * rather than blaming their device or their account.
+   */
+  private fun unavailable(): GoogleSignInResult = GoogleSignInResult.Error(
+    "Google couldn't complete the sign-in. Please continue with email or phone."
+  )
 
   /** One Credential Manager round trip; [Attempt.NoCredential] means "try another option". */
   private sealed interface Attempt {
@@ -79,7 +96,7 @@ object GoogleSignInHelper {
   } catch (e: NoCredentialException) {
     // Not necessarily an empty device: an unregistered signing SHA-1, a consent screen the
     // user isn't a test user on, and the One Tap cooldown all land here too.
-    Log.w(TAG, "no credential from ${option.javaClass.simpleName} for ${BuildConfig.GOOGLE_WEB_CLIENT_ID}", e)
+    Log.w(TAG, "no credential from ${option.type} for ${BuildConfig.GOOGLE_WEB_CLIENT_ID}", e)
     Attempt.NoCredential
   } catch (e: GetCredentialException) {
     Log.w(TAG, "getCredential failed (${e.type})", e)
