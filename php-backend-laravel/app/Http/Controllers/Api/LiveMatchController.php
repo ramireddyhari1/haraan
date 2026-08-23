@@ -620,6 +620,16 @@ class LiveMatchController extends Controller
      * Each entry carries the over marker, a human line, and the outcome flags the app
      * uses to colour the ball bubble.
      */
+    /**
+     * Public so the scoring path can ask for the same replay it would otherwise have to
+     * reimplement: after a ball is recorded, MatchesController needs the line for THAT
+     * delivery, and the crease it belongs to is only knowable by replaying the log.
+     */
+    public function commentaryFeed(LiveMatch $match): array
+    {
+        return $this->buildCommentary($match);
+    }
+
     private function buildCommentary(LiveMatch $match): array
     {
         $actions = DB::table('match_actions')
@@ -694,6 +704,10 @@ class LiveMatchController extends Controller
                 default: continue 2;
             }
 
+            // What the board has always shown, and what a written line is expanded FROM.
+            $shorthand = trim(($bowler !== '' ? "$bowler to " : '') . ($striker !== '' ? "$striker, " : '') . $outcome);
+            $written = trim((string) ($act->commentary ?? ''));
+
             $overNo = intdiv($legalBalls, 6);
             $ballInOver = ($legalBalls % 6) + 1;
             $overMark = "$overNo.$ballInOver";
@@ -704,7 +718,19 @@ class LiveMatchController extends Controller
                 'innings'  => $inningsNo,
                 'over'     => $overMark,
                 'kind'     => 'ball',
-                'text'     => trim(($bowler !== '' ? "$bowler to " : '') . ($striker !== '' ? "$striker, " : '') . $outcome),
+                // A written line replaces the scorer's shorthand when this ball has one.
+                // Null is the normal state: older balls, and every ball when Gemini is not
+                // configured. The shorthand rides along regardless, so a client that wants
+                // the terse feed never has to re-derive it.
+                'text'      => $written !== '' ? $written : $shorthand,
+                'shorthand' => $shorthand,
+                'actionId'  => (int) $act->id,
+                // The parts, separately. The collapsed shorthand is ambiguous when a name
+                // is missing ("kishore to no run" reads as a batter called "no run"), so
+                // anything WRITING from these facts must get them labelled, not parsed.
+                'bowler'    => $bowler,
+                'striker'   => $striker,
+                'outcome'   => $outcome,
                 'label'    => $label,
                 'runs'     => $runsOffBat + $extras,
                 'wicket'   => $wicket,

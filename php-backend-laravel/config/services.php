@@ -208,6 +208,23 @@ return [
 
     // Google Cloud Translation API (server-side key — never shipped to the app; the
     // app calls /api/translate which proxies to Google with this key).
+    // Gemini, used to write the ball-by-ball commentary line (App\Services\CricketCommentary).
+    // Server-side only — never shipped in the APK. With no key the board keeps the
+    // template commentary it has always had, so this is safe to leave unset.
+    // Vertex AI ("Agent Platform API"). Preferred over the AI Studio key: it bills to
+    // Cloud, which is where this project's credits are, and Vertex does not use prompts
+    // to train Google's models. Path may be relative to the app root.
+    'vertex' => [
+        'credentials' => env('VERTEX_CREDENTIALS'), // service account JSON
+        'project' => env('VERTEX_PROJECT', 'haraan'),
+        'location' => env('VERTEX_LOCATION', 'us-central1'),
+    ],
+
+    'gemini' => [
+        'key' => env('GEMINI_API_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
+    ],
+
     'google_translate' => [
         'key' => env('GOOGLE_TRANSLATE_API_KEY'),
     ],

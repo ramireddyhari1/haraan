@@ -616,6 +616,58 @@ final class MatchesController extends Controller
             $match->save();
         }
 
+        // Write the broadcast line for the ball just recorded.
+        //
+        // AFTER the response, deliberately: QUEUE_CONNECTION is `sync`, so dispatching a
+        // job would run it inline and make the scorer wait on a model. afterResponse runs
+        // once the response is flushed, which keeps tapping FOUR instant and needs no
+        // queue worker. Everything inside is best-effort — the ball is already saved, and
+        // the feed falls back to the scorer's shorthand if no line is ever written.
+        if (app(\App\Services\CricketCommentary::class)->isConfigured()) {
+            $matchId = (int) $match->id;
+            dispatch(function () use ($matchId): void {
+                try {
+                    $m = LiveMatch::query()->find($matchId);
+                    if ($m === null) {
+                        return;
+                    }
+                    // The line for THIS delivery comes from the same replay the board
+                    // reads, so the written sentence can never describe a different ball
+                    // than the one on screen.
+                    $feed = app(\App\Http\Controllers\Api\LiveMatchController::class)->commentaryFeed($m);
+                    $balls = array_values(array_filter($feed, fn (array $e): bool => ($e['kind'] ?? '') === 'ball'));
+                    // FIRST, not last: buildCommentary ends with array_reverse, so the feed
+                    // is newest-first. Taking end() here wrote the line onto the OLDEST ball
+                    // of the match, and the "already written" guard below then made every
+                    // later delivery a no-op — the feature would have looked simply dead.
+                    $last = $balls[0] ?? null;
+                    if (! is_array($last) || empty($last['actionId'])) {
+                        return;
+                    }
+                    // Already written (a retried request, a replayed log): never pay twice
+                    // for the same ball, and never let the words change under the reader.
+                    $existing = \Illuminate\Support\Facades\DB::table('match_actions')
+                        ->where('id', $last['actionId'])->value('commentary');
+                    if (trim((string) $existing) !== '') {
+                        return;
+                    }
+                    app(\App\Services\CricketCommentary::class)->writeFor((int) $last['actionId'], $m, [
+                        'line' => (string) ($last['shorthand'] ?? $last['text'] ?? ''),
+                        // Roles labelled, never parsed out of the collapsed shorthand.
+                        'bowler' => (string) ($last['bowler'] ?? ''),
+                        'striker' => (string) ($last['striker'] ?? ''),
+                        'outcome' => (string) ($last['outcome'] ?? ''),
+                        'over' => (string) ($last['over'] ?? ''),
+                        'wicket' => (bool) ($last['wicket'] ?? false),
+                        'battingName' => (string) ($last['battingName'] ?? ''),
+                        'format' => (string) ($m->competition ?? ''),
+                    ]);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('commentary write skipped: ' . $e->getMessage());
+                }
+            })->afterResponse();
+        }
+
         // Push "this match changed" so watchers refetch instantly (cricket per-ball).
         \App\Events\MatchUpdated::dispatch($match->id);
 
