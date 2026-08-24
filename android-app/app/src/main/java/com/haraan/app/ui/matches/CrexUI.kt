@@ -19,11 +19,9 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.nativeCanvas
 import android.graphics.BitmapFactory
-import kotlinx.coroutines.delay
 
 // ─────────────────────────────────────────────
 //  DESIGN TOKENS
@@ -283,9 +281,28 @@ private fun HeroLastBall(state: MatchUiState) {
             "•", "0" -> Color(0xFF0F172A).copy(alpha = 0.25f)
             else -> Color(0xFF0F172A)
         }
+        // Identity of the delivery, not its value: the screen refetches on a poll and on
+        // every realtime nudge, and keyed on "6" a six would replay its burst every few
+        // seconds. Overs advance per legal ball and the over's ball list grows per
+        // delivery, so the pair moves exactly once per ball and never on a refetch.
+        val ballKey = state.overs + "|" + state.thisOver.size + "|" + lastBall
+        var burst by remember { mutableStateOf<BurstKind?>(null) }
+        val fired = rememberBurst(ballKey = ballKey, lastBall = lastBall, isLive = state.isLive)
+        // Keyed on the EVENT (kind + ball), not the kind: back-to-back sixes are two
+        // moments, and keying on "SIX" would leave the second one silent.
+        LaunchedEffect(fired?.ballKey) { if (fired != null) burst = fired.kind }
+
         Box(contentAlignment = Alignment.Center) {
             Text(lastBall, color = c.copy(alpha = 0.12f), fontSize = 56.sp, fontWeight = FontWeight.Black)
             Text(lastBall, color = c, fontSize = 38.sp, fontWeight = FontWeight.Black)
+            // Overlaid, so the burst can spill past the centre column without moving any
+            // of the hero's layout — a score that shifted sideways on every six would be
+            // worse than no animation.
+            BoundaryBurst(
+                kind = burst,
+                modifier = Modifier.size(190.dp),
+                onFinished = { burst = null },
+            )
         }
         Spacer(Modifier.height(6.dp))
         Box(
@@ -468,16 +485,19 @@ private fun ScoringRibbon(modifier: Modifier = Modifier, state: MatchUiState, ba
         animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
         label = "phase"
     )
-    // …plus a one-shot fast burst + haptic synced to each new ball outcome.
+    // …plus a one-shot fast burst synced to each new ball outcome. Visual only: the
+    // PHYSICAL half of a boundary belongs to BoundaryBurst, which owns one haptic per
+    // delivery with a signature per event. This used to fire its own confirm tick too,
+    // and the two landed on the same ball a few milliseconds apart — on a real phone
+    // that reads as one smeared buzz rather than two deliberate ones.
     val boost = remember { Animatable(0f) }
-    val view = LocalView.current
     var firstRun by remember { mutableStateOf(true) }
     LaunchedEffect(state.thisOver) {
         if (firstRun) { firstRun = false; return@LaunchedEffect }
         when (state.thisOver.lastOrNull()) {
-            "4" -> { fireScoreHaptic(view, wicket = false); boost.animateTo(boost.value + 2.2f, tween(950, easing = FastOutSlowInEasing)) }
-            "6" -> { fireScoreHaptic(view, wicket = false); delay(80); fireScoreHaptic(view, wicket = false); boost.animateTo(boost.value + 3.0f, tween(1100, easing = FastOutSlowInEasing)) }
-            "W" -> { fireScoreHaptic(view, wicket = true); boost.animateTo(boost.value + 2.6f, tween(1000, easing = FastOutSlowInEasing)) }
+            "4" -> boost.animateTo(boost.value + 2.2f, tween(950, easing = FastOutSlowInEasing))
+            "6" -> boost.animateTo(boost.value + 3.0f, tween(1100, easing = FastOutSlowInEasing))
+            "W" -> boost.animateTo(boost.value + 2.6f, tween(1000, easing = FastOutSlowInEasing))
             else -> {}
         }
         // Keep the accumulated offset bounded (period = 1 segment) so it never drifts off-path.
@@ -522,15 +542,6 @@ private fun ScoringRibbon(modifier: Modifier = Modifier, state: MatchUiState, ba
     }
 }
 
-/** Boundary = crisp confirm tick; wicket = sharp reject buzz. Falls back on pre-API-30. */
-private fun fireScoreHaptic(view: android.view.View, wicket: Boolean) {
-    val constant = if (android.os.Build.VERSION.SDK_INT >= 30) {
-        if (wicket) android.view.HapticFeedbackConstants.REJECT else android.view.HapticFeedbackConstants.CONFIRM
-    } else {
-        android.view.HapticFeedbackConstants.LONG_PRESS
-    }
-    view.performHapticFeedback(constant)
-}
 
 
 
