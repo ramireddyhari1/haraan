@@ -1,10 +1,6 @@
 package com.haraan.app.ui.matches
 
 import android.content.Context
-import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -28,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
-import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -228,85 +223,21 @@ private fun easeOutCubic(t: Float): Float {
 }
 
 /**
- * The physical half.
+ * The physical half — delegated, deliberately.
  *
- * Each event gets its own signature so the three are distinguishable by feel alone, and
- * the signature is carried by the COUNT rather than by strength: a four is one knock, a
- * six two, a wicket three. Count survives on every motor; strength does not.
- *
- * That distinction is the whole reason there are two paths below. Most phones — every
- * budget and mid-range handset with a rotary (ERM) motor — report
- * `hasAmplitudeControl() == false`, and on those the amplitude array handed to
- * createWaveform is DISCARDED: each pulse plays flat out, so a "soft" four and a "heavy"
- * six come out identical and the whole shaped design collapses into one generic buzz.
- * Verified on the Realme test device, which reports `capabilities = [ON_CALLBACK]` and no
- * amplitude control at all.
- *
- * So when the hardware cannot render a shaped waveform, the device's own predefined
- * effects are used instead. Those are tuned by the OEM for that exact motor, including
- * its spin-up time, and land far crisper than a hand-rolled 40ms pulse an ERM barely has
- * time to start. The shaped waveform is kept for hardware that can actually express it.
- *
- * Never throws — a phone with no vibrator, or a user who has switched haptics off, must
- * not be able to break a scoreboard.
+ * This used to carry its own vibrator code. The keypad in ScoringScreen then needed the
+ * same three signatures, and two copies of a haptic is exactly how the last bug here
+ * happened: the scoring ribbon kept a confirm tick of its own and fired it on the same
+ * ball, milliseconds apart, which reads as one smeared buzz rather than two deliberate
+ * ones. A six must feel identical whether you are watching it or entering it, so both
+ * sides call the same function. See [cricketThud] for why the signature is carried by the
+ * number of knocks rather than their strength.
  */
-private suspend fun thump(context: Context, kind: BurstKind) {
-    try {
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        } ?: return
-
-        if (!vibrator.hasVibrator()) return
-
-        // No amplitude control: the shaped waveform would be flattened, so use the
-        // motor's own tuned knocks and let the COUNT carry the meaning.
-        if (!vibrator.hasAmplitudeControl()) {
-            val knock = VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
-            when (kind) {
-                // One tuned double-knock rather than two singles: the OEM spaces the pair
-                // for its own motor far better than a guessed gap can.
-                BurstKind.SIX -> vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK))
-                BurstKind.FOUR -> vibrator.vibrate(knock)
-                BurstKind.WICKET -> repeat(3) { i ->
-                    if (i > 0) delay(95)
-                    vibrator.vibrate(knock)
-                }
-            }
-            return
-        }
-
-        // timings alternate off/on, starting with a 0ms wait.
-        val timings: LongArray
-        val amplitudes: IntArray
-        when (kind) {
-            BurstKind.SIX -> {
-                timings = longArrayOf(0, 55, 70, 90)
-                amplitudes = intArrayOf(0, 200, 0, 255)
-            }
-            BurstKind.FOUR -> {
-                timings = longArrayOf(0, 60)
-                amplitudes = intArrayOf(0, 170)
-            }
-            BurstKind.WICKET -> {
-                timings = longArrayOf(0, 40, 45, 40, 45, 110)
-                amplitudes = intArrayOf(0, 255, 0, 255, 0, 255)
-            }
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(timings, -1)
-        }
-    } catch (e: kotlinx.coroutines.CancellationException) {
-        // Leaving the screen mid-wicket cancels this. Cancellation is not a failure and
-        // must travel on, or the coroutine that owns the burst never learns it is done.
-        throw e
-    } catch (_: Throwable) {
-        // Haptics are a nicety. Losing them must never cost the screen.
-    }
-}
+private suspend fun thump(context: Context, kind: BurstKind) = cricketThud(
+    context,
+    when (kind) {
+        BurstKind.SIX -> Thud.SIX
+        BurstKind.FOUR -> Thud.FOUR
+        BurstKind.WICKET -> Thud.WICKET
+    },
+)
