@@ -129,6 +129,14 @@ data class HomeFeed(
 data class SquadMember(
   val id: String,
   val name: String,
+  /**
+   * Their profile photo, when the squad entry is linked to a real account. Blank for a
+   * guest or a free-hand name — which is most of grassroots cricket, so every caller has
+   * to have a monogram ready rather than treating this as normally present.
+   */
+  val avatar: String = "",
+  /** Admin-granted blue tick. Shown beside the name wherever this player is named. */
+  val isVerified: Boolean = false,
   val isGuest: Boolean = false,
   val isCaptain: Boolean = false,
   val isViceCaptain: Boolean = false,

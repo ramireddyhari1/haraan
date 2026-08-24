@@ -110,7 +110,7 @@ class LiveMatchController extends Controller
                 'overs1'      => $isCricket ? ($battingTeam === 2 ? '' : $overs) : $setRally[0],
                 'overs2'      => $isCricket ? ($battingTeam === 2 ? $overs : '') : $setRally[1],
                 'battingTeam' => $battingTeam,
-                'status'      => (string) ($m->status ?? ''),
+                'status'      => $this->resultStatus($m),
                 // Which sport this is, so the app's Cricket/Badminton/Football boards
                 // can filter for real. Defaults to cricket: every match created before
                 // the column existed is one, and an untagged match must not vanish
@@ -551,8 +551,12 @@ class LiveMatchController extends Controller
             'canScore' => $canScore,
             'isPrivate' => (bool) $match->is_private,
             'joinCode' => (string) ($match->join_code ?? ''),
-            'homeSquad' => $match->home_squad ?: [],
-            'awaySquad' => $match->away_squad ?: [],
+            // Squads carry each member's photo where the entry is linked to an account, so
+            // the scorer's batter/bowler pickers can show a face instead of the same generic
+            // bat icon on every row. Blank for guests and free-hand names, which is the norm
+            // - see the monogram fallback in ScoringScreen.
+            'homeSquad' => $this->squadWithPhotos($match->home_squad ?: []),
+            'awaySquad' => $this->squadWithPhotos($match->away_squad ?: []),
             'team1' => $match->home,
             'team1Full' => $match->home_full ?: $match->home,
             'team1Logo' => $this->absoluteLogo($match->home_logo),
@@ -564,7 +568,7 @@ class LiveMatchController extends Controller
             'score' => $score,
             'overs' => (string) ($match->overs ?? ''),
             'crr' => (string) ($match->crr ?? ''),
-            'status' => $match->score_text ?: (string) ($match->status ?? ''),
+            'status' => $match->score_text ?: $this->resultStatus($match),
             'isLive' => strtolower((string) $match->status) === 'live',
             // Which detail screen to open. MatchUiState.sport existed with the comment
             // "drives which scorer/view opens" but was never populated — so every match,
@@ -581,6 +585,12 @@ class LiveMatchController extends Controller
             'board' => app(\App\Services\MatchEventRecorder::class)->boardPayload($match),
             'formatLabel' => (string) ($match->competition ?? ''),
             'venue' => (string) ($match->venue ?? ''),
+            // When the match began. `scheduled_at` is the time the creator SET; it is null
+            // for the many matches started on the spot, and there `created_at` is the honest
+            // answer. The flag says which one this is so the client can label it "Starts" vs
+            // "Started" rather than guessing, and neither is invented when both are absent.
+            'startLabel' => $this->startLabel($match),
+            'startIsScheduled' => $match->scheduled_at !== null,
             'venueBadge' => $this->venueBadge($match),
             'inningsLabel' => (string) ($match->status ?? ''),
             'battingTeam' => $battingTeam,
@@ -652,6 +662,22 @@ class LiveMatchController extends Controller
         $strikerId = null;
         $nonStrikerId = null;
 
+        // Milestone tracking. Deliberately mirrors buildInningsCards' arithmetic EXACTLY —
+        // striker is credited on every delivery except a wide, partnership takes runs plus
+        // extras — because a "fifty" card that disagreed with the scorecard beside it would
+        // be worse than no card at all.
+        $bat = [];              // name => ['runs','balls','fours','sixes','mark']
+        $pRuns = 0; $pBalls = 0; $pMark = 0;
+        $teamRuns = 0; $wkts = 0;
+        $inningsTotals = [];    // innings number => final runs, for the chase target
+        $target = null;
+
+        $ensure = static function (array &$bat, string $name): void {
+            if ($name !== '' && ! isset($bat[$name])) {
+                $bat[$name] = ['runs' => 0, 'balls' => 0, 'fours' => 0, 'sixes' => 0, 'mark' => 0];
+            }
+        };
+
         foreach ($actions as $act) {
             $type = (string) $act->action_type;
             $p = json_decode($act->payload, true) ?: [];
@@ -666,6 +692,13 @@ class LiveMatchController extends Controller
                 $nonStriker = $this->resolvePlayerName($match, $nonStrikerId);
                 $bowler = $this->resolvePlayerName($match, $p['bowler_id'] ?? null);
                 $legalBalls = 0;
+                if ($inningsNo > 1) {
+                    $inningsTotals[$inningsNo - 1] = $teamRuns;
+                    $target = $teamRuns + 1;
+                }
+                $bat = []; $pRuns = 0; $pBalls = 0; $pMark = 0; $teamRuns = 0; $wkts = 0;
+                $ensure($bat, $striker);
+                $ensure($bat, $nonStriker);
                 $feed[] = ['innings' => $inningsNo, 'over' => '', 'kind' => 'header',
                     'text' => "Innings $inningsNo — $battingName", 'label' => '', 'runs' => 0,
                     'wicket' => false, 'boundary' => false, 'battingName' => $battingName];
@@ -747,6 +780,89 @@ class LiveMatchController extends Controller
                 $legalBalls++;
             }
 
+            // ── Running figures, same rules as the scorecard ──
+            $total = $runsOffBat + $extras;
+            $teamRuns += $total;
+            $pRuns += $total;
+            if ($isLegal) {
+                $pBalls++;
+            }
+            if ($wicket) {
+                $wkts++;
+            }
+            $ensure($bat, $striker);
+            if ($striker !== '' && $type !== 'wide' && isset($bat[$striker])) {
+                $bat[$striker]['runs'] += $runsOffBat;
+                $bat[$striker]['balls'] += 1;
+                if ($type === 'runs' && $runsOffBat === 4) $bat[$striker]['fours'] += 1;
+                if ($type === 'runs' && $runsOffBat === 6) $bat[$striker]['sixes'] += 1;
+            }
+
+            // ── Milestones ──
+            // A batter's fifty, hundred, and every fifty after. `mark` remembers the last
+            // one announced so a player cannot be congratulated twice for the same fifty
+            // when the feed is rebuilt, and cannot skip one by hitting a six through it.
+            if ($striker !== '' && isset($bat[$striker])) {
+                $b = $bat[$striker];
+                $reached = intdiv($b['runs'], 50) * 50;
+                if ($reached >= 50 && $reached > $b['mark']) {
+                    $bat[$striker]['mark'] = $reached;
+                    $shots = [];
+                    if ($b['fours'] > 0) $shots[] = $b['fours'] . 'x4';
+                    if ($b['sixes'] > 0) $shots[] = $b['sixes'] . 'x6';
+                    $feed[] = [
+                        'innings' => $inningsNo, 'over' => $overMark, 'kind' => 'milestone',
+                        'milestoneKind' => $reached >= 100 ? 'century' : 'fifty',
+                        'text' => $striker . ($reached >= 100
+                            ? ($reached > 100 ? " moves to $reached" : ' brings up a HUNDRED')
+                            : ($reached > 50 ? " moves to $reached" : ' brings up a FIFTY')),
+                        'detail' => trim($b['runs'] . ' off ' . $b['balls']
+                            . ($shots ? '  ·  ' . implode('  ·  ', $shots) : '')),
+                        'label' => (string) $reached,
+                        'runs' => 0, 'wicket' => false, 'boundary' => false,
+                        'battingName' => $battingName,
+                        'playerId' => (string) ($strikerId ?? ''),
+                        'photo' => $this->avatarFor($strikerId, $photoCache),
+                    ];
+                }
+            }
+
+            // A fifty stand. Announced on the partnership, not on either batter, because a
+            // stand belongs to the pair — and it is dropped the moment a wicket falls.
+            $pReached = intdiv($pRuns, 50) * 50;
+            if (! $wicket && $pReached >= 50 && $pReached > $pMark) {
+                $pMark = $pReached;
+                $pair = array_values(array_filter([$striker, $nonStriker]));
+                $feed[] = [
+                    'innings' => $inningsNo, 'over' => $overMark, 'kind' => 'milestone',
+                    'milestoneKind' => 'partnership',
+                    'text' => ($pair ? implode(' & ', $pair) . ' — ' : '') . "$pReached partnership",
+                    'detail' => $pRuns . ' runs off ' . $pBalls . ' balls, unbroken',
+                    'label' => (string) $pReached,
+                    'runs' => 0, 'wicket' => false, 'boundary' => false,
+                    'battingName' => $battingName, 'playerId' => '', 'photo' => null,
+                ];
+            }
+
+            // The chase settled. Only in the second innings, and only once.
+            if ($target !== null && $teamRuns >= $target) {
+                $feed[] = [
+                    'innings' => $inningsNo, 'over' => $overMark, 'kind' => 'milestone',
+                    'milestoneKind' => 'target',
+                    'text' => "$battingName win the chase",
+                    'detail' => "Target $target reached in $overMark overs",
+                    'label' => 'WON',
+                    'runs' => 0, 'wicket' => false, 'boundary' => false,
+                    'battingName' => $battingName, 'playerId' => '', 'photo' => null,
+                ];
+                $target = null;
+            }
+
+            // Partnership is broken by the wicket, not by the runs.
+            if ($wicket) {
+                $pRuns = 0; $pBalls = 0; $pMark = 0;
+            }
+
             // Strike rotation (so the next line names the right batter).
             $runsToSwap = ($type === 'bye' || $type === 'legbye') ? $extras : $runsOffBat;
             if ($runsToSwap % 2 === 1) {
@@ -791,6 +907,107 @@ class LiveMatchController extends Controller
             'photo'       => $this->avatarFor($id, $photoCache),
             'career'      => $this->careerFor($id, $cache),
         ];
+    }
+
+    /**
+     * Squad entries with a `photo` added wherever the member is a real, non-guest account.
+     *
+     * Deliberately ADDITIVE: the stored shape ({id, name}) is passed through untouched and
+     * a key is appended, so nothing that already reads these arrays can break. Resolution
+     * is by the squad's own id - never by name, because a name match deciding whose face
+     * appears next to "select new batsman" is exactly the kind of guess that puts the wrong
+     * person on screen.
+     *
+     * @param  array<int,mixed> $squad
+     * @return array<int,mixed>
+     */
+    private function squadWithPhotos(array $squad): array
+    {
+        $cache = [];
+
+        // One lookup for the whole squad's blue ticks rather than one per member. Verified
+        // is admin-granted and rare, so the map is almost always tiny.
+        $ids = [];
+        foreach ($squad as $member) {
+            $id = is_array($member) ? trim((string) ($member['id'] ?? '')) : '';
+            if ($id !== '' && strtolower($id) !== 'null') {
+                $ids[] = $id;
+            }
+        }
+        $verified = $ids === []
+            ? collect()
+            : User::whereIn('player_id', $ids)
+                ->where('is_guest', false)
+                ->pluck('is_verified', 'player_id');
+
+        return array_map(function ($member) use (&$cache, $verified) {
+            if (! is_array($member)) {
+                return $member;
+            }
+            $id = trim((string) ($member['id'] ?? ''));
+            $real = $id !== '' && strtolower($id) !== 'null';
+            $member['photo'] = $real ? (string) ($this->avatarFor($id, $cache) ?? '') : '';
+            $member['is_verified'] = $real && (bool) ($verified[$id] ?? false);
+
+            return $member;
+        }, $squad);
+    }
+
+    /**
+     * What a finished match should SAY.
+     *
+     * Cricket rewrites `status` on completion with a real result ("babu won by 3
+     * wickets"), but every other sport was left holding the literal word "Completed" - so
+     * a badminton card that knew it was 1-0 still refused to say who had won.
+     *
+     * Deliberately scoped to NON-cricket. Cricket's margin is runs or wickets depending on
+     * which side batted second, and "BAB won 25-22" is not a thing anyone says about a
+     * cricket match; a wrong result line is worse than a dull one, so cricket keeps
+     * whatever it already wrote.
+     *
+     * Anything that is not a bare "completed" passes straight through - that covers Live,
+     * Scheduled, and every result string already stored.
+     */
+    private function resultStatus(LiveMatch $m): string
+    {
+        $status = trim((string) ($m->status ?? ''));
+        if (strtolower($status) !== 'completed') {
+            return $status;
+        }
+        if (strtolower((string) ($m->sport ?: 'cricket')) === 'cricket') {
+            return $status;
+        }
+
+        $h = (int) ($m->home_score ?? 0);
+        $a = (int) ($m->away_score ?? 0);
+        // Nothing was ever scored - there is no result to report, only an end.
+        if ($h === 0 && $a === 0) {
+            return $status;
+        }
+        if ($h === $a) {
+            return "Match tied $h-$a";
+        }
+
+        return $h > $a
+            ? trim((string) $m->home) . " won $h-$a"
+            : trim((string) $m->away) . " won $a-$h";
+    }
+
+    /** "21 Aug 2026, 5:15 PM" for the start of a match, or '' when nothing is recorded. */
+    private function startLabel(LiveMatch $match): string
+    {
+        $at = $match->scheduled_at ?: $match->created_at;
+        if (! $at) {
+            return '';
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::parse($at)
+                ->timezone(config('app.timezone'))
+                ->format('j M Y, g:i A');
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /**

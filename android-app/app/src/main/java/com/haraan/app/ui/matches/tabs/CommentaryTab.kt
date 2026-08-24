@@ -330,6 +330,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
             items(state.commentary) { line ->
                 when {
                     line.kind == "header" -> CommentaryHeader(line.text)
+                    line.kind == "milestone" -> MilestoneBanner(line)
                     line.kind == "batter_in" -> NewBatterRow(line)
                     line.wicket -> WicketBanner(line, state)
                     else -> CommentaryRow(line)
@@ -507,6 +508,166 @@ private fun WicketBanner(line: CommentaryLine, state: MatchUiState) {
  * gets a card. That difference in FORM is what stops the pair reading as one template
  * printed in two colours, and it costs one row instead of two cards per dismissal.
  */
+/**
+ * A milestone, given the room a milestone deserves.
+ *
+ * Everything else in this feed is a line of text. A fifty rendered as another line of text
+ * is the same failure the hero card had before the boundary burst: the biggest moment of
+ * an innings drawn exactly like the smallest. So this is a BANNER — full width, the
+ * event's own colour, the number set enormous behind the words — and it is the only thing
+ * in the feed that looks like this, which is what makes it register while scrolling.
+ *
+ * Colour carries the rank: a hundred is gold, a fifty is the brand blue, a stand is green,
+ * a chase won is the winning red. No emoji anywhere near it — a trophy glyph would make it
+ * look like a mobile game, not a scoreboard.
+ */
+@Composable
+private fun MilestoneBanner(line: CommentaryLine) {
+    val accent = when (line.milestoneKind) {
+        "century" -> Color(0xFFD97706)
+        "partnership" -> Color(0xFF15803D)
+        "target" -> Color(0xFFDC2626)
+        else -> CrexColors.AccentBlue
+    }
+    val eyebrow = when (line.milestoneKind) {
+        "century" -> "MILESTONE"
+        "partnership" -> "PARTNERSHIP"
+        "target" -> "MATCH WON"
+        else -> "MILESTONE"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(accent.copy(alpha = 0.16f), accent.copy(alpha = 0.05f))
+                )
+            )
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+    ) {
+        // The number, enormous and faint, bled off the right edge. It reads as texture at a
+        // glance and as the figure itself when you look — the same trick the MVP card uses,
+        // so the two feel like one product.
+        Text(
+            line.label,
+            color = accent.copy(alpha = 0.13f),
+            fontSize = 112.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp),
+            style = TextStyle(fontFeatureSettings = "tnum")
+        )
+
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // ZONE 1 — the player. Large enough to be the reason you stop scrolling. A
+            // partnership belongs to two people, so rather than picking one of them to
+            // portray it shows the number itself at the same size: the column is never
+            // empty, and the card keeps one shape whatever kind of milestone it is.
+            if (line.milestoneKind == "fifty" || line.milestoneKind == "century") {
+                MilestoneFace(line.text, line.photoUrl, accent)
+            } else {
+                MilestoneDisc(line.label, accent)
+            }
+            Spacer(Modifier.width(16.dp))
+
+            // ZONE 2 — what happened, in three descending weights: what kind of moment,
+            // then the sentence, then the figures behind it.
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    eyebrow,
+                    color = accent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.5.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    line.text,
+                    color = CrexColors.TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    lineHeight = 22.sp,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                if (line.detail.isNotBlank()) {
+                    Spacer(Modifier.height(7.dp))
+                    Text(
+                        line.detail,
+                        color = CrexColors.TextSecondary,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Zone 1 for a milestone with no single owner — a stand, or a chase won.
+ *
+ * The number at portrait size keeps every milestone card the same shape, so the feed does
+ * not visibly reflow between a fifty and a partnership. Filling the slot with a generic
+ * icon instead would say nothing that the words beside it do not already say.
+ */
+@Composable
+private fun MilestoneDisc(label: String, accent: Color) {
+    Box(
+        modifier = Modifier
+            .size(84.dp)
+            .clip(CircleShape)
+            .background(accent.copy(alpha = 0.16f))
+            .border(2.5.dp, accent.copy(alpha = 0.6f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = accent,
+            fontSize = if (label.length > 3) 18.sp else 26.sp,
+            fontWeight = FontWeight.Black,
+            style = TextStyle(fontFeatureSettings = "tnum")
+        )
+    }
+}
+
+/** The milestone-maker's face; initials in the event colour when they have no photo. */
+@Composable
+private fun MilestoneFace(text: String, photoUrl: String, accent: Color) {
+    Box(
+        modifier = Modifier
+            .size(84.dp)
+            .clip(CircleShape)
+            .background(accent.copy(alpha = 0.16f))
+            .border(2.5.dp, accent.copy(alpha = 0.6f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        if (photoUrl.isNotBlank()) {
+            AsyncImage(
+                model = photoUrl,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+        } else {
+            // The headline starts with the player's name, so its initials are theirs.
+            val parts = text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+            val initials = when {
+                parts.isEmpty() -> "?"
+                parts.size == 1 -> parts[0].take(2).uppercase()
+                else -> (parts[0].take(1) + parts[1].take(1)).uppercase()
+            }
+            Text(initials, color = accent, fontSize = 27.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+
 @Composable
 private fun NewBatterRow(line: CommentaryLine) {
     // Only a career with real deliveries behind it counts — an all-zero row is the same

@@ -190,6 +190,8 @@ class MatchDetailsViewModel : ViewModel() {
             inningsCards = inningsCards(o.optJSONArray("inningsCards")),
             commentary = commentary(o.optJSONArray("commentary")),
             mvp = mvp(o.optJSONArray("mvp")),
+            startLabel = o.optName("startLabel"),
+            startIsScheduled = o.optBoolean("startIsScheduled", false),
         )
     }
 
@@ -251,8 +253,14 @@ class MatchDetailsViewModel : ViewModel() {
                 wicket = o.optBoolean("wicket"),
                 boundary = o.optBoolean("boundary"),
                 battingName = o.optString("battingName"),
-                playerId = o.optString("playerId"),
-                photoUrl = o.optString("photo"),
+                // optName, NOT optString: the server sends JSON null for a player with
+                // no photo, and optString renders that as the literal string "null" —
+                // non-blank, so every "has a photo?" check passed and the image loader
+                // was handed "null" as a URL. Left an empty ring on every card.
+                playerId = o.optName("playerId"),
+                photoUrl = o.optName("photo"),
+                milestoneKind = o.optString("milestoneKind"),
+                detail = o.optString("detail"),
                 career = career,
             )
         }
@@ -352,7 +360,13 @@ class MatchDetailsViewModel : ViewModel() {
                     // Guests come through as {"id":null} — optString would stringify that to
                     // "null", which then gets sent back as a bogus player ref. Treat it as blank.
                     val id = ov.optName("id").ifBlank { ov.optName("player_id") }
-                    SquadMember(id = id, name = name, isGuest = id.isBlank())
+                    SquadMember(
+                        id = id,
+                        name = name,
+                        avatar = ov.optName("photo").ifBlank { ov.optName("avatar") },
+                        isVerified = ov.optBoolean("is_verified", false),
+                        isGuest = id.isBlank(),
+                    )
                 }
             }
         }

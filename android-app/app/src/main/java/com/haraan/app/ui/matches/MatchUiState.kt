@@ -54,6 +54,10 @@ data class CommentaryLine(
     val playerId: String = "",
     /** The player's real profile photo, when they have one. Blank for guests. */
     val photoUrl: String = "",
+    /** Milestone cards only: "fifty" | "century" | "partnership" | "target". */
+    val milestoneKind: String = "",
+    /** Milestone cards only: the supporting figures, e.g. "54 off 15 · 3x4 · 6x6". */
+    val detail: String = "",
     val career: CareerBatting? = null
 )
 data class InningsExtras(val total: Int, val wides: Int, val noBalls: Int, val byes: Int, val legByes: Int)
@@ -201,6 +205,10 @@ data class MatchUiState(
     val venueBadgeArea: String = "",
     /** Format / competition label, e.g. "20 Over Match". */
     val competition: String = "",
+    /** "21 Aug 2026, 5:15 PM", or blank when the match records no time at all. */
+    val startLabel: String = "",
+    /** True when [startLabel] is a time the creator SET, false when it is when they began. */
+    val startIsScheduled: Boolean = false,
 
     // ── Live-scoring (ScoringWorkstation) state ──
     // 1 = team1 batting/chasing, 2 = team2. Drives which squad/colour the keypad uses.

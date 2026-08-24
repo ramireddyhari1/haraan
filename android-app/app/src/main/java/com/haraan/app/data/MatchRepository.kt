@@ -543,7 +543,14 @@ class MatchRepository(
       val o = arr.optJSONObject(i) ?: return@mapNotNull null
       val name = o.optString("name").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
       val id = o.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: ""
-      SquadMember(id = id, name = name)
+      val avatar = (o.optString("photo").takeIf { it.isNotBlank() && it != "null" }
+        ?: o.optString("avatar").takeIf { it.isNotBlank() && it != "null" }).orEmpty()
+      SquadMember(
+        id = id,
+        name = name,
+        avatar = avatar,
+        isVerified = o.optBoolean("is_verified", false),
+      )
     }
   }
 

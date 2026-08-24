@@ -164,6 +164,11 @@ private fun MatchOverviewCard(state: MatchUiState) {
     val rows = buildList {
         if (state.status.isNotBlank()) add("Status" to state.status)
         if (state.venue.isNotBlank()) add("Venue" to state.venue)
+        // "Starts" when the creator set a time, "Started" when this is simply when they
+        // began scoring - the two are not the same claim.
+        if (state.startLabel.isNotBlank()) {
+            add((if (state.startIsScheduled) "Starts" else "Started") to state.startLabel)
+        }
         if (state.toss.isNotBlank()) add("Toss" to state.toss)
     }
 
