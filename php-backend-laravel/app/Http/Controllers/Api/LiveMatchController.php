@@ -607,7 +607,7 @@ class LiveMatchController extends Controller
             // Ball-by-ball commentary feed (newest first), replayed from the log.
             'commentary' => $this->buildCommentary($match),
             // Impact ranking (MVP tab) derived from the same replayed cards.
-            'mvp' => $this->buildMvp($match, $cards),
+            'mvp' => $this->buildMvp($match, $cards, $viewer),
             // Current partnership + last wicket, derived from the live innings — real
             // values (no "0(0)" / "N/A" placeholders) or null when there's nothing yet.
             'partnership' => $partnership,
@@ -1060,7 +1060,7 @@ class LiveMatchController extends Controller
      * bowlers to the other one — so batting and bowling spells across both innings
      * aggregate onto one row. Keyed by display name, exactly like the replay itself.
      */
-    private function buildMvp(LiveMatch $match, array $cards): array
+    private function buildMvp(LiveMatch $match, array $cards, ?User $viewer = null): array
     {
         if (empty($cards)) {
             return [];
@@ -1069,6 +1069,54 @@ class LiveMatchController extends Controller
         $teamName = fn (int $team): string => $team === 2
             ? (string) ($match->away_full ?: $match->away)
             : (string) ($match->home_full ?: $match->home);
+
+        // Squad name -> player id. The scorecard's batter and bowler names come from the
+        // squad the scorer picked from, so this is an exact join rather than a fuzzy match
+        // on a person's name - which is the only kind of join worth making when the result
+        // decides whose FACE appears on a card.
+        $idByName = [];
+        foreach ([$match->home_squad ?: [], $match->away_squad ?: []] as $squad) {
+            foreach ((array) $squad as $member) {
+                $memberName = trim((string) (is_array($member) ? ($member['name'] ?? '') : ''));
+                $memberId = trim((string) (is_array($member) ? ($member['id'] ?? '') : ''));
+                if ($memberName !== '' && $memberId !== '' && strtolower($memberId) !== 'null') {
+                    $idByName[mb_strtolower($memberName)] = $memberId;
+                }
+            }
+        }
+        $photoCache = [];
+
+        // Whether the VIEWER already follows each of these players, resolved for the whole
+        // ranking in one query rather than one per card. Empty for a signed-out visitor,
+        // whose Follow buttons have no state to settle against and so are not offered.
+        $followed = [];
+        $viewerPlayerId = $viewer instanceof User ? (string) $viewer->player_id : '';
+
+        // Which squad ids are REAL accounts. A squad id alone proves nothing - seeded and
+        // legacy matches carry ids like "DEMO_AR" that no user owns, and offering Follow on
+        // one of those ships a button whose only possible outcome is a 404.
+        $userIdByPlayerId = collect();
+        if ($idByName !== []) {
+            $squadIds = array_values(array_unique(array_values($idByName)));
+            $userIdByPlayerId = User::whereIn('player_id', $squadIds)
+                ->where('is_guest', false)
+                ->pluck('id', 'player_id');
+        }
+
+        if ($viewer instanceof User) {
+            if ($userIdByPlayerId->isNotEmpty()) {
+                $following = array_flip(
+                    DB::table('player_follows')
+                        ->where('follower_id', $viewer->id)
+                        ->whereIn('followee_id', $userIdByPlayerId->values()->all())
+                        ->pluck('followee_id')
+                        ->all()
+                );
+                foreach ($userIdByPlayerId as $pid => $uid) {
+                    $followed[(string) $pid] = isset($following[$uid]);
+                }
+            }
+        }
 
         $rows = [];
         $blank = static fn (string $name, int $team): array => [
@@ -1146,8 +1194,21 @@ class LiveMatchController extends Controller
 
             $overs = intdiv($r['ballsBowled'], 6) . '.' . ($r['ballsBowled'] % 6);
 
+            // Blank for a guest, an unregistered name, or anyone who has not uploaded a
+            // photo. The app draws a monogram in that case rather than a stock silhouette.
+            $playerId = $idByName[mb_strtolower($r['name'])] ?? '';
+
             $out[] = [
                 'name'         => $r['name'],
+                'playerId'     => $playerId,
+                'photo'        => $playerId === '' ? '' : (string) ($this->avatarFor($playerId, $photoCache) ?? ''),
+                // A button is only offered when it can be both truthful and useful: a real
+                // linked player, a signed-in viewer, and not the viewer themselves.
+                'canFollow'    => $playerId !== ''
+                    && $viewer instanceof User
+                    && $playerId !== $viewerPlayerId
+                    && $userIdByPlayerId->has($playerId),
+                'isFollowing'  => $playerId !== '' && ($followed[$playerId] ?? false),
                 'team'         => $r['team'],
                 'teamName'     => $teamName($r['team']),
                 'points'       => max(0, $batPoints + $bowlPoints),

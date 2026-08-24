@@ -81,6 +81,22 @@ data class InningsCard(
  */
 data class MvpPlayer(
     val name: String,
+    /**
+     * The player's Haraan id, when the scorer picked them from a linked squad. Blank for a
+     * name typed in free-hand, which is most of grassroots cricket - so everything keyed on
+     * it ([photoUrl], the follow action) has to be optional rather than assumed.
+     */
+    val playerId: String = "",
+    /** Their real profile photo. Blank for guests and anyone who hasn't uploaded one. */
+    val photoUrl: String = "",
+    /**
+     * Whether a Follow button can honestly be offered: a real account behind the name, a
+     * signed-in viewer, and not the viewer themselves. The server decides, because only it
+     * knows who is asking.
+     */
+    val canFollow: Boolean = false,
+    /** Whether the viewer already follows them — the button's resting state. */
+    val isFollowing: Boolean = false,
     /** 1 = team1/home, 2 = team2/away — drives the row's team accent. */
     val team: Int,
     val teamName: String,

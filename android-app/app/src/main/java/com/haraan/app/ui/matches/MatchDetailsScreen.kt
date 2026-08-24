@@ -194,8 +194,22 @@ fun MatchDetailsScreen(
             )
         }
         is MatchScreenState.Success -> {
-            // Open on Commentary by default (index 1 in tabsList).
-            val pagerState = rememberPagerState(initialPage = 1, pageCount = { tabsList.size })
+            // Where to open.
+            //
+            // A live match opens on Commentary — the feed is the thing still happening. A
+            // FINISHED one opens on the Player of the Match, because the first question
+            // anybody asks about a match that is over is who won it, and a commentary feed
+            // whose newest line is already history is a poor answer to it.
+            //
+            // Gated on the ranking having someone in it, not merely on the match not being
+            // live: a match that has not STARTED is also not live, and landing that on an
+            // empty MVP tab would be worse than the feed it replaced. No ball bowled, no
+            // ranking, no reason to switch.
+            val finished = !state.data.isLive && state.data.mvp.isNotEmpty()
+            val pagerState = rememberPagerState(
+                initialPage = if (finished) 4 else 1,
+                pageCount = { tabsList.size }
+            )
             val coroutineScope = rememberCoroutineScope()
             val view = androidx.compose.ui.platform.LocalView.current
 
@@ -204,9 +218,28 @@ fun MatchDetailsScreen(
             // isn't felt twice. `tapDriven` is raised by onTabSelected and consumed here.
             var tapDriven by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
             var firstSettle by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+            // Whether the reader has picked a tab themselves — by tap or by swipe. Once they
+            // have, the screen stops choosing for them.
+            var readerChoseTab by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            // Raised while the screen moves the pager itself, so its settle is not mistaken
+            // for the reader making a choice.
+            var autoDriven by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
             LaunchedEffect(pagerState.settledPage) {
                 if (firstSettle) { firstSettle = false; return@LaunchedEffect }
+                if (autoDriven) { autoDriven = false; tapDriven = false; return@LaunchedEffect }
+                readerChoseTab = true
                 if (tapDriven) tapDriven = false else hapticTick(view)
+            }
+
+            // The match ENDING while the screen is open is the same moment, so the page moves
+            // then too — but only while the reader is still where the screen put them. Pulling
+            // someone off a scorecard they deliberately opened is a bug, not a flourish.
+            LaunchedEffect(finished) {
+                if (finished && !readerChoseTab && pagerState.currentPage != 4) {
+                    autoDriven = true
+                    pagerState.animateScrollToPage(4)
+                }
             }
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
             val scrollOffset by androidx.compose.runtime.remember {
@@ -238,6 +271,7 @@ fun MatchDetailsScreen(
                             liveActive = state.data.isLive,
                             onTabSelected = { index ->
                                 tapDriven = true
+                                readerChoseTab = true
                                 coroutineScope.launch {
                                     pagerState.animateScrollToPage(index)
                                 }

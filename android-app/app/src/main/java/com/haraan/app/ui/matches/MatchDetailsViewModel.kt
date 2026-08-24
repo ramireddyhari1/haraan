@@ -200,6 +200,10 @@ class MatchDetailsViewModel : ViewModel() {
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             MvpPlayer(
                 name = o.optName("name"),
+                playerId = o.optName("playerId"),
+                photoUrl = o.optName("photo"),
+                canFollow = o.optBoolean("canFollow"),
+                isFollowing = o.optBoolean("isFollowing"),
                 team = o.optInt("team", 1),
                 teamName = o.optName("teamName"),
                 points = o.optInt("points"),
