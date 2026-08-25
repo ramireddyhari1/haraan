@@ -164,6 +164,24 @@ data class IncomingJoinRequest(
 )
 
 /**
+ * What the server said about one scoring action.
+ *
+ * This used to be a bare `String?`, and EVERY failure collapsed to null — so a 403 the
+ * server had gone to the trouble of explaining ("Complete your ActionBoard player profile
+ * first.") was indistinguishable from a dead network. The scorer then told the user to
+ * check a connection that was working perfectly, which is the worst kind of error message:
+ * confidently wrong, and it sends them to fix something that is not broken.
+ */
+data class ScoreOutcome(
+  val ok: Boolean,
+  val body: String? = null,
+  /** The server's own words when it REFUSED. Null when the request never landed at all. */
+  val refusal: String? = null,
+  /** Machine-readable reason, e.g. "profile_incomplete", when the server sent one. */
+  val code: String = "",
+)
+
+/**
  * Talks to the ActionBoard match API. Mirrors [HaraanAuthRepository]'s plain
  * HttpURLConnection style, adding the JWT Bearer header for protected routes.
  */
@@ -660,16 +678,27 @@ class MatchRepository(
     }
   }
 
+
   suspend fun sendScoreAction(
     token: String,
     matchId: String,
     action: JSONObject
-  ): String? = withContext(Dispatchers.IO) {
+  ): ScoreOutcome = withContext(Dispatchers.IO) {
     try {
       val response = postJson("/api/matches/$matchId/score-action", action, token)
-      if (response.code in 200..299) response.body else null
+      if (response.code in 200..299) {
+        ScoreOutcome(ok = true, body = response.body)
+      } else {
+        ScoreOutcome(
+          ok = false,
+          refusal = parseErrorMessage(response.body, "Haraan wouldn't accept that ball."),
+          code = runCatching { JSONObject(response.body).optString("code") }.getOrDefault(""),
+        )
+      }
     } catch (_: Exception) {
-      null
+      // Never landed — no server opinion to report, so refusal stays null and the caller
+      // falls back to a connection message, which is then actually true.
+      ScoreOutcome(ok = false)
     }
   }
 

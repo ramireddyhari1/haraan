@@ -186,11 +186,19 @@ fun TossScreen(
                 .put("non_striker_id", playerRef(nonStriker) ?: "Batter 2")
                 .put("bowler_id", playerRef(bowler) ?: "Bowler")
                 .put("decision", "${nameOf(winner)} • $decisionWord")
-            if (repo.sendScoreAction(token, matchId, payload) != null) {
+            val started = repo.sendScoreAction(token, matchId, payload)
+            if (started.ok) {
                 Toast.makeText(ctx, "Match is live — open it to score.", Toast.LENGTH_LONG).show()
                 onStarted()
             } else {
-                Toast.makeText(ctx, "Couldn't start the match. Check connection.", Toast.LENGTH_SHORT).show()
+                // The server's reason when it gave one — this is the first place a scorer
+                // meets the incomplete-profile gate, and "check connection" would send
+                // them to fix a network that is working.
+                Toast.makeText(
+                    ctx,
+                    started.refusal ?: "Couldn't start the match. Check connection.",
+                    Toast.LENGTH_LONG
+                ).show()
                 phase = TossPhase.LINEUP
             }
         }

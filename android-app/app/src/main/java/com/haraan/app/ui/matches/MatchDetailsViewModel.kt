@@ -184,6 +184,7 @@ class MatchDetailsViewModel : ViewModel() {
             venueBadgeArea = o.optJSONObject("venueBadge")?.optString("area").orEmpty(),
             competition = o.optString("formatLabel"),
             battingTeam = o.optInt("battingTeam", 1),
+            scoreBlocked = o.optName("scoreBlocked"),
             innings = o.optInt("innings", 1),
             homeSquad = squad(o.optJSONArray("homeSquad")),
             awaySquad = squad(o.optJSONArray("awaySquad")),

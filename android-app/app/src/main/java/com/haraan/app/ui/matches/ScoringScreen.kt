@@ -236,8 +236,9 @@ fun ScoringScreen(
                         .put("striker_id", playerRef(secondBattingSquad.firstOrNull { it.name == strikerName }) ?: strikerName.ifBlank { "Batter 1" })
                         .put("non_striker_id", playerRef(secondBattingSquad.firstOrNull { it.name == nonStrikerName }) ?: nonStrikerName.ifBlank { "Batter 2" })
                         .put("bowler_id", playerRef(secondBowlingSquad.firstOrNull { it.name == bowlerName }) ?: bowlerName.ifBlank { "Bowler" })
-                    if (repo.sendScoreAction(token, matchId, payload) == null) {
-                        Toast.makeText(ctx, "Couldn't start 2nd innings — check connection.", Toast.LENGTH_SHORT).show()
+                    val sent0 = repo.sendScoreAction(token, matchId, payload)
+                    if (!sent0.ok) {
+                        Toast.makeText(ctx, sent0.refusal ?: "Couldn't start 2nd innings — check connection.", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -262,15 +263,17 @@ fun ScoringScreen(
                             .put("striker_id", playerRef(openStriker) ?: after.striker.name.ifBlank { "Batter 1" })
                             .put("non_striker_id", playerRef(openNonStriker) ?: after.nonStriker.name.ifBlank { "Batter 2" })
                             .put("bowler_id", playerRef(openingBowler) ?: after.bowler.name.ifBlank { "Bowler" })
-                        if (repo.sendScoreAction(token, matchId, start) == null) {
-                            Toast.makeText(ctx, "Couldn't start scoring. Check connection.", Toast.LENGTH_SHORT).show()
+                        val sent1 = repo.sendScoreAction(token, matchId, start)
+                        if (!sent1.ok) {
+                            Toast.makeText(ctx, sent1.refusal ?: "Couldn't start scoring. Check connection.", Toast.LENGTH_LONG).show()
                             return@withLock
                         }
                         started.value = true
                     }
                     val action = scoreActionFor(event, after, battingSquad) ?: return@withLock
-                    if (repo.sendScoreAction(token, matchId, action) == null) {
-                        Toast.makeText(ctx, "Score didn't save — check connection.", Toast.LENGTH_SHORT).show()
+                    val sent2 = repo.sendScoreAction(token, matchId, action)
+                    if (!sent2.ok) {
+                        Toast.makeText(ctx, sent2.refusal ?: "Score didn't save — check connection.", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -283,8 +286,9 @@ fun ScoringScreen(
                     val payload = JSONObject()
                         .put("type", "change_bowler")
                         .put("bowler_id", playerRef(member) ?: "Bowler")
-                    if (repo.sendScoreAction(token, matchId, payload) == null) {
-                        Toast.makeText(ctx, "Bowler change didn't save.", Toast.LENGTH_SHORT).show()
+                    val sent3 = repo.sendScoreAction(token, matchId, payload)
+                    if (!sent3.ok) {
+                        Toast.makeText(ctx, sent3.refusal ?: "Bowler change didn't save.", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -300,8 +304,9 @@ fun ScoringScreen(
                             .put("type", "change_batsman")
                             .put("role", role)
                             .put("id", playerRef(member) ?: member.name)
-                        if (repo.sendScoreAction(token, matchId, payload) == null) {
-                            Toast.makeText(ctx, "Batter change didn't save.", Toast.LENGTH_SHORT).show()
+                        val sent4 = repo.sendScoreAction(token, matchId, payload)
+                        if (!sent4.ok) {
+                            Toast.makeText(ctx, sent4.refusal ?: "Batter change didn't save.", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -316,8 +321,9 @@ fun ScoringScreen(
                         .put("type", "wicket")
                         .put("new_batsman_id", playerRef(newBatsman) ?: "")
                         .put("dismissal", dismissal)
-                    if (repo.sendScoreAction(token, matchId, payload) == null) {
-                        Toast.makeText(ctx, "Wicket didn't save — check connection.", Toast.LENGTH_SHORT).show()
+                    val sent5 = repo.sendScoreAction(token, matchId, payload)
+                    if (!sent5.ok) {
+                        Toast.makeText(ctx, sent5.refusal ?: "Wicket didn't save — check connection.", Toast.LENGTH_LONG).show()
                     }
                 }
             }

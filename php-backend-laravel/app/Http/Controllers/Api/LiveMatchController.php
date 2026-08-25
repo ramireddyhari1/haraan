@@ -506,6 +506,17 @@ class LiveMatchController extends Controller
             && (int) $match->user_id === (int) $viewer->id
             && strtolower((string) $match->status) !== 'completed';
 
+        // Why scoring would be REFUSED even though this is the viewer's own match.
+        //
+        // /score-action sits behind the actionboard.profile gate, so a creator with an
+        // incomplete profile saw a Score button, opened the scorer, and had every single
+        // ball rejected. The button was telling the truth about ownership and lying about
+        // usability. The client can now say what is actually wrong, up front.
+        $scoreBlocked = '';
+        if ($canScore && ! $viewer->isActionboardProfileComplete()) {
+            $scoreBlocked = 'profile_incomplete';
+        }
+
         // Replay once, then derive the live partnership + last wicket from the current innings.
         $cards = $this->buildInningsCards($match);
         $liveCard = !empty($cards) ? end($cards) : null;
@@ -549,6 +560,7 @@ class LiveMatchController extends Controller
         return [
             'creatorId' => (int) $match->user_id,
             'canScore' => $canScore,
+            'scoreBlocked' => $scoreBlocked,
             'isPrivate' => (bool) $match->is_private,
             'joinCode' => (string) ($match->join_code ?? ''),
             // Squads carry each member's photo where the entry is linked to an account, so

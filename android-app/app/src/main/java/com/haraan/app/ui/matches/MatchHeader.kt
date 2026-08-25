@@ -97,7 +97,22 @@ fun MatchHeader(
 
             // Live-scoring entry — only the match creator gets this.
             if (state.canScore) {
-                ScoreButton(onClick = onScoreClick)
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                ScoreButton(onClick = {
+                    // The scorer sits behind the ActionBoard profile gate. Walking a
+                    // creator into it means every ball they enter is rejected, and the
+                    // scorer blamed the network for it. Say what is actually wrong here,
+                    // before the walk.
+                    if (state.scoreBlocked == "profile_incomplete") {
+                        android.widget.Toast.makeText(
+                            ctx,
+                            "Finish your player profile (state, district and main sport) to score matches.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        onScoreClick()
+                    }
+                })
                 Spacer(Modifier.width(8.dp))
             }
             var showLanguage by remember { mutableStateOf(false) }

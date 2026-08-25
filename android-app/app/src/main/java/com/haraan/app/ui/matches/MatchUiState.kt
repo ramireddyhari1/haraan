@@ -166,6 +166,12 @@ data class MatchUiState(
     // ── Result verification (create → verify → XP) ──
     /** Backend verification state: "" (n/a), "pending", "settled", or "expired". */
     val verificationStatus: String = "",
+    /**
+     * Why scoring would be refused despite [canScore] — currently only "profile_incomplete".
+     * Blank when nothing is in the way. Lets the Score button explain itself instead of
+     * opening a scorer that rejects every ball.
+     */
+    val scoreBlocked: String = "",
     /** True when the viewer is a captain who can still confirm this completed result. */
     val canConfirm: Boolean = false,
     /** Where the result settled once verified: "low"/"medium"/"high"/"verified". */
