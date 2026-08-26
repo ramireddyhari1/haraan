@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -21,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.haraan.app.ui.matches.CrexColors
 import com.haraan.app.ui.matches.MatchUiState
@@ -84,11 +88,59 @@ fun MvpTab(state: MatchUiState, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(top = 14.dp, bottom = 28.dp)
     ) {
-        item(key = "hero") { MvpHero(state, leader, live = state.isLive) }
+        // ── The awards ──
+        //
+        // A match is remembered as a handful of NAMED performances, not as a leaderboard.
+        // Best batter and best bowler are derived from the same batPoints/bowlPoints the
+        // ranking already uses, so they cannot disagree with it.
+        val bestBat = players.filter { it.didBat }.maxByOrNull { it.batPoints }
+            ?.takeIf { it.batPoints > 0 }
+        val bestBowl = players.filter { it.didBowl }.maxByOrNull { it.bowlPoints }
+            ?.takeIf { it.bowlPoints > 0 }
 
-        if (chasing.isNotEmpty()) {
-            item(key = "chasing") {
-                ChasingPack(state = state, players = chasing, topPoints = topPoints)
+        item(key = "heroes-label") {
+            SectionLabel(if (state.isLive) "LEADING THE MATCH" else "HEROES OF THE MATCH")
+        }
+        item(key = "hero") {
+            MvpHero(
+                state = state,
+                p = leader,
+                live = state.isLive,
+                // When the best batter or bowler IS the player of the match, say so on
+                // their one card rather than printing the same face again further down.
+                // The obvious version of this screen shows a matchwinning all-rounder
+                // three times over and calls it three awards.
+                alsoBest = listOfNotNull(
+                    "batter".takeIf { bestBat?.name == leader.name },
+                    "bowler".takeIf { bestBowl?.name == leader.name },
+                ),
+            )
+        }
+
+        if (bestBat != null && bestBat.name != leader.name) {
+            item(key = "award-bat") { AwardCard(state, bestBat, Award.BATTER, players) }
+        }
+        if (bestBowl != null && bestBowl.name != leader.name) {
+            item(key = "award-bowl") { AwardCard(state, bestBowl, Award.BOWLER, players) }
+        }
+
+        // ── Everyone else who did something ──
+        val named = setOfNotNull(leader.name, bestBat?.name, bestBowl?.name)
+        val rest = players.filter { it.name !in named }
+        if (rest.isNotEmpty()) {
+            item(key = "star-label") { SectionLabel("STAR PERFORMANCES") }
+            items(rest.chunked(2), key = { it.first().name }) { pair ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    pair.forEach { player ->
+                        StarCard(state, player, Modifier.weight(1f))
+                    }
+                    // A lone odd player keeps its half-width rather than stretching across
+                    // the row and pretending to be a different kind of card.
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
             }
         }
 
@@ -103,7 +155,13 @@ private fun teamColor(state: MatchUiState, team: Int): Color =
 // ─────────────────────────── Hero (rank 1) ───────────────────────────
 
 @Composable
-private fun MvpHero(state: MatchUiState, p: MvpPlayer, live: Boolean) {
+private fun MvpHero(
+    state: MatchUiState,
+    p: MvpPlayer,
+    live: Boolean,
+    /** "batter" / "bowler" — awards this player ALSO won, folded in rather than repeated. */
+    alsoBest: List<String> = emptyList(),
+) {
     val accent = teamColor(state, p.team)
     val logoUrl = if (p.team == 2) state.team2Logo else state.team1Logo
     val teamCode = if (p.team == 2) state.team2 else state.team1
@@ -143,21 +201,30 @@ private fun MvpHero(state: MatchUiState, p: MvpPlayer, live: Boolean) {
                 .padding(end = 8.dp)
         )
 
+        Column {
+        // The headline award gets the same photo panel as the other two — it would be odd
+        // for the biggest one to be the only card without a face.
+        AwardPhotoPanel(
+            name = p.name,
+            photoUrl = p.photoUrl,
+            accent = accent,
+            // Live, the lead can still change hands, so it says who is ahead rather than
+            // crowning anyone early.
+            label = if (live) "Leading the match" else "Player of the match",
+            height = 210.dp,
+        )
+
         Column(modifier = Modifier.padding(18.dp)) {
+            // The panel above already names the award, so the body carries only what it
+            // does NOT say: which other awards this player also swept.
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.weight(1f))
                 Text(
-                    // While the match is live the lead can still change hands, so the card
-                    // says who is ahead rather than crowning anyone early.
-                    if (live) "LEADING THE MATCH" else "PLAYER OF THE MATCH",
-                    color = accent,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.4.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    p.roleLabel,
-                    color = CrexColors.TextMuted,
+                    // "BEST BATTER · BEST BOWLER" beats "ALL-ROUND" when they actually
+                    // took both awards — the role label is a category, this is an honour.
+                    if (alsoBest.isEmpty()) p.roleLabel
+                    else alsoBest.joinToString("  ·  ") { "BEST ${it.uppercase()}" },
+                    color = if (alsoBest.isEmpty()) CrexColors.TextMuted else accent,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.9.sp
@@ -167,14 +234,6 @@ private fun MvpHero(state: MatchUiState, p: MvpPlayer, live: Boolean) {
             Spacer(Modifier.height(16.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PlayerFace(
-                    name = p.name,
-                    photoUrl = p.photoUrl,
-                    accent = accent,
-                    size = 96.dp,
-                    halo = true
-                )
-                Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         p.name,
@@ -260,6 +319,7 @@ private fun MvpHero(state: MatchUiState, p: MvpPlayer, live: Boolean) {
                 Spacer(Modifier.height(16.dp))
                 FollowPill(player = p)
             }
+        }
         }
     }
 }
@@ -490,6 +550,363 @@ private fun MvpRow(state: MatchUiState, player: MvpPlayer, rank: Int, fraction: 
             fontWeight = FontWeight.Black,
             style = TextStyle(fontFeatureSettings = "tnum")
         )
+    }
+}
+
+/**
+ * A player as a PORTRAIT PANEL rather than a circle.
+ *
+ * The reference design (CricHeroes) gives each award a 16:9 photo slab. It leads with
+ * identity, which is right — a grassroots cricketer wants to see themselves, and a name in
+ * a table does not do that. But a cinematic frame wrapped around what is usually a casual
+ * profile picture promises more than the content delivers, and it costs a whole screen per
+ * award, leaving the FIGURES — the thing players actually screenshot — crammed into a
+ * strip underneath.
+ *
+ * So: a tall portrait down the side of the card. Big enough to be the reason you stop
+ * scrolling, small enough that the innings keeps its weight and the card stays one screen.
+ *
+ * The no-photo case is designed FIRST, not patched on. Roughly two thirds of squad entries
+ * carry no linked account (they were typed in, or the player has none), so initials on a
+ * team-coloured panel is the COMMON case and has to look like a decision. A circle that is
+ * empty reads as a failed image load; a panel with the player's initials and their team's
+ * colour reads as a card.
+ */
+@Composable
+private fun PlayerPortrait(
+    name: String,
+    photoUrl: String,
+    accent: Color,
+    width: Dp,
+    height: Dp,
+) {
+    Box(
+        modifier = Modifier
+            .size(width = width, height = height)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(accent.copy(alpha = 0.28f), accent.copy(alpha = 0.12f))
+                )
+            )
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (photoUrl.isNotBlank()) {
+            coil.compose.AsyncImage(
+                model = photoUrl,
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)),
+            )
+        } else {
+            Text(
+                initialsOf(name),
+                color = accent,
+                fontSize = (height.value * 0.30f).sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+            )
+        }
+    }
+}
+
+/** "Suresh Pillai" -> "SP"; a single name falls back to its first two letters. */
+private fun initialsOf(name: String): String {
+    val parts = name.trim().split(Regex("[ ]+")).filter { it.isNotBlank() }
+    return when {
+        parts.isEmpty() -> "?"
+        parts.size == 1 -> parts[0].take(2).uppercase()
+        else -> (parts[0].take(1) + parts[1].take(1)).uppercase()
+    }
+}
+
+/**
+ * The award's photo panel — the thing that makes the card feel like a moment.
+ *
+ * Built the way broadcast and the reference apps do it: the player's own photo fills the
+ * frame, with a BLURRED, darkened copy of the same image behind it so a portrait-shaped
+ * upload can sit in a landscape frame without cropping someone's head off. The award name
+ * sits on a scrim along the bottom, where it reads against any photo.
+ *
+ * `Modifier.blur` is a no-op below API 31; there the backdrop is simply the cropped,
+ * darkened image, which still fills the frame and still reads. Nothing is conditional on
+ * version — it degrades on its own.
+ *
+ * With no photo — two thirds of squad entries have no linked account — the frame becomes a
+ * deep team-colour field carrying the player's initials at display size. That case was
+ * designed, not defaulted to: it has to look like the card it is, not like a photo that
+ * failed to load.
+ */
+@Composable
+private fun AwardPhotoPanel(
+    name: String,
+    photoUrl: String,
+    accent: Color,
+    label: String,
+    height: Dp = 188.dp,
+    labelSize: TextUnit = 19.sp,
+    scrimHeight: Dp = 74.dp,
+    initialsSize: TextUnit = 64.sp,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+            .background(accent.copy(alpha = 0.22f))
+    ) {
+        if (photoUrl.isNotBlank()) {
+            // Backdrop: same image, blown up, blurred and dimmed so the frame is never
+            // empty at the edges and the subject still reads.
+            coil.compose.AsyncImage(
+                model = photoUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .matchParentSize()
+                    .blur(22.dp)
+                    .alpha(0.55f),
+            )
+            // Subject: the whole photo, uncropped.
+            coil.compose.AsyncImage(
+                model = photoUrl,
+                contentDescription = name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.matchParentSize(),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.linearGradient(
+                            listOf(accent.copy(alpha = 0.42f), accent.copy(alpha = 0.16f))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    initialsOf(name),
+                    color = accent,
+                    fontSize = initialsSize,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.sp,
+                )
+            }
+        }
+
+        // The label needs to survive a bright photo AND a pale monogram panel, so it rides
+        // its own gradient rather than trusting whatever is behind it.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(scrimHeight)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color(0xF2000000))
+                    )
+                )
+        )
+        Text(
+            label,
+            color = Color.White,
+            fontSize = labelSize,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 12.dp, end = 10.dp, bottom = 10.dp)
+        )
+    }
+}
+
+// ─────────────────────────── Awards ───────────────────────────
+
+/** The two awards handed out beside the player of the match. */
+private enum class Award { BATTER, BOWLER }
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        color = CrexColors.TextMuted,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 1.4.sp,
+        modifier = Modifier.padding(start = 2.dp, top = 2.dp)
+    )
+}
+
+/**
+ * Best batter / best bowler.
+ *
+ * The caption is DERIVED, never decorative. "Most runs in the match" is only printed when
+ * they actually scored the most; otherwise it falls back to the weaker but still true
+ * "highest impact with the bat". Writing "the bat did all the talking" under whoever
+ * happened to rank first is the kind of copy that reads well once and is wrong by the
+ * second match.
+ */
+@Composable
+private fun AwardCard(
+    state: MatchUiState,
+    p: MvpPlayer,
+    award: Award,
+    all: List<MvpPlayer>,
+) {
+    val accent = teamColor(state, p.team)
+    val topRuns = all.maxOfOrNull { it.runs } ?: 0
+    val topWkts = all.maxOfOrNull { it.wickets } ?: 0
+
+    val label = if (award == Award.BATTER) "Best batter" else "Best bowler"
+    // Derived, never canned. "Top score of the match" is only printed when they actually
+    // scored the most; a fixed line like "the bat did all the talking" reads well once and
+    // is wrong by the second match.
+    val caption = when (award) {
+        Award.BATTER ->
+            if (p.runs > 0 && p.runs == topRuns) "Top score of the match"
+            else "Highest impact with the bat"
+        Award.BOWLER ->
+            if (p.wickets > 0 && p.wickets == topWkts) "Best figures of the match"
+            else "Highest impact with the ball"
+    }
+    val figure = if (award == Award.BATTER) p.batLine else p.bowlLine
+    val support = if (award == Award.BATTER) {
+        buildString {
+            append("SR ${p.strikeRate}")
+            if (p.fours > 0) append("  ·  ${p.fours}x4")
+            if (p.sixes > 0) append("  ·  ${p.sixes}x6")
+        }
+    } else {
+        buildString {
+            append("ER ${p.econ}")
+            if (p.maidens > 0) append("  ·  ${p.maidens} mdn")
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(CrexColors.Surface)
+            .border(1.dp, CrexColors.Border, RoundedCornerShape(18.dp))
+    ) {
+        AwardPhotoPanel(name = p.name, photoUrl = p.photoUrl, accent = accent, label = label)
+
+        // Caption strip, in the award's colour — the band that makes the panel above read
+        // as a card rather than a photo with text on it.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(accent.copy(alpha = 0.10f))
+                .padding(horizontal = 16.dp, vertical = 11.dp)
+        ) {
+            Text(
+                caption, color = CrexColors.TextPrimary, fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        p.name, color = accent, fontSize = 18.sp,
+                        fontWeight = FontWeight.Black, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        p.teamName.ifBlank { if (p.team == 2) state.team2 else state.team1 },
+                        color = CrexColors.TextSecondary, fontSize = 12.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "${p.points}", color = CrexColors.TextPrimary, fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        style = TextStyle(fontFeatureSettings = "tnum")
+                    )
+                    Text(
+                        "IMPACT", color = CrexColors.TextMuted, fontSize = 8.5.sp,
+                        fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    figure, color = CrexColors.TextPrimary, fontSize = 25.sp,
+                    fontWeight = FontWeight.Black,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    support, color = CrexColors.TextSecondary, fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Everyone else who did something worth a line.
+ *
+ * Half-width so two sit side by side: these are contributions, not headlines, and giving
+ * each of them a full-width card would flatten the difference between the match's best
+ * performance and its sixth-best.
+ */
+@Composable
+private fun StarCard(state: MatchUiState, p: MvpPlayer, modifier: Modifier = Modifier) {
+    val accent = teamColor(state, p.team)
+    val lines = listOfNotNull(
+        p.batLine.takeIf { it.isNotBlank() },
+        p.bowlLine.takeIf { it.isNotBlank() },
+    )
+
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(CrexColors.Surface)
+            .border(1.dp, CrexColors.Border, RoundedCornerShape(16.dp))
+    ) {
+        // Same panel as the awards, one scale down — the player's face with their name on
+        // the scrim, so a tile is recognisably the same object as the card above it.
+        AwardPhotoPanel(
+            name = p.name,
+            photoUrl = p.photoUrl,
+            accent = accent,
+            label = p.name,
+            height = 148.dp,
+            labelSize = 14.sp,
+            scrimHeight = 56.dp,
+            initialsSize = 40.sp,
+        )
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
+            lines.forEachIndexed { i, line ->
+                if (i > 0) Spacer(Modifier.height(4.dp))
+                Text(
+                    line, color = CrexColors.TextPrimary, fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
+            // A player with no line at all still gets a tile rather than vanishing — they
+            // are in the ranking because they did something.
+            if (lines.isEmpty()) {
+                Text(
+                    "${p.points} impact", color = CrexColors.TextSecondary, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
 
