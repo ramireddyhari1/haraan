@@ -31,7 +31,7 @@ android {
         // on any device on any network without `adb reverse`. For local dev, switch back to
         // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000` (and temporarily allow
         // cleartext in the manifest).
-        buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
+        buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:8000\"")
         // Google Sign-In: the OAuth **Web application** client ID (serverClientId) from the
         // Google Cloud Console. The backend uses the same value as the token audience. Empty
         // until configured — the "Continue with Google" button hides itself when blank.
@@ -121,8 +121,17 @@ dependencies {
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.coil.compose)
-  // QR code generation (attendee ticket QRs)
+  // QR code generation (attendee ticket QRs, and the match-device pairing code)
   implementation("com.google.zxing:core:3.5.3")
+
+  // CameraX — a paired phone acting as a match camera records short clips around a
+  // delivery. video + view only; no image analysis pipeline is pulled in, because
+  // nothing on-device is analysing frames.
+  implementation("androidx.camera:camera-core:1.3.4")
+  implementation("androidx.camera:camera-camera2:1.3.4")
+  implementation("androidx.camera:camera-lifecycle:1.3.4")
+  implementation("androidx.camera:camera-video:1.3.4")
+  implementation("androidx.camera:camera-view:1.3.4")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests

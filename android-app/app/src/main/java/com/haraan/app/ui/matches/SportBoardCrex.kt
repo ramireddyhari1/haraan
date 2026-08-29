@@ -276,14 +276,14 @@ fun CrexBoardHero(
             // The white label band behind the card — host for the crawling word-mark.
             Spacer(
                 modifier = Modifier.matchParentSize()
-                    .clip(RoundedCornerShape(26.dp))
+                    .clip(RoundedCornerShape(RibbonCardRadius))
                     .background(Color.White)
-                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(26.dp)),
+                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(RibbonCardRadius)),
             )
             Column(
                 modifier = Modifier.fillMaxWidth().padding(band)
                     .graphicsLayer { scaleX = popScale; scaleY = popScale }
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(RibbonCardRadius - band))
                     .background(Brush.verticalGradient(listOf(theme.cardTop, theme.cardBottom)))
                     .drawWithContent {
                         drawContent()
@@ -345,43 +345,15 @@ private fun CrexSeamRibbon(
         boost.snapTo(boost.value.mod(1f))
     }
     val argb = color.toArgb()
+    val mark = rememberRibbonMark(word, argb)
 
     Canvas(modifier = modifier) {
-        val center = band.toPx() / 2f
-        val radius = (26.dp.toPx() - center).coerceAtLeast(0f)
-        val paint = android.graphics.Paint().apply {
-            isAntiAlias = true
-            this.color = argb
-            textSize = 10.5.dp.toPx()
-            letterSpacing = 0.12f
-            typeface = android.graphics.Typeface.create(
-                android.graphics.Typeface.DEFAULT_BOLD, android.graphics.Typeface.BOLD,
-            )
-        }
-        val segment = "$word        "
-        val perimeter = 2f * ((size.width - 2 * center) + (size.height - 2 * center))
-        // Make the pattern tile the loop EXACTLY. A repeat that doesn't divide into the
-        // perimeter leaves a part-glyph sitting on the join, which renders as a small dark
-        // block on the left edge — the one flaw on an otherwise clean card. Stretching the
-        // letter spacing by a fraction of a pixel per character makes the repeat periodic,
-        // so the text meets itself with no seam at all.
-        val rawWidth = paint.measureText(segment).coerceAtLeast(1f)
-        val segs = Math.round(perimeter / rawWidth).coerceIn(2, 80)
-        val target = perimeter / segs
-        paint.letterSpacing += (target - rawWidth) / segment.length / paint.textSize
-        val segWidth = paint.measureText(segment).coerceAtLeast(1f)
-        val count = segs + 2
-        val path = android.graphics.Path().apply {
-            addRoundRect(
-                center, center, size.width - center, size.height - center,
-                radius, radius, android.graphics.Path.Direction.CW,
-            )
-        }
-        val fm = paint.fontMetrics
-        val vOffset = -(fm.ascent + fm.descent) / 2f
-        val phase = (basePhase + boost.value).mod(1f)
-        drawContext.canvas.nativeCanvas.drawTextOnPath(
-            segment.repeat(count), path, -phase * segWidth, vOffset, paint,
+        drawSeamRibbon(
+            word = word,
+            argb = argb,
+            band = band,
+            phase = (basePhase + boost.value).mod(1f),
+            mark = mark,
         )
     }
 }

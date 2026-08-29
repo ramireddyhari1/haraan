@@ -220,6 +220,10 @@ Route::middleware('auth.jwt.optional')->group(function (): void {
     Route::get('/live-matches', [LiveMatchController::class, 'index']);
     Route::get('/live-matches/{id}', [LiveMatchController::class, 'show'])->whereNumber('id');
 
+    // AI-assisted match analysis. Optional auth like the detail it belongs to — the
+    // figures are public, and the written read is about the match, not the reader.
+    Route::get('/live-matches/{id}/insights', [LiveMatchController::class, 'insights'])->whereNumber('id');
+
     // Live presence — the eye + count on the match detail header. Optional auth so guests
     // are counted too (keyed by the app's install id, never a raw IP). The code variant
     // covers private matches, whose viewers only ever hold the share code.
@@ -324,6 +328,15 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
 // OPTIONAL auth, not none: a guest must still be able to open a shared profile, but a
 // signed-in viewer needs `auth_user` populated or `social.is_following` is always false
 // and the Follow button opens in the wrong state for everyone you already follow.
+// Pairing a second phone to a match. No account required and none assumed — whoever is
+// holding the camera phone may never have signed up. The pairing token is short-lived
+// and single-use; the session token it mints is what the device uses afterwards, and
+// the scorer can revoke it at any time.
+Route::get('match-devices/{token}/preview', [\App\Http\Controllers\Api\MatchDeviceController::class, 'preview']);
+Route::post('match-devices/claim', [\App\Http\Controllers\Api\MatchDeviceController::class, 'claim']);
+Route::post('match-devices/heartbeat', [\App\Http\Controllers\Api\MatchDeviceController::class, 'heartbeat']);
+Route::post('match-devices/clips', [\App\Http\Controllers\Api\MatchDeviceController::class, 'uploadClip']);
+
 Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);
 
 // Posts are public — a guest opening a shared profile sees the grid, same as the profile
@@ -360,6 +373,13 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     Route::post('/{id}/verify', [MatchesController::class, 'verify']);     // organizer/venue → High/Verified
     Route::post('/{id}/dispute', [MatchesController::class, 'dispute']);   // reputation penalty
     Route::post('/{id}/score-action', [MatchesController::class, 'scoreAction']);
+
+    // Multi-device match sessions: the scorer opens a pairing for a role, lists what is
+    // attached, and can cut any of it loose. Creator-only — see MatchDeviceController.
+    Route::post('/{id}/devices', [\App\Http\Controllers\Api\MatchDeviceController::class, 'store']);
+    Route::get('/{id}/devices', [\App\Http\Controllers\Api\MatchDeviceController::class, 'index']);
+    Route::delete('/{id}/devices/{deviceId}', [\App\Http\Controllers\Api\MatchDeviceController::class, 'destroy']);
+    Route::get('/{id}/clips', [\App\Http\Controllers\Api\MatchDeviceController::class, 'clips']);
 
     // Football / badminton scoring. Deliberately separate from /score-action:
     // cricket keeps its per-ball pipeline, and recordEvent refuses cricket, so a
@@ -431,6 +451,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         // and their altitude. Every client calls this first.
         Route::get('/context', 'context');
         Route::get('/overview', 'overview');
+        Route::get('/today', 'today');
         Route::get('/events', 'events');
         Route::get('/events/{id}', 'showEvent')->whereNumber('id');
         Route::get('/events/{id}/analytics', 'eventAnalytics')->whereNumber('id');
@@ -441,6 +462,9 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/venues/{id}/slots', 'venueSlots')->whereNumber('id');
         Route::get('/venues/{id}/courts', 'venueCourts')->whereNumber('id');
         Route::get('/bookings', 'bookings');
+        // Games on this partner's courts: booking-linked, plus public matches
+        // whose GPS lands on the venue. Read-only.
+        Route::get('/matches', 'matches');
 
         // --- Write actions gated by staff capability (owners hold all) ---
         Route::middleware('partner.can:pricing')->group(function (): void {

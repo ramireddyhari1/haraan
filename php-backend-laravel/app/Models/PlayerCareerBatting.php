@@ -12,9 +12,22 @@ class PlayerCareerBatting extends Model
 {
     protected $table = 'player_career_batting';
 
+    protected $casts = ['zones' => 'array'];
+
+    /**
+     * The eight regions the scorer's picker names, in ground order from straight.
+     * Deliberately region names, not off/leg side: batting hand is not recorded, so a
+     * side of the wicket would be a claim the data cannot support.
+     */
+    public const ZONE_LABELS = [
+        'Straight', 'Cover', 'Point', 'Third man',
+        'Fine leg', 'Square leg', 'Mid-wicket', 'Long-on',
+    ];
+
     protected $fillable = [
         'player_id', 'player_name', 'innings', 'runs', 'balls',
         'fours', 'sixes', 'outs', 'high_score',
+        'thirties', 'fifties', 'hundreds', 'zones',
     ];
 
     /** Batting average = runs / dismissals; null (shown as "—") until they've been out once. */

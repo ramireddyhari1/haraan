@@ -8,6 +8,32 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
+/**
+ * The scoreboard of a match, in the shape the ActionBoard card already reads — same
+ * field names, same attribution, built by the same rules on the server. The profile
+ * can therefore draw a player's history with the feed's own card instead of a line
+ * of text, and the two can never drift apart.
+ */
+data class MatchCard(
+  val team1: String,
+  val team2: String,
+  val team1Logo: String,
+  val team2Logo: String,
+  val team1Emblem: String,
+  val team2Emblem: String,
+  val score1: String,
+  val score2: String,
+  val overs1: String,
+  val overs2: String,
+  val battingTeam: Int,
+  val sport: String,
+  val isLive: Boolean,
+  val competition: String,
+  val venue: String,
+  val district: String,
+  val locality: String,
+)
+
 data class RecentMatch(
   val matchId: Long,
   val title: String,
@@ -18,6 +44,8 @@ data class RecentMatch(
   val won: Boolean,
   val mom: Boolean,
   val awardedAt: String,
+  /** Null only for a server too old to send it; the row then reads as plain text. */
+  val card: MatchCard? = null,
 )
 
 data class AchievementDto(
@@ -49,6 +77,95 @@ sealed class UsernameCheck {
 data class CareerStat(val label: String, val value: Int)
 
 data class SportCareer(val sport: String, val stats: List<CareerStat>)
+
+/**
+ * THE CAREER BOOK — the full record, one entry per sport the player has played.
+ *
+ * [SportCareer] above is three totals; this is the batting and bowling line a
+ * cricketer expects to see about themselves. Values arrive as formatted STRINGS
+ * because the numbers genuinely are not all integers: an average reads "-" until
+ * the player has been out, best bowling reads "4/23", milestones read "3 / 0".
+ * Formatting them here would mean re-deriving rules the server already applied.
+ */
+data class CareerFigure(val label: String, val value: String)
+
+/**
+ * A drawn view of figures the group already reports.
+ *
+ * [kind] is "split" (a stacked bar of parts that sum to the whole) or "meter" (one
+ * value on a fixed scale). Deliberately server-chosen: which figure is worth drawing
+ * is a question about the SPORT, and the client should not be holding that opinion.
+ */
+data class CareerSegment(val label: String, val value: Float)
+
+data class CareerVisual(
+    val kind: String,
+    val title: String,
+    val caption: String?,
+    val segments: List<CareerSegment> = emptyList(),
+    val value: Float = 0f,
+    val max: Float = 0f,
+)
+
+/** One discipline — Batting, Bowling, Attacking — with the figure that leads it. */
+data class CareerGroup(
+    val title: String,
+    val leadLabel: String,
+    val leadValue: String,
+    val stats: List<CareerFigure>,
+    val visual: CareerVisual? = null,
+)
+
+/**
+ * One region of the ground and what the player has scored into it. Only boundaries the
+ * scorer actually placed are here — the wheel is a record of real shots, so a region
+ * with no dots means nobody plotted one, not that the player never hit there.
+ */
+data class WagonZone(
+    val zone: Int,
+    val label: String,
+    val shots: Int,
+    val fours: Int,
+    val sixes: Int,
+    val runs: Int,
+)
+
+data class WagonWheel(
+    val title: String,
+    val total: Int,
+    val shots: Int,
+    val zones: List<WagonZone>,
+    val caption: String?,
+)
+
+/**
+ * Three sentences about the figures on this page, written by a model that was handed
+ * those figures and forbidden to produce any of its own. [source] is shown verbatim:
+ * a reader is entitled to know which lines were written rather than counted.
+ */
+data class CareerAnalysis(val title: String, val lines: List<String>, val source: String)
+
+data class SportRecord(
+    val key: String,
+    val label: String,
+    val matches: Int,
+    /** The three numbers that lead the sport, before any discipline is opened. */
+    val headline: List<CareerFigure>,
+    val groups: List<CareerGroup>,
+    /**
+     * Why this sport has no groups, in the server's own words. It knows the reason —
+     * never played, never ball-by-ball scored, or a sport that only scores per side —
+     * and the app has no way to tell those apart from an empty list.
+     */
+    val note: String? = null,
+    /** Cricket only, and only once a boundary has actually been placed. */
+    val wagon: WagonWheel? = null,
+    /** Null until a read has been written for the player's current figures. */
+    val analysis: CareerAnalysis? = null,
+)
+
+/** [primary] is the player's own sport, and always the first entry in [sports]. */
+data class CareerBook(val primary: String, val sports: List<SportRecord>)
 
 /**
  * The follow graph as it applies to the viewer looking at this profile.
@@ -112,6 +229,11 @@ data class PlayerProfile(
    * read zero. Null only for a server too old to send the block.
    */
   val sportCareer: SportCareer? = null,
+  /**
+   * The full per-sport record behind the Stats tab. Null only for a server too old
+   * to send it — the profile then falls back to [sportCareer]'s three totals.
+   */
+  val careerBook: CareerBook? = null,
   /**
    * Follower counts + whether the viewer already follows this player. Null only for a
    * server too old to send the block — the follow UI hides rather than guessing.
@@ -243,6 +365,121 @@ class ProfileRepository(
     return SportCareer(sport = sport.lowercase(), stats = stats)
   }
 
+  private fun parseCareerBook(json: JSONObject?): CareerBook? {
+    if (json == null) return null
+    val sportsJson = json.optJSONArray("sports") ?: return null
+    val sports = mutableListOf<SportRecord>()
+    for (i in 0 until sportsJson.length()) {
+      val s = sportsJson.optJSONObject(i) ?: continue
+      val groups = mutableListOf<CareerGroup>()
+      val groupsJson = s.optJSONArray("groups")
+      if (groupsJson != null) {
+        for (g in 0 until groupsJson.length()) {
+          val group = groupsJson.optJSONObject(g) ?: continue
+          val lead = group.optJSONObject("lead")
+          groups += CareerGroup(
+            title = group.optString("title"),
+            leadLabel = lead?.optString("label").orEmpty(),
+            leadValue = lead?.optString("value").orEmpty(),
+            stats = parseFigures(group.optJSONArray("stats")),
+            visual = parseVisual(group.optJSONObject("visual")),
+          )
+        }
+      }
+      sports += SportRecord(
+        key = s.optString("key", "cricket"),
+        label = s.optString("label", "Cricket"),
+        matches = s.optInt("matches", 0),
+        headline = parseFigures(s.optJSONArray("headline")),
+        groups = groups,
+        note = s.optString("note").takeIf { it.isNotBlank() && it != "null" },
+        wagon = parseWagon(s.optJSONObject("wagon")),
+        analysis = parseAnalysis(s.optJSONObject("analysis")),
+      )
+    }
+    if (sports.isEmpty()) return null
+    return CareerBook(primary = json.optString("primary", "cricket"), sports = sports)
+  }
+
+  private fun parseWagon(json: JSONObject?): WagonWheel? {
+    if (json == null) return null
+    val arr = json.optJSONArray("zones") ?: return null
+    val zones = mutableListOf<WagonZone>()
+    for (i in 0 until arr.length()) {
+      val z = arr.optJSONObject(i) ?: continue
+      val runs = z.optInt("runs", 0)
+      if (runs <= 0) continue
+      zones += WagonZone(
+        zone = z.optInt("zone", 0),
+        label = z.optString("label"),
+        shots = z.optInt("shots", 0),
+        fours = z.optInt("fours", 0),
+        sixes = z.optInt("sixes", 0),
+        runs = runs,
+      )
+    }
+    if (zones.isEmpty()) return null
+    return WagonWheel(
+      title = json.optString("title", "Where the runs go"),
+      total = json.optInt("total", zones.sumOf { it.runs }),
+      shots = json.optInt("shots", zones.sumOf { it.shots }),
+      zones = zones,
+      caption = json.optString("caption").takeIf { it.isNotBlank() && it != "null" },
+    )
+  }
+
+  private fun parseAnalysis(json: JSONObject?): CareerAnalysis? {
+    if (json == null) return null
+    val arr = json.optJSONArray("lines") ?: return null
+    val lines = mutableListOf<String>()
+    for (i in 0 until arr.length()) {
+      arr.optString(i).takeIf { it.isNotBlank() }?.let { lines += it }
+    }
+    if (lines.isEmpty()) return null
+    return CareerAnalysis(
+      title = json.optString("title", "The read on your game"),
+      lines = lines,
+      source = json.optString("source"),
+    )
+  }
+
+  private fun parseVisual(json: JSONObject?): CareerVisual? {
+    if (json == null) return null
+    val kind = json.optString("kind")
+    if (kind.isBlank()) return null
+    val segments = mutableListOf<CareerSegment>()
+    val arr = json.optJSONArray("segments")
+    if (arr != null) {
+      for (i in 0 until arr.length()) {
+        val o = arr.optJSONObject(i) ?: continue
+        val value = o.optDouble("value", 0.0).toFloat()
+        // A zero part is not drawable and reads as a gap in the bar, so it is
+        // dropped rather than rendered as a sliver of nothing.
+        if (value > 0f) segments += CareerSegment(o.optString("label"), value)
+      }
+    }
+    if (kind == "split" && segments.isEmpty()) return null
+    return CareerVisual(
+      kind = kind,
+      title = json.optString("title"),
+      caption = json.optString("caption").takeIf { it.isNotBlank() && it != "null" },
+      segments = segments,
+      value = json.optDouble("value", 0.0).toFloat(),
+      max = json.optDouble("max", 0.0).toFloat(),
+    )
+  }
+
+  private fun parseFigures(arr: org.json.JSONArray?): List<CareerFigure> {
+    if (arr == null) return emptyList()
+    val out = mutableListOf<CareerFigure>()
+    for (i in 0 until arr.length()) {
+      val o = arr.optJSONObject(i) ?: continue
+      val label = o.optString("label")
+      if (label.isNotBlank()) out += CareerFigure(label, o.optString("value", "-"))
+    }
+    return out
+  }
+
   private fun parseProfile(json: JSONObject): PlayerProfile {
     val recent = mutableListOf<RecentMatch>()
     val arr = json.optJSONArray("recent_matches")
@@ -251,6 +488,27 @@ class ProfileRepository(
         val o = arr.getJSONObject(i)
         recent.add(
           RecentMatch(
+            card = o.optJSONObject("card")?.let { c ->
+              MatchCard(
+                team1 = c.optString("team1"),
+                team2 = c.optString("team2"),
+                team1Logo = c.optString("team1Logo"),
+                team2Logo = c.optString("team2Logo"),
+                team1Emblem = c.optString("team1Emblem"),
+                team2Emblem = c.optString("team2Emblem"),
+                score1 = c.optString("score1"),
+                score2 = c.optString("score2"),
+                overs1 = c.optString("overs1"),
+                overs2 = c.optString("overs2"),
+                battingTeam = c.optInt("battingTeam", 1),
+                sport = c.optString("sport", "cricket"),
+                isLive = c.optBoolean("isLive"),
+                competition = c.optString("competition"),
+                venue = c.optString("venue"),
+                district = c.optString("district"),
+                locality = c.optString("locality"),
+              )
+            },
             matchId = o.optLong("match_id", 0L),
             title = o.optString("title", ""),
             matchType = o.optString("match_type", ""),
@@ -302,6 +560,7 @@ class ProfileRepository(
       careerRuns = json.optJSONObject("career")?.optInt("runs", 0) ?: 0,
       careerWickets = json.optJSONObject("career")?.optInt("wickets", 0) ?: 0,
       sportCareer = parseSportCareer(json.optJSONObject("sport_career")),
+      careerBook = parseCareerBook(json.optJSONObject("career_book")),
       completion = json.optJSONObject("profile_completion")?.let { c ->
         val arr = c.optJSONArray("missing")
         ProfileCompletion(

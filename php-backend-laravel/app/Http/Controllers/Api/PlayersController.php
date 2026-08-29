@@ -8,12 +8,17 @@ use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
+use App\Models\PlayerCareerBatting;
+use App\Models\PlayerCareerBowling;
+use App\Models\PlayerCareerFielding;
 use App\Models\PlayerPost;
 use App\Models\PostComment;
 use App\Models\PostImage;
 use App\Models\PostLike;
 use App\Models\PostSave;
 use App\Models\User;
+use App\Services\CareerBattingService;
+use App\Services\PlayerCareerAnalysis;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -100,6 +105,12 @@ final class PlayersController extends Controller
             ])
             ->all();
 
+        // The scoreboard for each of those matches, in the shape the ActionBoard card
+        // already reads. The profile used to list a match as one line of text and an XP
+        // number — the same game the feed draws as a scorecard. There is no reason for
+        // a player's own history to be the poorest view of it in the app.
+        $recent = $this->attachMatchCards($recent);
+
         return [
             'id'               => $user->id,
             'player_id'        => $pid,
@@ -146,6 +157,13 @@ final class PlayersController extends Controller
             // cricket-only (runs/wickets), so a footballer's profile was advertising
             // batting figures that can never be anything but zero.
             'sport_career' => $this->sportCareer($user),
+
+            // The full record, one entry per sport this player has actually played.
+            // `career` and `sport_career` above are a handful of totals; this is the
+            // batting and bowling line a cricketer expects to see about themselves,
+            // and it carries the other sports on the same shape so the profile can
+            // simply offer them as tabs.
+            'career_book' => $this->careerBook($user),
 
             // The social graph. The follow system was built and wired into player
             // SEARCH, but the profile — the one screen where following belongs —
@@ -247,6 +265,441 @@ final class PlayersController extends Controller
      *
      * @return array<string, mixed>
      */
+    /**
+     * Every sport this player has a record in, each as {key, label, matches, headline,
+     * groups}. The app renders it without knowing any sport's rules: `headline` is the
+     * three numbers that lead, `groups` are the labelled tables under them.
+     *
+     * Values are formatted STRINGS on purpose. An average is "-" until a player has
+     * been out, best bowling reads "4/23", and milestones read "3 / 0" — none of those
+     * survive being an int, and the alternative is six format rules in the client.
+     */
+    /**
+     * Hydrate ledger rows with the real scoreline, badges and place of each match.
+     *
+     * Mirrors {@see LiveMatchController::index}'s row shape field for field, so the
+     * profile card and the feed card are fed identically and cannot drift apart.
+     */
+    private function attachMatchCards(array $recent): array
+    {
+        $ids = array_values(array_filter(array_map(fn ($r) => (int) ($r['match_id'] ?? 0), $recent)));
+        if ($ids === []) {
+            return $recent;
+        }
+        $matches = LiveMatch::query()->whereIn('id', $ids)->get()->keyBy('id');
+
+        foreach ($recent as $i => $row) {
+            $m = $matches->get((int) ($row['match_id'] ?? 0));
+            if ($m === null) {
+                continue;
+            }
+
+            // Which side batted last — drives score attribution and which team the card
+            // puts on top. Same derivation the feed uses.
+            $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
+            $battingTeam = 1;
+            for ($j = count($overSummary) - 1; $j >= 0; $j--) {
+                $tag = $overSummary[$j]['batting'] ?? null;
+                if ($tag !== null && $tag !== '') {
+                    $battingTeam = ($tag === $m->away || $tag === 'away') ? 2 : 1;
+                    break;
+                }
+            }
+
+            // score_text carries wickets, which only cricket has. On every other sport it
+            // holds the whole line ("2 - 1") and must not be printed as one side's score.
+            $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
+            $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
+            $overs = (string) ($m->overs ?? '');
+
+            $recent[$i]['card'] = [
+                'team1'       => (string) $m->home,
+                'team2'       => (string) $m->away,
+                'team1Full'   => (string) ($m->home_full ?? ''),
+                'team2Full'   => (string) ($m->away_full ?? ''),
+                'team1Logo'   => $this->absoluteMatchLogo($m->home_logo),
+                'team2Logo'   => $this->absoluteMatchLogo($m->away_logo),
+                'team1Emblem' => (string) ($m->home_emblem ?? ''),
+                'team2Emblem' => (string) ($m->away_emblem ?? ''),
+                'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
+                'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
+                'overs1'      => $isCricket && $battingTeam !== 2 ? $overs : '',
+                'overs2'      => $isCricket && $battingTeam === 2 ? $overs : '',
+                'battingTeam' => $battingTeam,
+                'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
+                'status'      => (string) ($m->status ?? ''),
+                'isLive'      => strtolower((string) $m->status) === 'live',
+                'result'      => (string) ($m->result ?? ''),
+                'competition' => (string) ($m->competition ?? ''),
+                'venue'       => (string) ($m->venue ?? ''),
+                'district'    => (string) ($m->district ?? ''),
+                'locality'    => (string) ($m->locality ?? ''),
+            ];
+        }
+
+        return $recent;
+    }
+
+    /** A stored logo path made absolute; blank stays blank so the app draws its emblem. */
+    private function absoluteMatchLogo(?string $path): string
+    {
+        $p = trim((string) $path);
+        if ($p === '' || str_starts_with($p, 'http')) {
+            return $p;
+        }
+        return rtrim(config('app.url', ''), '/') . '/' . ltrim($p, '/');
+    }
+
+    private function careerBook(User $user): array
+    {
+        $pid = (string) $user->player_id;
+        $primary = strtolower((string) ($user->primary_sport ?? 'cricket')) ?: 'cricket';
+
+        // What they have actually played, counted once per sport. A player who has
+        // never finished a match still gets their primary sport, so the tab strip is
+        // never empty on a brand-new profile.
+        $played = [];
+        if ($pid !== '') {
+            $rows = LiveMatch::query()
+                ->selectRaw('lower(sport) as sport, count(*) as played')
+                ->whereRaw('lower(status) = ?', ['completed'])
+                ->where(function ($q) use ($pid): void {
+                    $q->where('home_squad', 'like', '%"' . $pid . '"%')
+                      ->orWhere('away_squad', 'like', '%"' . $pid . '"%');
+                })
+                ->groupBy(DB::raw('lower(sport)'))
+                ->get();
+            foreach ($rows as $row) {
+                $key = (string) ($row->sport ?: 'cricket');
+                $played[$key] = (int) $row->played;
+            }
+        }
+        if (!isset($played[$primary])) {
+            $played[$primary] = 0;
+        }
+
+        // The player's own sport leads; the rest follow by how much they have played.
+        uksort($played, function (string $a, string $b) use ($played, $primary): int {
+            if ($a === $primary) {
+                return -1;
+            }
+            if ($b === $primary) {
+                return 1;
+            }
+            return $played[$b] <=> $played[$a];
+        });
+
+        $book = [];
+        foreach ($played as $sport => $matches) {
+            $book[] = $sport === 'cricket'
+                ? $this->cricketCareer($user, $pid, $matches)
+                : $this->otherSportCareer($user, $sport, $matches);
+        }
+
+        return ['primary' => $primary, 'sports' => $book];
+    }
+
+    /** Cricket: the batting and bowling lines, replayed from the ball log. */
+    private function cricketCareer(User $user, string $pid, int $matches): array
+    {
+        $bat = CareerBattingService::forPlayer($pid);
+        $bowl = $pid === '' ? null : PlayerCareerBowling::where('player_id', $pid)->first();
+        $field = $pid === '' ? null : PlayerCareerFielding::where('player_id', $pid)->first();
+
+        // The replay only counts matches a player actually appeared in. career_matches
+        // is the same number, so prefer whichever is larger rather than showing a zero
+        // next to a career that plainly exists.
+        $matches = max($matches, (int) ($user->career_matches ?? 0));
+
+        $innings = (int) ($bat->innings ?? 0);
+        $outs = (int) ($bat->outs ?? 0);
+        $runs = (int) ($bat->runs ?? 0);
+        $balls = (int) ($bat->balls ?? 0);
+
+        $groups = [];
+        if ($innings > 0 || $runs > 0) {
+            $fours = (int) ($bat->fours ?? 0);
+            $sixes = (int) ($bat->sixes ?? 0);
+            $boundaryRuns = $fours * 4 + $sixes * 6;
+            $groups[] = [
+                'title' => 'Batting',
+                'lead' => ['label' => 'Runs', 'value' => (string) $runs],
+                // How the runs were made. A strike rate says how fast; this says how -
+                // and it is the difference between a player who milks singles and one
+                // who clears the rope, which no total can express.
+                'visual' => $runs > 0 ? [
+                    'kind' => 'split',
+                    'title' => 'How the runs came',
+                    'caption' => $boundaryRuns > 0
+                        ? round($boundaryRuns * 100 / max(1, $runs)) . '% of your runs in boundaries'
+                        : null,
+                    'segments' => [
+                        ['label' => 'Sixes', 'value' => $sixes * 6],
+                        ['label' => 'Fours', 'value' => $fours * 4],
+                        ['label' => 'Running', 'value' => max(0, $runs - $boundaryRuns)],
+                    ],
+                ] : null,
+                'stats' => [
+                    ['label' => 'Innings', 'value' => (string) $innings],
+                    ['label' => 'Not outs', 'value' => (string) max(0, $innings - $outs)],
+                    ['label' => 'Highest', 'value' => (string) (int) ($bat->high_score ?? 0)],
+                    ['label' => 'Average', 'value' => self::num($bat?->average())],
+                    ['label' => 'Strike rate', 'value' => self::num($bat?->strikeRate())],
+                    ['label' => 'Balls faced', 'value' => (string) $balls],
+                    ['label' => 'Fours', 'value' => (string) (int) ($bat->fours ?? 0)],
+                    ['label' => 'Sixes', 'value' => (string) (int) ($bat->sixes ?? 0)],
+                    [
+                        'label' => '50s / 100s',
+                        'value' => (int) ($bat->fifties ?? 0) . ' / ' . (int) ($bat->hundreds ?? 0),
+                    ],
+                ],
+            ];
+        }
+
+        $bowlBalls = (int) ($bowl->balls ?? 0);
+        $wickets = (int) ($bowl->wickets ?? 0);
+        if ($bowlBalls > 0 || $wickets > 0) {
+            $economy = $bowl?->economy();
+            $groups[] = [
+                'title' => 'Bowling',
+                'lead' => ['label' => 'Wickets', 'value' => (string) $wickets],
+                // An economy rate means nothing to most players as a bare decimal. On a
+                // 0-15 scale with the verdict written out, it reads at a glance.
+                'visual' => $economy === null ? null : [
+                    'kind' => 'meter',
+                    'title' => 'Economy',
+                    'value' => $economy,
+                    'max' => 15,
+                    'caption' => $economy . ' runs per over — ' . match (true) {
+                        $economy < 5 => 'tight',
+                        $economy < 7 => 'steady',
+                        $economy < 9 => 'gettable',
+                        default => 'expensive',
+                    },
+                ],
+                'stats' => [
+                    ['label' => 'Innings', 'value' => (string) (int) ($bowl->innings ?? 0)],
+                    ['label' => 'Overs', 'value' => $bowl?->oversText() ?? '0.0'],
+                    ['label' => 'Runs', 'value' => (string) (int) ($bowl->runs ?? 0)],
+                    ['label' => 'Economy', 'value' => self::num($bowl?->economy())],
+                    ['label' => 'Average', 'value' => self::num($bowl?->average())],
+                    ['label' => 'Strike rate', 'value' => self::num($bowl?->strikeRate())],
+                    ['label' => 'Best', 'value' => $bowl?->bestText() ?? '-'],
+                    ['label' => 'Maidens', 'value' => (string) (int) ($bowl->maidens ?? 0)],
+                    [
+                        'label' => '3w / 5w',
+                        'value' => (int) ($bowl->three_fers ?? 0) . ' / ' . (int) ($bowl->five_fers ?? 0),
+                    ],
+                ],
+            ];
+        }
+
+        $catches = (int) ($field->catches ?? 0);
+        $runOuts = (int) ($field->run_outs ?? 0);
+        $stumpings = (int) ($field->stumpings ?? 0);
+        $dismissals = $catches + $runOuts + $stumpings;
+        if ($dismissals > 0) {
+            $groups[] = [
+                'title' => 'Fielding',
+                'lead' => ['label' => 'Dismissals', 'value' => (string) $dismissals],
+                'visual' => [
+                    'kind' => 'split',
+                    'title' => 'How they went',
+                    'caption' => null,
+                    'segments' => [
+                        ['label' => 'Catches', 'value' => $catches],
+                        ['label' => 'Run outs', 'value' => $runOuts],
+                        ['label' => 'Stumpings', 'value' => $stumpings],
+                    ],
+                ],
+                'stats' => [
+                    ['label' => 'Catches', 'value' => (string) $catches],
+                    ['label' => 'Run outs', 'value' => (string) $runOuts],
+                    ['label' => 'Stumpings', 'value' => (string) $stumpings],
+                ],
+            ];
+        }
+
+        // An empty cricket career has two different causes and the player deserves to
+        // know which: they have not played yet, or they played a match nobody scored
+        // ball by ball. Neither is "cricket does not track this".
+        $note = null;
+        if ($groups === []) {
+            $note = $matches > 0
+                ? 'These matches were not scored ball by ball, so there is no batting or bowling line from them yet.'
+                : 'Your batting and bowling line builds itself from the first match someone scores ball by ball.';
+        }
+
+        return [
+            'key' => 'cricket',
+            'label' => 'Cricket',
+            'matches' => $matches,
+            'note' => $note,
+            // Where the runs actually went. Only boundaries the scorer placed are in
+            // here, so the wheel is a record of real shots, never a reconstruction.
+            'wagon' => $this->wagon($bat),
+            // Three sentences about the figures above, written by a model that was
+            // handed those figures and forbidden to produce any of its own.
+            'analysis' => $this->careerAnalysis($user),
+            'headline' => [
+                ['label' => 'Matches', 'value' => (string) $matches],
+                ['label' => 'Runs', 'value' => (string) $runs],
+                ['label' => 'Wickets', 'value' => (string) $wickets],
+            ],
+            'groups' => $groups,
+        ];
+    }
+
+    /**
+     * The career wagon wheel: eight regions, each with the shots and runs the player
+     * actually hit there.
+     *
+     * Returns null rather than an empty wheel — a ground with no dots on it says the
+     * feature is broken, when the truth is that nobody placed a boundary yet.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function wagon(?PlayerCareerBatting $bat): ?array
+    {
+        $zones = $bat?->zones;
+        if (! is_array($zones) || $zones === []) {
+            return null;
+        }
+
+        $out = [];
+        $total = 0;
+        $shots = 0;
+        foreach ($zones as $z) {
+            $index = (int) ($z['zone'] ?? 0);
+            $runs = (int) ($z['runs'] ?? 0);
+            $total += $runs;
+            $shots += (int) ($z['shots'] ?? 0);
+            $out[] = [
+                'zone' => $index,
+                'label' => PlayerCareerBatting::ZONE_LABELS[$index] ?? 'Unknown',
+                'shots' => (int) ($z['shots'] ?? 0),
+                'fours' => (int) ($z['fours'] ?? 0),
+                'sixes' => (int) ($z['sixes'] ?? 0),
+                'runs' => $runs,
+            ];
+        }
+        if ($total <= 0) {
+            return null;
+        }
+
+        // Strongest region, so the card can say in words what the drawing shows.
+        $best = $out[0];
+        foreach ($out as $z) {
+            if ($z['runs'] > $best['runs']) {
+                $best = $z;
+            }
+        }
+
+        return [
+            'title' => 'Where the runs go',
+            'total' => $total,
+            'shots' => $shots,
+            'zones' => $out,
+            'caption' => $best['runs'] . ' of these runs went ' . strtolower($best['label'])
+                . ' — ' . (int) round($best['runs'] * 100 / $total) . '% of the placed boundaries.',
+        ];
+    }
+
+    /**
+     * The written read, if one has been generated for the player's current figures.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function careerAnalysis(User $user): ?array
+    {
+        $service = app(PlayerCareerAnalysis::class);
+        // Schedule the write for after this response, then serve whatever is already
+        // cached. The profile is never slower than the database because of this card.
+        $service->refreshAfterResponse($user, $service->facts($user));
+        $written = $service->cached($user);
+        if ($written === null) {
+            return null;
+        }
+
+        return [
+            'title' => 'The read on your game',
+            'lines' => $written['lines'],
+            // Named, not hidden. A reader is entitled to know which sentences on a page
+            // of real figures were written by a model rather than counted.
+            'source' => 'Written by Haraan AI from your own figures.',
+        ];
+    }
+
+    /** Every other sport: what its own scorer actually records, and nothing more. */
+    private function otherSportCareer(User $user, string $sport, int $matches): array
+    {
+        $label = ucfirst($sport);
+        $headline = [['label' => 'Matches', 'value' => (string) $matches]];
+        $groups = [];
+
+        if ($sport === 'football') {
+            $tally = function (string $kind) use ($user): int {
+                return (int) MatchEvent::query()
+                    ->where('player_id', $user->id)
+                    ->where('kind', $kind)
+                    ->count();
+            };
+            // Own goals move the opposition's score; they are not this player's tally.
+            $goals = $tally(MatchEvent::GOAL);
+            $assists = $tally(MatchEvent::ASSIST);
+            $headline[] = ['label' => 'Goals', 'value' => (string) $goals];
+            $headline[] = ['label' => 'Assists', 'value' => (string) $assists];
+            $groups[] = [
+                'title' => 'Attacking',
+                'lead' => ['label' => 'Goals', 'value' => (string) $goals],
+                'visual' => ($goals + $assists) > 0 ? [
+                    'kind' => 'split',
+                    'title' => 'Goal involvements',
+                    'caption' => null,
+                    'segments' => [
+                        ['label' => 'Goals', 'value' => $goals],
+                        ['label' => 'Assists', 'value' => $assists],
+                    ],
+                ] : null,
+                'stats' => [
+                    ['label' => 'Assists', 'value' => (string) $assists],
+                    ['label' => 'Involvements', 'value' => (string) ($goals + $assists)],
+                    [
+                        'label' => 'Per match',
+                        'value' => $matches > 0 ? self::num(round(($goals + $assists) / $matches, 2)) : '-',
+                    ],
+                ],
+            ];
+        }
+
+        // Volleyball, badminton, basketball, kabaddi and the racket sports all score
+        // points per SIDE. There is no per-player figure to withhold — there is none.
+        $note = null;
+        if ($groups === []) {
+            $note = $sport === 'football'
+                ? 'No goals or assists recorded in these matches yet.'
+                : 'This sport is scored per side, not per player, so matches are the only figure it keeps.';
+        }
+
+        return [
+            'key' => $sport,
+            'label' => $label,
+            'matches' => $matches,
+            'note' => $note,
+            'headline' => $headline,
+            'groups' => $groups,
+        ];
+    }
+
+    /** A rate as it should read, or "-" when there is honestly no number yet. */
+    private static function num(?float $value): string
+    {
+        if ($value === null) {
+            return '-';
+        }
+        return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.') ?: '0';
+    }
+
     private function sportCareer(User $user): array
     {
         $sport = strtolower((string) ($user->primary_sport ?? 'cricket'));

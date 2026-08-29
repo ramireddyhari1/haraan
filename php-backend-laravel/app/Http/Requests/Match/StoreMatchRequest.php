@@ -47,6 +47,10 @@ final class StoreMatchRequest extends FormRequest
             'format.kind'           => ['required_with:format', 'string', \Illuminate\Validation\Rule::in(\App\Support\SportRules::SUPPORTED)],
             'format.overs'          => ['nullable', 'integer', 'min:1', 'max:50'],
             'format.ball'           => ['nullable', 'string', 'max:20'],
+            // What the match is played ON — the create wizard's Ground step. Kept to a
+            // closed set so the surface can be counted and filtered later; anything
+            // unlisted is a typo, not a new kind of pitch.
+            'format.ground'         => ['nullable', 'string', 'in:turf,matting,cement,astro,mud,box'],
             'format.halves'         => ['nullable', 'integer', 'min:1', 'max:2'],
             'format.halfLengthMin'  => ['nullable', 'integer', 'min:5', 'max:45'],
             'format.bestOf'         => ['nullable', 'integer', 'in:1,3,5'],

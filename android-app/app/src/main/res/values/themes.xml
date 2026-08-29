@@ -4,6 +4,20 @@
     <style name="Theme.Thanna" parent="android:Theme.Material.Light.NoActionBar" />
 
     <!--
+      The camera role: a phone paired into a match as a viewfinder.
+
+      Its own DARK theme. Borrowing the splash theme put the brand plate at the top
+      of a black camera screen, and borrowing the light one flashed white before the
+      viewfinder appeared. A camera screen starts dark and stays dark.
+    -->
+    <style name="Theme.Haraan.Camera" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/camera_backdrop</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <!--
       Launch theme — stage 1 of the brand splash.
 
       Android 12+ ALWAYS draws a system splash on cold start; before this theme

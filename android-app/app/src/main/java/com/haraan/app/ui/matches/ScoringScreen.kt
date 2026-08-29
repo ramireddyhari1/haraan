@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SportsBaseball
 import androidx.compose.material.icons.outlined.SportsCricket
@@ -77,6 +78,9 @@ private val ScRed = Color(0xFFDC2626)
 private val ScFour = Color(0xFF2563EB)
 private val ScSix = Color(0xFFD97706)
 
+/** A recorded shot: which region, and exactly where inside it. */
+data class ShotPlot(val zone: Int, val x: Float, val y: Float)
+
 private data class ScorerBatter(val name: String, val runs: Int, val balls: Int)
 private data class ScorerBowler(val name: String, val balls: Int, val runs: Int, val wickets: Int)
 private data class ScorerState(
@@ -103,6 +107,15 @@ private data class ScorerState(
      * opened — plenty of matches are won at the toss by the side that fields.
      */
     val battedFirst: Int = 1,
+    /**
+     * Whether this match may record where boundaries went.
+     *
+     * Reserved for matches created by a VERIFIED account. Shot direction is the one figure
+     * on the whole board that cannot be checked against anything else — a scorecard can be
+     * argued with, a wagon wheel cannot — so it is only collected where there is a name
+     * attached to its accuracy. Everyone else scores exactly as before, with no extra tap.
+     */
+    val shotPlotting: Boolean = false,
     /** Where and when — shown under the toss line so the scorer can confirm the fixture. */
     val venue: String = "",
     val startLabel: String = "",
@@ -243,7 +256,7 @@ fun ScoringScreen(
                 }
             }
         },
-        onEvent = { event, after ->
+        onEvent = { event, after, plot ->
             scope.launch {
                 val token = scoringToken() ?: return@launch
                 persistLock.withLock {
@@ -270,7 +283,7 @@ fun ScoringScreen(
                         }
                         started.value = true
                     }
-                    val action = scoreActionFor(event, after, battingSquad) ?: return@withLock
+                    val action = scoreActionFor(event, after, battingSquad, plot?.zone, plot?.x, plot?.y) ?: return@withLock
                     val sent2 = repo.sendScoreAction(token, matchId, action)
                     if (!sent2.ok) {
                         Toast.makeText(ctx, sent2.refusal ?: "Score didn't save — check connection.", Toast.LENGTH_LONG).show()
@@ -312,8 +325,11 @@ fun ScoringScreen(
                 }
             }
         },
-        onWicket = { newBatsman, dismissal ->
-            // Wicket → persist with the chosen incoming batsman + how the batter was out.
+        onWicket = { newBatsman, dismissal, fielder ->
+            // Wicket → persist with the chosen incoming batsman, how the batter was out,
+            // and who made it happen. The fielder is what turns four wickets into four
+            // wickets AND the two catches that took them; it is omitted, never guessed,
+            // when the dismissal belongs to the bowler alone or the scorer skipped it.
             scope.launch {
                 val token = scoringToken() ?: return@launch
                 persistLock.withLock {
@@ -321,6 +337,7 @@ fun ScoringScreen(
                         .put("type", "wicket")
                         .put("new_batsman_id", playerRef(newBatsman) ?: "")
                         .put("dismissal", dismissal)
+                    playerRef(fielder)?.let { payload.put("fielder_id", it) }
                     val sent5 = repo.sendScoreAction(token, matchId, payload)
                     if (!sent5.ok) {
                         Toast.makeText(ctx, sent5.refusal ?: "Wicket didn't save — check connection.", Toast.LENGTH_LONG).show()
@@ -339,9 +356,33 @@ private fun playerRef(member: SquadMember?): String? {
 }
 
 /** Map a keypad event to the backend score-action payload. */
-private fun scoreActionFor(event: String, after: ScorerState, battingSquad: List<SquadMember>): JSONObject? =
+private fun scoreActionFor(
+    event: String,
+    after: ScorerState,
+    battingSquad: List<SquadMember>,
+    /**
+     * Which of the eight regions the shot went to, 0-7, or null when it was not captured.
+     * Absent is the normal case — every ball scored before the picker existed, and every
+     * boundary where the scorer tapped Skip. Nothing downstream may assume it is present.
+     */
+    zone: Int? = null,
+    /** Exact landing point, fractions of the ground radius. Null when not captured. */
+    shotX: Float? = null,
+    shotY: Float? = null,
+): JSONObject? =
     when (event) {
         "0", "1", "2", "3", "4", "5", "6" -> JSONObject().put("type", "runs").put("value", event.toInt())
+            .also {
+                if (zone != null && zone in 0..7) {
+                    it.put("zone", zone)
+                    if (shotX != null && shotY != null) {
+                        // Three places is finer than a thumb on a 268dp circle can express,
+                        // and it keeps the ball log small.
+                        it.put("x", Math.round(shotX * 1000f) / 1000.0)
+                        it.put("y", Math.round(shotY * 1000f) / 1000.0)
+                    }
+                }
+            }
         "WD" -> JSONObject().put("type", "wide").put("value", 1)
         "NB" -> JSONObject().put("type", "noball").put("runs_off_bat", 0)
         "BYE" -> JSONObject().put("type", "bye").put("value", 1)
@@ -382,6 +423,7 @@ private fun seedFrom(d: MatchUiState): ScorerState {
         team1Name = d.team1FullName.ifBlank { d.team1 },
         team2Name = d.team2FullName.ifBlank { d.team2 },
         battedFirst = d.battingTeam.takeIf { it == 1 || it == 2 } ?: 1,
+        shotPlotting = d.shotPlotting,
         venue = d.venue,
         startLabel = d.startLabel,
         startIsScheduled = d.startIsScheduled,
@@ -401,9 +443,9 @@ private fun ScorerLoaded(
     bowlingSquad: List<SquadMember> = emptyList(),
     secondBattingSquad: List<SquadMember> = emptyList(),
     secondBowlingSquad: List<SquadMember> = emptyList(),
-    onEvent: (event: String, after: ScorerState) -> Unit = { _, _ -> },
+    onEvent: (event: String, after: ScorerState, shot: ShotPlot?) -> Unit = { _, _, _ -> },
     onBowlerChange: (SquadMember?) -> Unit = {},
-    onWicket: (newBatsman: SquadMember?, dismissal: String) -> Unit = { _, _ -> },
+    onWicket: (newBatsman: SquadMember?, dismissal: String, fielder: SquadMember?) -> Unit = { _, _, _ -> },
     onStartSecondInnings: (striker: String, nonStriker: String, bowler: String) -> Unit = { _, _, _ -> },
     onChangeBatsman: (role: String, member: SquadMember) -> Unit = { _, _ -> },
 ) {
@@ -414,6 +456,12 @@ private fun ScorerLoaded(
     // Wicket flow: first pick HOW the batter was out, then who comes in.
     var pickDismissal by remember { mutableStateOf(false) }
     var pendingDismissal by remember { mutableStateOf("bowled") }
+    // Who took the catch / ran him out / stumped him. Null for bowled and LBW, and for
+    // a scorer who genuinely did not see which fielder it was.
+    var pendingFielder by remember { mutableStateOf<SquadMember?>(null) }
+    var showDevices by remember { mutableStateOf(false) }
+    var showClips by remember { mutableStateOf(false) }
+    var pickFielder by remember { mutableStateOf(false) }
     // Swap a batter who hasn't faced a ball (wrong batter picked).
     var pickChangeBatsman by remember { mutableStateOf(false) }
     var changeRole by remember { mutableStateOf("striker") }
@@ -424,6 +472,9 @@ private fun ScorerLoaded(
     // for a fresh innings the opening bowler is forced before the first delivery.
     var pickBowler by remember { mutableStateOf(false) }
     var showLanguage by remember { mutableStateOf(false) }
+    // The boundary waiting on a direction. Null when nothing is pending.
+    var pendingShot by remember { mutableStateOf<String?>(null) }
+    val shotPlotting = seed.shotPlotting
     var pickingOpening by remember { mutableStateOf(false) }
 
     // Innings tracking. `transitioned` = the user started the 2nd innings in THIS session,
@@ -505,7 +556,7 @@ private fun ScorerLoaded(
             next = next.copy(striker = next.nonStriker, nonStriker = next.striker, thisOver = emptyList())
         }
         state = next
-        onWicket(newBatsman, pendingDismissal)
+        onWicket(newBatsman, pendingDismissal, pendingFielder)
         pickBatsman = false
         val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
         if (next.balls > before && next.balls % 6 == 0 && !nextOver) {
@@ -513,10 +564,10 @@ private fun ScorerLoaded(
         }
     }
 
-    fun apply(ev: String) {
+    fun apply(ev: String, shot: ShotPlot? = null, asked: Boolean = false) {
         if (ev == "UNDO") {
             history.lastOrNull()?.let { state = it; history = history.dropLast(1) }
-            onEvent("UNDO", state)
+            onEvent("UNDO", state, null)
             return
         }
         // Block scoring once the innings is complete (over quota / all out / chase won).
@@ -537,11 +588,18 @@ private fun ScorerLoaded(
             pickDismissal = true
             return
         }
+        // A boundary asks where it went, once, before it is scored. `zone` being non-null
+        // means that question has already been answered (or skipped with -1), so this does
+        // not loop.
+        if ((ev == "4" || ev == "6") && shot == null && !asked && shotPlotting) {
+            pendingShot = ev
+            return
+        }
         history = history + state
         val before = state.balls
         val next = reduce(state, ev)
         state = next
-        onEvent(ev, next)
+        onEvent(ev, next, shot)
         // A legal delivery just completed the over → bring on a new bowler (and roll the
         // over). Skip the prompt when that ball also ended the innings.
         val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
@@ -550,15 +608,72 @@ private fun ScorerLoaded(
         }
     }
 
+    pendingShot?.let { shot ->
+        WagonZonePicker(
+            shot = shot,
+            onPick = { z, x, y ->
+                pendingShot = null
+                apply(shot, ShotPlot(z, x, y), asked = true)
+            },
+            onSkip = {
+                pendingShot = null
+                // Scored exactly as before, with no shot attached and no second prompt.
+                apply(shot, null, asked = true)
+            },
+        )
+    }
+
+    // Continues a wicket once the fielder question is settled (asked or skipped).
+    fun continueWicket() {
+        val willBeAllOut = state.wickets + 1 >= allOutWickets
+        // Last wicket → no new batter to pick; close the innings straight away.
+        if (!willBeAllOut && activeBattingSquad.isNotEmpty()) pickBatsman = true else finishWicket(null)
+    }
+
+    if (showClips) {
+        MatchClipsSheet(matchId = matchId, onDismiss = { showClips = false })
+    }
+
+    if (showDevices) {
+        MatchDevicesSheet(
+            matchId = matchId,
+            onDismiss = { showDevices = false },
+            onOpenClips = { showDevices = false; showClips = true },
+        )
+    }
+
     if (pickDismissal) {
         DismissalPicker(
             onPick = { type ->
                 pendingDismissal = type
+                pendingFielder = null
                 pickDismissal = false
-                // Last wicket → no new batter to pick; close the innings straight away.
-                val willBeAllOut = state.wickets + 1 >= allOutWickets
-                if (!willBeAllOut && activeBattingSquad.isNotEmpty()) pickBatsman = true else finishWicket(null)
+                // Only three dismissals have a fielder to name. Asking after a bowled
+                // one would be a question with no right answer, and the scorer is
+                // standing at the boundary with a game waiting on them.
+                val fielded = type == "caught" || type == "runout" || type == "stumped"
+                if (fielded && activeBowlingSquad.isNotEmpty()) pickFielder = true else continueWicket()
             }
+        )
+    }
+
+    if (pickFielder) {
+        FielderPicker(
+            squad = activeBowlingSquad,
+            dismissal = pendingDismissal,
+            onPick = { member ->
+                pendingFielder = member
+                pickFielder = false
+                continueWicket()
+            },
+            onSkip = {
+                // Skipping is a real answer in gully cricket — a run-out off a deflection
+                // often has no one player to credit. The wicket still stands; only the
+                // fielding line goes unclaimed.
+                pendingFielder = null
+                pickFielder = false
+                continueWicket()
+            },
         )
     }
 
@@ -654,6 +769,11 @@ private fun ScorerLoaded(
             )
             // Both of these were dead: ScCircleIcon defaults onClick to {}, so the two
             // controls in the scorer's header had never done anything at all.
+            // Attach another phone to this match — a camera down the pitch, a camera on
+            // the bowler, and whatever the next assisted feature needs. Sits before Share
+            // because it is about running THIS match, not about telling people about it.
+            ScCircleIcon(Icons.Outlined.Add, "Add match device") { showDevices = true }
+            Spacer(Modifier.width(10.dp))
             ScCircleIcon(Icons.Outlined.Share, "Share") {
                 // A link to WATCH, not to score. This is what a scorer sends to the group
                 // so people who aren't at the ground can follow the innings.
@@ -1208,11 +1328,11 @@ private fun ScorerFace(name: String, photoUrl: String, accent: Color, size: Dp =
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
             )
         } else {
-            Text(
-                scorerInitials(name),
-                color = accent,
-                fontSize = (size.value * 0.34f).sp,
-                fontWeight = FontWeight.ExtraBold
+            Image(
+                painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                contentDescription = name,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
             )
         }
     }
@@ -1328,6 +1448,73 @@ private fun DismissalPicker(onPick: (String) -> Unit) {
                         Text(label, color = ScInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Who made the dismissal — asked only for a catch, run-out or stumping, from the
+ * FIELDING side. Skippable, because a scorer who did not see it must not be forced
+ * to name someone: a wrong catch on a career is worse than a missing one.
+ */
+@Composable
+private fun FielderPicker(
+    squad: List<SquadMember>,
+    dismissal: String,
+    onPick: (SquadMember) -> Unit,
+    onSkip: () -> Unit,
+) {
+    val headline = when (dismissal) {
+        "caught" -> "Who took the catch?"
+        "runout" -> "Who ran him out?"
+        else -> "Who stumped him?"
+    }
+    Dialog(
+        onDismissRequest = onSkip,
+        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false),
+    ) {
+        Column(
+            Modifier.clip(RoundedCornerShape(18.dp)).background(ScPanel).padding(20.dp),
+        ) {
+            Text("FIELDING", color = ScRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(headline, color = ScInk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+            ) {
+                squad.forEach { member ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ScDark)
+                            .clickable { onPick(member) }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            member.name,
+                            color = ScInk,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onSkip)
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text("Not sure", color = ScInk.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

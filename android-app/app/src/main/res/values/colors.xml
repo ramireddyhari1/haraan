@@ -9,4 +9,8 @@
     -->
     <color name="splash_background">#F5F8FC</color>
     <color name="brand_blue">#2563EB</color>
+
+    <!-- The camera role's window colour. Matches the top of the screen's own gradient
+         so there is no seam between the window and the first frame Compose draws. -->
+    <color name="camera_backdrop">#070C16</color>
 </resources>

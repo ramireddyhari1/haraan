@@ -8,6 +8,10 @@
          prompt - but WITHOUT it declared, Vibrator.vibrate() is a silent no-op, so the
          burst plays its animation and the phone stays perfectly still. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Only for a phone paired INTO a match as a camera. Requested at that moment,
+         never on launch: the scoring app itself has no use for a camera. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- Required to post notifications on Android 13+ (requested at runtime in MainActivity). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -27,6 +31,35 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          A phone joining a match AS A CAMERA. Its own Activity on purpose: this flow has
+          no account, no splash and no bottom nav, and routing it through MainActivity
+          would mean teaching the whole navigation graph about a mode that has none of
+          those things. Keeps the screen awake because a camera pointed at the stumps
+          must not sleep between deliveries.
+        -->
+        <activity
+            android:name=".camera.CameraDeviceActivity"
+            android:launchMode="singleTask"
+            android:screenOrientation="fullSensor"
+            android:exported="true"
+            android:theme="@style/Theme.Haraan.Camera">
+            <!-- The app's own scheme: what the QR resolves to when Haraan is installed. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="camera" />
+            </intent-filter>
+            <!-- And the https form, which is what survives being pasted into WhatsApp. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="haraan.app" android:pathPrefix="/join/camera" />
             </intent-filter>
         </activity>
 

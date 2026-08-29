@@ -171,10 +171,19 @@ sealed interface MatchFormat {
     /** Serialised into `sport_state.format` on the match — no schema per sport. */
     fun toServerMap(): Map<String, Any>
 
-    data class Cricket(val overs: Int, val ball: BallType) : MatchFormat {
+    data class Cricket(
+        val overs: Int,
+        val ball: BallType,
+        /** What it is played on. A tape ball on matting is not the game it is on cement. */
+        val ground: GroundType = GroundType.TURF,
+    ) : MatchFormat {
         override val summaryLine: String get() = "$overs overs · ${ball.label} ball"
-        override fun toServerMap(): Map<String, Any> =
-            mapOf("kind" to "cricket", "overs" to overs, "ball" to ball.serverValue)
+        override fun toServerMap(): Map<String, Any> = mapOf(
+            "kind" to "cricket",
+            "overs" to overs,
+            "ball" to ball.serverValue,
+            "ground" to ground.serverValue,
+        )
     }
 
     data class Football(val halves: Int, val halfLengthMin: Int) : MatchFormat {
@@ -255,12 +264,12 @@ data class FormatPreset(
         return sameFormat && (playersPerSide == null || draft.playersPerSide == playersPerSide)
     }
 
-    /** Applies the preset, preserving the ball the creator already chose. */
+    /** Applies the preset, preserving the ball and ground the creator already chose. */
     fun apply(draft: CreateMatchDraft) {
         val preset = format
         val current = draft.format
         draft.format = if (preset is MatchFormat.Cricket && current is MatchFormat.Cricket) {
-            preset.copy(ball = current.ball)
+            preset.copy(ball = current.ball, ground = current.ground)
         } else {
             preset
         }
@@ -516,6 +525,8 @@ class CreateMatchDraft(sport: String = "cricket") {
     // and sends a harmless placeholder for the other sports (see the payload builder).
     val overs: Int get() = (format as? MatchFormat.Cricket)?.overs ?: 0
     val ball: BallType get() = (format as? MatchFormat.Cricket)?.ball ?: BallType.TENNIS
+    /** Cricket's surface — turf, matting, cement, astro, mud or a box arena. */
+    val ground: GroundType get() = (format as? MatchFormat.Cricket)?.ground ?: GroundType.TURF
     /** Football's half length — what the scorer clock actually runs on. */
     val halfLengthMin: Int get() = (format as? MatchFormat.Football)?.halfLengthMin ?: 45
     /** Badminton's games-to-win-the-match. */
@@ -1369,6 +1380,14 @@ private fun FormatPicker(draft: CreateMatchDraft) {
                 (draft.format as? MatchFormat.Cricket)?.let { draft.format = it.copy(ball = ball) }
             },
         )
+
+        // Ground sits with the ball because they are the same question asked twice:
+        // what the match is played with, and what it is played on.
+        Spacer(Modifier.height(20.dp))
+        FieldLabel("Ground")
+        GroundPicker(selected = draft.ground) { ground ->
+            (draft.format as? MatchFormat.Cricket)?.let { draft.format = it.copy(ground = ground) }
+        }
     }
 }
 
@@ -2676,6 +2695,9 @@ private fun SummaryCard(draft: CreateMatchDraft) {
         // Reads in the sport's own terms — "2 × 25 min", "Doubles · best of 3 to 21" —
         // instead of the old bare "Sport: Football", which confirmed nothing.
         SummaryRow("Format", draft.format.summaryLine)
+        if (draft.format is MatchFormat.Cricket) {
+            SummaryRow("Ground", draft.ground.label)
+        }
         if (draft.spec.showPlayersStepper) {
             SummaryRow("Per side", "${draft.playersPerSide} players")
         }

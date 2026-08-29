@@ -1040,6 +1040,18 @@ internal fun MainAppContainer(
         onOpenPlayerProfile = { showCricketProfile = true },
         onOpenPass = { b -> ticketPass = b },
         onOpenSupport = { showAccountProfile = false; onItemClick(com.haraan.app.SupportChat) },
+        // The venue page is the one place a slot is booked — courts, duration, coupon
+        // and payment all live there. The account screen only points at it.
+        onOpenVenue = { v ->
+          showAccountProfile = false
+          onItemClick(
+            com.haraan.app.VenueDetail(
+              id = v.id, title = v.name, location = v.location, rating = v.rating,
+              category = v.category, price = v.price, imageUrl = v.image.orEmpty(),
+              tagline = v.tagline, distance = v.distance,
+            )
+          )
+        },
         onSignOut = { showAccountProfile = false; onLogout() },
         // Guests carry a marker, not a credential — the screen must invite them to
         // sign in rather than call the API and surface the backend's 401.
@@ -8316,7 +8328,7 @@ private fun MatchResultContent(
 // beacon in the context strip and the chase/status line where the result would be.
 // Neither team is dimmed (both are still in it); the batting side reads bolder.
 @Composable
-private fun MatchLiveContent(
+internal fun MatchLiveContent(
   modifier: Modifier = Modifier,
   team1: String, team1Logo: String, score1: String, overs1: String,
   team2: String, team2Logo: String, score2: String, overs2: String,
@@ -8703,9 +8715,10 @@ private fun LiveFeedGroup(
 }
 
 // One floating card surface for a single match (or, in other callers, a small group).
-// Live groups sit highest in the GameHub depth hierarchy.
+// Live groups sit highest in the GameHub depth hierarchy. Internal because the profile
+// draws a player's own history with the same box — one card, one definition.
 @Composable
-private fun MatchGroup(content: @Composable () -> Unit) {
+internal fun MatchGroup(content: @Composable () -> Unit) {
   Card(
     modifier = Modifier
       .fillMaxWidth()

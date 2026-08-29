@@ -1,8 +1,11 @@
 package com.haraan.app.ui.profile
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.painterResource
+import com.haraan.app.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -142,6 +145,10 @@ private val Text1     = HaraanColors.TextPrimary
 private val Text2     = HaraanColors.TextSecondary
 private val Text3     = HaraanColors.TextMuted
 private val Stroke    = HaraanColors.BorderLight
+/** Inside a card. Lighter than [Stroke], which is a divider between things. */
+private val Hairline  = Color(0xFFEDF1F6)
+/** The neutral an empty track or an unfilled marker sits on. */
+private val Track     = Color(0xFFEEF2F7)
 private val Danger    = HaraanColors.Danger
 // Achievement metals stay local: they are medal materials, not brand colours, and
 // nothing outside this screen uses them.
@@ -251,10 +258,15 @@ private fun deriveExtras(p: PlayerProfile): PlayerExtras {
         }
     // Current win streak = leading run of wins in the (newest-first) recent list.
     val streakWins = p.recentMatches.takeWhile { it.won }.count()
+    // Recognition earns its place only for things the screen does not already say.
+    //
+    // "Verified" was the blue tick beside the name, printed a second time as a chip;
+    // "Top 2 YSR Kadapa" was the district-ranking card immediately above it, printed a
+    // third way. A section that repeats its neighbours makes both of them feel less
+    // like the answer, so those two are gone. What is left is genuinely nowhere else:
+    // the organiser status, and a live win streak.
     val chips = buildList {
-        if (p.trustScore >= 80) add(RepChip(Icons.Default.Verified, "Verified", green = true))
         if (p.isOrganizer) add(RepChip(Icons.Default.WorkspacePremium, "Organizer", green = false))
-        p.rankDistrict?.let { r -> if (r <= 100) add(RepChip(Icons.Default.TrendingUp, "Top $r ${p.district ?: "District"}", green = true)) }
         if (streakWins >= 2) add(RepChip(Icons.Default.Whatshot, "$streakWins-win streak", green = false))
     }
     val achievements = p.achievements.map {
@@ -866,7 +878,9 @@ private fun ProfileContent(
     val played = hasAnyHistory(p)
     val about = aboutRows(p)
     // Career/rank/XP/recognition/achievements all live under the Stats tab.
-    val hasCareer = careerCells(p).isNotEmpty()
+    // The full record when the server sends it, the two legacy cells when it does not.
+    val careerBook = p.careerBook
+    val hasCareer = careerBook != null || careerCells(p).isNotEmpty()
     val statsHasAny = played || hasCareer || e.chips.isNotEmpty() || e.achievements.isNotEmpty()
     // Tabs only earn their place once there's something under them. A brand-new player
     // with no history and no details keeps the single purposeful first-match card.
@@ -963,7 +977,7 @@ private fun ProfileContent(
                 item { Spacer(Modifier.height(20.dp)); SectionTitle("Match history"); Spacer(Modifier.height(12.dp)) }
                 items(p.recentMatches.size) { i ->
                     RecentMatchRow(p.recentMatches[i])
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                 }
             }
             // ── Stats ────────────────────────────────────────────────────────
@@ -971,7 +985,12 @@ private fun ProfileContent(
                 item { TabEmpty("No stats yet", "Play a match to start building a record.") }
             } else {
                 if (played) item { Spacer(Modifier.height(6.dp)); DistrictRankCard(p) }
-                if (hasCareer) item { Spacer(Modifier.height(16.dp)); SectionTitle("Career"); Spacer(Modifier.height(12.dp)); StatRow(p) }
+                if (hasCareer) item {
+                    Spacer(Modifier.height(16.dp))
+                    SectionTitle("Career")
+                    Spacer(Modifier.height(12.dp))
+                    if (careerBook != null) CareerBookSection(careerBook) else StatRow(p)
+                }
                 if (played) item { Spacer(Modifier.height(20.dp)); SectionTitle("Experience"); Spacer(Modifier.height(12.dp)); XpCard(p) }
                 if (e.chips.isNotEmpty()) item { Spacer(Modifier.height(20.dp)); SectionTitle("Recognition"); Spacer(Modifier.height(12.dp)); ReputationChips(e.chips) }
                 if (e.achievements.isNotEmpty()) {
@@ -1182,19 +1201,39 @@ private fun ProfileTabs(selected: Int, onSelect: (Int) -> Unit) {
         Row(Modifier.fillMaxWidth()) {
             tabs.forEachIndexed { i, (label, icon) ->
                 val sel = i == selected
-                val tint = if (sel) BlueBright else Text3
+                // The unselected tab was as faint as a disabled control. One step darker
+                // on the label keeps the selected tab obviously selected while leaving
+                // the other three legible.
+                val iconTint by androidx.compose.animation.animateColorAsState(
+                    if (sel) BlueBright else Text3,
+                    label = "tabIcon",
+                )
+                val labelTint by androidx.compose.animation.animateColorAsState(
+                    if (sel) BlueBright else Text2,
+                    label = "tabLabel",
+                )
+                val underline by androidx.compose.animation.animateColorAsState(
+                    if (sel) BlueBright else Color.Transparent,
+                    label = "tabRule",
+                )
                 Column(
-                    Modifier.weight(1f).pressable(haptic = Feel.SELECT) { onSelect(i) }.padding(top = 10.dp),
+                    Modifier.weight(1f).pressable(haptic = Feel.SELECT) { onSelect(i) }.padding(top = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.height(3.dp))
-                    Text(label, color = tint, fontSize = 12.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium)
-                    Spacer(Modifier.height(8.dp))
+                    Icon(icon, null, tint = iconTint, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        label,
+                        color = labelTint,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        letterSpacing = 0.1.sp,
+                    )
+                    Spacer(Modifier.height(9.dp))
                     Box(
-                        Modifier.height(2.5.dp).width(30.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(if (sel) BlueBright else Color.Transparent),
+                        Modifier.height(2.dp).width(28.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(underline),
                     )
                 }
             }
@@ -1351,17 +1390,17 @@ private fun ActionButton(
         modifier
             // Subtle lift so the button reads as a physical control, not flat text.
             .shadow(
-                elevation = if (filled) 6.dp else 3.dp,
-                shape = RoundedCornerShape(10.dp),
+                elevation = if (filled) 5.dp else 2.dp,
+                shape = RoundedCornerShape(12.dp),
                 clip = false,
-                ambientColor = (if (filled) BlueBright else Color.Black).copy(alpha = 0.10f),
-                spotColor = (if (filled) BlueBright else Color.Black).copy(alpha = if (filled) 0.40f else 0.12f),
+                ambientColor = (if (filled) BlueBright else Color.Black).copy(alpha = 0.08f),
+                spotColor = (if (filled) BlueBright else Color.Black).copy(alpha = if (filled) 0.34f else 0.08f),
             )
             .pressable(enabled = enabled, haptic = haptic, onClick = onClick)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(if (filled) BlueBright else Surface)
-            .then(if (filled) Modifier else Modifier.border(1.dp, Stroke, RoundedCornerShape(10.dp)))
-            .padding(vertical = 11.dp),
+            .then(if (filled) Modifier else Modifier.border(1.dp, Stroke, RoundedCornerShape(12.dp)))
+            .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -1372,7 +1411,10 @@ private fun ActionButton(
                 else -> Text1
             },
             fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
+            // A secondary control set in the same weight as the player's own name makes
+            // the row shout; SemiBold reads as deliberate rather than loud.
+            fontWeight = if (filled) FontWeight.Bold else FontWeight.SemiBold,
+            letterSpacing = (-0.1).sp,
         )
     }
 }
@@ -1565,26 +1607,39 @@ private fun ReportSheet(
  * Matches (which has no list screen) stays inert.
  */
 @Composable
-private fun SocialCount(value: Int, label: String, onClick: (() -> Unit)? = null, onHero: Boolean = false) {
+private fun SocialCount(
+    value: Int,
+    label: String,
+    onClick: (() -> Unit)? = null,
+    onHero: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     // On the blue hero the counts must read white; on a light card they read dark.
     val valueColor = if (onHero) Color.White else Text1
-    val labelColor = if (onHero) Color.White.copy(alpha = 0.82f) else Text3
+    val labelColor = if (onHero) Color.White.copy(alpha = 0.82f) else Text2
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = if (onClick != null) {
-            Modifier.pressable(onClick = onClick).padding(horizontal = 12.dp, vertical = 4.dp)
-        } else {
-            Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-        },
+        modifier = modifier
+            .then(if (onClick != null) Modifier.pressable(onClick = onClick) else Modifier)
+            .padding(vertical = 4.dp),
     ) {
-        Text("${AnimatedInt(value)}", color = valueColor, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
-        Spacer(Modifier.height(3.dp))
+        Text(
+            "${AnimatedInt(value)}",
+            color = valueColor,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.5).sp,
+            // Lining figures: without them the three counts shift sideways against each
+            // other while they animate up, and the row never settles square.
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+        )
+        Spacer(Modifier.height(4.dp))
         Text(
             label.uppercase(),
             color = labelColor,
-            fontSize = 10.sp,
+            fontSize = 9.5.sp,
             fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.7.sp,
+            letterSpacing = 0.8.sp,
         )
     }
 }
@@ -1722,27 +1777,50 @@ private fun RecentForm(matches: List<RecentMatch>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .premiumCardShadow(radius = 20.dp, ambient = 16.dp, contact = 2.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(Surface)
-            .padding(18.dp),
+            .border(1.dp, Hairline, RoundedCornerShape(20.dp))
+            .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Last ${last.size}", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text("$wins W · ${last.size - wins} L", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            // "Last 5" is the heading of this card, so it reads as ink; the tally beside
+            // it is the supporting figure and steps back.
+            Text(
+                "Last ${last.size}",
+                color = Text1,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.2).sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "$wins W · ${last.size - wins} L",
+                color = Text2,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+            )
         }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             last.forEach { m ->
                 val won = m.won
                 Box(
                     Modifier
-                        .size(34.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(if (won) Green else Color(0xFFEEF1F5)),
+                        // A loss is a quiet marker, not a red one — the same neutral the
+                        // rest of the screen uses for an empty track.
+                        .background(if (won) Green else Track),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(if (won) "W" else "L", color = if (won) Color.White else Text3, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        if (won) "W" else "L",
+                        color = if (won) Color.White else Text2,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                 }
             }
         }
@@ -1774,21 +1852,37 @@ private fun AboutCard(rows: List<Pair<String, String>>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .premiumCardShadow(radius = 16.dp, ambient = 14.dp, contact = 2.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .premiumCardShadow(radius = 20.dp, ambient = 16.dp, contact = 2.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(Surface)
-            .padding(vertical = 4.dp),
+            .border(1.dp, Hairline, RoundedCornerShape(20.dp))
+            .padding(vertical = 6.dp),
     ) {
         rows.forEachIndexed { i, (label, value) ->
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(label, color = Text3, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(108.dp))
-                Text(value, color = BlueBright, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(
+                    label,
+                    color = Text2,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.width(104.dp),
+                )
+                // The answer is the primary information on the row and reads as ink.
+                // Eight blue values down a card made blue mean "a field", not "an
+                // accent", and left the label and the answer at the same volume.
+                Text(
+                    value,
+                    color = Text1,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
             }
             if (i != rows.lastIndex) {
-                Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(1.dp).background(Stroke))
+                Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(1.dp).background(Hairline))
             }
         }
     }
@@ -1814,16 +1908,16 @@ private fun HeroCard(
 ) {
     // Flat, Instagram-style header: avatar left, the three counts on the same row to its
     // right, then name / tier / handle / location as plain text below — no blue card.
-    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             // Avatar. The blue arc is a COMPLETION meter, so it only means something on
             // your own profile — on someone else's it's a progress bar for a chore that
             // isn't yours. There, the ring is a plain hairline that just frames the photo.
             Box(contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(92.dp)) {
-                    val sw = 3.5.dp.toPx()
+                    val sw = 3.dp.toPx()
                     drawArc(
-                        color = HaraanColors.Field,
+                        color = HaraanColors.Field.copy(alpha = 0.85f),
                         startAngle = -90f, sweepAngle = 360f, useCenter = false,
                         style = DrawStroke(width = sw, cap = StrokeCap.Round),
                     )
@@ -1844,11 +1938,11 @@ private fun HeroCard(
                     // A profile whose avatar URL 404s (or is still loading) used to render
                     // as a blank grey disc — the single cheapest-looking thing on the
                     // screen, and it happens on real accounts.
-                    Text(
-                        p.name.take(1).uppercase().ifBlank { "?" },
-                        color = BlueBright,
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Bold,
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                        contentDescription = "Profile photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
                     )
                     if (photo != null) {
                         AsyncImage(
@@ -1863,12 +1957,20 @@ private fun HeroCard(
                 // a badge on the photo.
                 Box(
                     Modifier.align(Alignment.BottomEnd)
-                        .clip(RoundedCornerShape(9.dp)).background(BlueBright)
-                        .border(2.dp, Surface, RoundedCornerShape(9.dp))
-                        .padding(horizontal = 7.dp, vertical = 2.dp),
-                ) { Text("LVL ${e.level}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold) }
+                        .clip(RoundedCornerShape(999.dp)).background(BlueBright)
+                        .border(2.5.dp, Surface, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        "LVL ${e.level}",
+                        color = Color.White,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.3.sp,
+                    )
+                }
             }
-            Spacer(Modifier.width(18.dp))
+            Spacer(Modifier.width(16.dp))
             // Name moved UP beside the avatar, with the three counts directly beneath it.
             Column(Modifier.weight(1f)) {
                 // Name owns its own line. Sharing it with the tier chip left real names
@@ -1878,11 +1980,11 @@ private fun HeroCard(
                     Text(
                         p.name.ifBlank { "Player" },
                         color = Text1,
-                        fontSize = 19.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp,
+                        letterSpacing = (-0.45).sp,
                         maxLines = 2,
-                        lineHeight = 22.sp,
+                        lineHeight = 24.sp,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
@@ -1894,19 +1996,18 @@ private fun HeroCard(
                             Icons.Default.Verified,
                             contentDescription = "Verified",
                             tint = BlueBright,
-                            modifier = Modifier.padding(top = 3.dp).size(18.dp),
+                            modifier = Modifier.padding(top = 4.dp).size(17.dp),
                         )
                     }
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SocialCount(matches, "Matches")
-                    SocialCount(followers, "Followers", onClick = onOpenFollowers)
-                    SocialCount(following, "Following", onClick = onOpenFollowing)
+                    SocialCount(matches, "Matches", modifier = Modifier.weight(1f))
+                    SocialCount(followers, "Followers", onClick = onOpenFollowers, modifier = Modifier.weight(1f))
+                    SocialCount(following, "Following", onClick = onOpenFollowing, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -1922,11 +2023,11 @@ private fun HeroCard(
         val sub = listOfNotNull(handle, loc.ifBlank { null }).joinToString("  ·  ")
         if (!p.bio.isNullOrBlank()) {
             Spacer(Modifier.height(10.dp))
-            Text(p.bio!!, color = Text1, fontSize = 13.5.sp, lineHeight = 18.sp)
+            Text(p.bio!!, color = Text1, fontSize = 13.5.sp, lineHeight = 19.sp)
         }
         if (sub.isNotBlank()) {
-            Spacer(Modifier.height(if (!p.bio.isNullOrBlank()) 5.dp else 10.dp))
-            Text(sub, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(if (!p.bio.isNullOrBlank()) 6.dp else 12.dp))
+            Text(sub, color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Medium, lineHeight = 18.sp)
         }
 
         // Trust + ID + tier — the three "credentials" facts on one line. The tier chip used
@@ -1934,7 +2035,7 @@ private fun HeroCard(
         // person's own name; here it reads with the other things the system says ABOUT the
         // player. It sits OUTSIDE the pressable so it can't be mistaken for part of the
         // copy-the-ID target.
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         var copied by remember { mutableStateOf(false) }
         LaunchedEffect(copied) { if (copied) { delay(1600); copied = false } }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1942,8 +2043,8 @@ private fun HeroCard(
                 Modifier.pressable(haptic = Feel.COMMIT) { onCopyId(); copied = true }.padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Default.Shield, null, tint = if (copied) Green else Text3, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(5.dp))
+                Icon(Icons.Default.Shield, null, tint = if (copied) Green else Text3, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(6.dp))
                 Text("Trust ${p.trustScore}", color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(8.dp))
                 Text("·", color = Text3, fontSize = 12.5.sp)
@@ -1958,18 +2059,29 @@ private fun HeroCard(
                     if (copied) "Copied" else "Copy",
                     tint = Text3, modifier = Modifier.size(13.dp),
                 )
+                // The tap target reaches past the glyph, so the whole line is grabbable
+                // without the ink moving.
+                Spacer(Modifier.width(2.dp))
             }
             Spacer(Modifier.width(10.dp))
             Box(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(BlueTint).padding(horizontal = 8.dp, vertical = 3.dp),
-            ) { Text(e.tier.uppercase(), color = BlueBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp) }
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(BlueTint)
+                    .padding(horizontal = 9.dp, vertical = 4.dp),
+            ) { Text(e.tier.uppercase(), color = BlueBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp) }
             if (p.isOrganizer) { Spacer(Modifier.width(6.dp)); Pill("ORGANIZER", Gold, GoldTint) }
         }
         // Setup nudge — yours only. It used to render on every profile, so opening a
         // stranger told you to go "Set state · Set district" about a person you don't know.
         if (isSelf && e.profilePct < 100 && e.profileSteps.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Text("Complete your profile:  ${e.profileSteps.joinToString("  ·  ")}", color = Text3, fontSize = 11.5.sp)
+            Text(
+                "Complete your profile:  ${e.profileSteps.joinToString("  ·  ")}",
+                color = Text3,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
         }
     }
 }
@@ -2172,24 +2284,110 @@ private fun AchievementBadge(item: Achievement) {
 // ─────────────────────────────────────────────────────── Recent match (REAL) ────
 @Composable
 private fun RecentMatchRow(m: RecentMatch) {
+    val card = m.card
+    // A player's own history was the poorest view of a match in the app: one line of
+    // text and an XP number, for the same game the feed draws as a scorecard. It is
+    // the feed's card now — the actual composable, not a copy of it — with the badges
+    // and the XP this screen owns added underneath in the same box.
+    if (card == null) {
+        RecentMatchTextRow(m)
+        return
+    }
+    com.haraan.app.ui.main.MatchGroup {
+        Column {
+            com.haraan.app.ui.main.MatchLiveContent(
+                modifier = Modifier.fillMaxWidth(),
+                team1 = card.team1,
+                team1Logo = card.team1Logo.ifBlank { card.team1Emblem },
+                score1 = card.score1,
+                overs1 = card.overs1,
+                team2 = card.team2,
+                team2Logo = card.team2Logo.ifBlank { card.team2Emblem },
+                score2 = card.score2,
+                overs2 = card.overs2,
+                statusLine = if (card.isLive) "LIVE" else if (m.won) "WON" else "RESULT",
+                statusSub = card.competition,
+                sport = card.sport,
+                isLive = card.isLive,
+                venue = card.venue,
+                district = card.district,
+                locality = card.locality,
+                battingTeam = card.battingTeam,
+                cricketInnings = card.sport.equals("cricket", ignoreCase = true),
+                // The star means "man of the match" here, which is the one thing on a
+                // player's own history worth marking before anything else.
+                isFeatured = m.mom,
+            )
+            MatchBadgeFooter(m)
+        }
+    }
+}
+
+/**
+ * What the profile knows about the match that the feed does not: how it was graded,
+ * and what it paid. Sits inside the same card, below a hairline, so it reads as the
+ * player's own footnote on the scoreboard rather than as a second row.
+ */
+@Composable
+private fun MatchBadgeFooter(m: RecentMatch) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(Hairline))
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val typeLabel = m.matchType.uppercase()
+        Pill(typeLabel, Text2, Bg)
+        // A casual match carries matchType "casual" AND isRanked=false, which printed
+        // "CASUAL  CASUAL" side by side on every one of them. The second chip only earns
+        // its place when it says something the first didn't.
+        val rankedLabel = if (m.isRanked) "RANKED" else "CASUAL"
+        if (!rankedLabel.equals(typeLabel, ignoreCase = true)) {
+            Spacer(Modifier.width(6.dp))
+            val (tColor, tBg) = trustColors(m.trustLevel)
+            Pill(rankedLabel, tColor, tBg)
+        }
+        if (m.won) { Spacer(Modifier.width(6.dp)); Pill("WON", Green, GreenTint) }
+        if (m.mom) { Spacer(Modifier.width(6.dp)); Pill("MOM", Gold, GoldTint) }
+        Spacer(Modifier.weight(1f))
+        Text(
+            "+${m.xp}",
+            color = BlueBright,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.4).sp,
+            // Lining figures, so a +9 and a +140 hang off the same right edge down the
+            // list instead of each finding its own.
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/** The old text row, kept for a server that cannot describe the scoreboard yet. */
+@Composable
+private fun RecentMatchTextRow(m: RecentMatch) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(Surface)
-            .border(1.dp, Stroke, RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .border(1.dp, Hairline, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(m.title, color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Spacer(Modifier.height(4.dp))
+            Text(
+                m.title,
+                color = Text1,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.2).sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val typeLabel = m.matchType.uppercase()
                 Pill(typeLabel, Text2, Bg)
-                // A casual match carries matchType "casual" AND isRanked=false, which
-                // printed "CASUAL  CASUAL" side by side on every one of them. The second
-                // chip only earns its place when it says something the first didn't.
                 val rankedLabel = if (m.isRanked) "RANKED" else "CASUAL"
                 if (!rankedLabel.equals(typeLabel, ignoreCase = true)) {
                     Spacer(Modifier.width(6.dp))
@@ -2200,7 +2398,15 @@ private fun RecentMatchRow(m: RecentMatch) {
                 if (m.mom) { Spacer(Modifier.width(6.dp)); Pill("MOM", Gold, GoldTint) }
             }
         }
-        Text("+${m.xp}", color = BlueBright, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "+${m.xp}",
+            color = BlueBright,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.4).sp,
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+        )
     }
 }
 
@@ -2282,11 +2488,11 @@ private fun SectionTitle(title: String, trailing: String? = null) {
 private fun Pill(text: String, color: Color, bg: Color) {
     Box(
         Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(999.dp))
             .background(bg)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .padding(horizontal = 9.dp, vertical = 4.dp),
     ) {
-        Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(text, color = color, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
     }
 }
 
@@ -2450,7 +2656,12 @@ private fun ShareablePlayerCard(p: PlayerProfile, e: PlayerExtras) {
                 if (photo != null) {
                     AsyncImage(photo, "Photo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape))
                 } else {
-                    Text(p.name.take(1).uppercase().ifBlank { "?" }, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                        contentDescription = "Photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    )
                 }
             }
             Spacer(Modifier.width(14.dp))
