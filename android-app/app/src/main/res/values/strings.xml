@@ -13,6 +13,7 @@
     <string name="tab_live">Live</string>
     <string name="tab_scorecard">Scorecard</string>
     <string name="tab_mvp">MVP</string>
+    <string name="tab_insights">Insights</string>
 
     <!-- Scorer -->
     <string name="out">OUT</string>

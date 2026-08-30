@@ -266,6 +266,35 @@ final class PlayersController extends Controller
      * @return array<string, mixed>
      */
     /**
+     * A player's recent form with bat and ball, for the match Insights tab.
+     *
+     * Public and per-player rather than per-match: the Insights tab asks for the one
+     * player the reader tapped, so a squad of twenty-two is twenty-two cheap requests
+     * spread over the time somebody spends looking, not one request that replays a
+     * season before the tab can draw.
+     */
+    public function form(string $playerId): JsonResponse
+    {
+        $service = app(\App\Services\PlayerFormService::class);
+        $form = $service->forPlayer($playerId);
+        $style = $service->styleLine($playerId);
+
+        return response()->json(['data' => [
+            'playerId' => $playerId,
+            'battingStyle' => $style['batting'],
+            'bowlingStyle' => $style['bowling'],
+            'batting' => $form['batting'],
+            'bowling' => $form['bowling'],
+            // Named so the app can say why a panel is missing instead of drawing an
+            // empty table: the split needs a bowler type on historical deliveries and
+            // there is none, and batting position is recorded nowhere.
+            'unavailable' => [
+                'spinVsPace' => 'Bowler type has only just started being recorded, so there is nothing to split yet.',
+            ],
+        ]]);
+    }
+
+    /**
      * Every sport this player has a record in, each as {key, label, matches, headline,
      * groups}. The app renders it without knowing any sport's rules: `headline` is the
      * three numbers that lead, `groups` are the labelled tables under them.

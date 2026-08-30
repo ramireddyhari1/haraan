@@ -293,6 +293,12 @@ final class MatchesController extends Controller
         PlayerStatsService::freezeMatchStats($match);
         // Re-derive real career batting from the ball log (feeds the "new batter" card).
         \App\Services\CareerBattingService::rebuildAll();
+
+        // The ground this was played at now has one more match in its record.
+        $ground = app(\App\Services\GroundResolver::class)->resolve($match);
+        if ($ground !== null) {
+            app(\App\Services\GroundInsightsService::class)->refresh($ground);
+        }
         // Auto-verify Haraan turf matches; otherwise open the captain window.
         VenueVerificationService::onMatchCompleted($match);
 
@@ -525,6 +531,145 @@ final class MatchesController extends Controller
         }
 
         return $resolved;
+    }
+
+    /**
+     * The ground this match is played at, and what has happened there before.
+     *
+     * Public: a ground's history is not private to the people playing on it, and the
+     * Insights tab is readable by anyone watching the match.
+     *
+     * The shape carries its own honesty. `confidence` says how much the numbers are
+     * worth, `hasTrends` says whether the client may draw conclusions at all, and every
+     * rate ships with the sample it came from — "4 of 7", never a bare "57%".
+     */
+    public function ground(string $id): JsonResponse
+    {
+        $match = LiveMatch::query()->find($id);
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+
+        $ground = $match->ground_id !== null
+            ? \App\Models\MatchGround::find($match->ground_id)
+            : app(\App\Services\GroundResolver::class)->resolve($match);
+
+        if ($ground === null) {
+            return response()->json(['data' => null]);
+        }
+
+        // A ground whose stats have never been computed gets them now — the first view
+        // of a card should not be empty because nothing has completed since deploy.
+        if ($ground->stats_at === null) {
+            $ground = app(\App\Services\GroundInsightsService::class)->refresh($ground);
+        }
+
+        $stats = [];
+        if ($ground->matches_played > 0) {
+            $stats[] = ['label' => 'Matches played', 'value' => (string) $ground->matches_played];
+        }
+        if ($ground->hasTrends()) {
+            if ($ground->first_innings_avg > 0) {
+                $stats[] = ['label' => '1st innings avg', 'value' => (string) $ground->first_innings_avg];
+            }
+            if ($ground->highest_total > 0) {
+                $stats[] = ['label' => 'Highest total', 'value' => (string) $ground->highest_total];
+            }
+            if ($ground->best_individual > 0) {
+                $stats[] = [
+                    'label' => 'Best innings',
+                    'value' => (string) $ground->best_individual,
+                    'note' => $ground->best_individual_by,
+                ];
+            }
+            if ($ground->boundary_percent > 0) {
+                $stats[] = ['label' => 'Runs in boundaries', 'value' => $ground->boundary_percent . '%'];
+            }
+            if ($ground->run_rate !== null) {
+                $stats[] = ['label' => 'Run rate', 'value' => (string) $ground->run_rate];
+            }
+            if ($ground->decided_matches > 0) {
+                $stats[] = [
+                    'label' => 'Batting first won',
+                    // The sample IS the figure. "4 of 7" cannot be misread as a rate
+                    // measured over a season, which is exactly how "57%" would read.
+                    'value' => $ground->batting_first_wins . ' of ' . $ground->decided_matches,
+                ];
+            }
+        }
+
+        // The two-part bar. The reference card this layout comes from splits wickets by
+        // PACE and SPIN; we do not know a bowler's type on any historical delivery, so
+        // that bar would be invented. This is the same shape carrying a split we
+        // actually measure — how the runs at this ground were made.
+        $split = null;
+        if ($ground->hasTrends() && $ground->boundary_percent > 0) {
+            $split = [
+                'title' => 'How runs are made here',
+                'leftLabel' => 'Boundaries',
+                'leftPercent' => $ground->boundary_percent,
+                'rightLabel' => 'Running',
+                'rightPercent' => max(0, 100 - $ground->boundary_percent),
+            ];
+        }
+
+        // Sentences, computed rather than written. Every number in them appears in the
+        // figures above; a model gets to phrase these later, not to produce them.
+        $bullets = [];
+        if ($ground->hasTrends()) {
+            if ($ground->boundary_percent > 0) {
+                $bullets[] = $ground->boundary_percent . '% of the runs here come in boundaries.';
+            }
+            if ($ground->decided_matches > 0) {
+                $bullets[] = 'Teams batting first have won ' . $ground->batting_first_wins
+                    . ' of the last ' . $ground->decided_matches . ' matches.';
+            }
+            if ($ground->first_innings_avg > 0) {
+                $bullets[] = 'A first innings here averages ' . $ground->first_innings_avg . '.';
+            }
+        }
+
+        return response()->json(['data' => [
+            'id' => (string) $ground->id,
+            'name' => $ground->name,
+            'split' => $split,
+            'bullets' => $bullets,
+            'address' => $ground->formatted_address,
+            'locality' => $ground->locality,
+            'district' => $ground->district,
+            'latitude' => $ground->latitude,
+            'longitude' => $ground->longitude,
+            // A real satellite tile of the actual ground. Null without a key, and the
+            // card then shows its own drawn header rather than a broken image.
+            'mapUrl' => $this->groundMapUrl($ground),
+            'matchesPlayed' => $ground->matches_played,
+            'confidence' => $ground->confidence(),
+            'hasTrends' => $ground->hasTrends(),
+            'note' => $ground->hasTrends()
+                ? null
+                : 'Ground data is building. Trends appear once five matches here have been scored ball by ball.',
+            'stats' => $stats,
+        ]]);
+    }
+
+    /** Google Static Maps, satellite, centred on the ground. Null with no key. */
+    private function groundMapUrl(\App\Models\MatchGround $ground): ?string
+    {
+        $key = trim((string) config('services.google_maps.server_key'));
+        if ($key === '' || $ground->latitude === null || $ground->longitude === null) {
+            return null;
+        }
+
+        return 'https://maps.googleapis.com/maps/api/staticmap?' . http_build_query([
+            'center' => $ground->latitude . ',' . $ground->longitude,
+            // 17 frames a cricket ground without losing the surroundings that make it
+            // recognisable to someone who has played there.
+            'zoom' => 17,
+            'size' => '640x360',
+            'scale' => 2,
+            'maptype' => 'satellite',
+            'key' => $key,
+        ]);
     }
 
     public function scoreAction(Request $request, string $id): JsonResponse

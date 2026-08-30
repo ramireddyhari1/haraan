@@ -172,6 +172,111 @@ data class IncomingJoinRequest(
  * check a connection that was working perfectly, which is the worst kind of error message:
  * confidently wrong, and it sends them to fix something that is not broken.
  */
+/** One over of the innings, with the score as it stood after it. */
+data class ProgressOver(
+  val over: Int,
+  val runs: Int,
+  val wickets: Int,
+  val total: Int,
+  val totalWickets: Int,
+  /** The scorer's shorthand for each delivery in this over: "4", "0", "W", "wd", "lb1". */
+  val balls: List<String>,
+)
+
+/** An over that moved the match, scored on runs AND wickets rather than runs alone. */
+data class ChangingOver(val over: Int, val runs: Int, val wickets: Int, val swing: Int)
+
+/** A stand, in the order the wickets fell. */
+data class Stand(
+  val wicket: Int,
+  val runs: Int,
+  val balls: Int,
+  val batters: String,
+  val unbroken: Boolean,
+)
+
+/** One bowler against one batter, over the balls actually bowled between them. */
+data class FaceOff(
+  val bowler: String,
+  val batter: String,
+  val balls: Int,
+  val runs: Int,
+  val wickets: Int,
+  val strikeRate: Double,
+)
+
+/**
+ * One boundary whose direction the scorer recorded.
+ *
+ * Only exists for balls scored after the wagon-wheel picker shipped, and only where the
+ * scorer answered it. An innings with none is the normal case, not a failure.
+ */
+data class Shot(
+  val zone: Int,
+  val runs: Int,
+  val batter: String,
+  val over: Int,
+  /**
+   * Exact landing point as a fraction of the ground's radius, or null for shots captured
+   * before points were recorded. The wheel falls back to the region's centre for those, so
+   * an early capture still plots — just less precisely.
+   */
+  val x: Float?,
+  val y: Float?,
+)
+
+/** Runs and shot count per region, rolled up from [Shot]s. */
+data class ShotZone(val zone: Int, val shots: Int, val runs: Int)
+
+/** Where the runs came from — counted per delivery, never inferred from a total. */
+data class ScoringBreakdown(
+  val dots: Int,
+  val ones: Int,
+  val twos: Int,
+  val threes: Int,
+  val fours: Int,
+  val sixes: Int,
+  val extras: Int,
+)
+
+/** One phase of an innings — Start / Middle / Finish, proportional to its length. */
+data class InsightPhase(val label: String, val overs: Int, val runs: Int, val runRate: Double)
+
+/** Everything derived from one innings' ball log. */
+data class InningsInsight(
+  val battingName: String,
+  /** 1 = home/team1, 2 = away/team2 — drives which side's colour this innings draws in. */
+  val battingTeam: Int,
+  val runs: Int,
+  val wickets: Int,
+  val overs: String,
+  val runRate: Double,
+  val fours: Int,
+  val sixes: Int,
+  val boundaryPercent: Int,
+  val dotPercent: Int,
+  val phases: List<InsightPhase>,
+  val bestOverNumber: Int,
+  val bestOverRuns: Int,
+  val bestStandRuns: Int,
+  val bestStandBalls: Int,
+  val progress: List<ProgressOver>,
+  val changingOvers: List<ChangingOver>,
+  val partnerships: List<Stand>,
+  val faceoffs: List<FaceOff>,
+  val breakdown: ScoringBreakdown,
+  val shots: List<Shot>,
+  val shotZones: List<ShotZone>,
+)
+
+/** The Insights payload: real figures, plus prose when there is any. */
+data class MatchInsights(
+  val innings: List<InningsInsight>,
+  val balls: Int,
+  /** Null whenever no analysis has been written. Normal, not an error. */
+  val analysis: String?,
+)
+
 data class ScoreOutcome(
   val ok: Boolean,
   val body: String? = null,
@@ -185,6 +290,41 @@ data class ScoreOutcome(
  * Talks to the ActionBoard match API. Mirrors [HaraanAuthRepository]'s plain
  * HttpURLConnection style, adding the JWT Bearer header for protected routes.
  */
+/** One figure about a ground, already formatted by the server. */
+data class GroundStat(val label: String, val value: String, val note: String? = null)
+
+/**
+ * A ground and what has happened there.
+ *
+ * [confidence] and [note] are the honesty controls, and they come from the server
+ * because it is the only side that knows the sample size. Below five matches the
+ * server sends no stats at all and a note saying so — the client must never fill that
+ * silence with an average of two games.
+ */
+/** Two shares of one whole, each already a percentage of it. */
+data class GroundSplit(
+  val title: String,
+  val leftLabel: String,
+  val leftPercent: Int,
+  val rightLabel: String,
+  val rightPercent: Int,
+)
+
+data class GroundInsights(
+    val name: String,
+    val locality: String?,
+    val district: String?,
+    val mapUrl: String?,
+    val matchesPlayed: Int,
+    val confidence: String,
+    val hasTrends: Boolean,
+    val note: String?,
+    val stats: List<GroundStat>,
+    val split: GroundSplit? = null,
+    /** Plain sentences over the same figures — computed, not written by a model. */
+    val bullets: List<String> = emptyList(),
+)
+
 class MatchRepository(
   private val baseUrl: String = ApiConfig.BASE_URL,
 ) {
@@ -864,6 +1004,210 @@ class MatchRepository(
    * [token] is optional: the public endpoints (presence) accept a guest, and sending no
    * Authorization header at all is safer than sending one the server will reject.
    */
+  /**
+   * Match insights: the derived figures, and the written read when the server has one.
+   *
+   * [MatchInsights.analysis] is null far more often than not — no model configured, the
+   * call failed, or under an over has been bowled — and that is a normal state, not an
+   * error. The FIGURES are always there, and they are the part that must never be wrong.
+   */
+  /** JSONArray -> list, skipping anything that is not an object. Null array -> empty. */
+  private inline fun <T> org.json.JSONArray?.mapObjects(build: (JSONObject) -> T): List<T> {
+    if (this == null) return emptyList()
+    val out = ArrayList<T>(length())
+    for (i in 0 until length()) {
+      optJSONObject(i)?.let { out.add(build(it)) }
+    }
+    return out
+  }
+
+  suspend fun fetchInsights(matchId: String): MatchInsights? = withContext(Dispatchers.IO) {
+    try {
+      val connection = (URL("${baseUrl.trimEnd('/')}/api/live-matches/$matchId/insights")
+        .openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 15000
+        // Longer than most reads: a FINISHED match writes its analysis inline on the first
+        // request, and that call has to reach a model and come back.
+        readTimeout = 40000
+        setRequestProperty("Accept", "application/json")
+      }
+      val code = connection.responseCode
+      val body = (if (code >= 400) connection.errorStream else connection.inputStream)
+        ?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } }.orEmpty()
+      connection.disconnect()
+      if (code !in 200..299) return@withContext null
+
+      val o = JSONObject(body)
+      val innings = mutableListOf<InningsInsight>()
+      val arr = o.optJSONArray("innings")
+      for (i in 0 until (arr?.length() ?: 0)) {
+        val n = arr!!.optJSONObject(i) ?: continue
+        val phases = mutableListOf<InsightPhase>()
+        val pa = n.optJSONArray("phases")
+        for (j in 0 until (pa?.length() ?: 0)) {
+          val ph = pa!!.optJSONObject(j) ?: continue
+          phases.add(
+            InsightPhase(
+              label = ph.optString("label"),
+              overs = ph.optInt("overs"),
+              runs = ph.optInt("runs"),
+              runRate = ph.optDouble("runRate", 0.0),
+            )
+          )
+        }
+        val bo = n.optJSONObject("bestOver")
+        val bp = n.optJSONObject("bestPartnership")
+        innings.add(
+          InningsInsight(
+            battingName = n.optString("battingName"),
+            battingTeam = n.optInt("battingTeam", 1),
+            runs = n.optInt("runs"),
+            wickets = n.optInt("wickets"),
+            overs = n.optString("overs"),
+            runRate = n.optDouble("runRate", 0.0),
+            fours = n.optInt("fours"),
+            sixes = n.optInt("sixes"),
+            boundaryPercent = n.optInt("boundaryPercent"),
+            dotPercent = n.optInt("dotPercent"),
+            phases = phases,
+            bestOverNumber = bo?.optInt("over") ?: 0,
+            bestOverRuns = bo?.optInt("runs") ?: 0,
+            bestStandRuns = bp?.optInt("runs") ?: 0,
+            bestStandBalls = bp?.optInt("balls") ?: 0,
+            progress = n.optJSONArray("progress").mapObjects { o ->
+              ProgressOver(
+                over = o.optInt("over"),
+                runs = o.optInt("runs"),
+                wickets = o.optInt("wickets"),
+                total = o.optInt("total"),
+                totalWickets = o.optInt("totalWickets"),
+                balls = (o.optJSONArray("balls")).let { ba ->
+                  if (ba == null) emptyList()
+                  else (0 until ba.length()).map { ba.optString(it) }.filter { it.isNotBlank() }
+                },
+              )
+            },
+            changingOvers = n.optJSONArray("changingOvers").mapObjects { o ->
+              ChangingOver(
+                over = o.optInt("over"),
+                runs = o.optInt("runs"),
+                wickets = o.optInt("wickets"),
+                swing = o.optInt("swing"),
+              )
+            },
+            partnerships = n.optJSONArray("partnerships").mapObjects { o ->
+              Stand(
+                wicket = o.optInt("wicket"),
+                runs = o.optInt("runs"),
+                balls = o.optInt("balls"),
+                batters = o.optString("batters"),
+                unbroken = o.optBoolean("unbroken"),
+              )
+            },
+            faceoffs = n.optJSONArray("faceoffs").mapObjects { o ->
+              FaceOff(
+                bowler = o.optString("bowler"),
+                batter = o.optString("batter"),
+                balls = o.optInt("balls"),
+                runs = o.optInt("runs"),
+                wickets = o.optInt("wickets"),
+                strikeRate = o.optDouble("strikeRate", 0.0),
+              )
+            },
+            shots = n.optJSONArray("shots").mapObjects { o ->
+              Shot(
+                zone = o.optInt("zone"),
+                runs = o.optInt("runs"),
+                batter = o.optString("batter"),
+                over = o.optInt("over"),
+                x = if (o.isNull("x")) null else o.optDouble("x").toFloat(),
+                y = if (o.isNull("y")) null else o.optDouble("y").toFloat(),
+              )
+            },
+            shotZones = n.optJSONArray("shotZones").mapObjects { o ->
+              ShotZone(zone = o.optInt("zone"), shots = o.optInt("shots"), runs = o.optInt("runs"))
+            },
+            breakdown = (n.optJSONObject("breakdown") ?: JSONObject()).let { b ->
+              ScoringBreakdown(
+                dots = b.optInt("dots"),
+                ones = b.optInt("ones"),
+                twos = b.optInt("twos"),
+                threes = b.optInt("threes"),
+                fours = b.optInt("fours"),
+                sixes = b.optInt("sixes"),
+                extras = b.optInt("extras"),
+              )
+            },
+          )
+        )
+      }
+
+      MatchInsights(
+        innings = innings,
+        balls = o.optInt("balls"),
+        analysis = o.optString("analysis").takeIf { it.isNotBlank() && it != "null" },
+      )
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  /** The ground this match is at, or null when the match names no venue. */
+  suspend fun fetchGround(matchId: String): GroundInsights? = withContext(Dispatchers.IO) {
+    try {
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/matches/$matchId/ground").openConnection()
+        as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Accept", "application/json")
+      }
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+      if (code !in 200..299) return@withContext null
+
+      val data = JSONObject(body).optJSONObject("data") ?: return@withContext null
+      val stats = mutableListOf<GroundStat>()
+      data.optJSONArray("stats")?.let { arr ->
+        for (i in 0 until arr.length()) {
+          val o = arr.optJSONObject(i) ?: continue
+          stats += GroundStat(
+            label = o.optString("label"),
+            value = o.optString("value"),
+            note = o.optString("note").takeIf { it.isNotBlank() && it != "null" },
+          )
+        }
+      }
+      GroundInsights(
+        name = data.optString("name"),
+        locality = data.optString("locality").takeIf { it.isNotBlank() && it != "null" },
+        district = data.optString("district").takeIf { it.isNotBlank() && it != "null" },
+        mapUrl = data.optString("mapUrl").takeIf { it.isNotBlank() && it != "null" },
+        matchesPlayed = data.optInt("matchesPlayed", 0),
+        confidence = data.optString("confidence", "building"),
+        hasTrends = data.optBoolean("hasTrends", false),
+        note = data.optString("note").takeIf { it.isNotBlank() && it != "null" },
+        stats = stats,
+        split = data.optJSONObject("split")?.let { sp ->
+          GroundSplit(
+            title = sp.optString("title"),
+            leftLabel = sp.optString("leftLabel"),
+            leftPercent = sp.optInt("leftPercent"),
+            rightLabel = sp.optString("rightLabel"),
+            rightPercent = sp.optInt("rightPercent"),
+          )
+        },
+        bullets = data.optJSONArray("bullets")?.let { arr ->
+          (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { l -> l.isNotBlank() } }
+        } ?: emptyList(),
+      )
+    } catch (_: Exception) {
+      null
+    }
+  }
+
   private fun postJson(path: String, jsonBody: JSONObject, token: String?): HttpResult {
     val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"

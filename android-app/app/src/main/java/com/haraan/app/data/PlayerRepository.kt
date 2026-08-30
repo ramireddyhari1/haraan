@@ -126,6 +126,43 @@ data class HomeFeed(
 )
 
 /** One member of a team squad. Registered players have a Player ID; guests have a name only. */
+/**
+ * One innings in a form line.
+ *
+ * [headline] and [support] are already shaped for display — "31" and "(34)" for a
+ * batter, "4.0-0-38-2" and "4.0 ov" for a bowler — because the two disciplines are
+ * read in completely different notations and a single numeric model would only be
+ * unpacked into these two strings at every call site.
+ */
+data class FormInnings(
+    val headline: String,
+    val support: String,
+    val match: String,
+    val date: String,
+    /**
+     * The one number this innings is judged by — runs for a batter, wickets for a
+     * bowler. Carried separately from [headline] because that is a formatted string
+     * ("31*", "4.0-0-38-2") and the UI needs to rank innings against each other.
+     */
+    val leadValue: Int? = null,
+)
+
+data class FormTotal(val label: String, val value: String)
+
+/** One discipline's form: the innings, what they total, and any measured rates. */
+data class FormBlock(
+    val innings: List<FormInnings>,
+    val totals: List<FormTotal>,
+    val efficiency: List<FormTotal> = emptyList(),
+)
+
+data class PlayerForm(
+    val battingStyle: String,
+    val bowlingStyle: String,
+    val batting: FormBlock?,
+    val bowling: FormBlock?,
+)
+
 data class SquadMember(
   val id: String,
   val name: String,
@@ -152,6 +189,90 @@ class PlayerRepository(
    * Resolve a registered player by Player ID. Returns null when not found (404)
    * or on any error, so callers can treat it as "not a valid player".
    */
+  /**
+   * A player's last five innings with bat and ball.
+   *
+   * No token: a player's recent scores are public, and the Insights tab is read by
+   * people watching a match who may not be signed in.
+   */
+  suspend fun fetchForm(playerId: String): PlayerForm? = withContext(Dispatchers.IO) {
+    val trimmed = playerId.trim()
+    if (trimmed.isEmpty()) return@withContext null
+
+    val encoded = URLEncoder.encode(trimmed, "UTF-8")
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/$encoded/form").openConnection()
+      as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 15000
+      readTimeout = 20000
+      setRequestProperty("Accept", "application/json")
+    }
+
+    try {
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      val data = JSONObject(body).optJSONObject("data") ?: return@withContext null
+      PlayerForm(
+        battingStyle = data.optString("battingStyle"),
+        bowlingStyle = data.optString("bowlingStyle"),
+        batting = parseFormBlock(data.optJSONObject("batting"), batting = true),
+        bowling = parseFormBlock(data.optJSONObject("bowling"), batting = false),
+      )
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * The two disciplines read in different notations, and the shaping happens here so
+   * the UI never has to know which one it is holding: a batter's innings is "31" over
+   * "(34)", a bowler's spell is "4.0-0-38-2" over "4.0 ov".
+   */
+  private fun parseFormBlock(json: JSONObject?, batting: Boolean): FormBlock? {
+    if (json == null) return null
+    val arr = json.optJSONArray("innings") ?: return null
+    val innings = mutableListOf<FormInnings>()
+    for (i in 0 until arr.length()) {
+      val o = arr.optJSONObject(i) ?: continue
+      if (batting) {
+        val runs = o.optInt("runs")
+        val notOut = o.optBoolean("notOut")
+        innings += FormInnings(
+          headline = "$runs" + if (notOut) "*" else "",
+          support = "(" + o.optInt("balls") + ")",
+          match = o.optString("match"),
+          date = o.optString("date"),
+          leadValue = runs,
+        )
+      } else {
+        val overs = o.optString("overs")
+        innings += FormInnings(
+          headline = overs + "-" + o.optInt("maidens") + "-" + o.optInt("runs") + "-" + o.optInt("wickets"),
+          support = "$overs ov",
+          match = o.optString("match"),
+          date = o.optString("date"),
+          leadValue = o.optInt("wickets"),
+        )
+      }
+    }
+    if (innings.isEmpty()) return null
+
+    fun totals(key: String): List<FormTotal> {
+      val list = mutableListOf<FormTotal>()
+      json.optJSONArray(key)?.let { t ->
+        for (i in 0 until t.length()) {
+          val o = t.optJSONObject(i) ?: continue
+          list += FormTotal(o.optString("label"), o.optString("value"))
+        }
+      }
+      return list
+    }
+
+    return FormBlock(innings = innings, totals = totals("totals"), efficiency = totals("efficiency"))
+  }
+
   suspend fun lookup(token: String, playerId: String): PlayerLite? = withContext(Dispatchers.IO) {
     val trimmed = playerId.trim()
     if (trimmed.isEmpty()) return@withContext null

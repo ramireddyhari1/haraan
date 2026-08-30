@@ -355,6 +355,16 @@ Route::middleware('auth.jwt.optional')->get('posts/feed', [PlayersController::cl
 // A post's comment thread (public, read-only). Optional auth. Two segments after `posts`.
 Route::middleware('auth.jwt.optional')->get('posts/{id}/comments', [PlayersController::class, 'comments'])->whereNumber('id');
 
+// The ground a match is played at, and what has happened there before. Declared OUTSIDE
+// the ranked-actions group on purpose: that group carries auth.jwt AND the
+// actionboard.profile gate, and a ground's record is not private to the people standing
+// on it — the Insights tab is readable by anyone watching the match, signed in or not.
+Route::get('matches/{id}/ground', [MatchesController::class, 'ground'])->whereNumber('id');
+
+// A player's last five innings with bat and ball. Public: the Insights tab is readable
+// by anyone watching, and a player's recent scores are not private to them.
+Route::get('players/{playerId}/form', [PlayersController::class, 'form']);
+
 // Ranked actions require a complete ActionBoard profile (auth.jwt + gate).
 Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group(function (): void {
     Route::post('/', [MatchesController::class, 'store']);
