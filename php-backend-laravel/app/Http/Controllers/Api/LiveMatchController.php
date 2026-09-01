@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\MatchViewer;
 use App\Models\User;
+use App\Services\CricketInsights;
 use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
 use Illuminate\Http\JsonResponse;
@@ -560,6 +561,9 @@ class LiveMatchController extends Controller
         return [
             'creatorId' => (int) $match->user_id,
             'canScore' => $canScore,
+            'shotPlotting' => (bool) optional(
+                User::query()->find($match->user_id)
+            )->is_verified,
             'scoreBlocked' => $scoreBlocked,
             'isPrivate' => (bool) $match->is_private,
             'joinCode' => (string) ($match->join_code ?? ''),
@@ -1003,6 +1007,49 @@ class LiveMatchController extends Controller
         return $h > $a
             ? trim((string) $m->home) . " won $h-$a"
             : trim((string) $m->away) . " won $a-$h";
+    }
+
+    /**
+     * Insights for one match: the derived figures, plus a written read when there is one.
+     */
+    public function insights(Request $request, string $id): JsonResponse
+    {
+        $match = LiveMatch::query()->find($id);
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+        if (strtolower((string) ($match->sport ?: 'cricket')) !== 'cricket') {
+            return response()->json(['error' => 'Insights are cricket-only for now'], 422);
+        }
+
+        $service = app(CricketInsights::class);
+        $facts = $service->facts($match);
+        $live = strtolower((string) $match->status) === 'live';
+
+        $analysis = $service->analysis($match, $facts, allowWrite: ! $live);
+        if ($live && $service->isConfigured()) {
+            dispatch(function () use ($match, $facts, $service): void {
+                $service->analysis($match->fresh() ?? $match, $facts, allowWrite: true);
+            })->afterResponse();
+        }
+
+        // One verified line per innings, at the top of the tab. Null whenever Gemini is
+        // unreachable or said a number we never sent it — the app carries its own
+        // rule-based sentence for exactly that case, so a null costs nothing.
+        $headliner = app(\App\Services\InningsHeadline::class);
+        $innings = array_map(function (array $inn) use ($match, $headliner): array {
+            $inn['headline'] = $headliner->for((int) $match->id, $inn);
+
+            return $inn;
+        }, $facts['innings']);
+
+        return response()->json([
+            'matchId' => (string) $match->id,
+            'innings' => $innings,
+            'balls' => $facts['totalBalls'],
+            'analysis' => $analysis,
+            'analysisAt' => $match->insights_at?->toIso8601String(),
+        ]);
     }
 
     /** "21 Aug 2026, 5:15 PM" for the start of a match, or '' when nothing is recorded. */

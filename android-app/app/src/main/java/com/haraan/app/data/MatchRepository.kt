@@ -255,6 +255,12 @@ data class InningsInsight(
   val sixes: Int,
   val boundaryPercent: Int,
   val dotPercent: Int,
+  /**
+   * One verified line about this innings, written server-side. Null whenever it could
+   * not be trusted — the screen falls back to its own rule-based sentence, so nothing
+   * downstream may assume this is present.
+   */
+  val headline: String? = null,
   val phases: List<InsightPhase>,
   val bestOverNumber: Int,
   val bestOverRuns: Int,
@@ -310,12 +316,41 @@ data class GroundSplit(
   val rightPercent: Int,
 )
 
+/**
+ * Cricket IQ — one player's innings in this match, read back to them.
+ *
+ * `narrative` is a model's phrasing of the same numbers as `evidence`, and it is nullable
+ * on purpose: it arrives on a later fetch than the figures do, and the block is complete
+ * without it. Nothing on screen may depend on it being there.
+ */
+data class CricketIq(
+    val player: String,
+    val batters: List<String>,
+    val runs: Int,
+    val balls: Int,
+    val strikeRate: String,
+    val fours: Int,
+    val sixes: Int,
+    val findings: List<IqFinding>,
+    val evidence: List<IqRow>,
+    val narrative: String?,
+    val note: String?,
+)
+
+/** A verdict and the number that produced it. Never one without the other. */
+data class IqFinding(val kind: String, val label: String, val value: String, val why: String)
+
+data class IqRow(val label: String, val value: String)
+
 data class GroundInsights(
     val name: String,
     val locality: String?,
     val district: String?,
     val mapUrl: String?,
     val matchesPlayed: Int,
+    /** Par here, and the best ever made here. 0 means the sample is too small to say. */
+    val firstInningsAvg: Int = 0,
+    val highestTotal: Int = 0,
     val confidence: String,
     val hasTrends: Boolean,
     val note: String?,
@@ -1069,6 +1104,7 @@ class MatchRepository(
             fours = n.optInt("fours"),
             sixes = n.optInt("sixes"),
             boundaryPercent = n.optInt("boundaryPercent"),
+            headline = n.optString("headline").takeIf { it.isNotBlank() && it != "null" },
             dotPercent = n.optInt("dotPercent"),
             phases = phases,
             bestOverNumber = bo?.optInt("over") ?: 0,
@@ -1154,6 +1190,78 @@ class MatchRepository(
   }
 
   /** The ground this match is at, or null when the match names no venue. */
+  /**
+   * A player's innings, explained. `player` picks whose; null means the top scorer.
+   *
+   * Returns null when nobody has faced a ball yet, which is a normal state before a match
+   * starts rather than a failure — the caller simply shows nothing.
+   */
+  suspend fun fetchIq(matchId: String, player: String? = null): CricketIq? = withContext(Dispatchers.IO) {
+    try {
+      val q = player?.takeIf { it.isNotBlank() }
+        ?.let { "?player=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: ""
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/matches/$matchId/iq$q").openConnection()
+        as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Accept", "application/json")
+      }
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+      if (code !in 200..299) return@withContext null
+
+      val o = JSONObject(body)
+      if (!o.optBoolean("available", false)) return@withContext null
+
+      val batters = mutableListOf<String>()
+      o.optJSONArray("batters")?.let { arr ->
+        for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let { batters += it }
+      }
+      val findings = mutableListOf<IqFinding>()
+      o.optJSONArray("findings")?.let { arr ->
+        for (i in 0 until arr.length()) {
+          val f = arr.optJSONObject(i) ?: continue
+          findings += IqFinding(
+            kind = f.optString("kind"),
+            label = f.optString("label"),
+            value = f.optString("value"),
+            why = f.optString("why"),
+          )
+        }
+      }
+      val evidence = mutableListOf<IqRow>()
+      o.optJSONArray("evidence")?.let { arr ->
+        for (i in 0 until arr.length()) {
+          val r = arr.optJSONObject(i) ?: continue
+          evidence += IqRow(label = r.optString("label"), value = r.optString("value"))
+        }
+      }
+
+      CricketIq(
+        player = o.optString("player"),
+        batters = batters,
+        runs = o.optInt("runs"),
+        balls = o.optInt("balls"),
+        // Formatted here rather than on screen: a strike rate is read, not calculated with.
+        strikeRate = o.optDouble("strikeRate", 0.0).let {
+          if (it % 1.0 == 0.0) it.toInt().toString() else String.format("%.1f", it)
+        },
+        fours = o.optInt("fours"),
+        sixes = o.optInt("sixes"),
+        findings = findings,
+        evidence = evidence,
+        // optString turns a JSON null into the STRING "null" — the trap this codebase has
+        // been bitten by before.
+        narrative = o.optString("narrative").takeIf { it.isNotBlank() && it != "null" },
+        note = o.optString("note").takeIf { it.isNotBlank() && it != "null" },
+      )
+    } catch (_: Exception) {
+      null
+    }
+  }
+
   suspend fun fetchGround(matchId: String): GroundInsights? = withContext(Dispatchers.IO) {
     try {
       val connection = (URL(baseUrl.trimEnd('/') + "/api/matches/$matchId/ground").openConnection()
@@ -1186,6 +1294,8 @@ class MatchRepository(
         district = data.optString("district").takeIf { it.isNotBlank() && it != "null" },
         mapUrl = data.optString("mapUrl").takeIf { it.isNotBlank() && it != "null" },
         matchesPlayed = data.optInt("matchesPlayed", 0),
+        firstInningsAvg = data.optInt("firstInningsAvg", 0),
+        highestTotal = data.optInt("highestTotal", 0),
         confidence = data.optString("confidence", "building"),
         hasTrends = data.optBoolean("hasTrends", false),
         note = data.optString("note").takeIf { it.isNotBlank() && it != "null" },

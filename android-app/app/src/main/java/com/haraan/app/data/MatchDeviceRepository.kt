@@ -75,7 +75,121 @@ data class MatchClip(
     val url: String,
     val overBall: String,
     val durationMs: Long,
+    /** Null until somebody asks for a review. Most clips are never reviewed. */
+    val review: DeliveryReview? = null,
+    /** Where that review has got to. NONE means nobody has ever asked. */
+    val reviewStatus: ReviewStatus = ReviewStatus.NONE,
+    /** Server-supplied and safe to print — never an exception message. */
+    val reviewError: String? = null,
 )
+
+/**
+ * Where a clip's review has got to.
+ *
+ * Mirrors the server's strings. NONE is ours, not the server's: it stands for a clip
+ * nobody has asked about, which the server represents as a null status and which the UI
+ * has to tell apart from a review that ran and failed.
+ */
+enum class ReviewStatus {
+    NONE, PENDING, PROCESSING, COMPLETED, FAILED;
+
+    val settled: Boolean get() = this == COMPLETED || this == FAILED
+
+    companion object {
+        fun fromServer(value: String?): ReviewStatus = when (value?.lowercase()) {
+            "pending" -> PENDING
+            "processing" -> PROCESSING
+            "completed" -> COMPLETED
+            "failed" -> FAILED
+            else -> NONE
+        }
+    }
+}
+
+/** One answer shape for every review call, so the screen has a single thing to read. */
+data class ReviewState(
+    val status: ReviewStatus,
+    val review: DeliveryReview?,
+    val error: String?,
+)
+
+/**
+ * What the footage showed, factor by factor.
+ *
+ * There is deliberately no "out" field and there never will be one. A phone at an unknown
+ * angle cannot adjudicate an LBW, and a model that answered the appeal would be inventing
+ * certainty the camera does not have. Every factor may come back UNKNOWN, and on most
+ * ground-level footage most of them will.
+ */
+data class DeliveryReview(
+    val factors: List<ReviewFactor>,
+    /** Null when the model returned no coordinates at all, which is common. */
+    val evidence: DeliveryEvidence? = null,
+    /** How much the camera could see at all: good, partial or poor. */
+    val visibility: String,
+    /** One line about the footage itself — the angle, what was out of frame. */
+    val notes: String?,
+)
+
+/**
+ * The coordinate evidence behind a review — what a 2D map can actually be drawn from.
+ *
+ * Every coordinate is normalised 0..1 in IMAGE space: x across the frame, y down it.
+ * These are positions in the video, not positions on a pitch. Nothing in the pipeline is
+ * calibrated — no stump height, no crease reference, no camera pose — so a renderer must
+ * never present these on a diagram of a cricket pitch, which would silently upgrade a
+ * point in a picture into a measurement on the ground.
+ */
+data class DeliveryEvidence(
+    val coordinateSpace: String,
+    val ballDetected: Boolean,
+    val ballPoints: List<TrackPoint>,
+    val pitching: MarkedPoint?,
+    val impact: MarkedPoint?,
+    val projection: WicketProjection?,
+    val uncertainty: Map<String, String>,
+) {
+    /** True when there is literally nothing to draw. The map says so rather than drawing an empty box. */
+    val isEmpty: Boolean
+        get() = ballPoints.isEmpty() &&
+            pitching?.detected != true &&
+            impact?.detected != true &&
+            projection?.predicted != true
+}
+
+data class TrackPoint(val timestampMs: Int, val x: Float, val y: Float)
+
+/** An OBSERVED position. [detected] is derived server-side from surviving coordinates. */
+data class MarkedPoint(
+    val detected: Boolean,
+    val x: Float?,
+    val y: Float?,
+    val timestampMs: Int?,
+    val modelConfidence: Float?,
+)
+
+/**
+ * A PREDICTED position, kept in its own type so a renderer cannot accidentally draw it
+ * with the same weight as something the camera actually saw.
+ */
+data class WicketProjection(
+    val predicted: Boolean,
+    val stumpsHit: String,
+    val x: Float?,
+    val y: Float?,
+    val modelConfidence: Float?,
+)
+
+data class ReviewFactor(
+    /** Server key: pitching, impact, bat_involved, height, line. */
+    val key: String,
+    /** Server reading, e.g. in_line, outside_off, pad_first, cannot_tell. */
+    val reading: String,
+    /** The model's own claim that the footage settles this factor. */
+    val certain: Boolean,
+) {
+    val unknown: Boolean get() = reading == "cannot_tell"
+}
 
 /**
  * The scorer's half of multi-device pairing. The camera's half needs no account and no
@@ -143,11 +257,168 @@ class MatchDeviceRepository {
                             url = o.optString("url"),
                             overBall = o.optString("overBall"),
                             durationMs = o.optLong("durationMs", 0L),
+                            review = parseReview(o.optJSONObject("review")),
+                            reviewStatus = ReviewStatus.fromServer(
+                                o.optString("reviewStatus").takeIf { it.isNotBlank() && it != "null" },
+                            ),
+                            reviewError = o.optString("reviewError")
+                                .takeIf { it.isNotBlank() && it != "null" },
                         ),
                     )
                 }
             }
         }
+
+    /**
+     * Ask for a review of one clip.
+     *
+     * Returns as soon as the server has taken the request — the Vertex call runs on a
+     * queue now, so this no longer waits out an eight-to-ninety-second model call on a
+     * ground's connection. The caller polls [reviewStatus] until the state settles.
+     *
+     * A 202 with PENDING and a 200 with COMPLETED are both successes: on a server with no
+     * queue worker the job runs inline and the answer is already there.
+     */
+    suspend fun requestReview(token: String, matchId: String, clipId: String): ReviewState =
+        withContext(Dispatchers.IO) {
+            val response = postJson(
+                "/api/matches/$matchId/clips/$clipId/review",
+                JSONObject(),
+                token,
+            )
+            parseReviewState(response.body, response.code)
+        }
+
+    /** Where a queued review has got to. Cheap enough to poll every couple of seconds. */
+    suspend fun reviewStatus(token: String, matchId: String, clipId: String): ReviewState =
+        withContext(Dispatchers.IO) {
+            val response = getJson("/api/matches/$matchId/clips/$clipId/review", token)
+            parseReviewState(response.body, response.code)
+        }
+
+    /**
+     * One parse for both calls.
+     *
+     * A transport failure becomes FAILED with a plain message rather than an exception:
+     * the screen has one thing to render either way, and a scorer at a ground does not
+     * need to know whether the review died at nginx or at Vertex.
+     */
+    private fun parseReviewState(body: String, code: Int): ReviewState {
+        val json = runCatching { JSONObject(body) }.getOrNull()
+        val data = json?.optJSONObject("data")
+
+        if (data == null) {
+            val message = json?.optString("error")?.takeIf { it.isNotBlank() && it != "null" }
+                ?: "The review could not be started."
+            return ReviewState(ReviewStatus.FAILED, null, message)
+        }
+
+        val review = parseReview(data.optJSONObject("review"))
+        val status = ReviewStatus.fromServer(
+            data.optString("status").takeIf { it.isNotBlank() && it != "null" },
+        )
+        return ReviewState(
+            // A body carrying a review is complete whatever the status string says.
+            status = if (review != null) ReviewStatus.COMPLETED else status,
+            review = review,
+            error = data.optString("error").takeIf { it.isNotBlank() && it != "null" }
+                ?: "The review could not be started.".takeIf { code !in 200..299 && status == ReviewStatus.NONE },
+        )
+    }
+
+    /**
+     * Read the review, keeping the server's factor ORDER rather than the JSON object's.
+     *
+     * The order is cricket's — pitching, then impact, then whether the bat was involved,
+     * then height, then line — because that is the sequence an umpire actually decides in,
+     * and a list that arrives shuffled reads as a data dump instead of a decision.
+     */
+    private fun parseReview(json: JSONObject?): DeliveryReview? {
+        if (json == null) return null
+        val factorsJson = json.optJSONObject("factors") ?: return null
+        val order = listOf("pitching", "impact", "bat_involved", "height", "line")
+        val factors = order.mapNotNull { key ->
+            val f = factorsJson.optJSONObject(key) ?: return@mapNotNull null
+            val reading = f.optString("reading").takeIf { it.isNotBlank() && it != "null" }
+                ?: return@mapNotNull null
+            ReviewFactor(key = key, reading = reading, certain = f.optBoolean("certain", false))
+        }
+        if (factors.isEmpty()) return null
+        return DeliveryReview(
+            factors = factors,
+            evidence = parseEvidence(json.optJSONObject("delivery")),
+            visibility = json.optString("visibility").takeIf { it.isNotBlank() } ?: "poor",
+            notes = json.optString("notes").takeIf { it.isNotBlank() && it != "null" },
+        )
+    }
+
+    /**
+     * The coordinates, read exactly as sent and never repaired.
+     *
+     * The server has already dropped anything outside the frame and derived every
+     * `detected` flag from coordinates that survived, so this parses rather than
+     * validates. A point missing an x or a y is skipped instead of being filled in:
+     * interpolating a position would be inventing evidence at the last possible moment.
+     */
+    private fun parseEvidence(json: JSONObject?): DeliveryEvidence? {
+        if (json == null) return null
+
+        val ball = json.optJSONObject("ball")
+        val points = ball?.optJSONArray("points")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                if (!o.has("x") || !o.has("y")) return@mapNotNull null
+                TrackPoint(
+                    timestampMs = o.optInt("timestampMs", 0),
+                    x = o.optDouble("x").toFloat(),
+                    y = o.optDouble("y").toFloat(),
+                )
+            }
+        } ?: emptyList()
+
+        fun marked(key: String): MarkedPoint? {
+            val o = json.optJSONObject(key) ?: return null
+            return MarkedPoint(
+                detected = o.optBoolean("detected", false),
+                x = if (o.isNull("x")) null else o.optDouble("x").toFloat(),
+                y = if (o.isNull("y")) null else o.optDouble("y").toFloat(),
+                timestampMs = if (o.isNull("timestampMs")) null else o.optInt("timestampMs"),
+                modelConfidence = if (o.isNull("modelConfidence")) null
+                    else o.optDouble("modelConfidence").toFloat(),
+            )
+        }
+
+        val projectionJson = json.optJSONObject("wicketProjection")
+        val projection = projectionJson?.let { o ->
+            WicketProjection(
+                predicted = o.optBoolean("predicted", false),
+                stumpsHit = o.optString("stumpsHit").takeIf { it.isNotBlank() } ?: "cannot_tell",
+                x = if (o.isNull("x")) null else o.optDouble("x").toFloat(),
+                y = if (o.isNull("y")) null else o.optDouble("y").toFloat(),
+                modelConfidence = if (o.isNull("modelConfidence")) null
+                    else o.optDouble("modelConfidence").toFloat(),
+            )
+        }
+
+        val uncertainty = json.optJSONObject("uncertainty")?.let { o ->
+            buildMap {
+                o.keys().forEach { key ->
+                    o.optString(key).takeIf { it.isNotBlank() && it != "null" }?.let { put(key, it) }
+                }
+            }
+        } ?: emptyMap()
+
+        return DeliveryEvidence(
+            coordinateSpace = json.optString("coordinateSpace").takeIf { it.isNotBlank() }
+                ?: "image_normalised",
+            ballDetected = ball?.optBoolean("detected", false) ?: false,
+            ballPoints = points,
+            pitching = marked("pitching"),
+            impact = marked("impact"),
+            projection = projection,
+            uncertainty = uncertainty,
+        )
+    }
 
     suspend fun revoke(token: String, matchId: String, deviceId: String): Boolean =
         withContext(Dispatchers.IO) {

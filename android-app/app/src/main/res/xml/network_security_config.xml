@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext stays off everywhere except the loopback addresses a local dev backend
+  lives on: 127.0.0.1 (reached through `adb reverse tcp:8000 tcp:8000`) and 10.0.2.2
+  (the emulator's alias for the host). Release traffic to haraan.app is unaffected and
+  still HTTPS-only, so this file is safe to ship — no need to flip it back before a build.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

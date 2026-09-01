@@ -76,7 +76,11 @@ private val Hairline = Color(0xFFE8EDF4)
 private val Well = Color(0xFFF4F7FB)
 
 @Composable
-fun GroundInsightsCard(ground: GroundInsights, modifier: Modifier = Modifier) {
+fun GroundInsightsCard(
+    ground: GroundInsights,
+    thisInnings: Int = 0,
+    modifier: Modifier = Modifier,
+) {
     // One clock for the whole card, so the connectors, boxes and bar are phases of a
     // single move rather than four animations that happen to start together.
     val reveal = remember(ground.name) { Animatable(0f) }
@@ -117,16 +121,22 @@ fun GroundInsightsCard(ground: GroundInsights, modifier: Modifier = Modifier) {
 
         Spacer(Modifier.height(14.dp))
 
-        // The ground itself, drawn. Replaces the satellite tile that was here: a
-        // rendered pitch reads as a cricket ground instantly and at any size, which a
-        // top-down photograph of a maidan does not.
-        GroundDisc3D(settle = ((t - 0.05f) / 0.45f).coerceIn(0f, 1f))
+        // THE COMPARISON, where a drawn pitch used to be.
+        //
+        // The disc was a picture of a cricket ground on a screen that had already said
+        // it was about a cricket ground — decoration in the one position on the card
+        // that a reader actually looks at. What belongs there is the only question this
+        // section exists to answer: was that a big score HERE?
+        //
+        // When the ground has no history to compare against, the plain figures still
+        // run, because "we don't know yet" is a fact and an empty card is not.
+        val compared = thisInnings > 0 &&
+            (ground.firstInningsAvg > 0 || ground.highestTotal > 0)
 
-        // All four figures on one line, under the ground rather than around it.
-        if (ground.stats.isNotEmpty()) {
-            // The disc's contact shadow reaches below its box; without this the top of
-            // the figures sits inside it.
-            Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(4.dp))
+        if (compared) {
+            GroundComparison(ground, thisInnings, t)
+        } else if (ground.stats.isNotEmpty()) {
             StatPair(ground.stats.take(4), t, phase = 0.25f)
         }
 
@@ -357,4 +367,149 @@ private fun CountUp(value: String, t: Float) {
         style = TextStyle(fontFeatureSettings = "tnum"),
         maxLines = 1,
     )
+}
+
+/**
+ * This innings, measured against this ground.
+ *
+ * The card used to print four figures in four equal cells — matches played, first-innings
+ * average, highest total, best innings — and leave the reader to do the only sum that
+ * matters. They don't. A number like "232" means nothing on its own; "this is 20 above
+ * par here" is the same data doing its job.
+ *
+ * Every figure is the ground's own history against the score at the top of the screen.
+ * Nothing here is generated, and nothing is estimated.
+ */
+@Composable
+private fun GroundComparison(ground: GroundInsights, thisInnings: Int, t: Float) {
+    val par = ground.firstInningsAvg
+    val best = ground.highestTotal
+    val verdict = groundVerdict(thisInnings, par, best) ?: return
+
+    Staged(t, after = 0.2f) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "$thisInnings",
+                    color = CrexColors.TextPrimary,
+                    fontSize = 46.sp,
+                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    letterSpacing = (-2).sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                )
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    verdict.headline,
+                    color = verdict.tint,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.1.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.padding(bottom = 8.dp).weight(1f),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                verdict.support,
+                color = CrexColors.TextSecondary,
+                fontSize = 14.sp,
+                lineHeight = 21.sp,
+            )
+
+            // The scale. Par is a marked point on it rather than another number in a
+            // row, so "above" and "below" are things you SEE before you read them.
+            if (par > 0) {
+                val ceiling = maxOf(thisInnings, best, par).coerceAtLeast(1)
+                val grow = ((t - 0.35f) / 0.5f).coerceIn(0f, 1f)
+                Spacer(Modifier.height(20.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFFEFF3F8)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth((thisInnings.toFloat() / ceiling) * grow)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(verdict.tint),
+                    )
+                    // Par, marked where it actually falls on the scale.
+                    Box(
+                        Modifier.fillMaxHeight().fillMaxWidth(par.toFloat() / ceiling),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        Box(
+                            Modifier
+                                .width(2.dp)
+                                .fillMaxHeight()
+                                .background(CrexColors.TextPrimary.copy(alpha = 0.55f)),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        "PAR $par",
+                        color = CrexColors.TextMuted,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.weight(1f),
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                    if (best > 0) {
+                        Text(
+                            "GROUND BEST $best",
+                            color = CrexColors.TextMuted,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** What this total is worth here, and the colour that says so. */
+private data class GroundVerdict(val headline: String, val support: String, val tint: Color)
+
+/**
+ * Ranked by how much the reader would care, not by which figure came first.
+ *
+ * A ground record outranks being above par, and being above par outranks the average
+ * itself — so the strongest true thing about the innings is the thing that gets said.
+ * Returns null when the ground has no history worth comparing against, and the card
+ * falls back to plain figures rather than inventing a verdict from one match.
+ */
+private fun groundVerdict(runs: Int, par: Int, best: Int): GroundVerdict? {
+    if (runs <= 0) return null
+    return when {
+        best > 0 && runs > best -> GroundVerdict(
+            "HIGHEST TOTAL EVER MADE HERE",
+            "The best before this was $best.",
+            Color(0xFF15803D),
+        )
+        par > 0 && runs > par -> GroundVerdict(
+            "${runs - par} ABOVE PAR HERE",
+            "A first innings at this ground averages $par.",
+            Color(0xFF15803D),
+        )
+        par > 0 && runs < par -> GroundVerdict(
+            "${par - runs} BELOW PAR HERE",
+            "A first innings at this ground averages $par.",
+            Color(0xFFB54708),
+        )
+        par > 0 -> GroundVerdict(
+            "EXACTLY PAR HERE",
+            "A first innings at this ground averages $par.",
+            CrexColors.TextSecondary,
+        )
+        else -> null
+    }
 }

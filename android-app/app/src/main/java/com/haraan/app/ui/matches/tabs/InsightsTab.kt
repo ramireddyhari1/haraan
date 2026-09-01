@@ -6,23 +6,31 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Canvas
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.pager.HorizontalPager
@@ -104,6 +112,10 @@ fun InsightsTab(matchId: String, state: MatchUiState, modifier: Modifier = Modif
         return
     }
 
+    // Survives rotation and a trip to another tab: a reader who opened the detail did
+    // so deliberately, and having it snap shut underneath them is its own small betrayal.
+    var showAll by rememberSaveable(matchId) { mutableStateOf(false) }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -135,90 +147,87 @@ fun InsightsTab(matchId: String, state: MatchUiState, modifier: Modifier = Modif
         // between them feels like changing ends rather than reloading the same card.
         item(key = "hero") { InningsHeroPager(data.innings, state) }
 
+        // CRICKET IQ, immediately under the hero.
+        //
+        // The hero says what the TEAM did; this says what a PERSON did inside it, and that
+        // is the question a player actually opens this tab with. Everything below the two
+        // of them is the evidence for one or the other.
+        item(key = "iq") { CricketIqSection(matchId, MatchRepository()) }
+
+        // WHERE IT WENT, and WHERE IT WAS PLAYED.
+        //
+        // These two survive above the fold because each answers something the figures
+        // cannot: the wheel says which parts of the ground this side scored through, and
+        // the ground card says whether a total like this one is big for here.
         data.innings.forEachIndexed { idx, inn ->
             val accent = if (inn.battingTeam == 2) state.team2Color else state.team1Color
 
-            // Whose charts these are. The hero used to sit directly above each innings
-            // and answer that; now that it is a pager at the top, the detail below needs
-            // to say it out loud — quietly, in one line, not in another card.
             if (data.innings.size > 1) {
-                item(key = "inn-label-$idx") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            Modifier
-                                .size(width = 3.dp, height = 15.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(accent),
-                        )
-                        Spacer(Modifier.width(9.dp))
-                        Text(
-                            inn.battingName.uppercase(),
-                            color = CrexColors.TextPrimary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.1.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            "${inn.runs}/${inn.wickets}  ·  ${inn.overs} ov",
-                            color = CrexColors.TextMuted,
-                            fontSize = 12.sp,
-                            style = TextStyle(fontFeatureSettings = "tnum"),
-                        )
-                    }
-                }
+                item(key = "inn-label-$idx") { InningsLabel(inn, accent) }
             }
 
-            // The order is the order a person asks the questions in.
-            //
-            // The tab used to open on the ground's record — a page about somewhere,
-            // before it said anything about what happened there. So the innings leads
-            // now: the score, then the ground it was made on, then who is in form, then
-            // the detail behind all three. Ground and form belong to the match as a
-            // whole, so they appear once, under the first innings.
-            if (idx == 0) {
-                ground?.let { known -> item(key = "ground") { GroundInsightsCard(known) } }
-
-                if (state.homeSquad.isNotEmpty() || state.awaySquad.isNotEmpty()) {
-                    item(key = "form") {
-                        AnalyseSection(
-                            team1Name = state.team1FullName.ifBlank { state.team1 },
-                            team2Name = state.team2FullName.ifBlank { state.team2 },
-                            team1Squad = state.homeSquad,
-                            team2Squad = state.awaySquad,
-                        )
-                    }
-                }
-            }
-
-            if (inn.progress.isNotEmpty()) {
-                item(key = "manhattan-$idx") {
-                    InsightSection("RUNS PER OVER") { Manhattan(inn, accent) }
-                }
-                item(key = "strip-$idx") {
-                    InsightSection("BALL BY BALL") { OverStrip(inn) }
-                }
-            }
             item(key = "wagon-$idx") {
                 InsightSection("WAGON WHEEL") { WagonWheel(inn) }
             }
-            if (inn.changingOvers.isNotEmpty()) {
-                item(key = "changing-$idx") { ChangingOversCard(inn) }
+
+            // The ground belongs to the match rather than to a side, so it appears once.
+            if (idx == 0) {
+                ground?.let { known ->
+                    item(key = "ground") { GroundInsightsCard(known, thisInnings = inn.runs) }
+                }
             }
-            if (inn.partnerships.isNotEmpty()) {
-                item(key = "stands-$idx") { PartnershipsCard(inn) }
-            }
-            if (inn.faceoffs.isNotEmpty()) {
-                item(key = "faceoff-$idx") { FaceOffCard(inn) }
-            }
-            item(key = "breakdown-$idx") { ScoringBreakdownCard(inn) }
         }
 
-        data.analysis?.let { text ->
-            item(key = "analysis") { AnalysisCard(text) }
+        // FULL BREAKDOWN.
+        //
+        // Everything past this line is detail. It is complete and it is correct, and it
+        // is not what the page is ABOUT — and that distinction is the one this tab was
+        // missing. Thirteen sections at identical weight gave a reader no way to tell the
+        // story from the evidence for it: every block announced itself with the same grey
+        // label and the same hairline, so nothing led and the page read as a list that a
+        // machine had emitted rather than a page somebody had edited.
+        //
+        // Nothing is deleted to fix that. The evidence simply stops competing with the
+        // story for the top of the screen, and anyone who wants all of it is one tap away.
+        item(key = "disclosure") {
+            BreakdownDisclosure(open = showAll) { showAll = !showAll }
+        }
+
+        if (showAll) {
+            if (state.homeSquad.isNotEmpty() || state.awaySquad.isNotEmpty()) {
+                item(key = "form") {
+                    AnalyseSection(
+                        team1Name = state.team1FullName.ifBlank { state.team1 },
+                        team2Name = state.team2FullName.ifBlank { state.team2 },
+                        team1Squad = state.homeSquad,
+                        team2Squad = state.awaySquad,
+                    )
+                }
+            }
+
+            data.innings.forEachIndexed { idx, inn ->
+                if (inn.progress.isNotEmpty()) {
+                    item(key = "strip-$idx") {
+                        InsightSection("BALL BY BALL") { OverStrip(inn) }
+                    }
+                }
+                if (inn.changingOvers.isNotEmpty()) {
+                    item(key = "changing-$idx") { ChangingOversCard(inn) }
+                }
+                if (inn.partnerships.isNotEmpty()) {
+                    item(key = "stands-$idx") { PartnershipsCard(inn) }
+                }
+                if (inn.faceoffs.isNotEmpty()) {
+                    item(key = "faceoff-$idx") { FaceOffCard(inn) }
+                }
+                // No ScoringBreakdownCard: the hero's "How the runs were made" already
+                // prints every one of its figures — the sixes, the fours, and the
+                // singles, twos, threes and extras by name. It was the same table twice.
+            }
+
+            data.analysis?.let { text ->
+                item(key = "analysis") { AnalysisCard(text) }
+            }
         }
 
         item(key = "footnote") {
@@ -228,6 +237,119 @@ fun InsightsTab(matchId: String, state: MatchUiState, modifier: Modifier = Modif
                 fontSize = 10.5.sp,
                 modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
             )
+        }
+    }
+}
+
+/**
+ * Whose charts these are, on one quiet line.
+ *
+ * Only drawn when there are two innings to tell apart — a single-innings match has
+ * already said whose it is at the top of the screen, and repeating it there would be a
+ * label with no job.
+ */
+@Composable
+private fun InningsLabel(inn: InningsInsight, accent: Color) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(width = 3.dp, height = 15.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(accent),
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            inn.battingName.uppercase(),
+            color = CrexColors.TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.1.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "${inn.runs}/${inn.wickets}  ·  ${inn.overs} ov",
+            color = CrexColors.TextMuted,
+            fontSize = 12.sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/**
+ * The line that divides the story from the evidence for it.
+ *
+ * Deliberately not a button. A filled pill or an outlined control would be a fifteenth
+ * object competing for attention on a page whose whole problem was too many objects at
+ * equal weight — so this is set as a rule, a label and a drawn mark, in the same
+ * typographic language as every other section head, and the whole row is the target.
+ *
+ * The mark is drawn rather than an icon: two strokes that become one when the section is
+ * open, which is the plainest possible statement of what tapping did.
+ */
+@Composable
+private fun BreakdownDisclosure(open: Boolean, onToggle: () -> Unit) {
+    val cross by animateFloatAsState(
+        if (open) 0f else 1f,
+        tween(220),
+        label = "disclosureCross",
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+            ) { onToggle() }
+            .padding(top = 10.dp, bottom = 4.dp),
+    ) {
+        Box(Modifier.fillMaxWidth().height(1.5.dp).background(InsightInk.copy(alpha = 0.16f)))
+        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "FULL BREAKDOWN",
+                    color = InsightInk,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.5.sp,
+                )
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    if (open) {
+                        "Tap to close"
+                    } else {
+                        "Ball by ball, every stand, the face-offs, form and the written read"
+                    },
+                    color = CrexColors.TextMuted,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Canvas(Modifier.size(18.dp)) {
+                val mid = size.height / 2f
+                val w = 1.8.dp.toPx()
+                drawLine(
+                    color = InsightInk,
+                    start = Offset(0f, mid),
+                    end = Offset(size.width, mid),
+                    strokeWidth = w,
+                    cap = StrokeCap.Round,
+                )
+                if (cross > 0.01f) {
+                    val half = (size.height / 2f) * cross
+                    drawLine(
+                        color = InsightInk,
+                        start = Offset(size.width / 2f, mid - half),
+                        end = Offset(size.width / 2f, mid + half),
+                        strokeWidth = w,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
         }
     }
 }
@@ -256,39 +378,53 @@ private fun InningsHeroPager(innings: List<InningsInsight>, state: MatchUiState)
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxWidth()) {
-        // Tabs above the card: the swipe is discoverable, but nobody should have to
-        // discover it to reach half the match.
-        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-            sides.forEachIndexed { i, side ->
-                val on = pager.currentPage == i
-                val fg by animateColorAsState(
-                    if (on) CrexColors.TextPrimary else CrexColors.TextMuted,
-                    tween(220),
-                    label = "sideFg",
-                )
-                val rule by animateColorAsState(
-                    if (on) side.colour else Color.Transparent,
-                    tween(220),
-                    label = "sideRule",
-                )
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) { scope.launch { pager.animateScrollToPage(i) } },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        side.name,
-                        color = fg,
-                        fontSize = 13.5.sp,
-                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1,
+        // Two sides, one rule.
+        //
+        // The tabs sit ON a continuous hairline rather than each carrying its own bar, so
+        // the selected side reads as a mark made on a single line — the way a printed
+        // fixture list marks the side it is talking about. The underline is the interaction
+        // colour, not the team's: a team colour here would compete with the same colour
+        // three lines down, where it is identifying the innings rather than the selection.
+        Box(Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .align(Alignment.BottomStart)
+                    .background(InsightRule),
+            )
+            Row(Modifier.fillMaxWidth()) {
+                sides.forEachIndexed { i, side ->
+                    val on = pager.currentPage == i
+                    val fg by animateColorAsState(
+                        if (on) InsightInk else CrexColors.TextMuted,
+                        tween(220),
+                        label = "sideFg",
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Box(Modifier.fillMaxWidth().height(2.dp).background(rule))
+                    val rule by animateColorAsState(
+                        if (on) CrexColors.AccentBlue else Color.Transparent,
+                        tween(220),
+                        label = "sideRule",
+                    )
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                            ) { scope.launch { pager.animateScrollToPage(i) } },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            side.name,
+                            color = fg,
+                            fontSize = 15.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Box(Modifier.fillMaxWidth().height(2.dp).background(rule))
+                    }
                 }
             }
         }
@@ -308,229 +444,768 @@ private fun InningsHeroPager(innings: List<InningsInsight>, state: MatchUiState)
 /**
  * A side that has not batted.
  *
- * Drawn in the same surface as a real hero rather than as an empty state, because it is
- * not an error — it is a fact about where the match has got to, and it will become a
+ * Set in the same editorial type as a real innings rather than as an empty state, because
+ * it is not an error — it is a fact about where the match has got to, and it will become a
  * scorecard shortly.
  */
 @Composable
 private fun YetToBatCard(name: String, colour: Color) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(22.dp), spotColor = Color(0x33101828))
-            .clip(RoundedCornerShape(22.dp))
-            .background(heroSurface(colour))
-    ) {
-        HeroTurf(Modifier.matchParentSize())
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
-            Text(
-                name.uppercase(),
-                color = Color.White.copy(alpha = 0.55f),
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.6.sp,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Yet to bat",
-                color = Color.White,
-                fontSize = 34.sp,
-                fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                letterSpacing = (-1.2).sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Their innings will appear here ball by ball.",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(30.dp))
+    Column(Modifier.fillMaxWidth()) {
+        InsightsEyebrow()
+        Spacer(Modifier.height(18.dp))
+        TeamRule(name, colour)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Yet to bat",
+            color = InsightInk.copy(alpha = 0.35f),
+            fontSize = 40.sp,
+            fontFamily = com.haraan.app.theme.ArchivoDisplay,
+            letterSpacing = (-1.4).sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Their innings will appear here ball by ball.",
+            color = CrexColors.TextSecondary,
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
+        )
+        Spacer(Modifier.height(34.dp))
+    }
+}
+
+// ── The Insights palette ───────────────────────────────────────────────────────────────
+//
+// Deliberately short. Navy carries every number, one blue carries interaction, and the
+// three phase hues exist only because START / MIDDLE / FINISH are three different things
+// that have to be told apart inside a single bar. Nothing here is decorative: if a colour
+// appears on this screen it is because it means something navy cannot.
+
+private val InsightInk = Color(0xFF0B1B33)          // headline navy — every figure
+private val InsightRule = Color(0xFFE6EBF2)         // hairline dividers
+private val InsightTrack = Color(0xFFEFF3F8)        // unfilled bar track
+private val PhaseStart = Color(0xFF2563EB)          // blue   — the opening
+private val PhaseMiddle = Color(0xFF0D9488)         // teal   — the build
+private val PhaseFinish = Color(0xFF7C3AED)         // purple — the close
+private val BoundaryGreen = Color(0xFF15803D)       // positive: runs taken to the rope
+private val PeakOrange = Color(0xFFEA580C)          // the single best over
+
+private fun phaseColour(index: Int): Color = when (index) {
+    0 -> PhaseStart
+    1 -> PhaseMiddle
+    else -> PhaseFinish
+}
+
+/** The section's own mark: a three-bar glyph and one word. Drawn, not an icon font. */
+@Composable
+private fun InsightsEyebrow() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Canvas(Modifier.size(width = 12.dp, height = 10.dp)) {
+            val w = size.width / 5f
+            listOf(0.45f, 0.8f, 1f).forEachIndexed { i, h ->
+                drawRect(
+                    color = CrexColors.TextMuted,
+                    topLeft = Offset(i * w * 1.7f, size.height * (1f - h)),
+                    size = androidx.compose.ui.geometry.Size(w, size.height * h),
+                )
+            }
         }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "INSIGHTS",
+            color = CrexColors.TextMuted,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.4.sp,
+        )
+    }
+}
+
+/** Whose innings this is: the side's own colour as a 3dp rule, then the name. */
+@Composable
+private fun TeamRule(name: String, colour: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(width = 3.dp, height = 13.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(colour),
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            name.uppercase(),
+            color = CrexColors.TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.3.sp,
+        )
     }
 }
 
 /**
- * A team's colour, taken down to something white type can sit on.
+ * THE INNINGS — told as one page, not as a stack of cards.
  *
- * Both heroes were the same navy, which meant swiping between two sides changed the
- * numbers and nothing else. Blending each side's own colour into near-black keeps its
- * hue — a blue side reads deep navy, a red one deep maroon — while holding the contrast
- * that 52sp white numerals need. The colour identifies; it never has to be legible.
+ * The old hero was a dark gradient slab with a turf horizon painted into it and four stat
+ * cells along its foot, every figure competing at the same weight. It looked expensive and
+ * said very little: you could not tell from it what KIND of innings this had been without
+ * reading all four numbers and doing the arithmetic yourself.
+ *
+ * What replaces it is match analysis set the way a newspaper sets it. The score is the
+ * largest thing on the screen because it is the most important thing on the screen. Under
+ * it, one sentence says what kind of innings it was. Then the evidence, in the order a
+ * reader asks for it: how much came in boundaries, when the runs came, the four figures
+ * worth keeping, and what to take from it. Nothing sits inside a container — hierarchy is
+ * size, weight and space, and sections are parted by a hairline rule.
+ *
+ * Every figure here is replayed from the ball log. Nothing on this screen is estimated.
  */
-private fun heroSurface(team: Color): Brush = Brush.verticalGradient(
-    0f to lerp(team, Color(0xFF0A1220), 0.72f),
-    0.55f to lerp(team, Color(0xFF070E18), 0.86f),
-    1f to lerp(team, Color(0xFF05090F), 0.9f),
-)
-
 @Composable
 private fun InningsInsightCard(inn: InningsInsight, accent: Color = CrexColors.AccentBlue) {
-    // THE HERO — "what happened".
-    //
-    // This was a white card of four grey stat cells, identical in weight to the ten
-    // sections under it, so the innings itself had no more presence than a chart legend.
-    // It is now the one dark surface on the tab: the page below is white and editorial,
-    // and this sits on it with weight. That contrast IS the hierarchy — the reader's eye
-    // has somewhere to land before the detail starts.
-    //
-    // Depth comes from a single hue lifted at the top, a turf horizon at the foot, and
-    // one soft shadow. Not from glass, blur or a second colour.
     val reveal = remember(inn.runs, inn.overs) { Animatable(0f) }
     LaunchedEffect(inn.runs, inn.overs) {
         reveal.animateTo(1f, tween(durationMillis = 900, easing = FastOutSlowInEasing))
     }
     val t = reveal.value
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(22.dp), spotColor = Color(0x33101828))
-            .clip(RoundedCornerShape(22.dp))
-            .background(heroSurface(accent))
-    ) {
-        HeroTurf(Modifier.matchParentSize())
-        Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+    Column(Modifier.fillMaxWidth()) {
+        InsightsEyebrow()
+        Spacer(Modifier.height(20.dp))
+        TeamRule(inn.battingName, accent)
+        Spacer(Modifier.height(6.dp))
+
+        // The score, and only the score. Overs and run rate sit opposite it at a fraction
+        // of the size — there for anyone who wants them, never competing for the eye.
+        Row(verticalAlignment = Alignment.Bottom) {
+            val shown = (inn.runs * ((t - 0.1f) / 0.6f).coerceIn(0f, 1f)).toInt()
             Text(
-                inn.battingName.uppercase(),
-                color = Color.White.copy(alpha = 0.55f),
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.6.sp,
+                "$shown",
+                color = InsightInk,
+                fontSize = 78.sp,
+                fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                letterSpacing = (-3.6).sp,
+                style = TextStyle(fontFeatureSettings = "tnum"),
             )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                // The score counts to itself. On the one number the whole tab is about,
-                // arriving is worth more than appearing.
-                val shown = (inn.runs * ((t - 0.1f) / 0.6f).coerceIn(0f, 1f)).toInt()
+            Text(
+                "/${inn.wickets}",
+                color = InsightInk.copy(alpha = 0.3f),
+                fontSize = 34.sp,
+                fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                modifier = Modifier.padding(bottom = 7.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.padding(bottom = 10.dp),
+            ) {
                 Text(
-                    "$shown",
-                    color = Color.White,
-                    fontSize = 52.sp,
-                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                    letterSpacing = (-2).sp,
+                    "${inn.overs} OV",
+                    color = InsightInk,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
                     style = TextStyle(fontFeatureSettings = "tnum"),
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    "/${inn.wickets}",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 26.sp,
-                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                    modifier = Modifier.padding(bottom = 5.dp),
-                )
-                Spacer(Modifier.weight(1f))
-                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 6.dp)) {
-                    Text(
-                        "${inn.overs} ov",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                    )
-                    Text(
-                        "RR ${inn.runRate}",
-                        color = Color.White.copy(alpha = 0.45f),
-                        fontSize = 11.5.sp,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                    )
-                }
-            }
-
-            // The read. One sentence that says what KIND of innings this was, chosen from
-            // the figures printed below it — so it is checkable, not asserted.
-            inningsRead(inn)?.let { read ->
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    read,
-                    color = Color.White.copy(alpha = 0.78f),
-                    fontSize = 13.5.sp,
-                    lineHeight = 20.sp,
+                    "RR ${inn.runRate}",
+                    color = CrexColors.TextMuted,
+                    fontSize = 11.5.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
                 )
             }
+        }
 
-            if (inn.phases.isNotEmpty()) {
-                Spacer(Modifier.height(20.dp))
-                val peak = inn.phases.maxOf { it.runRate }.coerceAtLeast(0.01)
-                inn.phases.forEachIndexed { i, ph ->
-                    if (i > 0) Spacer(Modifier.height(10.dp))
-                    val grow = ((t - 0.25f - i * 0.08f) / 0.5f).coerceIn(0f, 1f)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            ph.label,
-                            color = Color.White.copy(alpha = 0.55f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.width(50.dp),
-                        )
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(Color.White.copy(alpha = 0.12f))
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(((ph.runRate / peak).toFloat() * grow).coerceIn(0f, 1f))
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(lerp(accent, Color.White, 0.62f))
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            "${ph.runs}",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            style = TextStyle(fontFeatureSettings = "tnum"),
-                        )
-                        Text(
-                            " @ ${ph.runRate}",
-                            color = Color.White.copy(alpha = 0.45f),
-                            fontSize = 11.sp,
-                            style = TextStyle(fontFeatureSettings = "tnum"),
-                        )
-                    }
-                }
+        // The read: what kind of innings this was, in one line, chosen by rule from the
+        // figures printed below it. The opening figure is set in navy so the eye catches
+        // the claim and the number making it in the same movement.
+        // The server's verified line when there is one, this screen's own rule-based
+        // sentence when there is not. Both are readings of figures printed below them,
+        // so both are set the same way — and neither is badged as coming from a model,
+        // because a line that needs a badge to be believed has not earned its place.
+        (inn.headline ?: inningsRead(inn))?.let { read ->
+            Spacer(Modifier.height(12.dp))
+            // Set at headline size, not body size. This sentence is the point of the
+            // whole section — printed at 15sp under a 78sp score it read as a caption
+            // apologising for the number above it.
+            Text(
+                emphasiseLeadingFigure(read),
+                color = InsightInk.copy(alpha = 0.9f),
+                fontSize = 21.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+
+        if (inn.runs > 0) {
+            // The order is the order the questions get asked in: what shape was the
+            // innings, what was it made of, who made it, and how it climbed.
+            if (inn.progress.isNotEmpty()) InsightBlock(top = 26.dp) { InningsTimeline(inn, t) }
+            InsightBlock(top = if (inn.progress.isEmpty()) 26.dp else 24.dp) { RunsMade(inn, t) }
+
+            // The moment gets air instead of a rule. A hairline above a dark band would
+            // be a seam between two surfaces; space lets the band arrive on its own.
+            inn.partnerships.maxByOrNull { it.runs }?.let { stand ->
+                Spacer(Modifier.height(30.dp))
+                MomentBand(stand, inn.runs)
             }
 
-            Spacer(Modifier.height(20.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.10f)))
-            Spacer(Modifier.height(16.dp))
+            InsightBlock(top = 30.dp) { MilestoneStrip(inn) }
+        }
+    }
+}
 
-            // Four figures on one line, not a 2x2 grid of grey cells. The numbers carry
-            // the weight and the labels get out of the way underneath them.
-            Row(modifier = Modifier.fillMaxWidth()) {
-                HeroFigure("BOUNDARY", "${inn.boundaryPercent}%", Modifier.weight(1f))
-                HeroFigure("DOTS", "${inn.dotPercent}%", Modifier.weight(1f))
-                HeroFigure(
-                    "BEST OVER",
-                    if (inn.bestOverNumber > 0) "${inn.bestOverRuns}" else "-",
-                    Modifier.weight(1f),
-                    note = if (inn.bestOverNumber > 0) "over ${inn.bestOverNumber}" else null,
-                )
-                HeroFigure(
-                    "BEST STAND",
-                    if (inn.bestStandRuns > 0) "${inn.bestStandRuns}" else "-",
-                    Modifier.weight(1f),
-                    note = if (inn.bestStandRuns > 0) "${inn.bestStandBalls} balls" else null,
-                )
-            }
+/** A rule, then air, then the block. The only thing that parts one section from the next. */
+@Composable
+private fun InsightBlock(top: Dp = 24.dp, content: @Composable ColumnScope.() -> Unit) {
+    Spacer(Modifier.height(top))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(InsightRule))
+    Spacer(Modifier.height(18.dp))
+    Column(Modifier.fillMaxWidth(), content = content)
+}
+
+/** A small uppercase section head, with an optional figure sitting opposite it. */
+@Composable
+private fun BlockHead(label: String, trailing: String? = null) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            color = CrexColors.TextMuted,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.4.sp,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.let {
+            Text(
+                it,
+                color = CrexColors.TextMuted,
+                fontSize = 10.5.sp,
+                style = TextStyle(fontFeatureSettings = "tnum"),
+            )
         }
     }
 }
 
 /**
+ * THE INNINGS, OVER BY OVER.
+ *
+ * Cricket's own axis is the over, so that is the axis this is drawn on. Everything a
+ * reader wants is annotation on it rather than a second chart: the phases are shaded
+ * REGIONS of the innings, the wickets are marked at the over they fell, and the over that
+ * broke the game open is the column towering over its neighbours with its figure on top.
+ *
+ * The craft matters as much as the data here. Columns sit on a real baseline, the phase
+ * tints run behind them so the eye reads powerplay-middle-death as territory, and only
+ * one column is ever labelled — label them all and a graphic you take in at a glance
+ * becomes a table you have to read.
+ */
+@Composable
+private fun InningsTimeline(inn: InningsInsight, t: Float) {
+    val overs = inn.progress
+    if (overs.isEmpty()) return
+
+    // Which phase each over belongs to, from the phase lengths the server sent rather than
+    // guessed off the over number — a rain-shortened or gully innings has no six-over
+    // powerplay, and the server has already worked out where it cut them.
+    val bounds = remember(inn.phases) {
+        var running = 0
+        inn.phases.map { running += it.overs; running }
+    }
+    fun phaseOf(overNumber: Int): Int {
+        bounds.forEachIndexed { i, end -> if (overNumber <= end) return i }
+        return (inn.phases.size - 1).coerceAtLeast(0)
+    }
+
+    val peak = overs.maxOf { it.runs }.coerceAtLeast(1)
+    val grow = ((t - 0.2f) / 0.6f).coerceIn(0f, 1f)
+    val labelEvery = (overs.size / 6).coerceAtLeast(1)
+
+    BlockHead("THE INNINGS", "${overs.size} over${if (overs.size == 1) "" else "s"}")
+    Spacer(Modifier.height(20.dp))
+
+    Box(Modifier.fillMaxWidth().height(150.dp)) {
+        // Phase territory, behind the columns. Faint enough to read as ground rather than
+        // as data, strong enough that the three regions of an innings are visible at all.
+        Row(Modifier.matchParentSize()) {
+            overs.forEach { over ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(phaseColour(phaseOf(over.over)).copy(alpha = 0.05f)),
+                )
+            }
+        }
+
+        Row(
+            Modifier.matchParentSize().padding(top = 20.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            overs.forEach { over ->
+                val isBest = over.over == inn.bestOverNumber
+                val fill = if (isBest) PeakOrange else phaseColour(phaseOf(over.over))
+                Column(
+                    Modifier.weight(1f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.Bottom,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (isBest) {
+                        Text(
+                            "${over.runs}",
+                            color = PeakOrange,
+                            fontSize = 13.sp,
+                            fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                            maxLines = 1,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 1.5.dp)
+                            .fillMaxHeight(((over.runs.toFloat() / peak) * grow).coerceIn(0f, 1f))
+                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(fill),
+                    )
+                }
+            }
+        }
+    }
+
+    // The baseline. Columns standing on a drawn line read as a chart; columns floating on
+    // white read as coloured rectangles.
+    Box(Modifier.fillMaxWidth().height(1.5.dp).background(InsightInk.copy(alpha = 0.18f)))
+
+    // Wickets, marked at the over they fell in — cricket's own symbol, not a bar segment.
+    Spacer(Modifier.height(7.dp))
+    Row(Modifier.fillMaxWidth()) {
+        overs.forEach { over ->
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                if (over.wickets > 0) {
+                    Row {
+                        repeat(over.wickets.coerceAtMost(2)) { i ->
+                            if (i > 0) Spacer(Modifier.width(3.dp))
+                            Box(
+                                Modifier.size(14.dp).clip(CircleShape).background(CrexColors.WicketBall),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "W",
+                                    color = Color.White,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(7.dp))
+    Row(Modifier.fillMaxWidth()) {
+        overs.forEachIndexed { i, over ->
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                if (i == 0 || i == overs.lastIndex || over.over % labelEvery == 0) {
+                    Text(
+                        "${over.over}",
+                        color = CrexColors.TextMuted,
+                        fontSize = 9.5.sp,
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                }
+            }
+        }
+    }
+
+    // The phases, along the same axis and as wide as the overs they actually cover. Read
+    // here they are a reading of the chart above; in their own bar, as they were, they
+    // were a second chart saying the same thing worse.
+    if (inn.phases.isNotEmpty()) {
+        Spacer(Modifier.height(22.dp))
+        Row(Modifier.fillMaxWidth()) {
+            inn.phases.forEachIndexed { i, ph ->
+                Column(
+                    Modifier
+                        .weight(ph.overs.toFloat().coerceAtLeast(1f))
+                        .padding(end = if (i == inn.phases.lastIndex) 0.dp else 12.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(phaseColour(i)),
+                    )
+                    Spacer(Modifier.height(9.dp))
+                    Text(
+                        ph.label.uppercase(),
+                        color = CrexColors.TextMuted,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${ph.runs}",
+                        color = InsightInk,
+                        fontSize = 24.sp,
+                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                        letterSpacing = (-0.8).sp,
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                    Text(
+                        "${ph.runRate} an over",
+                        color = CrexColors.TextMuted,
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                }
+            }
+        }
+    }
+
+    if (inn.bestOverNumber > 0) {
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "Over ${inn.bestOverNumber} went for ${inn.bestOverRuns} — the biggest of the innings.",
+            color = CrexColors.TextSecondary,
+            fontSize = 13.sp,
+            lineHeight = 20.sp,
+        )
+    }
+}
+
+/**
+ * HOW THE RUNS WERE MADE.
+ *
+ * In cricket's units, not in percent. A bar filling to 94% invites "94% of what, toward
+ * what?" — a boundary share is not progress toward anything. A total, though, is made of
+ * strokes, and every one is counted in the ball log: 28 sixes is 168, 17 fours is 68, and
+ * the rest of the innings is the other 16. That adds to 252 exactly, and it is the
+ * sentence a cricket person actually says about an innings like this.
+ */
+@Composable
+private fun RunsMade(inn: InningsInsight, t: Float) {
+    val b = inn.breakdown
+    val sixRuns = b.sixes * 6
+    val fourRuns = b.fours * 4
+    // Derived by subtraction from the innings total rather than re-totalled from the
+    // pieces, so the three segments always add up to the score at the top of the screen.
+    val restRuns = (inn.runs - sixRuns - fourRuns).coerceAtLeast(0)
+    val grow = ((t - 0.3f) / 0.5f).coerceIn(0f, 1f)
+
+    BlockHead("HOW THE ${inn.runs} WERE MADE")
+    Spacer(Modifier.height(16.dp))
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(14.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(InsightTrack),
+    ) {
+        listOf(
+            sixRuns to CrexColors.SixBall,
+            fourRuns to CrexColors.FourBall,
+            restRuns to CrexColors.NormalBall,
+        ).forEachIndexed { i, (runs, colour) ->
+            if (runs > 0) {
+                Box(
+                    Modifier
+                        .weight(runs.toFloat())
+                        .fillMaxHeight()
+                        .padding(end = if (i == 2) 0.dp else 2.dp)
+                        .background(colour.copy(alpha = 0.3f + 0.7f * grow)),
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(18.dp))
+
+    StrokeLine(CrexColors.SixBall, b.sixes, "six", "sixes", sixRuns)
+    Spacer(Modifier.height(13.dp))
+    StrokeLine(CrexColors.FourBall, b.fours, "four", "fours", fourRuns)
+    Spacer(Modifier.height(13.dp))
+    RestLine(b, restRuns)
+}
+
+/** One stroke type: how many were hit, and what they were worth. */
+@Composable
+private fun StrokeLine(colour: Color, count: Int, one: String, many: String, runs: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(9.dp).clip(CircleShape).background(colour))
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "$count ${if (count == 1) one else many}",
+            color = InsightInk,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+        Text(
+            "$runs",
+            color = InsightInk,
+            fontSize = 22.sp,
+            fontFamily = com.haraan.app.theme.ArchivoDisplay,
+            letterSpacing = (-0.6).sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/**
+ * Everything that was not a boundary, named rather than lumped together.
+ *
+ * "The rest" tells a reader nothing. Nine singles and three twos tells them whether this
+ * side ran between the wickets at all — which, in an innings that was 94% boundaries, is
+ * the actual question.
+ */
+@Composable
+private fun RestLine(b: ScoringBreakdown, runs: Int) {
+    val parts = buildList {
+        if (b.ones > 0) add("${b.ones} single${if (b.ones == 1) "" else "s"}")
+        if (b.twos > 0) add("${b.twos} two${if (b.twos == 1) "" else "s"}")
+        if (b.threes > 0) add("${b.threes} three${if (b.threes == 1) "" else "s"}")
+        if (b.extras > 0) add("${b.extras} extra${if (b.extras == 1) "" else "s"}")
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(9.dp).clip(CircleShape).background(CrexColors.NormalBall))
+        Spacer(Modifier.width(12.dp))
+        Text(
+            if (parts.isEmpty()) "Nothing else" else parts.joinToString(", "),
+            color = InsightInk,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+        Text(
+            "$runs",
+            color = InsightInk,
+            fontSize = 22.sp,
+            fontFamily = com.haraan.app.theme.ArchivoDisplay,
+            letterSpacing = (-0.6).sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/**
+ * THE MOMENT — the one dark surface on a white page.
+ *
+ * Everything above this is quantities. This is the two people who made them, and it is
+ * the only block on the screen allowed to raise its voice: a deep navy field, the stand
+ * set at forty-eight point, and the batters named underneath. That contrast is the whole
+ * design — a page that is calm everywhere cannot be emphatic anywhere, and an innings
+ * built on one unbroken partnership deserves a screen that says so.
+ *
+ * It draws inside the page margins rather than bleeding off the edge: the section lives
+ * in a pager inside a clipped scrolling list, and a band drawn past those bounds gets cut
+ * off rather than bleeding.
+ */
+@Composable
+private fun MomentBand(stand: Stand, innRuns: Int) {
+    val strikeRate = if (stand.balls > 0) stand.runs * 100 / stand.balls else 0
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(InsightInk)
+            .padding(horizontal = 22.dp, vertical = 24.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "${stand.wicket}${ordinal(stand.wicket)} WICKET",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.5.sp,
+            )
+            if (stand.unbroken) {
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.35f)))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "UNBROKEN",
+                    color = PeakOrange,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.5.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${stand.runs}",
+                color = Color.White,
+                fontSize = 58.sp,
+                fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                letterSpacing = (-2.5).sp,
+                style = TextStyle(fontFeatureSettings = "tnum"),
+            )
+            Text(
+                "  off ${stand.balls}",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 17.sp,
+                modifier = Modifier.padding(bottom = 9.dp),
+                style = TextStyle(fontFeatureSettings = "tnum"),
+            )
+        }
+        if (stand.batters.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stand.batters,
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 25.sp,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.14f)))
+        Spacer(Modifier.height(16.dp))
+        Row {
+            BandFigure("STRIKE RATE", "$strikeRate", Modifier.weight(1f))
+            BandFigure(
+                "SHARE OF THE ${innRuns}",
+                "${(stand.runs * 100 / innRuns.coerceAtLeast(1))}%",
+                Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** One figure inside the dark band. */
+@Composable
+private fun BandFigure(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(
+            value,
+            color = Color.White,
+            fontSize = 24.sp,
+            fontFamily = com.haraan.app.theme.ArchivoDisplay,
+            letterSpacing = (-0.8).sp,
+            maxLines = 1,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = 9.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.1.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * The fifties as they came up, and the dot-ball count.
+ *
+ * This replaces a row of four figures in boxes. Four boxed numbers is the most
+ * template-looking object a screen can carry — it gives a partnership, a percentage and
+ * an over the same shape and the same weight. Cricket already marks an innings its own
+ * way: by the fifties ticking over. So that is what is here.
+ */
+@Composable
+private fun MilestoneStrip(inn: InningsInsight) {
+    val milestones = remember(inn.progress, inn.runs) { milestoneLadder(inn) }
+    if (milestones.isEmpty() && inn.breakdown.dots <= 0) return
+
+    if (milestones.isNotEmpty()) {
+        BlockHead("HOW IT CLIMBED")
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth()) {
+            milestones.forEachIndexed { i, (runs, over) ->
+                Column(Modifier.weight(1f)) {
+                    Box(
+                        Modifier
+                            .width(18.dp)
+                            .height(2.dp)
+                            .background(CrexColors.AccentBlue),
+                    )
+                    Spacer(Modifier.height(9.dp))
+                    Text(
+                        "$runs",
+                        color = InsightInk,
+                        fontSize = 20.sp,
+                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                        letterSpacing = (-0.6).sp,
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "ov $over",
+                        color = CrexColors.TextMuted,
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                }
+                if (i != milestones.lastIndex) Spacer(Modifier.width(6.dp))
+            }
+        }
+    }
+
+    if (inn.breakdown.dots > 0) {
+        Spacer(Modifier.height(if (milestones.isEmpty()) 0.dp else 20.dp))
+        Text(
+            "${inn.breakdown.dots} dot ball${if (inn.breakdown.dots == 1) "" else "s"} in the innings — ${inn.dotPercent}% of it went by without a run.",
+            color = CrexColors.TextMuted,
+            fontSize = 12.5.sp,
+            lineHeight = 19.sp,
+        )
+    }
+}
+
+private fun ordinal(n: Int): String = when {
+    n % 100 in 11..13 -> "th"
+    n % 10 == 1 -> "st"
+    n % 10 == 2 -> "nd"
+    n % 10 == 3 -> "rd"
+    else -> "th"
+}
+
+/**
+ * Each fifty of the innings and the over it came up in.
+ *
+ * Read off the cumulative total the server already sends per over, so the over named is
+ * the over the milestone was PASSED in — never interpolated, never a guess at the ball.
+ * The last five are kept, so a big innings shows its recent landmarks rather than
+ * squeezing eight of them into a phone's width.
+ */
+private fun milestoneLadder(inn: InningsInsight): List<Pair<Int, Int>> {
+    if (inn.progress.isEmpty()) return emptyList()
+    val out = mutableListOf<Pair<Int, Int>>()
+    var mark = 50
+    while (mark <= inn.runs) {
+        val over = inn.progress.firstOrNull { it.total >= mark } ?: break
+        out.add(mark to over.over)
+        mark += 50
+    }
+    return out.takeLast(5)
+}
+
+/**
  * What kind of innings this was, in one line.
  *
- * Picked by rule from the figures on the card, in order of how unusual each one is —
- * so the sentence is always something the reader can verify by looking down, and never
- * a claim the numbers do not support.
+ * Picked by rule from the figures on the page, in order of how unusual each one is — so
+ * the sentence is always something the reader can verify by looking down, and never a
+ * claim the numbers do not support.
  */
 private fun inningsRead(inn: InningsInsight): String? = when {
-    // An innings nobody has batted in has nothing to say about itself. Without this the
-    // second team's card opens with "0 fours and 0 sixes at 0.0 an over", which is true
-    // and useless, and reads as a template filling itself in.
+    // An innings nobody has batted in has nothing to say about itself.
     inn.runs <= 0 -> null
     inn.boundaryPercent >= 60 ->
         "${inn.boundaryPercent}% of these runs came in boundaries — this innings was built on them."
@@ -543,100 +1218,20 @@ private fun inningsRead(inn: InningsInsight): String? = when {
     else -> "${inn.fours} fours and ${inn.sixes} sixes at ${inn.runRate} an over."
 }
 
-/** One figure in the hero row: the number leads, the label sits under it. */
-@Composable
-private fun HeroFigure(label: String, value: String, modifier: Modifier = Modifier, note: String? = null) {
-    Column(modifier) {
-        Text(
-            value,
-            color = Color.White,
-            fontSize = 21.sp,
-            fontFamily = com.haraan.app.theme.ArchivoDisplay,
-            letterSpacing = (-0.6).sp,
-            style = TextStyle(fontFeatureSettings = "tnum"),
-            maxLines = 1,
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            label,
-            color = Color.White.copy(alpha = 0.45f),
-            fontSize = 8.5.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 0.9.sp,
-            maxLines = 1,
-        )
-        note?.let {
-            Text(
-                it,
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = 9.5.sp,
-                maxLines = 1,
-                style = TextStyle(fontFeatureSettings = "tnum"),
-            )
-        }
-    }
-}
-
 /**
- * A turf horizon at the foot of the hero.
+ * The opening figure of the read, set in navy.
  *
- * Not a decorative gradient: it is the ground the score was made on, sitting where the
- * ground sits — under everything, at the bottom of the frame.
- *
- * The first version started the green at full strength on a hard line, which cut the
- * card in two and made the figures beneath it look like a separate footer that had been
- * pasted on. Green now arrives from nothing over the upper half of its own band, so the
- * eye reads one surface receding rather than two blocks stacked.
+ * "94% of these runs came in boundaries" — the reader should catch the number and the claim
+ * it is making in one movement; the rest of the sentence can stay quiet.
  */
-@Composable
-private fun HeroTurf(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val horizon = size.height * 0.52f
-        drawRect(
-            brush = Brush.verticalGradient(
-                0f to Color(0xFF16452F).copy(alpha = 0f),
-                0.55f to Color(0xFF143E2B).copy(alpha = 0.42f),
-                1f to Color(0xFF0C2A1D).copy(alpha = 0.72f),
-                startY = horizon,
-                endY = size.height,
-            ),
-            topLeft = Offset(0f, horizon),
-            size = androidx.compose.ui.geometry.Size(size.width, size.height - horizon),
-        )
-        // Mown arcs curving away, which is what stops the band reading as a flat wash.
-        for (i in 0..2) {
-            val y = size.height * (0.74f + i * 0.13f)
-            drawArc(
-                color = Color.White.copy(alpha = 0.03f),
-                startAngle = 200f,
-                sweepAngle = 140f,
-                useCenter = false,
-                topLeft = Offset(-size.width * 0.3f, y - size.height * 0.15f),
-                size = androidx.compose.ui.geometry.Size(size.width * 1.6f, size.height * 0.3f),
-                style = Stroke(width = 7.dp.toPx()),
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatCell(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        Text(
-            label,
-            color = CrexColors.TextMuted,
-            fontSize = 8.5.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 1.sp,
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            value,
-            color = CrexColors.TextPrimary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Black,
-            style = TextStyle(fontFeatureSettings = "tnum"),
-        )
+private fun emphasiseLeadingFigure(text: String): AnnotatedString {
+    val end = text.indexOf(' ')
+    if (end <= 0) return AnnotatedString(text)
+    val head = text.take(end)
+    if (head.none { it.isDigit() }) return AnnotatedString(text)
+    return buildAnnotatedString {
+        withStyle(SpanStyle(color = InsightInk, fontWeight = FontWeight.Bold)) { append(head) }
+        append(text.substring(end))
     }
 }
 

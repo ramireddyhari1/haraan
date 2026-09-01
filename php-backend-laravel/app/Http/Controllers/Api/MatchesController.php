@@ -543,6 +543,35 @@ final class MatchesController extends Controller
      * worth, `hasTrends` says whether the client may draw conclusions at all, and every
      * rate ships with the sample it came from — "4 of 7", never a bare "57%".
      */
+    /**
+     * Cricket IQ — one player's innings in this match, explained.
+     *
+     * Public for the same reason the ground is: the Insights tab is readable by anyone
+     * watching the match, and how many balls somebody faced is not a secret.
+     *
+     * `?player=` picks whose innings; without it the top scorer is used, which is who a
+     * reader opening the block almost always means.
+     */
+    public function iq(Request $request, string $id): JsonResponse
+    {
+        $match = LiveMatch::query()->find($id);
+        if ($match === null) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+
+        $service = app(\App\Services\PlayerInningsIQ::class);
+        $facts = $service->forMatch($match, $request->query('player') ?: null);
+        if ($facts === null) {
+            return response()->json(['available' => false]);
+        }
+
+        // The written line is generated AFTER this response goes out, so the first reader
+        // of an innings gets the figures immediately and the prose on their next look.
+        $service->refreshAfterResponse($match, $facts);
+
+        return response()->json(['available' => true] + $facts);
+    }
+
     public function ground(string $id): JsonResponse
     {
         $match = LiveMatch::query()->find($id);
@@ -643,6 +672,12 @@ final class MatchesController extends Controller
             // card then shows its own drawn header rather than a broken image.
             'mapUrl' => $this->groundMapUrl($ground),
             'matchesPlayed' => $ground->matches_played,
+            // The two figures the app needs as NUMBERS rather than as display strings.
+            // The card compares this innings against them, and a comparison cannot be
+            // built by parsing digits back out of a label like "1st innings avg".
+            // Zero means "not enough matches here to say", never "an average of nought".
+            'firstInningsAvg' => $ground->hasTrends() ? (int) $ground->first_innings_avg : 0,
+            'highestTotal' => $ground->hasTrends() ? (int) $ground->highest_total : 0,
             'confidence' => $ground->confidence(),
             'hasTrends' => $ground->hasTrends(),
             'note' => $ground->hasTrends()
