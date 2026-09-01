@@ -361,6 +361,10 @@ Route::middleware('auth.jwt.optional')->get('posts/{id}/comments', [PlayersContr
 // on it — the Insights tab is readable by anyone watching the match, signed in or not.
 Route::get('matches/{id}/ground', [MatchesController::class, 'ground'])->whereNumber('id');
 
+// Cricket IQ: one player's innings in this match, read back to them. Public alongside the
+// rest of the Insights tab.
+Route::get('matches/{id}/iq', [MatchesController::class, 'iq'])->whereNumber('id');
+
 // A player's last five innings with bat and ball. Public: the Insights tab is readable
 // by anyone watching, and a player's recent scores are not private to them.
 Route::get('players/{playerId}/form', [PlayersController::class, 'form']);
@@ -390,6 +394,11 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     Route::get('/{id}/devices', [\App\Http\Controllers\Api\MatchDeviceController::class, 'index']);
     Route::delete('/{id}/devices/{deviceId}', [\App\Http\Controllers\Api\MatchDeviceController::class, 'destroy']);
     Route::get('/{id}/clips', [\App\Http\Controllers\Api\MatchDeviceController::class, 'clips']);
+    // On demand, never per ball: a review costs a video model call, and only an appealed
+    // delivery is worth one. Scorer-only, like the clips themselves.
+    Route::post('/{id}/clips/{clipId}/review', [\App\Http\Controllers\Api\MatchDeviceController::class, 'reviewClip']);
+    // Polled while the queued review runs. One row read, no model call.
+    Route::get('/{id}/clips/{clipId}/review', [\App\Http\Controllers\Api\MatchDeviceController::class, 'reviewStatus']);
 
     // Football / badminton scoring. Deliberately separate from /score-action:
     // cricket keeps its per-ball pipeline, and recordEvent refuses cricket, so a

@@ -9,6 +9,8 @@ use App\Models\LiveMatch;
 use App\Models\MatchDevice;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use App\Jobs\ReviewMatchClip;
+use App\Services\DeliveryReview;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -222,14 +224,42 @@ final class MatchDeviceController extends Controller
         if ($file === null || ! $file->isValid()) {
             return response()->json(['error' => 'No clip received.'], 422);
         }
-        // A delivery is seconds long. Anything much bigger is a phone uploading its
-        // gallery, and a ground connection cannot carry it anyway.
-        if ($file->getSize() > 40 * 1024 * 1024) {
-            return response()->json(['error' => 'That clip is too large.'], 422);
+        // THE REVIEW CONTRACT: Full HD, up to ten seconds, up to fifty megabytes.
+        if ($file->getSize() > DeliveryReview::MAX_REVIEW_BYTES) {
+            return response()->json([
+                'error' => 'That clip is too large (limit '
+                    . DeliveryReview::MAX_REVIEW_MB . 'MB). Record a shorter delivery.',
+            ], 422);
         }
         $extension = strtolower((string) $file->getClientOriginalExtension()) ?: 'mp4';
         if (! in_array($extension, ['mp4', 'webm', '3gp'], true)) {
             return response()->json(['error' => 'Unsupported clip format.'], 422);
+        }
+
+        // DURATION, read from the file rather than believed.
+        //
+        // durationMs arrives in the same multipart body as the video, so trusting it lets
+        // a client hand us a thirty-second clip labelled as eight. The container states
+        // its own length in its mvhd box, which is authoritative and needs no ffprobe.
+        //
+        // On the one real clip on this machine the two disagree by 1.8 seconds - the
+        // phone measures wall-clock from tap to finalise, which is not the same thing as
+        // how long the video runs. The container wins.
+        //
+        // An unreadable duration is refused rather than waved through: a clip whose
+        // length cannot be established is exactly the clip a ten-second pipeline must not
+        // accept on trust.
+        $durationMs = \App\Support\Mp4Probe::durationMs($file->getRealPath());
+        if ($durationMs === null) {
+            return response()->json([
+                'error' => 'That video could not be read. Record the delivery again.',
+            ], 422);
+        }
+        if ($durationMs > DeliveryReview::MAX_REVIEW_SECONDS * 1000) {
+            return response()->json([
+                'error' => 'That clip is longer than '
+                    . DeliveryReview::MAX_REVIEW_SECONDS . ' seconds. Record just the delivery.',
+            ], 422);
         }
 
         $path = $file->storeAs(
@@ -244,7 +274,8 @@ final class MatchDeviceController extends Controller
             'role' => $device->role,
             'path' => $path,
             'bytes' => (int) $file->getSize(),
-            'duration_ms' => (int) $request->input('durationMs', 0),
+            // The measured length, not the reported one.
+            'duration_ms' => $durationMs,
             'over_ball' => mb_substr(trim((string) $request->input('overBall')), 0, 12) ?: null,
             'created_at' => now(),
             'updated_at' => now(),
@@ -281,10 +312,148 @@ final class MatchDeviceController extends Controller
                 'overBall' => (string) ($c->over_ball ?? ''),
                 'durationMs' => (int) $c->duration_ms,
                 'recordedAt' => (string) $c->created_at,
+                'review' => $c->analysis === null ? null : json_decode((string) $c->analysis, true),
+                // Null means nobody has ever asked. The app treats that as "offer the
+                // button", which is different from a review that ran and failed.
+                'reviewStatus' => $c->review_status,
+                'reviewError' => $c->review_error,
             ])
             ->all();
 
         return response()->json(['data' => $clips]);
+    }
+
+    /**
+     * Ask for a review of one clip.
+     *
+     * Returns immediately. The Vertex call happens on a queue, because handing a video
+     * model several seconds of footage takes 8 seconds on a good day and the request
+     * used to sit through all of it — holding a PHP worker, and behind nginx on a
+     * ground's connection simply timing out with nothing to show for the wait.
+     *
+     * Scorer-only and on demand, as before: reviewing every clip a camera sends would
+     * put a video model in the path of a match nobody asked it to judge, and cost a call
+     * per ball for footage no one will open.
+     */
+    public function reviewClip(Request $request, string $id, string $clipId): JsonResponse
+    {
+        [$match, , $error] = $this->scorerContext($request, $id);
+        if ($error !== null) {
+            return $error;
+        }
+
+        $clip = DB::table('match_device_clips')
+            ->where('id', $clipId)
+            ->where('match_id', $match->id)
+            ->first();
+        if ($clip === null) {
+            return response()->json(['error' => 'Clip not found.'], 404);
+        }
+
+        // Already done. Footage does not change its mind, so neither does the reading.
+        if ($clip->analysis !== null) {
+            return $this->reviewState($clip->id, DeliveryReview::STATUS_COMPLETED, [
+                'review' => json_decode((string) $clip->analysis, true),
+                'cached' => true,
+            ]);
+        }
+
+        // Already running. A second tap must not buy a second Vertex call.
+        if (in_array((string) $clip->review_status, [
+            DeliveryReview::STATUS_PENDING,
+            DeliveryReview::STATUS_PROCESSING,
+        ], true)) {
+            return $this->reviewState($clip->id, (string) $clip->review_status, [], 202);
+        }
+
+        $service = app(DeliveryReview::class);
+        if (! $service->isConfigured()) {
+            return response()->json(['error' => 'Review is not available on this server.'], 503);
+        }
+
+        // Refuse here rather than letting the job discover it: the scorer gets the reason
+        // now instead of after a spinner that was always going to fail.
+        // The clip is stored and playable; this is only about what can reach the model.
+        // Refused here rather than in the job so the scorer gets the reason immediately
+        // instead of after a spinner that was always going to fail.
+        if ((int) $clip->bytes > DeliveryReview::MAX_VERTEX_INLINE_BYTES) {
+            DB::table('match_device_clips')->where('id', $clip->id)->update([
+                'review_status' => DeliveryReview::STATUS_FAILED,
+                'review_error' => 'This clip plays fine but is too large to analyse (limit '
+                    . DeliveryReview::MAX_VERTEX_INLINE_MB . 'MB). Record a shorter delivery to review it.',
+                'updated_at' => now(),
+            ]);
+
+            return $this->reviewState($clip->id, DeliveryReview::STATUS_FAILED, [], 422);
+        }
+
+        DB::table('match_device_clips')->where('id', $clip->id)->update([
+            'review_status' => DeliveryReview::STATUS_PENDING,
+            'review_error' => null,
+            'review_requested_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        ReviewMatchClip::dispatch(
+            (int) $clip->id,
+            (string) $clip->path,
+            ((string) $clip->role) === MatchDevice::ROLE_BOWLER ? 'bowler' : 'lbw',
+        );
+
+        // With QUEUE_CONNECTION=sync the dispatch above ran inline and the row is already
+        // finished, so re-read rather than asserting "pending" at a client that would
+        // then poll for a state that has been and gone.
+        return $this->reviewState($clip->id, DeliveryReview::STATUS_PENDING, [], 202);
+    }
+
+    /**
+     * Where a clip's review has got to. Polled by the app while a job runs.
+     *
+     * Cheap on purpose — one indexed row read, no model, no storage touch — because a
+     * phone will call this every couple of seconds for as long as Vertex is thinking.
+     */
+    public function reviewStatus(Request $request, string $id, string $clipId): JsonResponse
+    {
+        [$match, , $error] = $this->scorerContext($request, $id);
+        if ($error !== null) {
+            return $error;
+        }
+
+        $clip = DB::table('match_device_clips')
+            ->where('id', $clipId)
+            ->where('match_id', $match->id)
+            ->first();
+        if ($clip === null) {
+            return response()->json(['error' => 'Clip not found.'], 404);
+        }
+
+        return $this->reviewState($clip->id, (string) ($clip->review_status ?? ''));
+    }
+
+    /**
+     * One shape for every review answer, so the app has a single thing to parse.
+     *
+     * Re-reads the row rather than trusting the status passed in: on a sync queue the
+     * job has already run by the time we get here, and reporting "pending" for a review
+     * that finished would send the client into a poll for nothing.
+     */
+    private function reviewState(int $clipId, string $assumed, array $extra = [], int $code = 200): JsonResponse
+    {
+        $row = DB::table('match_device_clips')->find($clipId);
+        $status = (string) ($row?->review_status ?? $assumed);
+        $review = $row?->analysis === null ? null : json_decode((string) $row->analysis, true);
+
+        if ($review !== null) {
+            $status = DeliveryReview::STATUS_COMPLETED;
+            $code = 200;
+        }
+
+        return response()->json(['data' => array_merge([
+            'status' => $status === '' ? null : $status,
+            'review' => $review,
+            // Safe to print: set from DeliveryReview::lastFailure(), never an exception.
+            'error' => $row?->review_error,
+        ], $extra)], $code);
     }
 
     // ─────────────────────────── Shared ───────────────────────────

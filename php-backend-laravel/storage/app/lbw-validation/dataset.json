@@ -1,0 +1,24 @@
+{
+  "notes": "Real, human-reviewed deliveries only. Do not add a case whose expected values were guessed rather than watched. See README.md.",
+  "schema": {
+    "id": "stable identifier, e.g. lbw_001",
+    "clip": "filename inside clips/",
+    "role": "lbw | bowler",
+    "delivery": "optional over.ball, e.g. 9.5",
+    "expected": {
+      "pitching": "in_line | outside_off | outside_leg",
+      "impact": "in_line | outside_off | outside_leg",
+      "wickets": "hitting | missing"
+    },
+    "humanNotes": "optional: what the annotator saw, and how sure they were"
+  },
+  "cases": [
+    {
+      "id": "stokes_001",
+      "clip": "stokes_720p.webm",
+      "role": "lbw",
+      "source": "Wikimedia Commons, 'Ben Stokes bowling, 2012', CC BY-SA 3.0 / GFDL 1.2+, 720p VP9 transcode",
+      "humanNotes": "NOT ANNOTATED. Practice/net bowling footage, not an LBW appeal. Included to exercise the pipeline on real cricket, not to score accuracy."
+    }
+  ]
+}

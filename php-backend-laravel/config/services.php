@@ -220,6 +220,13 @@ return [
         'location' => env('VERTEX_LOCATION', 'us-central1'),
     ],
 
+    // The ffmpeg binary used to build the AI derivative of a review clip. Blank means
+    // "look for it on PATH"; absent means large clips simply cannot be analysed, which
+    // the pipeline reports honestly rather than crashing on.
+    'ffmpeg' => [
+        'path' => env('FFMPEG_PATH', ''),
+    ],
+
     'gemini' => [
         'key' => env('GEMINI_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
