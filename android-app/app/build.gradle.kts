@@ -79,6 +79,29 @@ android {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
       }
     }
+
+    /*
+     * ABI SPLITS — forced by OpenCV.
+     *
+     * The OpenCV Android AAR is about 112MB because it carries a native library for four
+     * architectures. Packaged universally on top of a 44.5MB app, every phone in India
+     * would download three architectures it can never execute.
+     *
+     * Splitting produces one APK per ABI, so a device fetches only its own slice. Play
+     * serves the right one automatically from an AAB; for sideloading and CI the universal
+     * APK is still built, and it is the big one by design.
+     *
+     * x86_64 is here for the emulator, not for phones — dropping it would make the whole
+     * vision pipeline untestable on a development machine.
+     */
+    splits {
+      abi {
+        isEnable = true
+        reset()
+        include("arm64-v8a", "armeabi-v7a", "x86_64")
+        isUniversalApk = true
+      }
+    }
 }
 
 kotlin {
@@ -124,6 +147,20 @@ dependencies {
   // QR code generation (attendee ticket QRs, and the match-device pairing code)
   implementation("com.google.zxing:core:3.5.3")
 
+  /*
+   * OpenCV — classical computer vision for ball tracking, at capture time.
+   *
+   * Chosen over MLKit/TFLite because no trained cricket-ball model exists to run on them,
+   * and classical motion detection needs no training data at all. The cost is size: this
+   * is by far the largest dependency in the app, which is why ABI splits above are not
+   * optional.
+   *
+   * Nothing outside com.haraan.app.vision may import org.opencv. The engine sits behind
+   * CricketVisionEngine so this can be swapped for a trained detector later without
+   * touching the delivery pipeline.
+   */
+  implementation("org.opencv:opencv:4.12.0")
+
   // CameraX — a paired phone acting as a match camera records short clips around a
   // delivery. video + view only; no image analysis pipeline is pulled in, because
   // nothing on-device is analysing frames.
@@ -140,6 +177,18 @@ dependencies {
 
   // Local tests: jUnit, coroutines, Android runner
   testImplementation(libs.junit)
+  /*
+   * A real org.json on the unit-test classpath.
+   *
+   * Android's android.jar ships STUBS: every org.json method throws
+   * "not mocked" under a plain JVM test. The session/export layer is deliberately
+   * Android-free so it can be tested off-device — and it serialises JSON — so without
+   * this the only tests that can run for the vision package are the ones that do not
+   * touch its output, which is most of what matters.
+   *
+   * Test scope only; the app itself uses the platform implementation at runtime.
+   */
+  testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
 
   // Instrumented tests: jUnit rules and runners

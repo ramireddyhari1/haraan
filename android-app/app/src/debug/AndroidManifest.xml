@@ -1,15 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Debug-only manifest overlay. Points debug builds at a network security config
-  that permits cleartext to loopback hosts, so `API_BASE_URL=http://127.0.0.1:8000`
-  + `adb reverse tcp:8000 tcp:8000` can actually reach a local `php artisan serve`.
-  `tools:replace` is required because the main manifest sets
-  usesCleartextTraffic="false" — this overlay must win for debug only.
--->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+  Debug-only additions.
 
-    <application
-        android:networkSecurityConfig="@xml/network_security_config"
-        tools:replace="android:networkSecurityConfig" />
+  VisionDiagnosticsActivity is registered HERE rather than in the main manifest so it is
+  physically absent from a release build — a developer tool that ships to players is a
+  developer tool that eventually gets found. The activity also re-checks BuildConfig.DEBUG
+  at runtime, because two locks on this door cost nothing.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="com.haraan.app.vision.VisionDiagnosticsActivity"
+            android:exported="true"
+            android:label="Vision diagnostics"
+            android:theme="@style/Theme.Haraan.Camera">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="vision-check" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.haraan.app.vision.VisionFieldTestActivity"
+            android:exported="true"
+            android:label="Vision field test"
+            android:screenOrientation="landscape"
+            android:keepScreenOn="true"
+            android:theme="@style/Theme.Haraan.Camera">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="vision-test" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>

@@ -6,6 +6,7 @@ import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
@@ -65,6 +66,7 @@ import androidx.core.content.ContextCompat
 import com.haraan.app.R
 import com.haraan.app.theme.ArchivoDisplay
 import com.haraan.app.data.CameraDeviceRepository
+import com.haraan.app.vision.OpenCvBallTracker
 import com.haraan.app.data.CameraSession
 import com.haraan.app.data.PairingPreview
 import kotlinx.coroutines.delay
@@ -382,6 +384,9 @@ private fun CameraMode(
     var granted by remember { mutableStateOf(hasCameraPermission()) }
     var recording by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
+    // Cleared on the next tap: a refusal is about the clip just filmed, not a mode the
+    // camera is stuck in.
+    var uploadError by remember { mutableStateOf<String?>(null) }
     var clipsSent by remember { mutableStateOf(0) }
     var score by remember { mutableStateOf("") }
     var overs by remember { mutableStateOf("") }
@@ -389,6 +394,56 @@ private fun CameraMode(
 
     val executor = remember { Executors.newSingleThreadExecutor() }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+
+    /*
+     * THE VISION ENGINE.
+     *
+     * Its own single thread, so analysis can never sit on the recorder's. Held for the
+     * lifetime of the screen and reset per delivery rather than rebuilt, because the
+     * native allocation is the expensive part.
+     */
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val vision = remember { OpenCvBallTracker() }
+    // Only counted while a delivery is actually being recorded — the camera runs the whole
+    // time somebody is holding the phone, and tracking the warm-up is noise.
+    var trackedPoints by remember { mutableStateOf(0) }
+    var trackingLive by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            vision.release()
+            analysisExecutor.shutdown()
+        }
+    }
+
+    val analyzer = remember {
+        ImageAnalysis.Analyzer { image ->
+            try {
+                if (trackingLive) {
+                    val plane = image.planes.getOrNull(0)
+                    if (plane != null) {
+                        val buffer = plane.buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
+                        // The camera's own monotonic clock, never the UI clock: ball
+                        // motion timing has to come from when the sensor saw it.
+                        val sighting = vision.onFrame(
+                            luma = bytes,
+                            width = image.width,
+                            height = image.height,
+                            rowStride = plane.rowStride,
+                            timestampMs = image.imageInfo.timestamp / 1_000_000,
+                        )
+                        if (sighting != null) trackedPoints = vision.track().size
+                    }
+                }
+            } catch (_: Throwable) {
+                // Never let analysis break the camera.
+            } finally {
+                image.close()
+            }
+        }
+    }
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
 
     DisposableEffect(Unit) { onDispose { executor.shutdown() } }
@@ -398,13 +453,34 @@ private fun CameraMode(
     // Check in on a cadence matched to cricket, not to a chat app. Losing the pairing is
     // reported here rather than discovered when an upload fails.
     LaunchedEffect(session.sessionToken) {
+        /*
+         * A missed beat is not a lost pairing.
+         *
+         * This used to drop the camera out of the match on the FIRST null — so one blip
+         * on ground Wi-Fi, or one slow response from a backend still warming up, ended a
+         * session that was perfectly healthy and sent somebody back to the scorer for a
+         * new pairing code.
+         *
+         * Three consecutive misses at a twenty-second cadence is about a minute of real
+         * silence, which is long enough to be a genuine disconnection and short enough
+         * that the scorer sees it before wondering why no clips are arriving. The screen
+         * shows "reconnecting" in between rather than pretending nothing is wrong.
+         */
+        var missed = 0
         while (true) {
             val beat = repo.heartbeat(session.sessionToken)
             if (beat == null) {
+                missed++
                 live = false
-                onDropped()
-                return@LaunchedEffect
+                if (missed >= MAX_MISSED_HEARTBEATS) {
+                    onDropped()
+                    return@LaunchedEffect
+                }
+                // Back off a little before retrying, but well inside the drop window.
+                delay(5_000)
+                continue
             }
+            missed = 0
             live = true
             score = beat.score
             overs = beat.overs
@@ -418,7 +494,13 @@ private fun CameraMode(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
                     PreviewView(context).also { view ->
-                        bindCamera(context, view, lifecycleOwner) { capture -> videoCapture = capture }
+                        bindCamera(
+                            context,
+                            view,
+                            lifecycleOwner,
+                            analysisExecutor,
+                            analyzer,
+                        ) { capture -> videoCapture = capture }
                     }
                 },
             )
@@ -472,12 +554,21 @@ private fun CameraMode(
         ) {
             Text(
                 when {
+                    // The point count is the only honest signal of whether vision is
+                    // doing anything, and it belongs where the person filming can see it.
+                    recording && trackedPoints > 0 -> "Recording · $trackedPoints ball points"
                     recording -> "Recording this delivery…"
                     uploading -> "Sending to the scorer…"
+                    uploadError != null -> uploadError!!
+                    // Said out loud rather than left to a small coloured dot. Somebody
+                    // holding this phone at the boundary needs to know the difference
+                    // between "idle" and "the scorer has stopped hearing from me".
+                    !live -> "Reconnecting to the match…"
+                    trackedPoints > 0 -> "$clipsSent sent · $trackedPoints ball points"
                     clipsSent > 0 -> "$clipsSent sent"
                     else -> "Tap when the bowler runs in"
                 },
-                color = Ink.copy(alpha = 0.85f),
+                color = if (uploadError != null) Rec else Ink.copy(alpha = 0.85f),
                 fontSize = 13.5.sp,
             )
             Spacer(Modifier.height(14.dp))
@@ -504,6 +595,12 @@ private fun CameraMode(
                             .then(
                                 Modifier.clickableCapture(enabled = granted && videoCapture != null) {
                                     val capture = videoCapture ?: return@clickableCapture
+                                    uploadError = null
+                                    // A fresh delivery: the previous track must not bleed
+                                    // into this one.
+                                    vision.reset()
+                                    trackedPoints = 0
+                                    trackingLive = true
                                     recording = true
                                     activeRecording = startClip(
                                         context = ctx,
@@ -511,6 +608,15 @@ private fun CameraMode(
                                         executor = executor,
                                         onFinished = { file, durationMs ->
                                             recording = false
+                                            trackingLive = false
+                                            // Checked here so a clip that cannot be
+                                            // accepted never crosses ground Wi-Fi at all.
+                                            if (file.length() > MAX_REVIEW_BYTES) {
+                                                runCatching { file.delete() }
+                                                uploadError =
+                                                    "That clip is too large to send. Record a shorter delivery."
+                                                return@startClip
+                                            }
                                             uploading = true
                                             scope.launch {
                                                 val ok = repo.uploadClip(
@@ -527,11 +633,21 @@ private fun CameraMode(
                                             }
                                         },
                                     )
-                                    // Ends itself. A delivery plus its aftermath fits in
-                                    // eight seconds, and nobody at a ground is watching
-                                    // this screen to press stop.
+                                    // Ends itself at the review ceiling.
+                                    //
+                                    // Ten seconds is what the server accepts, and it buys
+                                    // the run-up, the release, the bounce, the shot and
+                                    // enough afterwards to see where the ball went -
+                                    // which is the context a review actually needs.
+                                    // Nobody at a ground is watching this screen to press
+                                    // stop, so the cap has to be the recorder's own.
+                                    //
+                                    // Slightly under the limit on purpose: the container
+                                    // rounds, and a clip that measures 10.02s server-side
+                                    // would be refused after the upload had already been
+                                    // paid for over ground Wi-Fi.
                                     scope.launch {
-                                        delay(8_000)
+                                        delay(REVIEW_CLIP_MS)
                                         activeRecording?.stop()
                                         activeRecording = null
                                     }
@@ -613,27 +729,81 @@ private fun Modifier.clickableCapture(enabled: Boolean, onClick: () -> Unit): Mo
     )
 }
 
+// THE REVIEW CONTRACT, mirrored from the server.
+//
+// DeliveryReview holds the authoritative numbers; these exist so the phone refuses a clip
+// it already knows will be refused, before spending a ground's upload on it. If the server
+// limits move, these move with them.
+
+/** Server ceiling is 10s; stop just under it so container rounding cannot push us over. */
+/** Consecutive failed heartbeats before a camera is treated as genuinely gone. */
+private const val MAX_MISSED_HEARTBEATS = 3
+
+private const val REVIEW_CLIP_MS = 9_500L
+
+/** Matches DeliveryReview::MAX_REVIEW_BYTES. */
+private const val MAX_REVIEW_BYTES = 50L * 1024 * 1024
+
 // ─────────────────────────────────────────────────────── CameraX plumbing ─────
 
 private fun bindCamera(
     context: Context,
     view: PreviewView,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
+    analysisExecutor: java.util.concurrent.Executor,
+    onFrame: ImageAnalysis.Analyzer,
     onReady: (VideoCapture<Recorder>) -> Unit,
 ) {
     val future = ProcessCameraProvider.getInstance(context)
     future.addListener({
         val provider = future.get()
         val preview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
-        // SD is deliberate: a clip has to cross ground Wi-Fi, and a 4K eight seconds is
-        // a file nobody at a maidan is going to finish uploading between overs.
+
+        /*
+         * ANALYSIS, alongside recording rather than after it.
+         *
+         * This is the entire argument for doing vision on the phone: the frames are
+         * already here, in memory, stamped with the camera's own clock, while the ball is
+         * being bowled. A server would have to be sent twenty megabytes and decode it
+         * again to reach the same pixels.
+         *
+         * KEEP_ONLY_LATEST is the important flag. Under back pressure the analyser drops
+         * frames rather than queueing them, so a slow phone loses ball points but never
+         * delays the recording. Filming is the product; vision is bolted to the side of
+         * it, and it yields.
+         */
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .build()
+            .also { it.setAnalyzer(analysisExecutor, onFrame) }
+        // FULL HD, and the comment that used to sit here was wrong.
+        //
+        // It said "SD is deliberate" while the code asked for Quality.HD, which is 720p -
+        // neither the SD it claimed nor the Full HD anybody assumed. A review is worth
+        // having only if the ball is visible in it, and at 720p across a maidan it often
+        // is not, so this now asks for what it should always have asked for.
+        //
+        // The fallback still steps down rather than up: a handset that cannot do 1080p
+        // should film the delivery at 720p, not refuse to film it.
         val recorder = Recorder.Builder()
-            .setQualitySelector(QualitySelector.from(Quality.HD, androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)))
+            .setQualitySelector(
+                QualitySelector.from(
+                    Quality.FHD,
+                    androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.HD),
+                ),
+            )
             .build()
         val videoCapture = VideoCapture.withOutput(recorder)
         runCatching {
             provider.unbindAll()
-            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, videoCapture)
+            provider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                videoCapture,
+                analysis,
+            )
             onReady(videoCapture)
         }
     }, ContextCompat.getMainExecutor(context))
