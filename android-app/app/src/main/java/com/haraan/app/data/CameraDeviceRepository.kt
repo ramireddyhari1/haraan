@@ -44,7 +44,19 @@ class CameraDeviceRepository {
     private val baseUrl: String = ApiConfig.BASE_URL
 
     suspend fun preview(code: String): PairingPreview = withContext(Dispatchers.IO) {
-        val response = request("/api/match-devices/${code.uppercase()}/preview", "GET", null)
+        /*
+         * Retried once, and ONLY this call.
+         *
+         * A longer timeout alone does not solve a cold backend: the first request can
+         * take most of a minute while the server boots, and pushing the ceiling high
+         * enough to cover the worst case makes a genuinely dead network feel like a hang.
+         * One retry is better than one long wait — the second attempt meets a server the
+         * first one just warmed up, so it returns in a second or two.
+         *
+         * Safe here because a preview is a GET that changes nothing. claim() is NOT
+         * retried: it spends the pairing code, and repeating it could burn a second one.
+         */
+        val response = requestWithRetry("/api/match-devices/${code.uppercase()}/preview")
         if (response.code !in 200..299) {
             throw IllegalStateException(errorOf(response.body, "That pairing code is not valid."))
         }
@@ -86,6 +98,10 @@ class CameraDeviceRepository {
             "/api/match-devices/heartbeat",
             "POST",
             JSONObject().put("sessionToken", sessionToken),
+            // Short on purpose. This runs every twenty seconds, so a heartbeat still
+            // waiting when the next one is due has already failed at its job — and a
+            // caller that tolerates a miss recovers faster than one that waits.
+            readTimeoutMs = READ_TIMEOUT_HEARTBEAT_MS,
         )
         if (response.code !in 200..299) return@withContext null
         val data = JSONObject(response.body).optJSONObject("data") ?: return@withContext null
@@ -149,11 +165,19 @@ class CameraDeviceRepository {
         }
     }
 
-    private fun request(path: String, method: String, body: JSONObject?): HttpResult {
+    private fun request(
+        path: String,
+        method: String,
+        body: JSONObject?,
+        readTimeoutMs: Int = READ_TIMEOUT_INTERACTIVE_MS,
+    ): HttpResult {
         val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 15000
-            readTimeout = 15000
+            // Connecting is a different question from answering. A TCP connect that has
+            // not completed in fifteen seconds is not going to, and waiting longer only
+            // delays telling the person their signal is gone.
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = readTimeoutMs
             setRequestProperty("Accept", "application/json")
             if (body != null) {
                 doOutput = true
@@ -177,5 +201,56 @@ class CameraDeviceRepository {
         fallback
     }
 
+    /**
+     * A GET, attempted twice before giving up.
+     *
+     * Only a timeout or a transport failure is retried. An answer from the server — a 404
+     * for an unknown code, a 410 for an expired one — is the truth and is returned as is;
+     * asking again would just be slower.
+     */
+    private fun requestWithRetry(path: String): HttpResult {
+        repeat(2) { attempt ->
+            val result = runCatching { request(path, "GET", null) }
+            val value = result.getOrNull()
+            if (value != null) return value
+            if (attempt == 0) Thread.sleep(RETRY_PAUSE_MS)
+        }
+        // Second failure: let the real exception surface so the screen can say what went
+        // wrong rather than reporting an invalid code for a network that never answered.
+        return request(path, "GET", null)
+    }
+
     private data class HttpResult(val code: Int, val body: String)
+
+    private companion object {
+        /** A connect either happens or it does not; waiting longer helps nobody. */
+        const val CONNECT_TIMEOUT_MS = 15_000
+
+        /**
+         * For the one-shot calls somebody is watching: pairing preview and claim.
+         *
+         * Fifteen seconds was too short and it showed. A backend that has just been
+         * started spends twenty to forty seconds on its first request while it boots and
+         * compiles, and a phone on ground Wi-Fi with one bar is no faster — so the pairing
+         * screen reported "Read timed out" for a request that was about to succeed, and
+         * the code was blamed for a network that was merely slow.
+         *
+         * The person is standing there having just scanned a QR: they will wait, and a
+         * slow join beats a false failure that sends them back to the scorer for a new
+         * code that will behave exactly the same way.
+         */
+        const val READ_TIMEOUT_INTERACTIVE_MS = 45_000
+
+        /**
+         * For the heartbeat, which repeats and must stay inside its own cadence.
+         *
+         * A missed beat is cheap here — the caller tolerates a few in a row before it
+         * concludes anything — so failing fast and trying again shortly is strictly better
+         * than one long wait that blocks the next check.
+         */
+        const val READ_TIMEOUT_HEARTBEAT_MS = 10_000
+
+        /** Long enough for a booting backend to finish, short enough not to feel stuck. */
+        const val RETRY_PAUSE_MS = 1_500L
+    }
 }
