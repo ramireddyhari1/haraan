@@ -144,6 +144,7 @@ dependencies {
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.coil.compose)
+  implementation(libs.coil.video)
   // QR code generation (attendee ticket QRs, and the match-device pairing code)
   implementation("com.google.zxing:core:3.5.3")
 

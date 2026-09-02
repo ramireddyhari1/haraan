@@ -17,6 +17,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -51,6 +52,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -408,6 +413,13 @@ private fun CameraMode(
     // time somebody is holding the phone, and tracking the warm-up is noise.
     var trackedPoints by remember { mutableStateOf(0) }
     var trackingLive by remember { mutableStateOf(false) }
+    // What the detector is seeing, for the overlay. Short on purpose: a long trail smears
+    // into a blur and hides the jitter that tells you it is tracking the wrong thing.
+    var ballTrail by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>>(emptyList()) }
+    var latestBall by remember { mutableStateOf<com.haraan.app.vision.BallSighting?>(null) }
+    // Off by default: it is an aiming aid, not decoration, and it is in the way once the
+    // phone is set. Persisted for the session so it does not reappear every delivery.
+    var showGuide by remember { mutableStateOf(true) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -434,7 +446,11 @@ private fun CameraMode(
                             rowStride = plane.rowStride,
                             timestampMs = image.imageInfo.timestamp / 1_000_000,
                         )
-                        if (sighting != null) trackedPoints = vision.track().size
+                        if (sighting != null) {
+                            trackedPoints = vision.track().size
+                            latestBall = sighting
+                            ballTrail = vision.track().takeLast(CAMERA_TRAIL_POINTS)
+                        }
                     }
                 }
             } catch (_: Throwable) {
@@ -517,6 +533,116 @@ private fun CameraMode(
 
         // Status, top: which role this phone is playing and whether the match still
         // knows about it.
+        // THE AIMING GUIDE.
+        //
+        // The person holding this phone is the only one who can fix a bad angle, and by
+        // the time a scorer opens the clip they are three overs away. So the frame says
+        // what a useful shot looks like: stumps upright in the lower middle, the pitch
+        // running away up the frame.
+        //
+        // These are the same four reference points a homography will need later, so the
+        // habit this builds is the habit calibration will depend on.
+        if (showGuide && granted) {
+            Canvas(Modifier.fillMaxSize()) {
+                val guide = Color.White.copy(alpha = 0.34f)
+                val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+
+                // The pitch, narrowing with distance.
+                // Proportioned for a phone on a tripod behind the bowler's arm. The first
+                // pass ran the pitch from 40% to 86% of the height, which read as a tall
+                // funnel and put the near crease directly behind the record button - the
+                // one part of the screen a thumb is always covering.
+                val nearY = size.height * 0.74f
+                val farY = size.height * 0.36f
+                val nearHalf = size.width * 0.32f
+                val farHalf = size.width * 0.075f
+                val cx = size.width / 2f
+
+                drawPath(
+                    Path().apply {
+                        moveTo(cx - nearHalf, nearY)
+                        lineTo(cx - farHalf, farY)
+                        moveTo(cx + nearHalf, nearY)
+                        lineTo(cx + farHalf, farY)
+                    },
+                    guide,
+                    style = stroke,
+                )
+
+                // Popping crease, near end.
+                drawLine(
+                    guide,
+                    Offset(cx - nearHalf, nearY),
+                    Offset(cx + nearHalf, nearY),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                // And far end, where the stumps should sit.
+                drawLine(
+                    guide,
+                    Offset(cx - farHalf, farY),
+                    Offset(cx + farHalf, farY),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+
+                // Three stumps at the far crease — the thing to line the phone up on.
+                // Tall enough to aim at. The stumps are the thing being lined up, so they
+                // have to be the most legible part of the guide, not a detail.
+                val stumpH = size.height * 0.075f
+                listOf(-1, 0, 1).forEach { i ->
+                    val x = cx + i * (farHalf * 0.62f)
+                    drawLine(
+                        guide,
+                        Offset(x, farY),
+                        Offset(x, farY - stumpH),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
+
+        // WHAT THE DETECTOR IS SEEING, live.
+        //
+        // This existed only in the debug field-test mode, which is the wrong place for it:
+        // the operator is the one who can correct the aim, and without this they cannot
+        // tell the tracker is following a fielder's shirt until somebody reviews the clip
+        // long afterwards. Observed points only — nothing here is interpolated.
+        if (granted && (ballTrail.isNotEmpty() || latestBall != null)) {
+            Canvas(Modifier.fillMaxSize()) {
+                if (ballTrail.size >= 2) {
+                    val path = Path()
+                    ballTrail.forEachIndexed { i, point ->
+                        val o = Offset(point.x * size.width, point.y * size.height)
+                        if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y)
+                    }
+                    drawPath(
+                        path,
+                        Color(0xFF6E9BF5).copy(alpha = 0.8f),
+                        style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                }
+                ballTrail.forEach { point ->
+                    drawCircle(
+                        Color(0xFF6E9BF5),
+                        radius = 3.dp.toPx(),
+                        center = Offset(point.x * size.width, point.y * size.height),
+                    )
+                }
+                latestBall?.let { point ->
+                    val o = Offset(point.x * size.width, point.y * size.height)
+                    drawCircle(Color(0xFF4ADE80), radius = 8.dp.toPx(), center = o)
+                    drawCircle(
+                        Color.White,
+                        radius = 13.dp.toPx(),
+                        center = o,
+                        style = Stroke(width = 1.5.dp.toPx()),
+                    )
+                }
+            }
+        }
+
         Column(
             Modifier
                 .align(Alignment.TopStart)
@@ -541,6 +667,25 @@ private fun CameraMode(
                 color = Ink.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 maxLines = 1,
+            )
+            Spacer(Modifier.height(9.dp))
+            if (showGuide) {
+                Text(
+                    "Line the far stumps up inside the guide",
+                    color = Ink.copy(alpha = 0.55f),
+                    fontSize = 11.sp,
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(2.dp))
+            }
+            Text(
+                if (showGuide) "Hide aiming guide" else "Show aiming guide",
+                color = Ink.copy(alpha = 0.85f),
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickableCapture(enabled = true) { showGuide = !showGuide }
+                    .padding(vertical = 2.dp),
             )
         }
 
@@ -600,6 +745,8 @@ private fun CameraMode(
                                     // into this one.
                                     vision.reset()
                                     trackedPoints = 0
+                                    ballTrail = emptyList()
+                                    latestBall = null
                                     trackingLive = true
                                     recording = true
                                     activeRecording = startClip(
@@ -736,6 +883,9 @@ private fun Modifier.clickableCapture(enabled: Boolean, onClick: () -> Unit): Mo
 // limits move, these move with them.
 
 /** Server ceiling is 10s; stop just under it so container rounding cannot push us over. */
+/** Points kept on the live overlay. Enough to see a path, few enough to stay readable. */
+private const val CAMERA_TRAIL_POINTS = 30
+
 /** Consecutive failed heartbeats before a camera is treated as genuinely gone. */
 private const val MAX_MISSED_HEARTBEATS = 3
 

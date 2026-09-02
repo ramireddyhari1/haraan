@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -69,11 +75,18 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import coil.ImageLoader
+import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import com.haraan.app.data.DeliveryEvidence
 import com.haraan.app.data.DeliveryReview
 import com.haraan.app.data.ReviewStatus
 import com.haraan.app.ui.pressable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import com.haraan.app.ui.theme.HaraanColors
 
@@ -151,11 +164,20 @@ fun MatchClipsSheet(matchId: String, onDismiss: () -> Unit) {
                     lineHeight = 19.sp,
                 )
 
-                else -> Column(
-                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                // A GRID, not a list.
+                //
+                // A list of identical rows says only "there are clips". A grid of frames
+                // says which delivery each one is before anybody taps anything — and
+                // finding the ball you are arguing about is the entire job of this screen.
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.heightIn(max = 460.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    list.forEach { clip -> ClipRow(clip) { playing = clip } }
+                    items(list, key = { it.id }) { clip ->
+                        ClipTile(clip) { playing = clip }
+                    }
                 }
             }
 
@@ -177,45 +199,103 @@ fun MatchClipsSheet(matchId: String, onDismiss: () -> Unit) {
     playing?.let { clip -> ClipPlayer(clip, matchId) { playing = null } }
 }
 
+/**
+ * One delivery in the grid: a frame from the clip, the over it belongs to, its length.
+ *
+ * The thumbnail is decoded from the video itself rather than stored server-side, because
+ * generating one on the server needs ffmpeg, which is not installed — and Coil already
+ * caches decoded frames, so a grid that scrolls does not decode twice.
+ *
+ * The frame is taken a second in rather than at zero: the first frame of a delivery clip
+ * is usually the bowler still walking back, and a grid of identical run-up stills is no
+ * more useful than the list this replaced.
+ */
 @Composable
-private fun ClipRow(clip: MatchClip, onPlay: () -> Unit) {
-    Row(
+private fun ClipTile(clip: MatchClip, onPlay: () -> Unit) {
+    val context = LocalContext.current
+    val request = remember(clip.url) {
+        ImageRequest.Builder(context)
+            .data(clip.url)
+            .videoFrameMillis(1_000)
+            .crossfade(true)
+            .build()
+    }
+
+    Column(
         Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(Well)
-            .pressable(onClick = onPlay)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .pressable(onClick = onPlay),
     ) {
         Box(
-            Modifier.size(38.dp).clip(CircleShape).background(Accent.copy(alpha = 0.12f)),
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .background(Color.Black),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.PlayArrow, null, tint = Accent, modifier = Modifier.size(20.dp))
+            AsyncImage(
+                model = request,
+                contentDescription = if (clip.overBall.isNotBlank()) {
+                    "Delivery at over ${clip.overBall}"
+                } else {
+                    "Unmarked delivery"
+                },
+                imageLoader = videoImageLoader(context),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                Modifier.size(30.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(17.dp))
+            }
+            // A reviewed delivery is marked, so a scorer can see at a glance which balls
+            // have already been looked at.
+            if (clip.review != null) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF4ADE80)),
+                )
+            }
         }
-        Spacer(Modifier.width(13.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
             Text(
-                // The delivery is the thing a scorer looks a clip up BY, so it leads.
-                if (clip.overBall.isNotBlank()) "Over ${clip.overBall}" else "Unmarked delivery",
+                if (clip.overBall.isNotBlank()) "Over ${clip.overBall}" else "Unmarked",
                 color = Ink,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                style = TextStyle(fontFeatureSettings = "tnum"),
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(clip.roleLabel, color = Ink3, fontSize = 11.5.sp, maxLines = 1)
-        }
-        if (clip.durationMs > 0) {
-            Text(
-                "${clip.durationMs / 1000}s",
-                color = Ink2,
                 fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
                 style = TextStyle(fontFeatureSettings = "tnum"),
             )
+            if (clip.durationMs > 0) {
+                Text(
+                    "${clip.durationMs / 1000}s",
+                    color = Ink3,
+                    fontSize = 10.5.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                )
+            }
         }
     }
+}
+
+/**
+ * A loader that can decode a video frame.
+ *
+ * Built once and remembered: an ImageLoader carries its own caches, and creating one per
+ * tile would defeat the caching this exists for.
+ */
+@Composable
+private fun videoImageLoader(context: android.content.Context): ImageLoader = remember {
+    ImageLoader.Builder(context)
+        .components { add(VideoFrameDecoder.Factory()) }
+        .build()
 }
 
 /**
@@ -235,6 +315,54 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
     var failure by remember(clip.id) { mutableStateOf(clip.reviewError) }
     // A decode failure is about this handset, never about the review.
     var playbackFailed by remember(clip.id) { mutableStateOf(false) }
+
+    /*
+     * FRAME MODE.
+     *
+     * Playback and frame-stepping are genuinely different things and cannot share one
+     * surface. A VideoView seeks to the nearest keyframe, which on an 8-second clip can be
+     * a second away — useless when the question is whether the ball hit pad or bat first.
+     *
+     * So stepping switches to still frames pulled with MediaMetadataRetriever at
+     * OPTION_CLOSEST, which is frame-accurate, and the video surface is hidden while that
+     * is showing. Slow motion stays on the video: 0.25x through the real decoder looks far
+     * better than flicking stills at four a second.
+     */
+    var frame by remember(clip.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var framePositionMs by remember(clip.id) { mutableStateOf(0L) }
+    var speed by remember(clip.id) { mutableStateOf(1f) }
+    var player by remember(clip.id) { mutableStateOf<android.media.MediaPlayer?>(null) }
+
+    val retriever = remember(clip.url) { android.media.MediaMetadataRetriever() }
+    var retrieverReady by remember(clip.url) { mutableStateOf(false) }
+    LaunchedEffect(clip.url) {
+        retrieverReady = withContext(Dispatchers.IO) {
+            runCatching { retriever.setDataSource(clip.url, HashMap<String, String>()) }.isSuccess
+        }
+    }
+    DisposableEffect(clip.url) {
+        onDispose { runCatching { retriever.release() } }
+    }
+
+    // Pull one frame at a position. Off the main thread — decoding a 1080p frame is not
+    // something to do while the UI is trying to stay at sixty.
+    suspend fun stepTo(positionMs: Long) {
+        if (!retrieverReady) return
+        val clamped = positionMs.coerceIn(0L, if (clip.durationMs > 0) clip.durationMs else 10_000L)
+        val bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                retriever.getFrameAtTime(
+                    clamped * 1000L,
+                    android.media.MediaMetadataRetriever.OPTION_CLOSEST,
+                )
+            }.getOrNull()
+        }
+        if (bitmap != null) {
+            player?.let { runCatching { it.pause() } }
+            framePositionMs = clamped
+            frame = bitmap
+        }
+    }
 
     // Poll while the queued review runs.
     //
@@ -291,7 +419,15 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                     .aspectRatio(9f / 16f),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!playbackFailed) {
+                if (frame != null) {
+                    // Frame mode: a still, exactly where the scrubber says it is.
+                    androidx.compose.foundation.Image(
+                        bitmap = frame!!.asImageBitmap(),
+                        contentDescription = "Frame at ${framePositionMs} ms",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else if (!playbackFailed) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { context ->
@@ -299,7 +435,16 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                                 setVideoPath(clip.url)
                                 // Loops, because reviewing a dismissal means watching it
                                 // again, and again — the entire point of the footage.
-                                setOnPreparedListener { it.isLooping = true; start() }
+                                setOnPreparedListener { mp ->
+                                    mp.isLooping = true
+                                    player = mp
+                                    // Applied on prepare as well as on change, so a speed
+                                    // chosen before the clip loaded is not silently lost.
+                                    runCatching {
+                                        mp.playbackParams = mp.playbackParams.setSpeed(speed)
+                                    }
+                                    start()
+                                }
                                 // Handled HERE rather than left to the system.
                                 //
                                 // Returning true suppresses Android's own "Can't play
@@ -336,6 +481,57 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                     }
                 }
             }
+            // TRANSPORT. Step back, step forward, and the speeds a review actually uses.
+            if (!playbackFailed) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StepButton("◀") { scope.launch { stepTo(framePositionMs - FRAME_STEP_MS) } }
+                    Spacer(Modifier.width(8.dp))
+                    StepButton("▶") { scope.launch { stepTo(framePositionMs + FRAME_STEP_MS) } }
+                    Spacer(Modifier.width(14.dp))
+
+                    // Leaving frame mode is its own action: tapping a speed while looking
+                    // at a still should resume, not silently change a hidden setting.
+                    if (frame != null) {
+                        TransportChip("RESUME", selected = false) {
+                            frame = null
+                            player?.let { mp ->
+                                runCatching { mp.seekTo(framePositionMs.toInt()); mp.start() }
+                            }
+                        }
+                    } else {
+                        listOf(1f, 0.5f, 0.25f).forEach { option ->
+                            TransportChip(
+                                label = if (option == 1f) "1x" else "${option}x".replace("0.", "."),
+                                selected = speed == option,
+                            ) {
+                                speed = option
+                                player?.let { mp ->
+                                    runCatching {
+                                        mp.playbackParams = mp.playbackParams.setSpeed(option)
+                                        // setPlaybackParams starts a paused player on some
+                                        // devices; keep the intent explicit.
+                                        if (!mp.isPlaying) mp.start()
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.width(6.dp))
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (frame != null) {
+                        Text(
+                            "%.2fs".format(framePositionMs / 1000.0),
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                        )
+                    }
+                }
+            }
+
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -432,6 +628,44 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
         }
     }
 }
+
+/** A frame step. Deliberately large targets — this gets tapped repeatedly. */
+@Composable
+private fun StepButton(glyph: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .pressable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun TransportChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                if (selected) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.1f),
+            )
+            .pressable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 8.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        )
+    }
+}
+
+/** One frame at 30fps. Close enough for every camera this app records with. */
+private const val FRAME_STEP_MS = 33L
 
 /**
  * The wait, made to feel like the machine is doing the thing it says it is doing.
