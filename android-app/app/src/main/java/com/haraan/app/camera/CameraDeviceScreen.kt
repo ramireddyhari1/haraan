@@ -23,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -421,9 +423,39 @@ private fun CameraMode(
     // phone is set. Persisted for the session so it does not reappear every delivery.
     var showGuide by remember { mutableStateOf(true) }
 
+    /*
+     * THE PITCH ITSELF, found rather than drawn.
+     *
+     * A static outline can only tell somebody roughly where to point. Once the creases are
+     * located the guide stops being a template and becomes the thing a measurement stands
+     * on: the same four corners are what a homography is solved from.
+     *
+     * So a corridor drawn on a DETECTED pitch is not decoration. It is the only visible
+     * evidence that the phone understands what it is looking at - if it sits crooked on the
+     * surface, the calibration behind it is wrong, and that is worth seeing before a review
+     * is ever asked for.
+     */
+    val pitchDetector = remember { com.haraan.app.vision.OpenCvPitchDetector() }
+    var pitchQuad by remember { mutableStateOf<com.haraan.app.vision.PitchQuad?>(null) }
+
+    /*
+     * And when it cannot find it: four taps.
+     *
+     * Faded paint, a wet outfield, an indoor net with no creases at all - detection will
+     * fail on real grounds, and a feature that only works on a good pitch is not a feature.
+     * Somebody who can see the ground can always point at its corners.
+     *
+     * A tapped quad OUTRANKS a detected one. A person looking at the pitch has better
+     * information than a Hough transform, and the [QuadSource] recorded on it means every
+     * measurement downstream can still say which of the two it stood on.
+     */
+    var tappedCorners by remember { mutableStateOf<List<com.haraan.app.vision.Point2>>(emptyList()) }
+    var tapping by remember { mutableStateOf(false) }
+
     DisposableEffect(Unit) {
         onDispose {
             vision.release()
+            pitchDetector.release()
             analysisExecutor.shutdown()
         }
     }
@@ -431,12 +463,24 @@ private fun CameraMode(
     val analyzer = remember {
         ImageAnalysis.Analyzer { image ->
             try {
-                if (trackingLive) {
-                    val plane = image.planes.getOrNull(0)
-                    if (plane != null) {
-                        val buffer = plane.buffer
-                        val bytes = ByteArray(buffer.remaining())
-                        buffer.get(bytes)
+                val plane = image.planes.getOrNull(0)
+                if (plane != null) {
+                    val buffer = plane.buffer
+                    buffer.rewind()
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+
+                    /*
+                     * One frame, one job.
+                     *
+                     * The two detectors never run on the same frame. Finding the pitch is a
+                     * Hough transform over the whole image and is much the heavier of the
+                     * two - but a pitch does not move while a ball is in the air, and the
+                     * ball is the measurement that cannot be redone. Spending analysis time
+                     * re-finding a stationary rectangle mid-delivery would cost frames of
+                     * the one thing there is only one chance to see.
+                     */
+                    if (trackingLive) {
                         // The camera's own monotonic clock, never the UI clock: ball
                         // motion timing has to come from when the sensor saw it.
                         val sighting = vision.onFrame(
@@ -451,6 +495,16 @@ private fun CameraMode(
                             latestBall = sighting
                             ballTrail = vision.track().takeLast(CAMERA_TRAIL_POINTS)
                         }
+                    } else if (pitchQuad == null) {
+                        // Stops as soon as it succeeds. The phone is on a tripod; re-running
+                        // it every frame would burn battery to re-derive an answer that is
+                        // already correct, and let the guide twitch between readings.
+                        pitchDetector.detect(
+                            luma = bytes,
+                            width = image.width,
+                            height = image.height,
+                            rowStride = plane.rowStride,
+                        )?.let { pitchQuad = it }
                     }
                 }
             } catch (_: Throwable) {
@@ -542,7 +596,64 @@ private fun CameraMode(
         //
         // These are the same four reference points a homography will need later, so the
         // habit this builds is the habit calibration will depend on.
-        if (showGuide && granted) {
+        val tappedQuad = remember(tappedCorners) {
+            if (tappedCorners.size < 4) {
+                null
+            } else {
+                com.haraan.app.vision.PitchQuad(
+                    corners = tappedCorners,
+                    source = com.haraan.app.vision.QuadSource.TAPPED,
+                    confidence = 1f,
+                ).takeIf { it.isPlausible() }
+            }
+        }
+        val found = tappedQuad ?: pitchQuad
+        if (showGuide && granted && found != null) {
+            /*
+             * FOUND. The guide is now the pitch, not a picture of one: drawn from the
+             * corners the detector located, in that pitch's own perspective.
+             *
+             * The corridor inside it is placed in METRES and pushed back through the
+             * homography. Drawn in screen space it would be a trapezium that merely looks
+             * about right; drawn this way it is visibly wrong the moment the calibration is,
+             * which is the only reason to draw it at all.
+             */
+            Canvas(Modifier.fillMaxSize()) {
+                fun px(point: com.haraan.app.vision.Point2) =
+                    Offset((point.x * size.width).toFloat(), (point.y * size.height).toFloat())
+
+                fun quadPath(points: List<Offset>) = Path().apply {
+                    moveTo(points[0].x, points[0].y)
+                    points.drop(1).forEach { lineTo(it.x, it.y) }
+                    close()
+                }
+
+                drawPath(
+                    quadPath(found.corners.map { px(it) }),
+                    Color(0xFF4ADE80).copy(alpha = 0.8f),
+                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
+                )
+
+                found.toImage()?.let { toImage ->
+                    val half = com.haraan.app.vision.PitchGeometry.RETURN_CREASE_HALF_WIDTH_M * 0.35
+                    val near = -com.haraan.app.vision.PitchGeometry.POPPING_CREASE_AHEAD_M
+                    val far = com.haraan.app.vision.PitchGeometry.CALIBRATION_LENGTH_M + near
+
+                    val band = listOf(
+                        com.haraan.app.vision.Point2(-half, near),
+                        com.haraan.app.vision.Point2(half, near),
+                        com.haraan.app.vision.Point2(half, far),
+                        com.haraan.app.vision.Point2(-half, far),
+                    ).map { px(toImage.map(it)) }
+
+                    // A corner on the horizon maps to NaN by design. Skip the band rather
+                    // than let a broken calibration paint something confident.
+                    if (band.none { it.x.isNaN() || it.y.isNaN() }) {
+                        drawPath(quadPath(band), Color(0xFF6E9BF5).copy(alpha = 0.20f))
+                    }
+                }
+            }
+        } else if (showGuide && granted) {
             Canvas(Modifier.fillMaxSize()) {
                 val guide = Color.White.copy(alpha = 0.34f)
                 val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
@@ -643,6 +754,54 @@ private fun CameraMode(
             }
         }
 
+        if (tapping && granted) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            // Normalised, so the corners survive a rotation or a preview
+                            // resize - the homography is solved in this same 0..1 space.
+                            val point = com.haraan.app.vision.Point2(
+                                (offset.x / size.width).toDouble(),
+                                (offset.y / size.height).toDouble(),
+                            )
+                            val next = tappedCorners + point
+                            tappedCorners = next
+                            if (next.size >= 4) tapping = false
+                        }
+                    },
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    tappedCorners.forEachIndexed { i, point ->
+                        val o = Offset(
+                            (point.x * size.width).toFloat(),
+                            (point.y * size.height).toFloat(),
+                        )
+                        drawCircle(Color(0xFFFACC15), radius = 7.dp.toPx(), center = o)
+                        drawCircle(
+                            Color.Black.copy(alpha = 0.6f),
+                            radius = 7.dp.toPx(),
+                            center = o,
+                            style = Stroke(width = 1.5.dp.toPx()),
+                        )
+                        if (i > 0) {
+                            val previous = tappedCorners[i - 1]
+                            drawLine(
+                                Color(0xFFFACC15).copy(alpha = 0.7f),
+                                Offset(
+                                    (previous.x * size.width).toFloat(),
+                                    (previous.y * size.height).toFloat(),
+                                ),
+                                o,
+                                strokeWidth = 2.dp.toPx(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Column(
             Modifier
                 .align(Alignment.TopStart)
@@ -671,10 +830,44 @@ private fun CameraMode(
             Spacer(Modifier.height(9.dp))
             if (showGuide) {
                 Text(
-                    "Line the far stumps up inside the guide",
+                    when {
+                        // Named in the order the calibration rectangle expects them. Asking
+                        // for "the corners" and hoping would put the pitch inside out.
+                        tapping -> CORNER_PROMPTS.getOrElse(tappedCorners.size) { "" }
+                        tappedQuad != null -> "Corners set by hand"
+                        pitchQuad != null -> "Pitch found \u2014 guide locked to the creases"
+                        tappedCorners.size >= 4 ->
+                            "Those four corners are not a pitch shape \u2014 tap them again"
+                        else -> "Line the far stumps up inside the guide"
+                    },
                     color = Ink.copy(alpha = 0.55f),
                     fontSize = 11.sp,
                     maxLines = 2,
+                )
+                Spacer(Modifier.height(2.dp))
+            }
+            if (found == null || tappedCorners.isNotEmpty()) {
+                Text(
+                    when {
+                        tapping -> "Cancel"
+                        tappedCorners.isNotEmpty() -> "Set the corners again"
+                        else -> "Set the corners by hand"
+                    },
+                    color = Color(0xFFFACC15),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickableCapture(enabled = true) {
+                            if (tapping) {
+                                tapping = false
+                                tappedCorners = emptyList()
+                            } else {
+                                tappedCorners = emptyList()
+                                tapping = true
+                                showGuide = true
+                            }
+                        }
+                        .padding(vertical = 2.dp),
                 )
                 Spacer(Modifier.height(2.dp))
             }
@@ -861,6 +1054,20 @@ private fun GhostButton(label: String, onClick: () -> Unit) {
         Text(label, color = Ink.copy(alpha = 0.75f), fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold)
     }
 }
+
+/**
+ * The four taps, in the order [com.haraan.app.vision.PitchGeometry.CALIBRATION_CORNERS_M]
+ * expects them: clockwise from the striker's left, near crease first.
+ *
+ * Order is not a detail. The homography maps whatever it is handed, so corners collected
+ * in the wrong sequence produce a map that solves perfectly and reads every length wrong.
+ */
+private val CORNER_PROMPTS = listOf(
+    "Tap the NEAR crease corner on your left",
+    "Now the NEAR corner on your right",
+    "Now the FAR corner on the right",
+    "Last one: the FAR corner on the left",
+)
 
 /** Taps with no ripple — this screen is mostly a viewfinder. */
 @Composable
