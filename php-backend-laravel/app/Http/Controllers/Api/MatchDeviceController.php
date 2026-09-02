@@ -287,7 +287,7 @@ final class MatchDeviceController extends Controller
 
         return response()->json(['data' => [
             'id' => (string) $id,
-            'url' => Storage::disk('public')->url($path),
+            'url' => $this->clipUrl($request, $path),
         ]]);
     }
 
@@ -308,7 +308,7 @@ final class MatchDeviceController extends Controller
                 'id' => (string) $c->id,
                 'role' => (string) $c->role,
                 'roleLabel' => MatchDevice::friendlyRole((string) $c->role),
-                'url' => Storage::disk('public')->url((string) $c->path),
+                'url' => $this->clipUrl($request, (string) $c->path),
                 'overBall' => (string) ($c->over_ball ?? ''),
                 'durationMs' => (int) $c->duration_ms,
                 'recordedAt' => (string) $c->created_at,
@@ -454,6 +454,35 @@ final class MatchDeviceController extends Controller
             // Safe to print: set from DeliveryReview::lastFailure(), never an exception.
             'error' => $row?->review_error,
         ], $extra)], $code);
+    }
+
+    /**
+     * A clip URL on the host the caller actually reached us on.
+     *
+     * Storage::url() builds from APP_URL, and when those disagree the client is handed an
+     * address it cannot fetch. Locally APP_URL is http://localhost while the API answers
+     * on :8000, so every clip URL pointed at port 80 of the phone itself — which is why
+     * playback reported "can't play this clip" and every thumbnail decoded black. The
+     * bytes were never arriving; nothing was wrong with the video or the codec.
+     *
+     * Taking the host from the request means a clip is always fetched from wherever the
+     * app just successfully talked to us, whatever APP_URL happens to say. Behind a proxy
+     * this reflects the forwarded host, which is the address the client used and therefore
+     * the one that will work.
+     */
+    private function clipUrl(Request $request, string $path): string
+    {
+        $relative = Storage::disk('public')->url($path);
+
+        // Storage::url() may hand back an absolute URL or a rooted path depending on the
+        // disk config; normalise to the path so the host can be replaced cleanly.
+        $parsed = parse_url($relative);
+        $pathOnly = $parsed['path'] ?? $relative;
+        if (isset($parsed['query'])) {
+            $pathOnly .= '?' . $parsed['query'];
+        }
+
+        return rtrim($request->getSchemeAndHttpHost(), '/') . '/' . ltrim($pathOnly, '/');
     }
 
     // ─────────────────────────── Shared ───────────────────────────
