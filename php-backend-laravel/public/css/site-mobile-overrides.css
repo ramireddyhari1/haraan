@@ -137,7 +137,7 @@
 
     /* --- HEADER / TOPBAR --- */
     .topbar {
-        padding: 8px 0;
+        padding: 8px 0 4px;
         position: sticky;
         top: 0;
         z-index: 100;
@@ -165,7 +165,7 @@
         /* No horizontal padding of its own — the .container's 16px already matches
            the app's 16dp header inset. The extra 12px here pushed the content to
            28px and squeezed the name column ~20px narrower than on device. */
-        padding: 6px 0;
+        padding: 6px 0 2px;
     }
 
     /* --- APP-MATCHED GREETING HEADER ---------------------------------------
@@ -826,7 +826,7 @@
         /* Plain white surface fading into the slate canvas (user: white only) —
            the fade just kills the header/content seam. */
         background: linear-gradient(180deg, #FFFFFF 0%, #F4F7FB 260px);
-        padding: 14px 16px 8px;
+        padding: 4px 16px 8px;
     }
 
     /* Centered brand lockup at the top of the feed (user-placed: between the
@@ -842,7 +842,7 @@
        rather than leaving the hole they used to fill. */
     .mband {
         position: relative; overflow: hidden;
-        margin: 10px 0 10px; padding: 20px 20px 21px;
+        margin: 4px 0 10px; padding: 20px 20px 21px;
         border-radius: 20px;
         /* Events blue — the exact value of the Events tab pill above it (user's
            call: keep the reworked lockup, put the brand blue back as the fill).
