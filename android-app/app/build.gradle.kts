@@ -206,6 +206,15 @@ dependencies {
   implementation("androidx.security:security-crypto:1.1.0")
   // WebSocket client for realtime content updates (Reverb / Pusher protocol)
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
+  // Typed HTTP for new endpoints (first: campaign section themes). Rides the same OkHttp
+  // as the realtime socket; kotlinx-serialization because the plugin is already applied.
+  implementation(libs.retrofit)
+  implementation(libs.retrofit.converter.kotlinx.serialization)
+  implementation(libs.kotlinx.serialization.json)
+  // Durable, main-safe cache for server-driven UI state that must survive a cold start offline.
+  implementation(libs.androidx.datastore.preferences)
+  // Animated campaign decorations (lights, garlands) uploaded as Lottie .json from /control.
+  implementation(libs.lottie.compose)
 
   // Firebase — BoM keeps product versions aligned; add products without pinning versions.
   // Cloud Messaging (FCM) powers push notifications (see the notifications inbox work).

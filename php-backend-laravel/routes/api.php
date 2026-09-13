@@ -141,6 +141,10 @@ Route::get('/home/feed', [\App\Http\Controllers\Api\AppContentController::class,
 // Admin-curated home composition (ordered typed blocks); anonymous-safe, viewer-resolved.
 Route::middleware('auth.jwt.optional')->get('/home/layout', [\App\Http\Controllers\Api\AppContentController::class, 'layout']);
 
+// Campaign skins (header colours + decoration + validity window) for the Events and Pulse lanes.
+// Public: every viewer sees the same campaign, so there is nothing to resolve per user.
+Route::get('/section-themes', [\App\Http\Controllers\Api\SectionThemeController::class, 'index']);
+
 // Login screen posters — public, no auth needed, used by the Android app on launch.
 Route::get('/login-posters', static function () {
     $posters = \App\Models\Ad::where('placement', 'login_poster')

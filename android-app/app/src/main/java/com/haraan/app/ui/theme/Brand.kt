@@ -31,14 +31,5 @@ object Brand {
     val supportWhatsapp: String?
         get() = RemoteConfigStore.theme.supportWhatsapp?.takeIf { it.isNotBlank() }
 
-    /** Parse "#RRGGBB" or "#AARRGGBB" (with/without #) → Color; null if missing/malformed. */
-    private fun parseHex(hex: String?): Color? {
-        val h = hex?.trim()?.removePrefix("#")?.takeIf { it.isNotBlank() } ?: return null
-        val v = h.toLongOrNull(16) ?: return null
-        return when (h.length) {
-            6 -> Color(0xFF000000L or v) // RGB → opaque
-            8 -> Color(v)               // ARGB
-            else -> null
-        }
-    }
+    private fun parseHex(hex: String?): Color? = parseHexColor(hex)
 }

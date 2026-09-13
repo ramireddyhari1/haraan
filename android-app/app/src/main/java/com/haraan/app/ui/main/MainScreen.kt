@@ -249,6 +249,11 @@ import androidx.core.view.WindowCompat
 import com.haraan.app.ui.components.AutoRefresh
 import com.haraan.app.ui.components.SectionHeader
 import com.haraan.app.ui.theme.HaraanColors
+import com.haraan.app.ui.theme.LocalSectionTheme
+import com.haraan.app.ui.theme.ProvideSectionTheme
+import com.haraan.app.ui.theme.SectionTheme
+import com.haraan.app.ui.components.CampaignHeaderStrip
+import com.haraan.app.ui.components.bleedHorizontal
 import com.haraan.app.ui.theme.HaraanRadius
 import com.haraan.app.ui.theme.premiumCardShadow
 import com.haraan.app.ui.theme.overlapAbove
@@ -643,6 +648,28 @@ internal fun MainAppContainer(
   }
 
   val isEventsTab = (selectedTab == 0 && activeSubTab == "Events")
+
+  // Server-driven campaign skin for whichever lane is showing. Cached themes paint from the
+  // first frame; revalidation runs on resume, on a slow tick, and on a realtime "themes" push.
+  val sectionThemeViewModel: SectionThemeViewModel = viewModel()
+  val eventsSectionTheme by sectionThemeViewModel.events.collectAsStateWithLifecycle()
+  val pulseSectionTheme by sectionThemeViewModel.pulse.collectAsStateWithLifecycle()
+  AutoRefresh(intervalMs = com.haraan.app.data.theme.SectionThemeRepository.FRESH_FOR_MS) {
+    sectionThemeViewModel.revalidate()
+  }
+  val onPulseLane = activeSubTab == "GameHub"
+  // A live campaign turns the lane header into a dark, campaign-coloured takeover.
+  val immersiveHeader = selectedTab == 0 && !showActionBoardDetail &&
+    (if (onPulseLane) pulseSectionTheme else eventsSectionTheme)?.campaign != null
+  val takeoverView = androidx.compose.ui.platform.LocalView.current
+  androidx.compose.runtime.DisposableEffect(immersiveHeader) {
+    val window = (takeoverView.context as? android.app.Activity)?.window
+    val insets = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, takeoverView) }
+    // Light status-bar icons over the dark takeover; back to dark icons when it ends.
+    if (immersiveHeader) insets?.isAppearanceLightStatusBars = false
+    onDispose { if (immersiveHeader) insets?.isAppearanceLightStatusBars = true }
+  }
+
   val containerBackground = Brush.verticalGradient(
     colors = listOf(
       Color.White,
@@ -651,12 +678,16 @@ internal fun MainAppContainer(
     )
   )
 
+  ProvideSectionTheme(
+    theme = if (onPulseLane) pulseSectionTheme else eventsSectionTheme,
+    fallback = if (onPulseLane) SectionTheme.PulseDefault else SectionTheme.EventsDefault,
+  ) {
   Box(
     modifier = Modifier
       .fillMaxSize()
       .background(containerBackground)
   ) {
-    if (isEventsTab && !showActionBoardDetail) {
+    if (isEventsTab && !showActionBoardDetail && !immersiveHeader) {
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -667,8 +698,8 @@ internal fun MainAppContainer(
             // clashing sky-cyan. Kept at low alpha to stay soft over white.
             Brush.verticalGradient(
               colors = listOf(
-                HaraanColors.EventsBlue.copy(alpha = 0.20f),
-                HaraanColors.EventsBlue.copy(alpha = 0.06f),
+                LocalSectionTheme.current.primary.copy(alpha = 0.20f),
+                LocalSectionTheme.current.primary.copy(alpha = 0.06f),
                 Color.Transparent
               )
             )
@@ -697,10 +728,13 @@ internal fun MainAppContainer(
             modifier = Modifier
               .fillMaxWidth()
               .background(
-                if (isEventsTab) {
+                if (isEventsTab && immersiveHeader) {
+                  // Campaign takeover: flat deep colour, closed by CampaignHeaderStrip below.
+                  SolidColor(LocalSectionTheme.current.deep)
+                } else if (isEventsTab) {
                   Brush.verticalGradient(
                     colors = listOf(
-                      HaraanColors.AccentTint, // Brand-blue tint (#EAF1FE) — same family as the CTA
+                      LocalSectionTheme.current.tint, // Lane tint: brand #EAF1FE, or the live campaign's
                       Color.White              // Blends into white content area
                     )
                   )
@@ -728,7 +762,7 @@ internal fun MainAppContainer(
               name = accountName,
               avatarUrl = accountAvatar,
               locationState = locationState,
-              onDark = false,
+              onDark = immersiveHeader,
               onAvatarClick = { showAccountProfile = true },
               onLocationClick = { showLocationSheet = true },
               onChatClick = { onItemClick(com.haraan.app.SupportChat) },
@@ -751,7 +785,10 @@ internal fun MainAppContainer(
                   spotColor = Color.Black.copy(alpha = 0.1f)
                 )
                 .background(Color.White, RoundedCornerShape(UnifiedCornerRadius))
-                .border(BorderStroke(1.dp, Color(0xFFE2E8F0)), RoundedCornerShape(UnifiedCornerRadius))
+                .border(
+                  BorderStroke(1.dp, if (immersiveHeader) Color.Transparent else Color(0xFFE2E8F0)),
+                  RoundedCornerShape(UnifiedCornerRadius)
+                )
                 .padding(horizontal = 14.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
@@ -940,8 +977,15 @@ internal fun MainAppContainer(
           Spacer(modifier = Modifier.height(8.dp)) // Added breathing space
           PremiumSegmentedSwitch(
             selectedTab = activeSubTab,
-            onTabSelected = { activeSubTab = it }
+            onTabSelected = { activeSubTab = it },
+            onDark = immersiveHeader,
           )
+        }
+
+        // Campaign takeover closes the header with its decoration strip + scalloped edge.
+        if (immersiveHeader && isEventsTab) {
+          Spacer(modifier = Modifier.height(10.dp))
+          CampaignHeaderStrip(pageBackground = HaraanColors.Background)
         }
       }
       }
@@ -1106,6 +1150,7 @@ internal fun MainAppContainer(
       TicketPassScreen(booking = b, onClose = { ticketPass = null })
     }
   }
+  }
 }
 }
 
@@ -1120,6 +1165,7 @@ private fun EventsTabScreen(
   onEventClick: (EventItem) -> Unit
 ) {
   var selectedCategory by remember { mutableStateOf("All") }
+  val sectionTheme = LocalSectionTheme.current
   val localContext = LocalContext.current
   
   val bannerEvents = listOf(
@@ -1254,8 +1300,14 @@ private fun EventsTabScreen(
     // 1. "Haraan special" band — the feed's opening slab, in the slot the
     //    sponsored ad used to hold. The most valuable space on the feed now
     //    carries our own brand rather than someone else's.
+    //    While a campaign is live the header itself is dressed for it, so the band steps aside
+    //    and the feed starts right under the header's scalloped edge.
     item {
-      HaraanSpecialBand(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp))
+      if (sectionTheme.campaign != null) {
+        Spacer(modifier = Modifier.height(4.dp))
+      } else {
+        HaraanSpecialBand(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp))
+      }
     }
 
     // Per-rail placement: an event shows in a rail when its admin-set `placements`
@@ -1310,7 +1362,7 @@ private fun EventsTabScreen(
           painter = painterResource(id = com.haraan.app.R.drawable.ic_live_music),
           selected = selectedCategory == "Concerts",
           onClick = { selectedCategory = "Concerts" },
-          activeColor = HaraanColors.EventsBlue,
+          activeColor = sectionTheme.primary,
           modifier = Modifier.weight(1f)
         )
         HaraanCategoryCard(
@@ -1319,7 +1371,7 @@ private fun EventsTabScreen(
           painter = painterResource(id = com.haraan.app.R.drawable.ic_standup_comedy),
           selected = selectedCategory == "Standup",
           onClick = { selectedCategory = "Standup" },
-          activeColor = HaraanColors.EventsBlue,
+          activeColor = sectionTheme.primary,
           modifier = Modifier.weight(1f)
         )
         HaraanCategoryCard(
@@ -1328,7 +1380,7 @@ private fun EventsTabScreen(
           painter = painterResource(id = com.haraan.app.R.drawable.ic_select_all),
           selected = selectedCategory == "All",
           onClick = { selectedCategory = "All" },
-          activeColor = HaraanColors.EventsBlue,
+          activeColor = sectionTheme.primary,
           modifier = Modifier.weight(1f)
         )
       }
@@ -1367,7 +1419,7 @@ private fun EventsTabScreen(
           HaraanButton(
             text = "Explore Vijayawada",
             onClick = { selectedCategory = "All" },
-            containerColor = HaraanColors.EventsBlue
+            containerColor = sectionTheme.primary
           )
         }
       }
@@ -1415,8 +1467,8 @@ private fun EventsTabScreen(
             title = "Saved Events",
             subtitle = "3 items saved",
             icon = Icons.Default.Bookmark,
-            backgroundColor = Color(0xFFEFF6FF),
-            iconColor = HaraanColors.EventsBlue,
+            backgroundColor = sectionTheme.tint,
+            iconColor = sectionTheme.primary,
             onClick = { /* action */ }
           )
         }
@@ -1613,7 +1665,7 @@ private fun EventListCard(
         text = event.date.uppercase(),
         fontSize = 10.5.sp,
         fontWeight = FontWeight.Bold,
-        color = LightAccentBlue, // Highlight with blue
+        color = LocalSectionTheme.current.accentText, // Lane accent, contrast-safe on white
         letterSpacing = 0.4.sp,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
@@ -1664,7 +1716,7 @@ private fun EventListCard(
           text = priceDisplay,
           fontSize = 14.sp,
           fontWeight = FontWeight.ExtraBold,
-          color = LightAccentBlue, // Highlight with blue
+          color = LocalSectionTheme.current.accentText, // Lane accent, contrast-safe on white
           letterSpacing = (-0.2).sp
         )
         if (hasOnwards) {
@@ -1672,7 +1724,7 @@ private fun EventListCard(
             text = "onwards",
             fontSize = 11.sp,
             fontWeight = FontWeight.Normal,
-            color = LightAccentBlue.copy(alpha = 0.8f), // Highlight with blue
+            color = LocalSectionTheme.current.accentText.copy(alpha = 0.8f),
             modifier = Modifier.padding(bottom = 0.5.dp) // Precision alignment to currency baseline
           )
         }
@@ -1722,6 +1774,7 @@ private fun GameHubTabScreen(
   avatarUrl: String = ""
 ) {
   var selectedSport by remember { mutableStateOf("All") }
+  val sectionTheme = LocalSectionTheme.current
 
   // Full-screen search overlay (Phase 2): recents are kept for the session.
   var showSearch by remember { mutableStateOf(false) }
@@ -1870,14 +1923,15 @@ private fun GameHubTabScreen(
     // hero with a strong type hierarchy, green used only as an accent, and a hairline seam is
     // the calmer, premium look (Airbnb/Linear/Playo territory).
     item {
+      val pulseTakeover = sectionTheme.campaign != null
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .background(Color.White)
+          .background(if (pulseTakeover) sectionTheme.deep else Color.White)
           // Hairline seam so the white hero separates cleanly from the light content canvas
-          // below without a heavy band or shadow.
+          // below without a heavy band or shadow. The takeover ends in scallops instead.
           .drawBehind {
-            drawLine(
+            if (!pulseTakeover) drawLine(
               color = Color(0xFFECEEF2),
               start = Offset(0f, size.height),
               end = Offset(size.width, size.height),
@@ -1888,7 +1942,7 @@ private fun GameHubTabScreen(
       Column(
         modifier = Modifier
           .statusBarsPadding()
-          .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp)
+          .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = if (pulseTakeover) 0.dp else 14.dp)
       ) {
         // Personalized greeting header (avatar + name + location + utility icons) on the
         // dark hero. Replaces the old location-pill / bell / profile row.
@@ -1896,7 +1950,7 @@ private fun GameHubTabScreen(
           name = userName,
           avatarUrl = avatarUrl,
           locationState = locationState,
-          onDark = false,
+          onDark = pulseTakeover,
           onAvatarClick = onProfileClick,
           onLocationClick = onLocationClick,
           onChatClick = onSupportClick,
@@ -1913,7 +1967,7 @@ private fun GameHubTabScreen(
             query = searchQuery,
             onQueryChange = onSearchQueryChange,
             placeholder = "Search grounds, matches, players...",
-            activeColor = HaraanColors.GameHubGreen,
+            activeColor = sectionTheme.primary,
             modifier = Modifier.fillMaxWidth(),
             rotatingHints = listOf(
               "Search grounds near you",
@@ -1949,7 +2003,7 @@ private fun GameHubTabScreen(
               onVenueClick = { showSearch = false; onVenueClick(it) },
               onMatchClick = { showSearch = false; onMatchClick(it) },
               onDismiss = { showSearch = false },
-              accent = HaraanColors.GameHubGreen
+              accent = sectionTheme.primary
             )
           }
         }
@@ -1960,7 +2014,7 @@ private fun GameHubTabScreen(
         GameHubSegmentedSwitch(
           selectedTab = activeSubTab,
           onTabSelected = onTabSelected,
-          onLight = true,
+          onLight = !pulseTakeover,
         )
 
         // Hero ends after the switch — the dense ActionBoard moved out of the green band
@@ -1968,6 +2022,13 @@ private fun GameHubTabScreen(
         // Tight gap here (the ActionBoard card overlaps 32dp up onto the seam anyway) so the
         // green band doesn't leave a dead void under the switch.
         Spacer(modifier = Modifier.height(HaraanSpacing.Small))
+
+        if (pulseTakeover) {
+          CampaignHeaderStrip(
+            pageBackground = Color(0xFFF5F6F8),
+            modifier = Modifier.bleedHorizontal(16.dp),
+          )
+        }
       }
       }
     }
@@ -2143,11 +2204,11 @@ private fun GameHubTabScreen(
           val chipBg by androidx.compose.animation.animateColorAsState(
             // Filled slate for unselected (was white) so chips read as solid pills against the
             // near-white page instead of floating with a faint hairline.
-            targetValue = if (isSelected) HaraanColors.GameHubDeep else Color(0xFFF1F5F9),
+            targetValue = if (isSelected) sectionTheme.deep else Color(0xFFF1F5F9),
             animationSpec = tween(200), label = "chipBg"
           )
           val chipContent by androidx.compose.animation.animateColorAsState(
-            targetValue = if (isSelected) Color.White else HaraanColors.TextSecondary,
+            targetValue = if (isSelected) sectionTheme.onDeep else HaraanColors.TextSecondary,
             animationSpec = tween(200), label = "chipContent"
           )
 
@@ -2940,7 +3001,10 @@ private fun GameHubSegmentedSwitch(
             Text(
               text = label,
               color = when {
-                isSelected -> Color(0xFF1E3A8A)
+                // Lane deep accent (#1E3A8A by default); ink if a campaign's is too light for the white pill.
+                isSelected -> LocalSectionTheme.current.deep
+                  .takeIf { SectionTheme.contrastRatio(it, Color.White) >= SectionTheme.MIN_TEXT_CONTRAST }
+                  ?: HaraanColors.TextPrimary
                 onLight -> HaraanColors.TextSecondary
                 else -> Color.White.copy(alpha = 0.75f)
               },
@@ -10650,21 +10714,26 @@ private fun TrendingRowSection(
 fun PremiumSegmentedSwitch(
     selectedTab: String,
     onTabSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** On the campaign takeover: translucent track, white pill, accent label. */
+    onDark: Boolean = false,
 ) {
     val tabs = listOf("Events" to "Events", "GameHub" to "Pulse")
     
     // --- COLOR PALETTE ALIGNED WITH YOUR SCREENSHOT ---
-    val containerBg = Color(0xFFF1F5F9)       // Clean, soft capsule background
-    val strokeColor = Color(0xFFE2E8F0)       // Thin outer bounding border
-    val activeText = Color.White               // Crisp white text for readability on the blue gradient
-    val inactiveText = Color(0xFF64748B)       // Muted slate gray for unselected states
+    val containerBg = if (onDark) Color.White.copy(alpha = 0.14f) else Color(0xFFF1F5F9)
+    val strokeColor = if (onDark) Color.White.copy(alpha = 0.18f) else Color(0xFFE2E8F0)
+    // Contrast-checked against the pill fill in both variants.
+    val activeText = if (onDark) LocalSectionTheme.current.accentText else LocalSectionTheme.current.onPrimary
+    val inactiveText = if (onDark) Color.White.copy(alpha = 0.82f) else Color(0xFF64748B)
 
     // Flat brand blue — the exact fill of the "Haraan special" band directly below
     // it. This used to be a #3B82F6 → #2563EB vertical gradient, which put two
     // different blues within 20dp of each other and read as a mismatch. One value,
     // one blue: never reintroduce a gradient here without changing the band too.
-    val activeGradient = SolidColor(LightAccentBlue) // Color(0xFF2563EB)
+    // Lane accent: #2563EB by default, the campaign accent while one is live. The band below
+    // is swapped for the campaign banner then, so the two never show different blues.
+    val activeGradient = SolidColor(if (onDark) Color.White else LocalSectionTheme.current.primary)
 
     BoxWithConstraints(
         modifier = modifier
