@@ -61,3 +61,26 @@ _IGNORE_session/
 # Kotlin compiler daemon caches / error logs (build artifact, regenerated).
 .kotlin/
 **/.kotlin/
+
+# Android build outputs copied out of Gradle — published to the VPS or Play, never source.
+*.apk
+*.aab
+
+# Session captures: screenshots, frame dumps, uiautomator XML dumps, store screenshots.
+/_*.png
+/_frames*/
+/*_dump.xml
+/android-app/*.png
+/play-screenshots/
+
+# Standalone HTML preview/verification pages. Anything under public/ is served on prod.
+/php-backend-laravel/public/preview_*.html
+/php-backend-laravel/public/*_preview.html
+/php-backend-laravel/public/*_review.html
+/php-backend-laravel/public/*_verify.html
+
+# Local helper scripts, test targets and brand source files.
+/php-backend-laravel/capture_employee.js
+/pitch-test-target.html
+/COMPANY LOGOS/
+/haraan.svg
