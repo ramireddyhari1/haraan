@@ -77,6 +77,7 @@ object RealtimeClient {
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     reconnectAttempts = 0
+                    RealtimeBus.emit(RealtimeBus.RECONNECTED)
                     webSocket.send(subscribeFrame(config.channel))
                     // Re-subscribe to any runtime channels (match.{id}) after a reconnect.
                     synchronized(extraChannels) {

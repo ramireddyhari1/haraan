@@ -157,11 +157,45 @@ class SectionThemeTest extends TestCase
         ];
     }
 
+    /** Smallest Lottie the app can play: one shape layer with a static fill. */
+    private static function lottie(array $overrides = []): array
+    {
+        return array_replace([
+            'v' => '5.7.4', 'fr' => 30, 'ip' => 0, 'op' => 60, 'w' => 1080, 'h' => 240,
+            'layers' => [[
+                'ty' => 4, 'nm' => 'dot', 'ks' => ['o' => ['a' => 0, 'k' => 100]],
+                'shapes' => [['ty' => 'fl', 'c' => ['a' => 0, 'k' => [1, 0.5, 0, 1]], 'o' => ['a' => 0, 'k' => 100]]],
+            ]],
+        ], $overrides);
+    }
+
+    public function test_lottie_check_names_the_faults_that_blank_the_strip(): void
+    {
+        $this->assertNull(SectionThemeJson::lottieProblem(json_encode(self::lottie())));
+
+        // The real upload that drew nothing: every property wrapped twice.
+        $doubled = self::lottie(['layers' => [[
+            'ty' => 4, 'nm' => 'bg',
+            'shapes' => [['ty' => 'rc', 'p' => ['a' => 0, 'k' => ['a' => 0, 'k' => [540, 540]]]]],
+        ]]]);
+        $this->assertStringContainsString('wrapped twice', SectionThemeJson::lottieProblem(json_encode($doubled)));
+
+        $textNoFonts = self::lottie(['layers' => [['ty' => 5, 'nm' => 'title', 't' => ['d' => ['k' => []]]]]]);
+        $this->assertStringContainsString('no embedded fonts', SectionThemeJson::lottieProblem(json_encode($textNoFonts)));
+
+        $textWithFonts = $textNoFonts + ['fonts' => ['list' => [['fName' => 'Poppins']]]];
+        $this->assertNull(SectionThemeJson::lottieProblem(json_encode($textWithFonts)));
+
+        $this->assertStringContainsString('no layers', SectionThemeJson::lottieProblem(json_encode(self::lottie(['layers' => []]))));
+        $this->assertStringContainsString('not a Lottie', SectionThemeJson::lottieProblem('{"hello":"world"}'));
+        $this->assertStringContainsString('not valid JSON', SectionThemeJson::lottieProblem('{nope'));
+    }
+
     public function test_uploaded_json_that_is_not_lottie_is_refused_and_removed(): void
     {
         Storage::fake('public');
         Storage::disk('public')->put('section-themes/a.json', '{"hello":"world"}');
-        Storage::disk('public')->put('section-themes/b.json', '{"v":"5.7.4","layers":[]}');
+        Storage::disk('public')->put('section-themes/b.json', json_encode(self::lottie()));
 
         try {
             SectionThemeResource::foldDecoration(['decoration' => 'section-themes/a.json']);

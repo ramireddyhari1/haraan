@@ -27,16 +27,23 @@ class SectionThemeViewModel(application: Application) : AndroidViewModel(applica
     val pulse: StateFlow<SectionTheme?> = themeFor(ThemeSection.Pulse)
 
     init {
-        viewModelScope.launch { repository.revalidate() }
-        // /control saved a campaign: skip the freshness window and fetch now.
+        // No fetch here: the screen's on-resume refresh runs on first composition too.
+        // /control saved a campaign, or the socket just (re)connected and may have missed that
+        // signal while the app was frozen in the background: skip the freshness window.
         viewModelScope.launch {
-            RealtimeBus.updates.filter { it == REALTIME_DOMAIN }.collect { repository.revalidate(force = true) }
+            RealtimeBus.updates
+                .filter { it == REALTIME_DOMAIN || it == RealtimeBus.RECONNECTED }
+                .collect { repository.revalidate(force = true) }
         }
     }
 
-    /** Cheap to call often (screen resume, periodic tick) — no-ops while the cache is fresh. */
-    suspend fun revalidate() {
-        repository.revalidate()
+    /**
+     * [force] = false no-ops while the cache is fresh (the periodic tick). Pass true when the
+     * user comes back to the app: a campaign published while they were away must show on
+     * return, not up to [SectionThemeRepository.FRESH_FOR_MS] later.
+     */
+    suspend fun revalidate(force: Boolean = false) {
+        repository.revalidate(force)
     }
 
     private fun themeFor(section: ThemeSection): StateFlow<SectionTheme?> {

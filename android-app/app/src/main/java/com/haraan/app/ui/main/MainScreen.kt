@@ -659,7 +659,13 @@ internal fun MainAppContainer(
   val sectionThemeViewModel: SectionThemeViewModel = viewModel()
   val eventsSectionTheme by sectionThemeViewModel.events.collectAsStateWithLifecycle()
   val pulseSectionTheme by sectionThemeViewModel.pulse.collectAsStateWithLifecycle()
-  AutoRefresh(intervalMs = com.haraan.app.data.theme.SectionThemeRepository.FRESH_FOR_MS) {
+  // Every return to the app refetches (a campaign published while it was backgrounded must
+  // show on return); the slow tick only fills gaps and respects the freshness window.
+  AutoRefresh(intervalMs = 0L) { sectionThemeViewModel.revalidate(force = true) }
+  AutoRefresh(
+    intervalMs = com.haraan.app.data.theme.SectionThemeRepository.FRESH_FOR_MS,
+    refreshOnResume = false,
+  ) {
     sectionThemeViewModel.revalidate()
   }
   val onPulseLane = activeSubTab == "GameHub"

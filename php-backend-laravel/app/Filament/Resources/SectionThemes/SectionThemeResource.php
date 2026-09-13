@@ -68,18 +68,14 @@ class SectionThemeResource extends Resource
         if ($path !== '' && ! str_starts_with($path, 'http')) {
             $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
             $disk = Storage::disk('public');
-            $valid = match ($extension) {
-                'png', 'webp' => true,
-                'json' => SectionThemeJson::isLottie((string) $disk->get($path)),
-                default => false,
+            $problem = match ($extension) {
+                'png', 'webp' => null,
+                'json' => SectionThemeJson::lottieProblem((string) $disk->get($path)),
+                default => 'Upload a .png, .webp or Lottie .json file.',
             };
-            if (! $valid) {
+            if ($problem !== null) {
                 $disk->delete($path);
-                throw ValidationException::withMessages([
-                    'data.decoration' => $extension === 'json'
-                        ? 'That .json file is not a Lottie animation. Export it from After Effects (Bodymovin) or LottieFiles.'
-                        : 'Upload a .png, .webp or Lottie .json file.',
-                ]);
+                throw ValidationException::withMessages(['data.decoration' => $problem]);
             }
         }
 

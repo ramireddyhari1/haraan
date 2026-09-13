@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.SharedFlow
  * this bus is for screen-level content.
  */
 object RealtimeBus {
+    /**
+     * Emitted every time the socket (re)opens. Signals sent while it was down — the app
+     * backgrounded and frozen by Android, a network change — are gone for good, so anything
+     * that must not miss a change refetches on this.
+     */
+    const val RECONNECTED = "realtime.reconnected"
+
     private val _updates = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val updates: SharedFlow<String> = _updates
 

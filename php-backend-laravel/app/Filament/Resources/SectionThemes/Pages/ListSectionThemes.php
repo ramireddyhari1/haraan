@@ -25,12 +25,14 @@ class ListSectionThemes extends ListRecords
                 ->icon('heroicon-m-arrow-up-tray')
                 ->color('gray')
                 ->modalHeading('Import a theme file')
-                ->modalDescription('Upload a .json theme exported from here (or written by hand in the same format). It is created as a new campaign theme you can review before it goes live.')
+                ->modalDescription('Upload a theme settings file from "Export JSON". It is created as a new campaign theme you can review before it goes live. For a Lottie animation, use Import JSON on the "New campaign theme" page instead.')
                 ->schema([
                     FileUpload::make('file')
                         ->label('Theme file (.json)')
                         ->acceptedFileTypes(['application/json', 'text/plain'])
-                        ->maxSize(512)
+                        // Big enough to accept a Lottie by mistake, so it gets a useful message
+                        // instead of a size error.
+                        ->maxSize(4096)
                         ->storeFiles(false)
                         ->required(),
                 ])
