@@ -24,9 +24,11 @@ class PlayerReportResource extends Resource
 
     protected static ?string $navigationLabel = 'Player reports';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Support & Moderation';
+
     protected static ?string $modelLabel = 'player report';
 
-    protected static ?int $navigationSort = 21;
+    protected static ?int $navigationSort = 2;
 
     /**
      * Reports name both an accuser and an accused. Same audience as Support — the ops

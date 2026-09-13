@@ -83,93 +83,11 @@ class PartnerPanelProvider extends PanelProvider
             ],
         );
 
-        // The brand logo lives in the sidebar header, which is collapsed behind the
-        // hamburger on mobile — so on a phone the console opened with no Haraan mark
-        // at all. Paint it into the top bar too, but only below the desktop breakpoint
-        // (where the sidebar logo already shows), so it never doubles up. On mobile
-        // it's absolutely centred, so the layout reads: ☰ (far left) · Haraan (centre)
-        // · search + profile (right).
+        // The shared mobile brand lives in a real view, with its layout defined by
+        // the compiled panel system rather than a render-hook style fragment.
         FilamentView::registerRenderHook(
             PanelsRenderHook::TOPBAR_START,
-            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
-                <a href="{{ filament()->getUrl() }}" class="hrn-topbar-logo" aria-label="Haraan Partner">
-                    <img src="{{ asset('images/haraan-logo-blue.png') }}" alt="Haraan Partner">
-                    <span class="hrn-topbar-tag">partner</span>
-                </a>
-                <style>
-                    .hrn-topbar-logo{display:none;flex-direction:column;align-items:center;
-                        justify-content:center;height:100%;line-height:1;text-decoration:none;}
-                    .hrn-topbar-logo img{height:1.5rem;width:auto;display:block;}
-                    /* Handwritten "partner" tucked under the Haraan wordmark. */
-                    .hrn-topbar-tag{font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
-                        "Brush Script MT","Comic Sans MS",cursive;
-                        font-size:12px;line-height:1;color:#0b1220;margin-top:2px;
-                        letter-spacing:.02em;transform:rotate(-3deg);}
-                    .dark .hrn-topbar-tag{color:#e6e9ef;}
-                    @media (max-width:1023px){
-                        .fi-topbar{position:relative;}
-                        /* Centre the logo over the bar; the hamburger falls to the far
-                           left in flow, the search icon + profile group sits on the right. */
-                        .hrn-topbar-logo{display:flex;position:absolute;left:50%;top:50%;
-                            transform:translate(-50%,-50%);z-index:5;margin:0;pointer-events:auto;}
-                    }
-                </style>
-            BLADE),
-        );
-
-        // Desktop twin of the mobile tag: a handwritten "partner" under the Haraan
-        // wordmark in the sidebar header. The header is a flex row holding just the
-        // logo (its collapse buttons are skipped when a topbar exists), so flex-wrap
-        // + a full-basis tag drops it onto its own line directly beneath the logo.
-        FilamentView::registerRenderHook(
-            PanelsRenderHook::SIDEBAR_LOGO_AFTER,
-            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : Blade::render(<<<'BLADE'
-                <span class="hrn-sidebar-tag">partner</span>
-                <span class="hrn-sidebar-tag hrn-sidebar-brand">Haraan</span>
-                <style>
-                    /* Brand header as an inset rounded card: a light blue→white wash
-                       inside a hairline border with round edges, so the wordmark sits
-                       in its own framed card. Resets to plain in dark mode so /control's
-                       dark theme is untouched. */
-                    .fi-sidebar-header{flex-wrap:wrap;
-                        justify-content:center;text-align:center;padding:14px 12px 12px;
-                        margin:10px 10px 6px;border-radius:16px;border:1px solid #e3e9f5;
-                        background:linear-gradient(180deg,#eaf1ff 0%,#f4f8ff 55%,#ffffff 100%);
-                        box-shadow:0 1px 2px rgba(11,18,32,.05);}
-                    .fi-sidebar-header .fi-sidebar-header-logo-ctn{margin-inline:auto;}
-                    .dark .fi-sidebar-header{background:transparent;
-                        border-color:rgba(255,255,255,.08);box-shadow:none;}
-                    .fi-sidebar-header-logo-ctn{flex:0 0 auto;}
-                    .hrn-sidebar-tag{flex-basis:100%;font-size:13px;line-height:1;
-                        color:#0b1220;margin-top:3px;letter-spacing:.02em;text-align:center;
-                        font-family:"Segoe Script","Bradley Hand","Snell Roundhand",
-                        "Brush Script MT","Comic Sans MS",cursive;
-                        transform:rotate(-3deg);transform-origin:center center;}
-                    /* Handwritten "Haraan" tucked under "partner", black. */
-                    .hrn-sidebar-brand{font-size:15px;margin-top:4px;}
-                    .dark .hrn-sidebar-tag{color:#e6e9ef;}
-                    @media (max-width:1023px){
-                        /* Mobile slide-out drawer: stack the header as a centred column so
-                           the logo sits nudged down from the top edge with "partner"
-                           centred directly beneath it (not crammed into the corner). The
-                           2nd handwritten "Haraan" is dropped on mobile. */
-                        /* Narrower slide-out drawer on mobile (default is the desktop
-                           sidebar width); the backdrop covers the rest. */
-                        .fi-sidebar{width:16rem!important;max-width:82vw!important;}
-                        /* Frost the page behind the open drawer. */
-                        .fi-sidebar-close-overlay{
-                            backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-                            background-color:rgba(15,23,42,.35)!important;}
-                        .hrn-sidebar-brand{display:none!important;}
-                        .fi-sidebar-header{flex-direction:column;align-items:center;
-                            justify-content:flex-start;height:auto;min-height:0;
-                            padding-top:2.5rem;padding-bottom:.85rem;row-gap:4px;}
-                        .fi-sidebar-header-logo-ctn{margin:0 auto;}
-                        .hrn-sidebar-tag{flex-basis:auto;margin-top:3px;text-align:center;
-                            transform:rotate(-3deg);transform-origin:center center;}
-                    }
-                </style>
-            BLADE),
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner' ? '' : view('filament.partner.topbar-brand')->render(),
         );
 
         // Branch switcher — the one control that turns a single-venue console into
@@ -230,44 +148,6 @@ class PartnerPanelProvider extends PanelProvider
                         @endforeach
                     </form>
                 </details>
-                <style>
-                    .hrn-branch{position:relative;margin-inline-start:.5rem;}
-                    .hrn-branch-btn{display:flex;align-items:center;gap:6px;cursor:pointer;
-                        list-style:none;padding:6px 10px;border-radius:10px;
-                        background:#f2f6fd;box-shadow:inset 0 0 0 1px #e2e9f5;
-                        font-size:13px;font-weight:600;color:#1e3a6b;max-width:15rem;}
-                    .hrn-branch-btn::-webkit-details-marker{display:none;}
-                    .hrn-branch-btn:hover{background:#e9f0fc;}
-                    .hrn-branch-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-                    .hrn-branch-pin{width:15px;height:15px;flex:none;opacity:.75;}
-                    .hrn-branch-chev{width:14px;height:14px;flex:none;opacity:.6;transition:transform .15s;}
-                    .hrn-branch[open] .hrn-branch-chev{transform:rotate(180deg);}
-                    .hrn-branch-menu{position:absolute;z-index:50;inset-inline-start:0;top:calc(100% + 6px);
-                        min-width:15rem;max-height:60vh;overflow-y:auto;padding:5px;
-                        background:#fff;border-radius:13px;
-                        box-shadow:0 10px 34px rgba(15,23,42,.16),0 0 0 1px #e9edf4;}
-                    .hrn-branch-item{display:flex;flex-direction:column;gap:1px;width:100%;
-                        padding:8px 10px;border-radius:9px;text-align:start;cursor:pointer;
-                        background:none;border:0;}
-                    .hrn-branch-item:hover{background:#f4f7fb;}
-                    .hrn-branch-item.is-on{background:#eef4ff;}
-                    .hrn-branch-item-name{font-size:13px;font-weight:600;color:#0b1220;}
-                    .hrn-branch-item-sub{font-size:11px;color:#6b7688;}
-                    .hrn-branch-rule{height:1px;margin:4px 6px;background:#eef1f6;}
-                    /* The switcher matters more than the mobile logo — keep it, and let
-                       the label shrink rather than push the topbar into a scroll. */
-                    @media (max-width:640px){
-                        .hrn-branch-btn{max-width:9rem;padding:6px 8px;}
-                        .hrn-branch-menu{min-width:13rem;}
-                    }
-                    .dark .hrn-branch-btn{background:#1c2432;box-shadow:inset 0 0 0 1px #2a3446;color:#dbe6fb;}
-                    .dark .hrn-branch-btn:hover{background:#222c3d;}
-                    .dark .hrn-branch-menu{background:#151b26;box-shadow:0 10px 34px rgba(0,0,0,.5),0 0 0 1px #2a3446;}
-                    .dark .hrn-branch-item:hover{background:#1c2432;}
-                    .dark .hrn-branch-item.is-on{background:#1d2a44;}
-                    .dark .hrn-branch-item-name{color:#eef2f8;}
-                    .dark .hrn-branch-item-sub{color:#9aa6b8;}
-                </style>
             BLADE),
         );
 
@@ -311,49 +191,6 @@ class PartnerPanelProvider extends PanelProvider
                         </button>
                     </form>
                 </div>
-                <style>
-                    /* ---- account card ---- */
-                    .hrn-acct{display:flex;align-items:center;gap:8px;margin:8px;padding:9px 10px;
-                        border-radius:13px;background:#f4f7fb;box-shadow:inset 0 0 0 1px #e9edf4;}
-                    .hrn-acct-link{display:flex;align-items:center;gap:10px;flex:1;min-width:0;
-                        text-decoration:none;border-radius:9px;}
-                    .hrn-acct-av{width:34px;height:34px;border-radius:50%;flex:none;display:flex;
-                        align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;
-                        letter-spacing:.02em;overflow:hidden;}
-                    .hrn-acct-av-img{object-fit:cover;display:block;}
-                    .hrn-acct-meta{min-width:0;flex:1;display:flex;flex-direction:column;line-height:1.2;}
-                    .hrn-acct-link:hover .hrn-acct-name{color:#1e50e6;}
-                    .dark .hrn-acct-link:hover .hrn-acct-name{color:#7fb0ff;}
-                    .hrn-acct-name{font-size:13px;font-weight:700;color:#0b1220;white-space:nowrap;
-                        overflow:hidden;text-overflow:ellipsis;}
-                    .hrn-acct-lane{font-size:11px;color:#7a8394;margin-top:1px;}
-                    .hrn-acct-form{margin:0;flex:none;}
-                    .hrn-acct-out{display:flex;align-items:center;justify-content:center;width:30px;height:30px;
-                        border-radius:9px;color:#9aa2b1;background:transparent;border:0;cursor:pointer;
-                        transition:background .15s,color .15s;}
-                    .hrn-acct-out:hover{background:#e7ebf2;color:#c2410c;}
-                    .hrn-acct-out svg{width:17px;height:17px;}
-                    .dark .hrn-acct{background:#141b28;box-shadow:inset 0 0 0 1px #1e2633;}
-                    .dark .hrn-acct-name{color:#eef1f6;} .dark .hrn-acct-lane{color:#8b94a5;}
-                    .dark .hrn-acct-out:hover{background:#1e2633;color:#fb923c;}
-
-                    /* ---- nav polish ---- */
-                    .fi-sidebar-nav .fi-sidebar-item-btn{padding-top:.5rem;padding-bottom:.5rem;border-radius:11px;}
-                    .fi-sidebar-nav .fi-sidebar-item-label{font-weight:500;}
-                    .fi-sidebar-nav .fi-sidebar-group-label{font-size:10.5px;letter-spacing:.09em;
-                        font-weight:700;text-transform:uppercase;opacity:.8;}
-                    /* accent-rail active state */
-                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn{position:relative;
-                        background:rgba(47,107,255,.11);font-weight:700;}
-                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn::before{content:"";position:absolute;
-                        inset-inline-start:5px;top:20%;bottom:20%;width:3px;border-radius:3px;
-                        background:linear-gradient(#3b82f6,#1e50e6);}
-                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-label{color:#1e50e6;font-weight:700;}
-                    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-icon{color:#1e50e6;}
-                    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn{background:rgba(59,130,246,.16);}
-                    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-label,
-                    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn .fi-sidebar-item-icon{color:#7fb0ff;}
-                </style>
             BLADE),
         );
 
@@ -383,95 +220,8 @@ class PartnerPanelProvider extends PanelProvider
                         </svg>
                         <span>{{ $label }}</span>
                     </a>
-                    <style>
-                        .hrn-create-cta{display:flex;align-items:center;justify-content:center;gap:8px;
-                            margin:0 8px 6px;padding:10px 14px;border-radius:12px;text-decoration:none;
-                            background:linear-gradient(180deg,#2f6bff,#1e50e6);color:#fff;
-                            font-size:13.5px;font-weight:600;letter-spacing:.01em;
-                            box-shadow:0 8px 18px -8px rgba(37,99,235,.6);transition:filter .15s,transform .05s;}
-                        .hrn-create-cta:hover{filter:brightness(1.06);}
-                        .hrn-create-cta:active{transform:translateY(1px);}
-                        .hrn-create-cta svg{width:17px;height:17px;}
-                    </style>
                 @endif
             BLADE),
-        );
-
-        // Dashboard: a compact, right-aligned period control. The control itself is
-        // the page's global filters form (one Select that drives every money widget);
-        // this hook only shrinks the full-width form field into a growezy-style pill.
-        // Scoped to the Dashboard page and guarded to the partner panel, so /control
-        // is never touched.
-        FilamentView::registerRenderHook(
-            PanelsRenderHook::PAGE_START,
-            function (): string {
-                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
-                    return '';
-                }
-
-                return Blade::render(<<<'BLADE'
-                    <style>
-                        /* Drop the redundant "Dashboard" page title so the hero command
-                           bar leads the page. (Partner dashboard only — this hook is
-                           scoped to it.) */
-                        .fi-header{display:none!important;}
-
-                        /* Shrink the page filters form into a compact, right-aligned
-                           period pill; it sits just under the hero card. */
-                        [wire\:partial="table-filters-form"]{display:flex;justify-content:flex-end;
-                            margin:.25rem 0 1.1rem;position:relative;z-index:1;}
-                        [wire\:partial="table-filters-form"] > *{width:auto;min-width:12rem;max-width:16rem;}
-                        [wire\:partial="table-filters-form"] .fi-fo-field-wrp-label{font-size:.7rem;
-                            text-transform:uppercase;letter-spacing:.08em;font-weight:800;
-                            color:#2f6bff;margin-bottom:5px;}
-                        /* Premium pill for the period selector: soft gradient, rounded,
-                           inset hairline that lifts to a brand-blue glow on hover. */
-                        [wire\:partial="table-filters-form"] .fi-input-wrp{border-radius:11px;
-                            background:linear-gradient(180deg,#ffffff,#f3f7ff);
-                            box-shadow:0 1px 2px rgba(11,18,32,.06),0 0 0 1px #dbe4f6 inset;
-                            transition:box-shadow .15s;}
-                        [wire\:partial="table-filters-form"] .fi-input-wrp:hover{
-                            box-shadow:0 3px 8px -2px rgba(47,107,255,.18),0 0 0 1px #b8ccf3 inset;}
-                        @media (max-width:640px){
-                            [wire\:partial="table-filters-form"]{justify-content:stretch;}
-                            [wire\:partial="table-filters-form"] > *{width:100%;max-width:none;}
-                        }
-                    </style>
-                BLADE);
-            },
-            scopes: \App\Filament\Pages\Dashboard::class,
-        );
-
-        // Mobile: tighten the whole partner console's vertical rhythm. Stock
-        // Filament leaves a 2rem gap between the header widgets (KPI cards) and
-        // the content below, another 2rem between page sections, and 1.5rem
-        // between widgets — which on a phone reads as big empty bands between
-        // the stats, the search bar and the list. Halve them (partner panel
-        // only, and only below the desktop breakpoint) so the screen feels
-        // dense and app-like without touching the desktop layout.
-        FilamentView::registerRenderHook(
-            PanelsRenderHook::PAGE_START,
-            function (): string {
-                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
-                    return '';
-                }
-
-                return Blade::render(<<<'BLADE'
-                    <style>
-                        @media (max-width:1023px){
-                            /* Gap between header widgets → table, and between page sections. */
-                            .fi-page-content{row-gap:.85rem;}
-                            .fi-page-main{gap:.85rem;}
-                            /* Gap between stacked widgets / KPI cards in a widget group. */
-                            .fi-wi{gap:.7rem;}
-                            /* Trim the KPI stat cards' own padding + oversized number. */
-                            .fi-wi-stats-overview-stat{padding:12px 13px 11px;}
-                            .fi-wi-stats-overview-stat-value{font-size:22px;margin-top:3px;}
-                            .fi-wi-stats-overview-stat-description{margin-top:6px;}
-                        }
-                    </style>
-                BLADE);
-            },
         );
 
         // Mobile: collapse the global search into a magnifier icon that sits beside the
@@ -487,31 +237,6 @@ class PartnerPanelProvider extends PanelProvider
                         <circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.2-4.2"/>
                     </svg>
                 </button>
-                <style>
-                    .hrn-search-btn{display:none;align-items:center;justify-content:center;
-                        width:2.25rem;height:2.25rem;border:0;background:transparent;color:inherit;
-                        cursor:pointer;border-radius:.6rem;padding:0;}
-                    .hrn-search-btn:hover{background:rgba(120,130,150,.14);}
-                    .hrn-search-btn svg{width:1.35rem;height:1.35rem;}
-                    @media (max-width:1023px){
-                        .fi-topbar-ctn{position:relative;}
-                        .hrn-search-btn{display:inline-flex;}
-                        /* Hide the inline search field until the icon opens it. */
-                        .fi-topbar .fi-global-search-ctn{display:none;}
-                        html.hrn-search-open .fi-topbar .fi-global-search-ctn{
-                            display:block;position:absolute;left:0;right:0;top:100%;z-index:40;
-                            padding:.6rem .8rem;
-                            background:var(--fi-color-white,#fff);
-                            border-top:1px solid rgba(120,130,150,.18);
-                            box-shadow:0 14px 26px -16px rgba(0,0,0,.4);}
-                        html.hrn-search-open .fi-topbar .fi-global-search-field .fi-input-wrp{width:100%;}
-                        html.hrn-search-open .hrn-search-btn{color:var(--fi-color-primary-600,#2563eb);}
-                    }
-                    @media (min-width:1024px){.hrn-search-btn{display:none!important;}}
-                    .dark html.hrn-search-open .fi-topbar .fi-global-search-ctn,
-                    :is(.dark) html.hrn-search-open .fi-topbar .fi-global-search-ctn{
-                        background:var(--fi-color-gray-900,#111722);border-top-color:rgba(120,130,150,.24);}
-                </style>
                 <script>
                     (function () {
                         if (window.hrnToggleSearch) return; // guard against SPA re-inits
@@ -545,16 +270,14 @@ class PartnerPanelProvider extends PanelProvider
             ->id('partner')
             ->path('partner')
             ->brandName('Haraan Partner')
-            // Blue wordmark for the partner console (matches the "+ Create event"
-            // CTA); /control keeps the navy mark via its own provider.
+            // The partner wordmark keeps its familiar public identity while the
+            // application shell uses the shared indigo interaction system.
             ->brandLogo(asset('images/haraan-logo-blue.png'))
             ->brandLogoHeight('2.2rem')
             // Square blue-H-on-white tile — the wide wordmark was illegible as a
             // 16px browser-tab icon.
             ->favicon(asset('favicon-192.png'))
-            // Same design system as /control — Inter + the compiled theme. The
-            // theme styles panel-agnostic fi-* hooks and follows each panel's own
-            // primary colour, so the blue lane stays blue.
+            // Shared type, surface, interaction and accessibility system.
             ->font('Inter')
             ->viteTheme('resources/css/filament/control/theme.css')
             ->login(PartnerLogin::class)
@@ -563,7 +286,9 @@ class PartnerPanelProvider extends PanelProvider
             // bare "simple" layout, which read like the panel had dropped away).
             ->profile(\App\Filament\Pages\Partner\PartnerProfile::class, isSimple: false)
             ->colors([
-                'primary' => Color::Blue,
+                // Keep interaction colour consistent with the control and
+                // employee workspaces; status green is never used as navigation.
+                'primary' => Color::Indigo,
             ])
             // Day theme only — no dark mode, so the profile menu's light/dark/system
             // switch disappears and the console always renders on the light palette.
@@ -582,6 +307,11 @@ class PartnerPanelProvider extends PanelProvider
                 \App\Filament\Pages\Partner\PartnerPublicProfile::class,
                 \App\Filament\Pages\Partner\PartnerSupport::class,
                 \App\Filament\Pages\Partner\PartnerNotifications::class,
+                \App\Filament\Pages\Partner\PartnerRosterPage::class,
+                \App\Filament\Pages\Partner\PartnerAttendancePage::class,
+                \App\Filament\Pages\Partner\PartnerTasksPage::class,
+                \App\Filament\Pages\Partner\PartnerLeaveApprovalPage::class,
+                \App\Filament\Pages\Partner\PartnerStaffAppraisalPage::class,
             ])
             ->widgets([
                 AccountWidget::class,

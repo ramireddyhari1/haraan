@@ -157,6 +157,44 @@ data class Overview(
     val trend: List<Double>,
 )
 
+/**
+ * Today, on this partner's courts — what `GET /api/partner/today` answers.
+ *
+ * Capacity counts CELLS (courts x slots), the same unit the desk grid draws, so
+ * "6 of 54" on Home and the grid can never tell different stories.
+ */
+data class ShiftBoard(
+    val dayLabel: String,
+    val slotsTotal: Int,
+    val slotsBooked: Int,
+    val slotsDone: Int,
+    val expected: Double,
+    val collected: Double,
+    val due: Double,
+    /** Owed across every date, not just today — the chase list doesn't reset at midnight. */
+    val chaseCount: Int,
+    val chaseAmount: Double,
+    val closed: List<String>,
+    val next: List<ShiftBooking>,
+) {
+    val occupancy: Float get() = if (slotsTotal <= 0) 0f else slotsBooked.toFloat() / slotsTotal
+
+    /** A day with no courts configured can't be reported as an empty one. */
+    val hasCapacity: Boolean get() = slotsTotal > 0
+}
+
+data class ShiftBooking(
+    val time: String,
+    val customer: String,
+    val venue: String,
+    val court: String,
+    val amount: Double,
+    val paid: Boolean,
+    val walkIn: Boolean,
+    /** On court right now — the row the desk cares about most. */
+    val running: Boolean,
+)
+
 data class EventSummary(
     val id: Long,
     val title: String,
@@ -195,11 +233,50 @@ data class BookingSummary(
     /** online | offline (walk-in). */
     val channel: String = "online",
     val paymentStatus: String = "paid",
+    /** What has actually been collected — a partly-settled booking is not owed in full. */
+    val amountPaid: Double = 0.0,
     /** cash | upi | card | online — null when no money was ever recorded. */
     val paymentMethod: String? = null,
     val slotDate: String? = null,
     val slotLabel: String? = null,
 )
+
+/**
+ * A game on one of the partner's courts.
+ *
+ * [source] is the honesty flag: `booking` means the match sits on a confirmed
+ * booking at this venue, `nearby` means only that its GPS landed here. The UI
+ * must keep the two apart — never sum them into one count.
+ */
+data class VenueMatch(
+    val id: Long,
+    val sport: String,
+    val title: String,
+    val home: String,
+    val away: String,
+    val score1: String,
+    val score2: String,
+    val overs: String,
+    /** Points inside the set being played — the set sports' answer to overs. */
+    val rally1: String,
+    val rally2: String,
+    val status: String,
+    val isLive: Boolean,
+    val isFinished: Boolean,
+    val startsAt: String?,
+    val time: String,
+    val typedVenue: String,
+    val venueName: String,
+    val branch: String,
+    val source: String,
+    /** Metres from the venue. Null for booking-linked matches, which need no guess. */
+    val distanceM: Int?,
+)
+
+data class VenueMatches(val confirmed: List<VenueMatch>, val nearby: List<VenueMatch>) {
+    val isEmpty: Boolean get() = confirmed.isEmpty() && nearby.isEmpty()
+    val liveCount: Int get() = confirmed.count { it.isLive }
+}
 
 /** Result of a scan-and-check-in. */
 data class CheckInResult(val status: String, val message: String)
@@ -253,9 +330,22 @@ data class CourtCell(
     val courtId: Long,
     val booked: Int,
     val isBooked: Boolean,
+    /**
+     * A player is on the payment screen for this court-hour right now. Not sold, and
+     * not free either — the server refuses a desk booking on top of it, so the cell
+     * has to say so rather than look Open and then throw an error at the tap.
+     */
+    val isHeld: Boolean = false,
     /** The rate this cell would actually charge — peak included. */
     val price: Double,
     val isPeak: Boolean = false,
+    /**
+     * Whether this court may be sold at this time at all: the slot runs for sports
+     * this court doesn't host, or vice versa. The server decides it (same rule the
+     * booking call enforces) so the grid can never offer a cell the API would 409.
+     * Defaults true so a build talking to an older server behaves as before.
+     */
+    val allowed: Boolean = true,
     val bookings: List<DayBooking>,
 )
 
@@ -268,6 +358,8 @@ data class DaySlot(
     val booked: Int,
     val available: Int,
     val isOpen: Boolean,
+    /** Sports this time runs for; empty = all of them. */
+    val sports: List<String> = emptyList(),
     val bookings: List<DayBooking>,
     val courts: List<CourtCell> = emptyList(),
 )
@@ -437,6 +529,8 @@ data class SlotEdit(
     val price: Double,
     val capacity: Int,
     val isOpen: Boolean,
+    /** Sports this time runs for; empty = all of them. */
+    val sports: List<String> = emptyList(),
 )
 
 /** Unified analytics payload for either an event or a venue. */
@@ -566,6 +660,44 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         )
     }
 
+    suspend fun today(token: String, venueId: Long? = null): ShiftBoard = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/today" + branchParam(venueId), token)).getJSONObject("data")
+        val capacity = o.getJSONObject("capacity")
+        val money = o.getJSONObject("money")
+        val chase = o.getJSONObject("chase")
+        val closedArr = o.optJSONArray("closed")
+        val nextArr = o.optJSONArray("next")
+
+        ShiftBoard(
+            dayLabel = o.optString("day_label", ""),
+            slotsTotal = capacity.optInt("total"),
+            slotsBooked = capacity.optInt("booked"),
+            slotsDone = capacity.optInt("done"),
+            expected = money.optDouble("expected", 0.0),
+            collected = money.optDouble("collected", 0.0),
+            due = money.optDouble("due", 0.0),
+            chaseCount = chase.optInt("count"),
+            chaseAmount = chase.optDouble("amount", 0.0),
+            closed = if (closedArr == null) emptyList() else (0 until closedArr.length()).mapNotNull {
+                closedArr.optJSONObject(it)?.optString("name")?.takeIf { n -> n.isNotBlank() }
+            },
+            next = if (nextArr == null) emptyList() else (0 until nextArr.length()).mapNotNull { i ->
+                nextArr.optJSONObject(i)?.let { b ->
+                    ShiftBooking(
+                        time = b.optString("time", ""),
+                        customer = b.optString("customer", "Guest"),
+                        venue = b.optString("venue", ""),
+                        court = b.optString("court", ""),
+                        amount = b.optDouble("amount", 0.0),
+                        paid = b.optBoolean("paid", false),
+                        walkIn = b.optBoolean("walk_in", false),
+                        running = b.optBoolean("running", false),
+                    )
+                }
+            },
+        )
+    }
+
     suspend fun events(token: String): List<EventSummary> = withContext(Dispatchers.IO) {
         parseArray(get("/api/partner/events", token)) { o ->
             EventSummary(
@@ -614,9 +746,47 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 customer = o.optString("customer", "Guest").ifBlank { "Guest" },
                 channel = o.optString("channel", "online"),
                 paymentStatus = o.optString("payment_status", "paid"),
+                amountPaid = o.optDouble("amount_paid", 0.0),
                 paymentMethod = o.optStringOrNull("payment_method"),
                 slotDate = o.optStringOrNull("slot_date"),
                 slotLabel = o.optStringOrNull("slot_label"),
+            )
+        }
+    }
+
+    suspend fun matches(token: String, venueId: Long? = null): VenueMatches = withContext(Dispatchers.IO) {
+        val data = JSONObject(get("/api/partner/matches" + branchParam(venueId), token)).optJSONObject("data")
+        VenueMatches(
+            confirmed = parseMatches(data?.optJSONArray("confirmed")),
+            nearby = parseMatches(data?.optJSONArray("nearby")),
+        )
+    }
+
+    private fun parseMatches(arr: JSONArray?): List<VenueMatch> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            VenueMatch(
+                id = o.optLong("id"),
+                sport = o.optString("sport", "cricket"),
+                title = o.optString("title", ""),
+                home = o.optString("home", ""),
+                away = o.optString("away", ""),
+                score1 = o.optString("score1", "0"),
+                score2 = o.optString("score2", "0"),
+                overs = o.optString("overs", ""),
+                rally1 = o.optString("rally1", ""),
+                rally2 = o.optString("rally2", ""),
+                status = o.optString("status", ""),
+                isLive = o.optBoolean("isLive"),
+                isFinished = o.optBoolean("isFinished"),
+                startsAt = o.optStringOrNull("startsAt"),
+                time = o.optString("time", ""),
+                typedVenue = o.optString("typedVenue", ""),
+                venueName = o.optString("venueName", ""),
+                branch = o.optString("branch", ""),
+                source = o.optString("source", "nearby"),
+                distanceM = if (o.isNull("distanceM")) null else o.optInt("distanceM"),
             )
         }
     }
@@ -684,8 +854,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     courtId = c.optLong("court_id"),
                     booked = c.optInt("booked"),
                     isBooked = c.optBoolean("is_booked", c.optInt("booked") > 0),
+                    isHeld = c.optBoolean("is_held", false),
                     price = c.optDouble("price", 0.0),
                     isPeak = c.optBoolean("is_peak", false),
+                    allowed = c.optBoolean("allowed", true),
                     bookings = parseDayBookings(c.optJSONArray("bookings")),
                 )
             }
@@ -698,6 +870,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 booked = s.optInt("booked"),
                 available = s.optInt("available"),
                 isOpen = s.optBoolean("is_open", true),
+                sports = s.optJSONArray("sports").toStringList(),
                 bookings = parseDayBookings(s.optJSONArray("bookings")),
                 courts = cells,
             )
@@ -758,6 +931,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 price = o.optDouble("price", 0.0),
                 capacity = o.optInt("capacity", 1),
                 isOpen = o.optBoolean("is_open", true),
+                sports = o.optJSONArray("sports").toStringList(),
             )
         }
     }
@@ -1088,9 +1262,22 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     }
 
     /** Create (slotId null) or update a slot. */
-    suspend fun saveSlot(token: String, venueId: Long, slotId: Long?, day: String?, time: String, price: Double, capacity: Int, isOpen: Boolean) = withContext(Dispatchers.IO) {
+    suspend fun saveSlot(
+        token: String,
+        venueId: Long,
+        slotId: Long?,
+        day: String?,
+        time: String,
+        price: Double,
+        capacity: Int,
+        isOpen: Boolean,
+        sports: List<String> = emptyList(),
+    ) = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("time", time).put("price", price).put("capacity", capacity).put("isOpen", isOpen)
+            // Always sent, because an empty list is a real answer — "this time runs
+            // for every sport" — and omitting the key means "leave it unchanged".
+            .put("sports", JSONArray(sports))
         if (!day.isNullOrBlank()) payload.put("day", day)
         val path = if (slotId == null) "/api/partner/venues/$venueId/slots" else "/api/partner/venues/$venueId/slots/$slotId"
         post(path, payload.toString(), token)

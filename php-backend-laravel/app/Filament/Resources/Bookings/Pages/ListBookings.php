@@ -26,6 +26,13 @@ class ListBookings extends ListRecords
         ];
     }
 
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            \App\Filament\Resources\Bookings\Widgets\BookingsExecutiveHeroWidget::class,
+        ];
+    }
+
     private function exportBookingsCsv(): StreamedResponse
     {
         AdminAction::log('bookings.exported');

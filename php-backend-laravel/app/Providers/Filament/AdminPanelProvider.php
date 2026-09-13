@@ -47,7 +47,8 @@ class AdminPanelProvider extends PanelProvider
             ->path('control')
             ->brandName('Haraan Control')
             ->brandLogo(asset('images/haraan-logo.png'))
-            ->brandLogoHeight('2.2rem')
+            ->darkModeBrandLogo(asset('images/haraan-logo-white.png'))
+            ->brandLogoHeight('1.875rem')
             ->favicon(asset('favicon-192.png'))
             // Inter across the whole panel — the single biggest lift from stock
             // Filament's system font. Compiled theme (viteTheme) carries the rest
@@ -62,33 +63,63 @@ class AdminPanelProvider extends PanelProvider
                     ->brandName('Haraan Control'),
             ])
             ->colors([
-                'primary' => Color::Green,
-                'gray' => Color::Slate,
+                // The console's indigo primary is shared with the partner and
+                // employee panels; green remains reserved for positive states.
+                'primary' => Color::Indigo,
+                'gray' => Color::Zinc,
+                'info' => Color::Blue,
+                'success' => Color::Emerald,
+                'warning' => Color::Amber,
+                'danger' => Color::Rose,
             ])
-            // Deliberate sidebar order with group icons. Without this Filament
-            // renders groups in discovery order (effectively random); a stable,
-            // labelled hierarchy is most of what makes a console read "organized".
-            // Day-to-day content up top; admin/plumbing collapsed at the bottom.
+            // Linear / Stripe tier-based information architecture:
+            // Core Operations (Events, Venues, Finance, Marketing) -> People & Directory ->
+            // Workforce/HRMS -> Collapsed Platform & Security infrastructure.
             ->navigationGroups([
+                NavigationGroup::make('Events')
+                    ->icon('heroicon-o-ticket'),
+                NavigationGroup::make('GameHub')
+                    ->icon('heroicon-o-building-storefront'),
+                NavigationGroup::make('Finance')
+                    ->icon('heroicon-o-banknotes'),
+                NavigationGroup::make('Marketing')
+                    ->icon('heroicon-o-megaphone'),
                 NavigationGroup::make('App Content')
-                    ->icon('heroicon-o-rectangle-group'),
+                    ->icon('heroicon-o-rectangle-stack'),
+                NavigationGroup::make('Support & Moderation')
+                    ->icon('heroicon-o-chat-bubble-left-right'),
                 NavigationGroup::make('People')
-                    ->icon('heroicon-o-users'),
+                    ->icon('heroicon-o-user-group'),
+                NavigationGroup::make('Workforce & HR')
+                    ->icon('heroicon-o-identification'),
                 NavigationGroup::make('Platform')
-                    ->icon('heroicon-o-cog-6-tooth')
+                    ->icon('heroicon-o-adjustments-horizontal')
                     ->collapsed(),
                 NavigationGroup::make('System')
-                    ->icon('heroicon-o-server-stack')
+                    ->icon('heroicon-o-shield-check')
                     ->collapsed(),
             ])
             ->sidebarCollapsibleOnDesktop()
+            ->sidebarWidth('20rem')
+            ->collapsedSidebarWidth('4.5rem')
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
-            ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
             ->pages([
                 Dashboard::class,
+                \App\Filament\Pages\CommandCenter::class,
+                \App\Filament\Pages\BrandingSettings::class,
+                \App\Filament\Pages\Cities::class,
+                \App\Filament\Pages\MessagingUsagePage::class,
+                \App\Filament\Pages\ServerStatus::class,
+                \App\Filament\Pages\WhatsAppConnection::class,
             ])
-            ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
+            ->widgets([
+                \App\Filament\Widgets\ActiveUsersTrendWidget::class,
+                \App\Filament\Widgets\ActiveUsersWidget::class,
+                \App\Filament\Widgets\HaraanStatsWidget::class,
+                \App\Filament\Widgets\LatestBookingsWidget::class,
+                \App\Filament\Widgets\RevenueOverviewWidget::class,
+            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
@@ -128,13 +159,6 @@ class AdminPanelProvider extends PanelProvider
                     \App\Filament\Resources\Events\Pages\CreateEvent::class,
                     \App\Filament\Resources\Events\Pages\EditEvent::class,
                 ],
-            )
-            // Haraan logo in the mobile topbar (the sidebar brand is hidden behind
-            // the hamburger below the lg breakpoint). The partial reveals itself
-            // only on mobile via CSS.
-            ->renderHook(
-                PanelsRenderHook::TOPBAR_START,
-                fn (): string => view('filament.topbar-brand')->render(),
             )
             // Sidebar footer identity card (who + role + quiet sign-out), the
             // control twin of the partner console's account card. Fills the

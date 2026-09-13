@@ -41,6 +41,9 @@ class LiveMatch extends Model
     public const VIS_FEATURED = 'FEATURED';
 
     protected $casts = [
+        // Written match analysis timestamp — without this it arrives as a raw string
+        // and every ->toIso8601String() on it is a 500.
+        'insights_at' => 'datetime',
         'probability' => 'array',
         'projected_score' => 'array',
         'batters' => 'array',

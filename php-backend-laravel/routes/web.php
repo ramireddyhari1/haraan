@@ -402,9 +402,20 @@ Route::middleware('erp.key')->group(function (): void {
         });
     });
 
-    // NOTE: the legacy Blade partner stub (partner/login, partner dashboard,
-    // password reset) has been retired — the /partner console is now the
-    // Filament PartnerPanelProvider, which owns /partner/login, password-reset
-    // and profile. Keeping the old Blade routes here shadowed the Filament
-    // panel's own login and 404'd it, so they are intentionally removed.
+    // HRMS Payslip printable view
+    Route::get('/payslips/{id}/print', function (int $id) {
+        $payroll = \App\Models\Hrms\EmployeePayroll::findOrFail($id);
+        $user = auth()->user();
+
+        if ($user->role === 'EMPLOYEE') {
+            abort_unless($user->employeeProfile && $payroll->employee_profile_id === $user->employeeProfile->id, 403, 'Unauthorized access to payslip.');
+        } elseif ($user->role === 'PARTNER') {
+            $effectivePartnerId = method_exists($user, 'effectivePartnerId') ? $user->effectivePartnerId() : $user->id;
+            abort_unless($payroll->employee?->partner_id === $effectivePartnerId, 403, 'Unauthorized access to venue payslip.');
+        }
+
+        $service = app(\App\Services\Hrms\PayrollCalculationService::class);
+        return response($service->generatePayslipHtml($payroll), 200, ['Content-Type' => 'text/html']);
+    })->middleware(['web', 'auth'])->name('payslip.print');
 });
+

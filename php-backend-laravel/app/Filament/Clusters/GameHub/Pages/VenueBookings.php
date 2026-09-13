@@ -31,7 +31,9 @@ class VenueBookings extends Page
 
     protected static ?string $navigationLabel = 'Day bookings';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 99;
+
+    protected static bool $shouldRegisterNavigation = false;
 
     protected string $view = 'filament.clusters.game-hub.venue-bookings';
 

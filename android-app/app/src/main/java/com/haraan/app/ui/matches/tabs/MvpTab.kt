@@ -2,10 +2,13 @@ package com.haraan.app.ui.matches.tabs
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.res.painterResource
+import com.haraan.app.R
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -962,12 +965,11 @@ private fun PlayerFace(
                 modifier = Modifier.fillMaxSize().clip(CircleShape)
             )
         } else {
-            Text(
-                initials(name),
-                color = accent,
-                fontSize = (size.value * 0.33f).sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 0.5.sp
+            Image(
+                painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
             )
         }
     }

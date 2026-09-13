@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Models\Concerns\BroadcastsContentChanges;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -33,23 +34,70 @@ final class VenueCourt extends Model
     ];
 
     protected $fillable = [
-        'venue_id', 'name', 'seats', 'kind', 'sports', 'price', 'sort_order', 'is_active',
-        'peak_price', 'peak_days', 'peak_start', 'peak_end',
+        'venue_id', 'parent_court_id', 'is_composite', 'split_type', 'partition_label',
+        'allow_simultaneous_booking', 'name', 'seats', 'kind', 'sports', 'price',
+        'sort_order', 'is_active', 'peak_price', 'peak_days', 'peak_start', 'peak_end',
     ];
 
     protected $casts = [
-        'sports'    => 'array',
-        'seats'     => 'integer',
-        'price'     => 'integer',
-        'peak_price' => 'integer',
-        'peak_days' => 'array',
-        'sort_order' => 'integer',
-        'is_active' => 'boolean',
+        'parent_court_id' => 'integer',
+        'is_composite'    => 'boolean',
+        'allow_simultaneous_booking' => 'boolean',
+        'sports'          => 'array',
+        'seats'           => 'integer',
+        'price'           => 'integer',
+        'peak_price'      => 'integer',
+        'peak_days'       => 'array',
+        'sort_order'      => 'integer',
+        'is_active'       => 'boolean',
     ];
 
     public function venue(): BelongsTo
     {
         return $this->belongsTo(Venue::class);
+    }
+
+    public function parentCourt(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_court_id');
+    }
+
+    public function childCourts(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_court_id');
+    }
+
+    public function pricingRules(): HasMany
+    {
+        return $this->hasMany(PricingRule::class, 'venue_court_id');
+    }
+
+    public function isParent(): bool
+    {
+        return $this->is_composite || $this->childCourts()->exists();
+    }
+
+    public function isChild(): bool
+    {
+        return $this->parent_court_id !== null;
+    }
+
+    /**
+     * All court IDs related by split/merge hierarchy (self, parent, children).
+     *
+     * @return list<int>
+     */
+    public function allRelatedCourtIds(): array
+    {
+        $ids = [(int) $this->id];
+        if ($this->parent_court_id !== null) {
+            $ids[] = (int) $this->parent_court_id;
+        }
+        foreach ($this->childCourts()->pluck('id')->all() as $childId) {
+            $ids[] = (int) $childId;
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /**
@@ -154,16 +202,36 @@ final class VenueCourt extends Model
     }
 
     /**
-     * The effective hourly rate for a booking: peak price when it applies, else this court's
-     * base price, falling back to the supplied venue price when the court sets none.
+     * The effective hourly rate for a booking: dynamic pricing rules take top precedence,
+     * falling back to peak price when applicable, else this court's base price or venue default.
      */
     public function rateFor(Carbon $date, ?string $time, int $venuePrice): int
     {
+        $baseRate = (float) ($this->price ?? $venuePrice);
+
+        // Check active pricing rules for this court or venue-wide
+        $rules = PricingRule::where('venue_id', $this->venue_id)
+            ->where(function ($q) {
+                $q->where('venue_court_id', $this->id)
+                  ->orWhereNull('venue_court_id');
+            })
+            ->where('is_active', true)
+            ->orderBy('priority', 'desc')
+            ->orderByRaw('CASE WHEN venue_court_id IS NOT NULL THEN 0 ELSE 1 END')
+            ->orderBy('id', 'desc')
+            ->get();
+
+        foreach ($rules as $rule) {
+            if ($rule->matches($date, $time)) {
+                return (int) round($rule->applyTo($baseRate));
+            }
+        }
+
         if ($this->isPeak($date, $time)) {
             return (int) $this->peak_price;
         }
 
-        return (int) ($this->price ?? $venuePrice);
+        return (int) $baseRate;
     }
 
     /** Parse a time label ("7:00 PM", "19:00") to minutes-from-midnight, or null. */

@@ -34,5 +34,8 @@ class DatabaseSeeder extends Seeder
 
         // Register the WhatsApp templates the code sends (drafts until Meta approves).
         $this->call(MessageTemplateSeeder::class);
+
+        // HRMS initial workforce, shifts, leaves, and demo employees
+        $this->call(HrmsSeeder::class);
     }
 }

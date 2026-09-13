@@ -2,15 +2,20 @@ package com.haraan.partner
 
 import android.content.Context
 import android.content.Intent
+import com.haraan.partner.daybookings.ui.DayBookingsScreen
+import com.haraan.partner.register.ui.ShiftRegisterScreen
+import com.haraan.partner.register.data.ShiftLocalDataSource
+import com.haraan.partner.register.data.ShiftRepository
+import com.haraan.partner.register.viewmodel.ShiftViewModel
 import androidx.core.content.FileProvider
 import java.io.File
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box as LayoutBox
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
@@ -23,6 +28,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -39,12 +47,15 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.CurrencyRupee
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Notifications
@@ -73,9 +84,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -112,8 +120,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import android.net.Uri
@@ -159,6 +167,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
+import com.haraan.partner.ui.drawer.HaraanPartnerDrawer
 
 private sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
@@ -168,15 +177,17 @@ private sealed interface UiState<out T> {
 
 @Composable
 fun PartnerApp() {
-    val context = LocalContext.current
-    val session = remember { Session(context) }
-    val api = remember { PartnerApi() }
-    var signedIn by remember { mutableStateOf(session.isSignedIn) }
+    com.haraan.partner.ui.theme.HaraanTheme {
+        val context = LocalContext.current
+        val session = remember { Session(context) }
+        val api = remember { PartnerApi() }
+        var signedIn by remember { mutableStateOf(session.isSignedIn) }
 
-    if (!signedIn) {
-        LoginScreen(api = api, session = session, onSignedIn = { signedIn = true })
-    } else {
-        HomeScaffold(api = api, session = session, onSignedOut = { signedIn = false })
+        if (!signedIn) {
+            LoginScreen(api = api, session = session, onSignedIn = { signedIn = true })
+        } else {
+            HomeScaffold(api = api, session = session, onSignedOut = { signedIn = false })
+        }
     }
 }
 
@@ -194,6 +205,7 @@ private val AuthInk = Color(0xFF0F172A)
 private val AuthMuted = Color(0xFF64748B)
 private val CardBorder = Color(0x0F0F172A)
 private val Hairline = Color(0x140F172A)
+private val NavIdle = Color(0xFF94A3B8)
 
 /** The one premium card surface used across every screen: soft lifted shadow,
  *  white fill, hairline border, consistent radius. Keeps the whole app coherent. */
@@ -843,7 +855,7 @@ private fun GradientCta(
 
 // ---- Home scaffold + tabs ----------------------------------------------
 
-private enum class Tab(val label: String) { Home("Home"), Events("Events"), Venues("Venues"), Sales("Sales"), Scan("Scan") }
+internal enum class Tab(val label: String) { Home("Home"), Events("Events"), Venues("Venues"), Matches("Matches"), Sales("Sales"), Scan("Scan") }
 
 /**
  * Which console the signed-in partner belongs to. Drives the whole shell.
@@ -852,9 +864,9 @@ private enum class Tab(val label: String) { Home("Home"), Events("Events"), Venu
  * and turf language is looking at somebody else's business — the two share their
  * booking arithmetic, but not their vocabulary and not their tabs.
  */
-private enum class Lane { EVENT, VENUE, CAFE, BOTH }
+internal enum class Lane { EVENT, VENUE, CAFE, BOTH }
 
-private fun laneOf(partnerType: String?): Lane = when (partnerType?.lowercase()) {
+internal fun laneOf(partnerType: String?): Lane = when (partnerType?.lowercase()) {
     "event", "host", "organiser", "organizer" -> Lane.EVENT
     "venue" -> Lane.VENUE
     "cafe", "café" -> Lane.CAFE
@@ -880,6 +892,11 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showNotifications by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
     var showStaff by remember { mutableStateOf(false) }
+    var showShiftRegister by remember { mutableStateOf(false) }
+    var showStandingSlots by remember { mutableStateOf(false) }
+    var showPricingMatrix by remember { mutableStateOf(false) }
+    var showWhatsAppDesk by remember { mutableStateOf(false) }
+    var showOperationsCenter by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
     if (showNotifications) {
@@ -938,18 +955,119 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             session.branchId = null
         }
     }
+
+    if (showShiftRegister) {
+        val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
+            ?: ctx?.branches?.firstOrNull()
+        val venueId = targetVenue?.id ?: 1L
+        val context = LocalContext.current
+        val localDs = remember { ShiftLocalDataSource(context) }
+        val repo = remember { ShiftRepository(localDs) }
+        val shiftVm = remember { ShiftViewModel(repo, token) }
+        ShiftRegisterScreen(
+            viewModel = shiftVm,
+            venueId = venueId,
+            onNavigateBack = { showShiftRegister = false }
+        )
+        return
+    }
+
+    if (showStandingSlots) {
+        val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
+            ?: ctx?.branches?.firstOrNull()
+        val venueId = targetVenue?.id ?: 1L
+        val context = LocalContext.current
+        val localDs = remember { com.haraan.partner.recurring.data.RecurringLocalDataSource(context) }
+        val repo = remember { com.haraan.partner.recurring.data.RecurringRepository(localDs) }
+        val recurringVm = remember { com.haraan.partner.recurring.viewmodel.StandingContractViewModel(repo, token) }
+        val courts = remember(targetVenue) {
+            listOf(1L to "Court 1", 2L to "Court 2", 3L to "Court 3")
+        }
+        com.haraan.partner.recurring.ui.StandingSlotsMasterScreen(
+            viewModel = recurringVm,
+            venueId = venueId,
+            availableCourts = courts,
+            onNavigateBack = { showStandingSlots = false }
+        )
+        return
+    }
+
+    if (showPricingMatrix) {
+        val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
+            ?: ctx?.branches?.firstOrNull()
+        val venueId = targetVenue?.id ?: 1L
+        val context = LocalContext.current
+        val localDs = remember { com.haraan.partner.pricing.data.PricingLocalDataSource(context) }
+        val repo = remember { com.haraan.partner.pricing.data.PricingRepository(localDs) }
+        val pricingVm = remember { com.haraan.partner.pricing.viewmodel.PricingMatrixViewModel(repo, token) }
+        val courts = remember(targetVenue) {
+            listOf(1L to "Court 1", 2L to "Court 2", 3L to "Court 3")
+        }
+        com.haraan.partner.pricing.ui.PricingMatrixDashboard(
+            viewModel = pricingVm,
+            venueId = venueId,
+            availableCourts = courts,
+            onNavigateBack = { showPricingMatrix = false }
+        )
+        return
+    }
+
+    if (showWhatsAppDesk) {
+        val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
+            ?: ctx?.branches?.firstOrNull()
+        val venueId = targetVenue?.id ?: 1L
+        val context = LocalContext.current
+        val localDs = remember { com.haraan.partner.whatsapp.data.WhatsAppLocalDataSource(context) }
+        val remoteDs = remember { com.haraan.partner.whatsapp.data.WhatsAppRemoteDataSource() }
+        val repo = remember { com.haraan.partner.whatsapp.data.WhatsAppRepository(remoteDs, localDs) }
+        val whatsappVm = remember { com.haraan.partner.whatsapp.viewmodel.WhatsAppDeskViewModel(repo, token) }
+        com.haraan.partner.whatsapp.ui.WhatsAppDeskDashboard(
+            viewModel = whatsappVm,
+            venueId = venueId,
+            onNavigateBack = { showWhatsAppDesk = false }
+        )
+        return
+    }
+
+    if (showOperationsCenter) {
+        val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
+            ?: ctx?.branches?.firstOrNull()
+        val venueId = targetVenue?.id ?: 1L
+        val context = LocalContext.current
+        val localDs = remember { com.haraan.partner.operations.data.OperationsLocalDataSource(context) }
+        val remoteDs = remember { com.haraan.partner.operations.data.OperationsRemoteDataSource() }
+        val repo = remember { com.haraan.partner.operations.data.OperationsRepository(remoteDs, localDs) }
+        val opsVm = remember { com.haraan.partner.operations.viewmodel.OwnerOperationsViewModel(repo, token) }
+        com.haraan.partner.operations.ui.OwnerOperationsDashboard(
+            viewModel = opsVm,
+            venueId = venueId,
+            onNavigateBack = { showOperationsCenter = false }
+        )
+        return
+    }
     val tabs = remember(lane) {
         buildList {
             add(Tab.Home)
             if (lane != Lane.VENUE) add(Tab.Events)
             if (lane != Lane.EVENT) add(Tab.Venues)
+            // Games on the turf. A venue's bar has the room for a fifth; the
+            // combined lane's does not, so it reaches Matches from the drawer
+            // instead. A café has no pitch and an event host has no venue, so
+            // neither lane is offered it at all.
+            if (lane == Lane.VENUE) add(Tab.Matches)
             add(Tab.Sales)
             add(Tab.Scan)
         }
     }
+    // What the drawer lists. The drawer is the index, so a destination the bar
+    // couldn't fit still has to appear here.
+    val navTabs = remember(tabs, lane) {
+        if (lane != Lane.BOTH) tabs
+        else tabs.toMutableList().apply { add(indexOf(Tab.Venues) + 1, Tab.Matches) }
+    }
     var tab by remember { mutableStateOf(Tab.Home) }
     // If the lane resolves and the current tab is no longer valid, fall back Home.
-    LaunchedEffect(tabs) { if (tab !in tabs) tab = Tab.Home }
+    LaunchedEffect(navTabs) { if (tab !in navTabs) tab = Tab.Home }
 
     // Live booking alerts (Part A — works with no push infra): while the app is
     // open, poll for bookings and surface anything newer than we've already shown
@@ -1019,7 +1137,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 session = session,
                 ctx = ctx,
                 lane = lane,
-                tabs = tabs,
+                tabs = navTabs,
                 current = tab,
                 branchId = branchId,
                 onTab = { picked -> tab = picked; closeDrawer() },
@@ -1034,6 +1152,11 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 onPayouts = if (session.can("reports")) ({ showPayouts = true; closeDrawer() }) else null,
                 onReports = if (session.can("reports")) ({ showReports = true; closeDrawer() }) else null,
                 onAcademy = if (session.can("pricing")) ({ showAcademy = true; closeDrawer() }) else null,
+                onShiftRegister = if (lane == Lane.VENUE || lane == Lane.CAFE) ({ showShiftRegister = true; closeDrawer() }) else null,
+                onStandingSlots = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showStandingSlots = true; closeDrawer() }) else null,
+                onPricingMatrix = if ((lane == Lane.VENUE || lane == Lane.BOTH) && session.can("pricing")) ({ showPricingMatrix = true; closeDrawer() }) else null,
+                onWhatsAppDesk = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showWhatsAppDesk = true; closeDrawer() }) else null,
+                onOperationsCenter = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showOperationsCenter = true; closeDrawer() }) else null,
                 onNotifications = { showNotifications = true; closeDrawer() },
                 onSupport = { showSupport = true; closeDrawer() },
                 onSignOut = { session.clear(); onSignedOut() },
@@ -1086,44 +1209,15 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             )
         },
         bottomBar = {
-            // Material3's defaults were leaking through here: the container took the
-            // lavender surface tint and the selected label picked up `secondary`
-            // (teal), neither of which is in this app's palette. Everything is
-            // stated explicitly so the bar matches the white topbar and blue accent.
-            Column {
-                HorizontalDivider(color = Hairline)
-                NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
-                    tabs.forEach { t ->
-                        val label = labelFor(t, lane)
-                        val isOn = tab == t
-                        NavigationBarItem(
-                            selected = isOn,
-                            onClick = {
-                                if (!isOn) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                tab = t
-                            },
-                            icon = {
-                                Icon(iconFor(t), contentDescription = label, modifier = Modifier.size(21.dp))
-                            },
-                            label = {
-                                Text(
-                                    label,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isOn) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                )
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = AuthAccentDeep,
-                                selectedTextColor = AuthAccentDeep,
-                                indicatorColor = Color(0x1F2F6BFF),
-                                unselectedIconColor = Color(0xFF94A3B8),
-                                unselectedTextColor = Color(0xFF94A3B8),
-                            ),
-                        )
-                    }
-                }
-            }
+            HaraanBottomBar(
+                items = tabs.map { navItemFor(it, lane) },
+                selectedKey = tab.name,
+                onSelect = { key -> tab = Tab.valueOf(key) },
+                accent = AuthAccentDeep,
+                idle = NavIdle,
+                container = Color.White,
+                hairline = Hairline,
+            )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -1131,12 +1225,12 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 BookingBanner(msg) { bookingBanner = null; tab = Tab.Sales; unseenBookings = 0 }
             }
             when (tab) {
+                // Customers, Packages, Academy and Payouts are reached from the
+                // drawer, which already lists every one of them — Home no longer
+                // repeats that list as four cards.
                 Tab.Home -> HomeTab(
                     api, token, session.name ?: "Partner", lane, branchId,
-                    onPayouts = if (session.can("reports")) ({ showPayouts = true }) else null,
-                    onCustomers = { showCustomers = true },
-                    onPackages = if (session.can("pricing")) ({ showPackages = true }) else null,
-                    onAcademy = if (session.can("pricing")) ({ showAcademy = true }) else null,
+                    onBookings = { tab = Tab.Sales; unseenBookings = 0 },
                 ) { serverType ->
                     if (serverType != null) {
                         session.partnerType = serverType
@@ -1149,7 +1243,34 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 Tab.Venues -> VenuesTab(api, token) { id, name ->
                     manageVenue = id to name
                 }
-                Tab.Sales -> SalesTab(api, token, branchId)
+                Tab.Matches -> MatchesTab(api, token, branchId)
+                Tab.Sales -> {
+                    if (lane == Lane.VENUE || lane == Lane.CAFE) {
+                        val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
+                            ?: ctx?.branches?.firstOrNull()
+                        if (targetVenue != null) {
+                            DayBookingsScreen(
+                                api = api,
+                                token = token,
+                                venueId = targetVenue.id,
+                                venueName = targetVenue.name.ifBlank { targetVenue.branch },
+                                onBack = { tab = Tab.Home },
+                                canPricing = session.can("pricing"),
+                                canBookings = session.can("bookings"),
+                                onPricing = {
+                                    manageVenue = targetVenue.id to (targetVenue.name.ifBlank { targetVenue.branch })
+                                },
+                                onAnalytics = {
+                                    detail = AnalyticsTarget(AnalyticsKind.Venue, targetVenue.id, targetVenue.name.ifBlank { targetVenue.branch })
+                                },
+                            )
+                        } else {
+                            SalesTab(api, token, branchId)
+                        }
+                    } else {
+                        SalesTab(api, token, branchId)
+                    }
+                }
                 Tab.Scan -> ScanTab(api, token)
             }
         }
@@ -1185,95 +1306,40 @@ private fun PartnerDrawer(
     onPayouts: (() -> Unit)?,
     onReports: (() -> Unit)?,
     onAcademy: (() -> Unit)?,
+    onShiftRegister: (() -> Unit)? = null,
+    onStandingSlots: (() -> Unit)? = null,
+    onPricingMatrix: (() -> Unit)? = null,
+    onWhatsAppDesk: (() -> Unit)? = null,
+    onOperationsCenter: (() -> Unit)? = null,
     onNotifications: () -> Unit,
     onSupport: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    ModalDrawerSheet(
-        drawerContainerColor = Color.White,
-        drawerShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
-        // The sheet's own status-bar inset is dropped so the navy identity block
-        // can run under the clock; the header re-applies it to its text.
-        windowInsets = WindowInsets(0, 0, 0, 0),
-        modifier = Modifier.widthIn(max = 320.dp),
-    ) {
-        Column(Modifier.fillMaxHeight()) {
-            DrawerHeader(session, ctx)
-
-            Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    // Bottom room so the last row can scroll clear of the pinned
-                    // Sign out strip instead of sitting under it.
-                    .padding(top = 6.dp, bottom = 18.dp),
-            ) {
-                DrawerSection("Go to")
-                tabs.forEach { t ->
-                    DrawerRow(
-                        icon = iconFor(t),
-                        label = labelFor(t, lane),
-                        selected = t == current,
-                        onClick = { onTab(t) },
-                    )
-                }
-
-                val tools = listOfNotNull(
-                    Triple(Icons.Filled.People, "Customers", onCustomers),
-                    onPackages?.let { Triple(Icons.Filled.ConfirmationNumber, "Packages", it) },
-                    onAcademy?.let { Triple(Icons.Filled.School, "Academy", it) },
-                    onStaff?.let { Triple(Icons.Filled.Badge, "Staff", it) },
-                    onPayouts?.let { Triple(Icons.Filled.Payments, "Payouts", it) },
-                    onReports?.let { Triple(Icons.Filled.Description, "Reports", it) },
-                )
-                if (tools.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
-                    DrawerSection("Manage")
-                    tools.forEach { (icon, label, action) ->
-                        DrawerRow(icon = icon, label = label, selected = false, onClick = action)
-                    }
-                }
-
-                Spacer(Modifier.height(2.dp))
-                DrawerSection("Account")
-                DrawerRow(icon = Icons.Filled.Notifications, label = "Notifications", selected = false, onClick = onNotifications)
-                DrawerRow(icon = Icons.AutoMirrored.Filled.HelpOutline, label = "Support", selected = false, onClick = onSupport)
-
-                // Only a partner who actually runs several outlets gets a branch
-                // band; a single-venue account sees the drawer it always had.
-                ctx?.takeIf { it.isMultiBranch }?.let { known ->
-                    Spacer(Modifier.height(6.dp))
-                    DrawerSection("Branch")
-                    DrawerRow(
-                        icon = Icons.Filled.Place,
-                        label = "All branches",
-                        selected = branchId == null,
-                        trailing = { if (branchId == null) DrawerTick() },
-                        onClick = { onBranch(null) },
-                    )
-                    known.branches.forEach { b ->
-                        DrawerRow(
-                            icon = Icons.Filled.Place,
-                            label = b.branch,
-                            selected = branchId == b.id,
-                            trailing = { if (branchId == b.id) DrawerTick() },
-                            onClick = { onBranch(b.id) },
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(color = Hairline)
-            DrawerRow(
-                icon = Icons.AutoMirrored.Filled.Logout,
-                label = "Sign out",
-                selected = false,
-                tint = RED,
-                onClick = onSignOut,
-            )
-            Spacer(Modifier.height(6.dp).navigationBarsPadding())
-        }
-    }
+    HaraanPartnerDrawer(
+        session = session,
+        ctx = ctx,
+        lane = lane,
+        tabs = tabs,
+        current = current,
+        branchId = branchId,
+        onTab = onTab,
+        onBranch = onBranch,
+        onCustomers = onCustomers,
+        onPackages = onPackages,
+        onStaff = onStaff,
+        onPayouts = onPayouts,
+        onReports = onReports,
+        onAcademy = onAcademy,
+        onShiftRegister = onShiftRegister,
+        onStandingSlots = onStandingSlots,
+        onPricingMatrix = onPricingMatrix,
+        onWhatsAppDesk = onWhatsAppDesk,
+        onOperationsCenter = onOperationsCenter,
+        onNotifications = onNotifications,
+        onSupport = onSupport,
+        onSettings = onNotifications,
+        onSignOut = onSignOut,
+    )
 }
 
 /** Navy identity block: who is signed in, and at what altitude. */
@@ -1345,7 +1411,7 @@ private fun DrawerHeader(session: Session, ctx: PartnerContext?) {
 }
 
 /** Reads the partner's altitude for the header chip. Owners see "Owner". */
-private fun altitudeLabel(session: Session, ctx: PartnerContext?): String = when {
+internal fun altitudeLabel(session: Session, ctx: PartnerContext?): String = when {
     ctx?.altitude == "desk" || session.isDesk -> "Desk"
     ctx?.altitude == "manager" -> "Manager"
     else -> "Owner"
@@ -1530,12 +1596,29 @@ private fun BranchMenuRow(name: String, sub: String, isOn: Boolean) {
     }
 }
 
-private fun iconFor(tab: Tab) = when (tab) {
+internal fun iconFor(tab: Tab) = when (tab) {
     Tab.Home -> Icons.Filled.Home
+    Tab.Matches -> Icons.Filled.Flag
     Tab.Events -> Icons.Filled.CalendarMonth
     Tab.Venues -> Icons.Filled.Place
     Tab.Sales -> Icons.Filled.Payments
     Tab.Scan -> Icons.Filled.QrCodeScanner
+}
+
+/**
+ * The bottom bar's version of a tab: both glyph states plus the lane's word for
+ * it. Kept apart from [iconFor], which still feeds the drawer's Material rows.
+ */
+private fun navItemFor(tab: Tab, lane: Lane): HaraanNavItem {
+    val (outline, active) = when (tab) {
+        Tab.Home -> HaraanNavIcons.HomeOutline to HaraanNavIcons.HomeActive
+        Tab.Events -> HaraanNavIcons.CalendarOutline to HaraanNavIcons.CalendarActive
+        Tab.Venues -> HaraanNavIcons.PinOutline to HaraanNavIcons.PinActive
+        Tab.Matches -> HaraanNavIcons.FlagOutline to HaraanNavIcons.FlagActive
+        Tab.Sales -> HaraanNavIcons.ReceiptOutline to HaraanNavIcons.ReceiptActive
+        Tab.Scan -> HaraanNavIcons.ScanOutline to HaraanNavIcons.ScanActive
+    }
+    return HaraanNavItem(tab.name, labelFor(tab, lane), outline, active)
 }
 
 /**
@@ -1545,7 +1628,7 @@ private fun iconFor(tab: Tab) = when (tab) {
  * where a turf lists "Venues". The tab SET is already right for a café — it
  * keeps Events, which a sports venue doesn't get — so only the words change.
  */
-private fun labelFor(tab: Tab, lane: Lane): String = when {
+internal fun labelFor(tab: Tab, lane: Lane): String = when {
     tab == Tab.Sales && (lane == Lane.VENUE || lane == Lane.CAFE) -> "Bookings"
     tab == Tab.Venues && lane == Lane.CAFE -> "Outlets"
     else -> tab.label
@@ -1580,72 +1663,345 @@ private fun <T> RefreshableContent(key: Any?, load: suspend () -> T, content: @C
 private data class Tile(val icon: ImageVector, val label: String, val value: String, val hint: String)
 
 @Composable
-private fun HomeTab(api: PartnerApi, token: String, name: String, lane: Lane, venueId: Long? = null, onPayouts: (() -> Unit)? = null, onCustomers: (() -> Unit)? = null, onPackages: (() -> Unit)? = null, onAcademy: (() -> Unit)? = null, onLane: (String?) -> Unit) {
-    // The branch is part of the key, so picking one reloads rather than leaving
-    // the previous outlet's numbers under a new title.
-    RefreshableContent(token to venueId, load = { api.overview(token, venueId) }) { o ->
-        // Report the server's authoritative type up so the tab bar matches.
+private fun HomeTab(
+    api: PartnerApi,
+    token: String,
+    name: String,
+    lane: Lane,
+    venueId: Long? = null,
+    onBookings: () -> Unit,
+    onLane: (String?) -> Unit,
+) {
+    // Home is a shift board now, not a dashboard.
+    //
+    // It used to open on all-time revenue, then a strip counting how many venues
+    // the owner has, then four navigation rows that all exist in the drawer. None
+    // of it answers the question somebody opens this app between customers to
+    // ask: what is happening on my courts today, and who owes me money. Today's
+    // sheet leads; the money that took years to earn sits underneath it.
+    val branch = venueId
+    // Two calls, fetched together: the day's sheet and the long view. Run one
+    // after the other they double the wait on a phone at a turf gate.
+    RefreshableContent(
+        token to branch,
+        load = {
+            coroutineScope {
+                val overview = async { api.overview(token, branch) }
+                val sheet = async { api.today(token, branch) }
+                overview.await() to sheet.await()
+            }
+        },
+    ) { (o, day) ->
         LaunchedEffect(o.type) { onLane(o.type) }
-        // If the server knows a more specific lane than the cached one, honour it.
-        val effective = if (o.type != null) laneOf(o.type) else lane
-        val subtitle = when (effective) {
-            Lane.EVENT -> "Event host"
-            Lane.VENUE -> "Sports venue"
-            Lane.CAFE -> "Café venue"
-            Lane.BOTH -> "Partner"
-        }
-        val tiles = when (effective) {
-            Lane.EVENT -> listOf(
-                Tile(Icons.Filled.ConfirmationNumber, "Events", o.eventsTotal.toString(), "${o.eventsUpcoming} upcoming"),
-                Tile(Icons.Filled.ConfirmationNumber, "Tickets", o.ticketsSold.toString(), "sold all-time"),
-                Tile(Icons.Filled.Today, "Today", o.bookingsToday.toString(), "bookings today"),
-                Tile(Icons.Filled.Close, "Cancelled", o.cancelled.toString(), "all-time"),
-            )
-            Lane.VENUE -> listOf(
-                Tile(Icons.Filled.Place, "Venues", o.venuesTotal.toString(), "turfs & spaces"),
-                Tile(Icons.Filled.ConfirmationNumber, "Bookings", o.bookingsTotal.toString(), "all-time"),
-                Tile(Icons.Filled.Today, "Today", o.bookingsToday.toString(), "bookings today"),
-            )
-            // A café counts outlets and the nights it hosts — never "turfs".
-            // Events are here and absent from the sports tiles above, which is
-            // the difference between the two lanes in one glance.
-            Lane.CAFE -> listOf(
-                Tile(Icons.Filled.Place, "Outlets", o.venuesTotal.toString(), "cafés & spaces"),
-                Tile(Icons.Filled.ConfirmationNumber, "Events", o.eventsTotal.toString(), "${o.eventsUpcoming} upcoming"),
-                Tile(Icons.Filled.Today, "Today", o.bookingsToday.toString(), "bookings today"),
-                Tile(Icons.Filled.ConfirmationNumber, "Bookings", o.bookingsTotal.toString(), "all-time"),
-            )
-            Lane.BOTH -> listOf(
-                Tile(Icons.Filled.ConfirmationNumber, "Events", o.eventsTotal.toString(), "${o.eventsUpcoming} upcoming"),
-                Tile(Icons.Filled.Place, "Venues", o.venuesTotal.toString(), "turfs & spaces"),
-                Tile(Icons.Filled.Today, "Today", o.bookingsToday.toString(), "bookings today"),
-                Tile(Icons.Filled.ConfirmationNumber, "Bookings", o.bookingsTotal.toString(), "all-time"),
-            )
-        }
 
         LazyColumn(
             Modifier.fillMaxSize().background(AuthPageBg).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 12.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 12.dp, bottom = 28.dp),
         ) {
-            item { GreetingHeader(name, subtitle) }
-            item { RevenueHero(o) }
-            item { StatStrip(tiles) }
-            if (onCustomers != null) {
-                item { CustomersEntryCard(onCustomers) }
+            item { ShiftGreeting(name) }
+            item { ShiftHero(day) }
+            if (day.chaseCount > 0) {
+                item { ChaseStrip(day, onBookings) }
             }
-            if (onPackages != null) {
-                item { PackagesEntryCard(onPackages) }
+            day.closed.takeIf { it.isNotEmpty() }?.let { shut ->
+                item { ClosedNotice(shut) }
             }
-            if (onAcademy != null) {
-                item { AcademyEntryCard(onAcademy) }
+            item { SectionLabel(if (day.next.isEmpty()) "TODAY" else "NEXT UP") }
+            if (day.next.isEmpty()) {
+                item { EmptySheet(day) }
+            } else {
+                items(day.next) { booking -> ShiftRow(booking) }
             }
-            if (onPayouts != null) {
-                item { PayoutsEntryCard(onPayouts) }
+            item { RevenueCard(o) }
+        }
+    }
+}
+
+/** One line, not a headline plus a badge restating the account type. */
+@Composable
+private fun ShiftGreeting(name: String) {
+    Column(Modifier.padding(top = 4.dp, bottom = 2.dp)) {
+        Text(greeting(), fontSize = 13.sp, color = AuthMuted)
+        Spacer(Modifier.height(2.dp))
+        Text(name, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk, letterSpacing = (-0.5).sp)
+    }
+}
+
+/**
+ * The day, in the app's one navy money surface.
+ *
+ * Money the venue stands to take today leads, because that is the number the
+ * owner can still change before closing. Underneath it, the honest fraction —
+ * cells booked out of cells that exist — and a bar, so a thin day looks thin.
+ */
+@Composable
+private fun ShiftHero(day: ShiftBoard) {
+    LayoutBox(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(18.dp, RoundedCornerShape(22.dp), clip = false, spotColor = AuthInkTop)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
+    ) {
+        LayoutBox(
+            Modifier.matchParentSize().background(
+                Brush.radialGradient(
+                    listOf(Color(0x553B82F6), Color(0x00000000)),
+                    center = Offset(120f, 40f), radius = 520f,
+                )
+            )
+        )
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            Text(
+                "TODAY · " + day.dayLabel.uppercase(),
+                color = Color(0xB3CFE0FF), fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "₹" + formatInr(day.expected),
+                    color = Color.White, fontSize = 34.sp,
+                    fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp,
+                    style = TextStyle(fontFeatureSettings = "tnum, zero"),
+                )
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    "expected",
+                    color = Color(0xCCE0E8FF), fontSize = 13.sp,
+                    modifier = Modifier.padding(bottom = 7.dp),
+                )
             }
-            if (effective != Lane.EVENT) {
-                item { BookingsMixCard(o) }
+
+            Spacer(Modifier.height(14.dp))
+            if (day.hasCapacity) {
+                Text(
+                    "${day.slotsBooked} of ${day.slotsTotal} slots booked" +
+                        if (day.slotsDone > 0) " · ${day.slotsDone} done" else "",
+                    color = Color(0xE6E0E8FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(8.dp))
+                OccupancyBar(day.occupancy)
+            } else {
+                // Zero of zero is not an empty day, it is an unfinished setup —
+                // saying "0 of 0 booked" would read as a catastrophe instead.
+                Text(
+                    "No bookable slots set up yet",
+                    color = Color(0xE6E0E8FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                )
             }
+
+            if (day.due > 0) {
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0x33F87171))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFFFCA5A5)))
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        "₹" + formatInr(day.due) + " of today still unpaid",
+                        color = Color(0xFFFCA5A5), fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** How full today is, at a glance. Empty reads as empty — no cheerful full bar. */
+@Composable
+private fun OccupancyBar(fraction: Float) {
+    val filled = fraction.coerceIn(0f, 1f)
+    LayoutBox(
+        Modifier.fillMaxWidth().height(6.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0x33FFFFFF)),
+    ) {
+        if (filled > 0f) {
+            LayoutBox(
+                Modifier.fillMaxWidth(filled).fillMaxHeight()
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xFF7DA9FF)),
+            )
+        }
+    }
+}
+
+/**
+ * Money owed, across every date.
+ *
+ * The figure is what is OUTSTANDING — total minus whatever has already been
+ * collected — so a booking half-settled in cash stops being chased in full.
+ */
+@Composable
+private fun ChaseStrip(day: ShiftBoard, onOpen: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0x14DC2626))
+            .border(1.dp, Color(0x33DC2626), RoundedCornerShape(14.dp))
+            .clickable { onOpen() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(RED))
+        Spacer(Modifier.width(9.dp))
+        Text(
+            "${day.chaseCount} unpaid · ₹" + formatInr(day.chaseAmount) + " to collect",
+            fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = RED,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = RED, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** A venue shut for the day can't be filled, and the owner should be told why it's quiet. */
+@Composable
+private fun ClosedNotice(names: List<String>) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0x14F59E0B))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFFF59E0B)))
+        Spacer(Modifier.width(9.dp))
+        Text(
+            names.joinToString(" · ") + if (names.size == 1) " is closed today" else " are closed today",
+            fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309),
+        )
+    }
+}
+
+/** One booking on today's sheet. */
+@Composable
+private fun ShiftRow(b: ShiftBooking) {
+    Row(
+        Modifier.fillMaxWidth().premiumSurface(16.dp).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.width(74.dp)) {
+            Text(
+                b.time.ifBlank { "—" },
+                fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                color = if (b.running) AuthAccentDeep else AuthInk,
+            )
+            if (b.running) {
+                Spacer(Modifier.height(3.dp))
+                Text("ON COURT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep, letterSpacing = 0.8.sp)
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(b.customer, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                listOfNotNull(
+                    b.court.takeIf { it.isNotBlank() },
+                    b.venue.takeIf { it.isNotBlank() },
+                    if (b.walkIn) "Walk-in" else null,
+                ).joinToString(" · "),
+                fontSize = 11.5.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text("₹" + formatInr(b.amount), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            if (!b.paid) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "UNPAID",
+                    fontSize = 9.sp, fontWeight = FontWeight.Bold, color = RED, letterSpacing = 0.6.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                        .background(Color(0x14DC2626)).padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Nothing left today — which is a different statement from having no courts. */
+@Composable
+private fun EmptySheet(day: ShiftBoard) {
+    Column(
+        Modifier.fillMaxWidth().premiumSurface(16.dp).padding(vertical = 26.dp, horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            if (!day.hasCapacity) "No slots to sell yet" else "Nothing left on today's sheet",
+            fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk,
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(
+            when {
+                !day.hasCapacity -> "Add courts and time slots to a venue and today's bookings will appear here."
+                day.slotsBooked > 0 -> "All ${day.slotsBooked} of today's bookings have finished."
+                else -> "No bookings for today yet. Anything taken at the desk shows up here straight away."
+            },
+            fontSize = 12.5.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 18.sp,
+        )
+    }
+}
+
+/**
+ * The long view, demoted below today's sheet.
+ *
+ * Both numbers now say what period they cover: the total is all-time, the change
+ * is the last seven days against the seven before them. The old card had them
+ * arguing — a heading of "TOTAL REVENUE" over a footnote reading "last 14 days".
+ */
+@Composable
+private fun RevenueCard(o: Overview) {
+    val trendPct: Int? = run {
+        if (o.trend.size < 14) null else {
+            val last7 = o.trend.takeLast(7).sum()
+            val prev7 = o.trend.dropLast(7).takeLast(7).sum()
+            if (prev7 <= 0.0) null else (((last7 - prev7) / prev7) * 100).roundToInt()
+        }
+    }
+    Column(Modifier.fillMaxWidth().premiumSurface(18.dp).padding(18.dp)) {
+        Text("TOTAL REVENUE · ALL TIME", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.3.sp)
+        Spacer(Modifier.height(7.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("₹" + formatInr(o.revenue), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk, letterSpacing = (-0.6).sp)
+            if (trendPct != null) {
+                Spacer(Modifier.width(9.dp))
+                val up = trendPct >= 0
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (up) Color(0x1416A34A) else Color(0x14DC2626))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Icon(
+                        if (up) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
+                        contentDescription = null,
+                        tint = if (up) GREEN else RED,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    // The baseline is named. A bare "-37%" is a comparison with
+                    // nothing to compare against.
+                    Text(
+                        "${if (up) "+" else ""}$trendPct% vs prev 7 days",
+                        color = if (up) GREEN else RED, fontSize = 10.5.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("${o.bookingsTotal} bookings all-time", fontSize = 12.sp, color = AuthMuted)
+        if (o.trend.any { it > 0 }) {
+            Spacer(Modifier.height(16.dp))
+            Sparkline(o.trend, Modifier.fillMaxWidth().height(46.dp), AuthAccent)
+            Spacer(Modifier.height(6.dp))
+            Text("last 14 days", fontSize = 10.5.sp, color = AuthMuted)
         }
     }
 }
@@ -2022,13 +2378,162 @@ private fun EventCard(e: EventSummary, onClick: () -> Unit) {
 private fun VenuesTab(api: PartnerApi, token: String, onOpen: (Long, String) -> Unit) {
     RefreshableContent(token, load = { api.venues(token) }) { list ->
         if (list.isEmpty()) EmptyState("No venues yet") else
-            LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Two per row. A venue card is a glance target — name, today's take,
+            // booking count — so a half-width card still says everything, and the
+            // owner sees four venues without scrolling instead of two.
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 items(list) { v -> VenueCard(v) { onOpen(v.id, v.name) } }
             }
     }
 }
 
 @Composable
+private fun MatchesTab(api: PartnerApi, token: String, venueId: Long?) {
+    RefreshableContent(token to venueId, load = { api.matches(token, venueId) }) { m ->
+        if (m.isEmpty) {
+            EmptyState("No games on your courts yet")
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (m.confirmed.isNotEmpty()) {
+                    item { SectionLabel("ON YOUR BOOKINGS") }
+                    items(m.confirmed) { MatchCard(it) }
+                }
+                if (m.nearby.isNotEmpty()) {
+                    item {
+                        Column {
+                            if (m.confirmed.isNotEmpty()) Spacer(Modifier.height(10.dp))
+                            SectionLabel("PLAYING NEARBY")
+                            Spacer(Modifier.height(4.dp))
+                            // Said plainly, because the difference matters: these are
+                            // matches sitting on top of the venue by GPS alone. No
+                            // booking here ties them to the house.
+                            Text(
+                                "Public games within 200 m. Not booked through you.",
+                                fontSize = 12.sp,
+                                color = AuthMuted,
+                            )
+                        }
+                    }
+                    items(m.nearby) { MatchCard(it) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One match, read the way a person behind a counter reads it: is it on right
+ * now, who is playing, what is the score.
+ *
+ * The scoreline is deliberately dumb — the server already decided what belongs
+ * in each slot per sport (cricket's "120/4" against a plain number elsewhere),
+ * so the card just prints what it was handed.
+ */
+@Composable
+private fun MatchCard(m: VenueMatch) {
+    LayoutBox(Modifier.premiumSurface(18.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (m.isLive) LivePill() else StatusChip(m)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    m.sport.replaceFirstChar { it.uppercase() },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AuthMuted,
+                )
+                Spacer(Modifier.weight(1f))
+                m.distanceM?.let {
+                    Text("$it m away", fontSize = 11.sp, color = AuthMuted)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            // Cricket puts overs in the small slot; a set sport puts the rally
+            // being played there, so a live game never reads a flat 0 - 0.
+            SideRow(m.home, m.score1, m.overs.ifBlank { m.rally1 })
+            Spacer(Modifier.height(6.dp))
+            SideRow(m.away, m.score2, m.rally2)
+
+            val footer = listOfNotNull(
+                m.branch.takeIf { it.isNotBlank() },
+                m.time.takeIf { it.isNotBlank() && !m.isLive },
+                m.title.takeIf { it.isNotBlank() },
+            ).joinToString(" · ")
+            if (footer.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = Hairline)
+                Spacer(Modifier.height(8.dp))
+                Text(footer, fontSize = 12.sp, color = AuthMuted, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SideRow(team: String, score: String, small: String?) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            team.ifBlank { "—" },
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = AuthInk,
+            maxLines = 1,
+            modifier = Modifier.weight(1f, false),
+        )
+        Spacer(Modifier.weight(1f))
+        small?.takeIf { it.isNotBlank() }?.let {
+            Text("($it)", fontSize = 12.sp, color = AuthMuted)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(score, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+    }
+}
+
+/** The only red in this screen: a game that is happening right now. */
+@Composable
+private fun LivePill() {
+    Row(
+        Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp)).background(RED))
+        Spacer(Modifier.width(5.dp))
+        Text("LIVE", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = RED, letterSpacing = 0.8.sp)
+    }
+}
+
+@Composable
+private fun StatusChip(m: VenueMatch) {
+    val label = when {
+        m.isFinished -> "Result"
+        m.status.isNotBlank() -> m.status
+        else -> "Scheduled"
+    }
+    Text(
+        label.uppercase(),
+        fontSize = 10.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.8.sp,
+        color = AuthMuted,
+        modifier = Modifier.clip(RoundedCornerShape(999.dp))
+            .background(Color(0x0F0F172A))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+/** Half-width card, sized for the two-column venues grid. */
 private fun VenueCard(v: VenueSummary, onClick: () -> Unit) {
     PressableSurface(onClick = onClick, radius = 20.dp) {
         Column {
@@ -2036,7 +2541,7 @@ private fun VenueCard(v: VenueSummary, onClick: () -> Unit) {
             // carry the design rather than look like a broken image: the brand navy
             // with a soft glow and a large watermark glyph, which reads as a
             // deliberate cover until a real photo is added in /control.
-            LayoutBox(Modifier.fillMaxWidth().height(132.dp)) {
+            LayoutBox(Modifier.fillMaxWidth().height(112.dp)) {
                 if (!v.image.isNullOrBlank()) {
                     AsyncImage(
                         model = v.image,
@@ -2077,16 +2582,22 @@ private fun VenueCard(v: VenueSummary, onClick: () -> Unit) {
                 // Revenue rides top-right — the number the owner scans for.
                 Text(
                     "₹" + formatInr(v.revenue),
-                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.ExtraBold, color = Color.White,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(9.dp)
                         .clip(RoundedCornerShape(999.dp)).background(Color(0x66000000))
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
-                Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
+                Column(Modifier.align(Alignment.BottomStart).padding(11.dp)) {
                     Text(
                         v.name,
-                        fontSize = 16.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
-                        letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold, color = Color.White,
+                        letterSpacing = (-0.3).sp,
+                        // Half-width cards cut most venue names mid-word on one
+                        // line, so the name gets two before it ellipses.
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        lineHeight = 17.sp,
                     )
                     v.location?.takeIf { it.isNotBlank() }?.let {
                         Spacer(Modifier.height(2.dp))
@@ -2098,30 +2609,39 @@ private fun VenueCard(v: VenueSummary, onClick: () -> Unit) {
                     }
                 }
             }
-            // Footer strip: what the owner acts on.
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x142F6BFF))
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                ) {
-                    Icon(Icons.Filled.ConfirmationNumber, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("${v.bookings} bookings", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep)
+            // Footer: what the owner acts on. At half width a single row has
+            // nowhere to put "Open desk" once the count chip and the sport have
+            // taken their space, so it sits on its own line underneath rather
+            // than shrinking type until nothing is legible.
+            Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x142F6BFF))
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                    ) {
+                        Icon(Icons.Filled.ConfirmationNumber, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "${v.bookings}",
+                            fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep,
+                        )
+                    }
+                    if (v.sports.isNotEmpty()) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            v.sports.first() + if (v.sports.size > 1) "  +${v.sports.size - 1}" else "",
+                            fontSize = 11.5.sp, color = AuthMuted, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
                 }
-                if (v.sports.isNotEmpty()) {
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        v.sports.first() + if (v.sports.size > 1) "  +${v.sports.size - 1}" else "",
-                        fontSize = 11.5.sp, color = AuthMuted, maxLines = 1,
-                    )
+                Spacer(Modifier.height(7.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Open desk", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep)
+                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(17.dp))
                 }
-                Spacer(Modifier.weight(1f))
-                Text("Open desk", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep)
-                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(17.dp))
             }
         }
     }
@@ -2183,184 +2703,33 @@ private fun VenueDayScreen(
     /** Decides whether this desk books courts or tables. */
     lane: Lane = Lane.VENUE,
 ) {
-    var dayMillis by remember { mutableStateOf(todayMillis()) }
-    var reload by remember { mutableStateOf(0) }
-    var addForSlot by remember { mutableStateOf<DaySlot?>(null) }
-    var addForCell by remember { mutableStateOf<CellTarget?>(null) }
-    var cancelTarget by remember { mutableStateOf<DayBooking?>(null) }
     var showPricing by remember { mutableStateOf(false) }
-    var booking by remember { mutableStateOf(false) }
-    var pendingPay by remember { mutableStateOf<PendingPay?>(null) }
-    val scope = rememberCoroutineScope()
-    val date = apiDate(dayMillis)
-    val state by produceState<UiState<DayGrid>>(UiState.Loading, dayMillis, reload) {
-        value = runCatchingUi { api.venueDay(token, venueId, date) }
-    }
 
     if (showPricing) {
-        VenuePricingScreen(api, token, venueId, venueName, onBack = { showPricing = false; reload++ })
+        VenuePricingScreen(api, token, venueId, venueName, onBack = { showPricing = false })
         return
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
-                title = { Text(venueName, maxLines = 1, fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
-                },
-                actions = {
-                    if (canPricing) HeaderIcon(Icons.Filled.Tune, "Pricing & slots") { showPricing = true }
-                    HeaderIcon(Icons.Filled.BarChart, "Analytics") { onAnalytics() }
-                    Spacer(Modifier.width(4.dp))
-                },
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
-                    .premiumSurface(14.dp).padding(4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { dayMillis -= DAY_MS }) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous day", tint = AuthAccent) }
-                Text(prettyDate(dayMillis), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
-                IconButton(onClick = { dayMillis += DAY_MS }) { Icon(Icons.Filled.ChevronRight, contentDescription = "Next day", tint = AuthAccent) }
-            }
-            Loaded(state) { grid ->
-                LazyColumn(
-                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
-                ) {
-                    item {
-                        if (grid.isBlocked) {
-                            Row(
-                                Modifier.fillMaxWidth().premiumSurface().padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("Closed on this day", color = RED, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                if (canBookings) {
-                                    TextButton(onClick = { scope.launch { runCatching { api.setDateClosed(token, venueId, date, false) }; reload++ } }) { Text("Reopen", color = AuthAccent, fontWeight = FontWeight.SemiBold) }
-                                }
-                            }
-                        } else if (canBookings) {
-                            TextButton(onClick = { scope.launch { runCatching { api.setDateClosed(token, venueId, date, true) }; reload++ } }) {
-                                Text("Close this day (maintenance/holiday)", color = AuthMuted, fontSize = 13.sp)
-                            }
-                        }
-                    }
-                    if (grid.courts.isNotEmpty()) {
-                        item {
-                            CourtGrid(
-                                grid = grid,
-                                canBookings = canBookings && !grid.isBlocked,
-                                onAddCell = { slot, courtId, courtName ->
-                                    // Court's own rate wins over the slot base price.
-                                    val cellPrice = slot.courts.firstOrNull { it.courtId == courtId }?.price ?: slot.price
-                                    addForCell = CellTarget(slot, courtId, courtName, cellPrice)
-                                },
-                                onCancel = { b -> cancelTarget = b },
-                                lane = lane,
-                            )
-                        }
-                    } else {
-                        if (grid.slots.isEmpty()) {
-                            item { Text("No slots configured for this venue.", Modifier.padding(16.dp), color = AuthMuted) }
-                        }
-                        items(grid.slots) { slot ->
-                            SlotCard(
-                                slot = slot,
-                                blocked = grid.isBlocked,
-                                canBookings = canBookings,
-                                onAdd = { addForSlot = slot },
-                                onCancel = { bid -> scope.launch { runCatching { api.cancelBooking(token, bid) }; reload++ } },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    addForSlot?.let { slot ->
-        WalkInDialog(
-            slotLabel = slot.time ?: slot.label,
-            amount = slot.price,
-            api = api,
-            token = token,
-            venueId = venueId,
-            busy = booking,
-            onDismiss = { addForSlot = null },
-            onConfirm = { name, phone, method, passId ->
-                booking = true
-                scope.launch {
-                    runCatching { api.createWalkIn(token, venueId, slot.slotId, date, name, phone, null, method, passId) }
-                        .onSuccess { r ->
-                            // Only a link needs watching; cash/UPI/card are already settled.
-                            if (r.paymentLink != null) {
-                                pendingPay = PendingPay(r.bookingId, r.paymentLink, r.paymentLinkId, r.amount)
-                            }
-                        }
-                    booking = false; addForSlot = null; reload++
-                }
-            },
-        )
-    }
-
-    addForCell?.let { t ->
-        WalkInDialog(
-            slotLabel = "${t.slot.time ?: t.slot.label} · ${t.courtName}",
-            amount = t.price,
-            api = api,
-            token = token,
-            venueId = venueId,
-            busy = booking,
-            onDismiss = { addForCell = null },
-            onConfirm = { name, phone, method, passId ->
-                booking = true
-                scope.launch {
-                    runCatching { api.createWalkIn(token, venueId, t.slot.slotId, date, name, phone, t.courtId, method, passId) }
-                        .onSuccess { r ->
-                            // Only a link needs watching; cash/UPI/card are already settled.
-                            if (r.paymentLink != null) {
-                                pendingPay = PendingPay(r.bookingId, r.paymentLink, r.paymentLinkId, r.amount)
-                            }
-                        }
-                    booking = false; addForCell = null; reload++
-                }
-            },
-        )
-    }
-
-    pendingPay?.let { p ->
-        PaymentWaitDialog(p, api, token) { paid -> pendingPay = null; if (paid) reload++ }
-    }
-
-    cancelTarget?.let { b ->
-        AlertDialog(
-            onDismissRequest = { cancelTarget = null },
-            title = { Text("Cancel booking?") },
-            text = { Text("${b.customer} — this frees the ${resourceNoun(lane).lowercase()} for that time.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    cancelTarget = null
-                    scope.launch { runCatching { api.cancelBooking(token, b.id) }; reload++ }
-                }) { Text("Cancel booking", color = RED, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = { TextButton(onClick = { cancelTarget = null }) { Text("Keep") } },
-        )
-    }
+    DayBookingsScreen(
+        api = api,
+        token = token,
+        venueId = venueId,
+        venueName = venueName,
+        onBack = onBack,
+        canPricing = canPricing,
+        canBookings = canBookings,
+        onPricing = { showPricing = true },
+        onAnalytics = onAnalytics,
+    )
 }
 
 /** A tapped free cell in the court grid: which slot + which court. */
 private data class CellTarget(val slot: DaySlot, val courtId: Long, val courtName: String, val price: Double = 0.0)
 
 /** Playo-style day grid: courts as columns, time slots as rows. Free cells add a
- *  walk-in; booked cells open a cancel confirm. Scrolls horizontally for many courts. */
+ *  walk-in; booked cells open a cancel confirm. The courts scroll horizontally when
+ *  there are many; the time column stays pinned beside them, because a scrolled-off
+ *  clock left the desk reading "Open ₹800" with no idea which hour it belonged to. */
 @Composable
 private fun CourtGrid(
     grid: DayGrid,
@@ -2371,40 +2740,114 @@ private fun CourtGrid(
 ) {
     val timeW = 58.dp
     val cellW = 96.dp
+    // Fixed heights on both columns: they scroll independently, so the only thing
+    // keeping a time label level with its row is that both use the same pitch.
+    // Tall enough for a court name over its sport line — 34.dp clipped the sport.
+    val headerH = 44.dp
+    val rowH = 56.dp
+    val rowGap = 6.dp
     val courtName = { id: Long -> grid.courts.firstOrNull { it.id == id }?.name ?: resourceNoun(lane) }
+
+    // Every sport these courts actually serve. A three-sport venue otherwise puts
+    // badminton courts, a turf and cricket nets in one sideways scroll, interleaved
+    // by sort order, with nothing to narrow it down.
+    val sports = remember(grid.courts) { grid.courts.flatMap { it.sports }.distinct() }
+    var picked by remember(grid.venueName) { mutableStateOf<String?>(null) }
+    // The chosen sport can vanish under us — a court edited, a branch switched — and a
+    // filter matching nothing would draw an empty grid with no obvious way back.
+    val sport = picked?.takeIf { it in sports }
+    val courts = if (sport == null) grid.courts else grid.courts.filter { sport in it.sports }
+    val shown = courts.map { it.id }.toSet()
+
     Column(Modifier.fillMaxWidth().premiumSurface().padding(vertical = 12.dp)) {
         Row(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             LegendDot(Color(0xFF16A34A), "Open"); Spacer(Modifier.width(14.dp)); LegendDot(AuthAccent, "Booked")
+            Spacer(Modifier.width(14.dp)); LegendDot(Color(0xFFB45309), "Holding")
         }
-        Column(Modifier.horizontalScroll(rememberScrollState())) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LayoutBox(Modifier.width(timeW).padding(start = 14.dp)) { Text("Time", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuthMuted) }
-                grid.courts.forEach { c ->
-                    Column(Modifier.width(cellW).padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(c.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
-                        if (c.sports.isNotEmpty()) Text(c.sports.first(), fontSize = 10.sp, color = AuthMuted, maxLines = 1)
+        // Single-sport venues get no filter — one chip reading "All" is just clutter.
+        if (sports.size > 1) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SportChip("All", sport == null) { picked = null }
+                sports.forEach { s ->
+                    Spacer(Modifier.width(8.dp))
+                    SportChip(s, sport == s) { picked = if (sport == s) null else s }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.width(timeW).padding(start = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(rowGap),
+            ) {
+                LayoutBox(Modifier.height(headerH), contentAlignment = Alignment.CenterStart) {
+                    Text("Time", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
+                }
+                grid.slots.forEach { slot ->
+                    LayoutBox(Modifier.height(rowH), contentAlignment = Alignment.CenterStart) {
+                        Text(slot.time ?: slot.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AuthInk, maxLines = 2)
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            grid.slots.forEach { slot ->
-                Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LayoutBox(Modifier.width(timeW).height(56.dp).padding(start = 14.dp), contentAlignment = Alignment.CenterStart) {
-                        Text(slot.time ?: slot.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AuthInk, maxLines = 2)
+            Column(
+                Modifier.horizontalScroll(rememberScrollState()).padding(end = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(rowGap),
+            ) {
+                Row(Modifier.height(headerH), verticalAlignment = Alignment.CenterVertically) {
+                    courts.forEach { c ->
+                        Column(Modifier.width(cellW).padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(c.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
+                            // Once a sport is picked every column shares it, so the
+                            // per-column label stops earning its space.
+                            if (sport == null && c.sports.isNotEmpty()) {
+                                Text(
+                                    c.sports.joinToString(" · "),
+                                    fontSize = 10.sp, color = AuthMuted,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
-                    slot.courts.forEach { cell ->
-                        GridCell(
-                            cell = cell,
-                            width = cellW,
-                            canBook = canBookings && slot.isOpen,
-                            onFree = { onAddCell(slot, cell.courtId, courtName(cell.courtId)) },
-                            onBooked = { onCancel(it) },
-                        )
+                }
+                grid.slots.forEach { slot ->
+                    Row(Modifier.height(rowH), verticalAlignment = Alignment.CenterVertically) {
+                        slot.courts.filter { it.courtId in shown }.forEach { cell ->
+                            GridCell(
+                                cell = cell,
+                                width = cellW,
+                                canBook = canBookings && slot.isOpen,
+                                onFree = { onAddCell(slot, cell.courtId, courtName(cell.courtId)) },
+                                onBooked = { onCancel(it) },
+                                runsFor = slot.sports.firstOrNull()
+                                    ?.let { if (slot.sports.size > 1) slot.sports.joinToString(", ") else it },
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/** One sport in the desk grid's filter row. Tapping the active one clears it. */
+@Composable
+private fun SportChip(label: String, on: Boolean, onPick: () -> Unit) {
+    Text(
+        label,
+        fontSize = 12.sp,
+        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+        color = if (on) AuthAccentDeep else AuthInk,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (on) Color(0x142F6BFF) else Color(0xFFF8FAFC))
+            .border(if (on) 1.5.dp else 1.dp, if (on) AuthAccent else Color(0x1F0F172A), RoundedCornerShape(999.dp))
+            .clickable { onPick() }
+            .padding(horizontal = 13.dp, vertical = 7.dp),
+    )
 }
 
 @Composable
@@ -2417,24 +2860,70 @@ private fun LegendDot(color: Color, label: String) {
 }
 
 @Composable
-private fun GridCell(cell: CourtCell, width: Dp, canBook: Boolean, onFree: () -> Unit, onBooked: (DayBooking) -> Unit) {
+private fun GridCell(
+    cell: CourtCell,
+    width: Dp,
+    canBook: Boolean,
+    onFree: () -> Unit,
+    onBooked: (DayBooking) -> Unit,
+    /** What this time DOES run for, shown on a cell the court can't be sold at. */
+    runsFor: String? = null,
+) {
     val booked = cell.isBooked
+    // This time doesn't run the sport this court hosts, so the server would refuse the
+    // sale. An already-booked cell still wins: restricting a slot after the fact must
+    // not strand a booking somewhere the desk can no longer see or cancel it.
+    val blocked = !booked && !cell.allowed
+    // A court-hour someone is paying for in the app right now. It reads amber and takes
+    // no tap: the server won't sell it to the desk either, and a cell that looks Open
+    // and answers with an error is worse than one that says what it is.
+    val held = !booked && !blocked && cell.isHeld
+    val fill = when {
+        booked -> Color(0x142F6BFF)
+        blocked -> Color(0x080F172A)
+        held -> Color(0x14B45309)
+        else -> Color(0x1416A34A)
+    }
+    val edge = when {
+        booked -> Color(0x332F6BFF)
+        blocked -> Color(0x140F172A)
+        held -> Color(0x33B45309)
+        else -> Color(0x3316A34A)
+    }
     LayoutBox(
         modifier = Modifier
             .width(width).height(56.dp).padding(horizontal = 4.dp)
             .clip(RoundedCornerShape(11.dp))
-            .background(if (booked) Color(0x142F6BFF) else Color(0x1416A34A))
-            .border(1.dp, if (booked) Color(0x332F6BFF) else Color(0x3316A34A), RoundedCornerShape(11.dp))
-            .clickable(enabled = booked || canBook) {
+            .background(fill)
+            .border(1.dp, edge, RoundedCornerShape(11.dp))
+            .clickable(enabled = booked || (canBook && !held && !blocked)) {
                 if (booked) cell.bookings.firstOrNull()?.let(onBooked) else onFree()
             },
         contentAlignment = Alignment.Center,
     ) {
+        if (blocked) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("—", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
+                if (!runsFor.isNullOrBlank()) {
+                    Text(
+                        "$runsFor only",
+                        fontSize = 9.5.sp, color = AuthMuted,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            return@LayoutBox
+        }
         if (booked) {
             val b = cell.bookings.firstOrNull()
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(b?.customer?.take(9) ?: "Booked", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep, maxLines = 1)
                 if ((b?.checkedIn ?: 0) > 0) Text("✓ in", fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = GREEN)
+            }
+        } else if (held) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Holding", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309), maxLines = 1)
+                Text("paying now", fontSize = 9.5.sp, color = AuthMuted, maxLines = 1)
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -3102,6 +3591,13 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
     val state by produceState<UiState<List<SlotEdit>>>(UiState.Loading, reload) {
         value = runCatchingUi { api.venueSlots(token, venueId) }
     }
+    // The sports a slot may be narrowed to are whatever this venue's courts host —
+    // asking the courts keeps the picker honest instead of offering a sport nothing
+    // can be booked for. A failure here just means no picker, never a broken screen.
+    val venueSports by produceState(emptyList<String>(), venueId) {
+        value = runCatching { api.venueCourts(token, venueId).flatMap { it.sports }.distinct() }
+            .getOrDefault(emptyList())
+    }
 
     if (showCourts) {
         CourtPricingScreen(api, token, venueId, venueName, onBack = { showCourts = false })
@@ -3201,20 +3697,22 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
     if (adding) {
         SlotEditDialog(
             existing = null,
+            venueSports = venueSports,
             onDismiss = { adding = false },
-            onSave = { day, time, price, capacity, isOpen ->
+            onSave = { day, time, price, capacity, isOpen, sports ->
                 adding = false
-                scope.launch { runCatching { api.saveSlot(token, venueId, null, day, time, price, capacity, isOpen) }; reload++ }
+                scope.launch { runCatching { api.saveSlot(token, venueId, null, day, time, price, capacity, isOpen, sports) }; reload++ }
             },
         )
     }
     editing?.let { slot ->
         SlotEditDialog(
             existing = slot,
+            venueSports = venueSports,
             onDismiss = { editing = null },
-            onSave = { day, time, price, capacity, isOpen ->
+            onSave = { day, time, price, capacity, isOpen, sports ->
                 editing = null
-                scope.launch { runCatching { api.saveSlot(token, venueId, slot.id, day, time, price, capacity, isOpen) }; reload++ }
+                scope.launch { runCatching { api.saveSlot(token, venueId, slot.id, day, time, price, capacity, isOpen, sports) }; reload++ }
             },
         )
     }
@@ -3223,14 +3721,18 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
 @Composable
 private fun SlotEditDialog(
     existing: SlotEdit?,
+    /** Every sport this venue's courts host — the only sensible options to offer. */
+    venueSports: List<String>,
     onDismiss: () -> Unit,
-    onSave: (day: String?, time: String, price: Double, capacity: Int, isOpen: Boolean) -> Unit,
+    onSave: (day: String?, time: String, price: Double, capacity: Int, isOpen: Boolean, sports: List<String>) -> Unit,
 ) {
     var day by remember { mutableStateOf(existing?.day ?: "") }
     var time by remember { mutableStateOf(existing?.time ?: "") }
     var price by remember { mutableStateOf(existing?.price?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "") }
     var capacity by remember { mutableStateOf((existing?.capacity ?: 1).toString()) }
     var isOpen by remember { mutableStateOf(existing?.isOpen ?: true) }
+    // Nothing selected means "every sport", which is what a slot has always meant.
+    val picked = remember { mutableStateListOf<String>().apply { addAll(existing?.sports.orEmpty()) } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -3244,6 +3746,19 @@ private fun SlotEditDialog(
                 OutlinedTextField(price, { price = it.filter { c -> c.isDigit() } }, label = { Text("Price (₹)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(capacity, { capacity = it.filter { c -> c.isDigit() } }, label = { Text("Capacity (courts)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                // Only worth asking on a venue that actually mixes sports.
+                if (venueSports.size > 1) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Runs for", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                        SportChip("All sports", picked.isEmpty()) { picked.clear() }
+                        venueSports.forEach { s ->
+                            Spacer(Modifier.width(8.dp))
+                            SportChip(s, s in picked) { if (s in picked) picked.remove(s) else picked.add(s) }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Open for booking", Modifier.weight(1f))
@@ -3253,7 +3768,13 @@ private fun SlotEditDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(day.trim().ifBlank { null }, time.trim(), price.toDoubleOrNull() ?: 0.0, capacity.toIntOrNull() ?: 1, isOpen) },
+                onClick = {
+                    onSave(
+                        day.trim().ifBlank { null }, time.trim(),
+                        price.toDoubleOrNull() ?: 0.0, capacity.toIntOrNull() ?: 1, isOpen,
+                        picked.toList(),
+                    )
+                },
                 enabled = time.isNotBlank(),
             ) { Text("Save") }
         },
@@ -4901,8 +5422,14 @@ private fun SalesTab(api: PartnerApi, token: String, venueId: Long? = null) {
             // can't answer the only question the owner opens this for: what came
             // in today. Order is preserved — the API already sorts newest first.
             val groups = remember(list) { list.groupBy { it.slotDate ?: "" }.toList() }
+            // Same rule the shift board on Home applies, so the two screens can
+            // never quote different debts: zero-rupee rows are data artefacts,
+            // not money, and what is owed is the balance, not the whole ticket.
             val owed = remember(list) {
-                list.filter { it.paymentStatus.lowercase() != "paid" && !it.isCancelled }
+                list.filter { it.paymentStatus.lowercase() != "paid" && !it.isCancelled && it.amount > 0 }
+            }
+            val outstanding = remember(owed) {
+                owed.sumOf { (it.amount - it.amountPaid).coerceAtLeast(0.0) }
             }
 
             LazyColumn(
@@ -4923,7 +5450,7 @@ private fun SalesTab(api: PartnerApi, token: String, venueId: Long? = null) {
                             LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(RED))
                             Spacer(Modifier.width(9.dp))
                             Text(
-                                "${owed.size} unpaid · ₹" + formatInr(owed.sumOf { it.amount }) + " to collect",
+                                "${owed.size} unpaid · ₹" + formatInr(outstanding) + " to collect",
                                 fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = RED,
                             )
                         }
@@ -4981,7 +5508,9 @@ private fun friendlyDay(date: String): String {
 @Composable
 private fun BookingRow(b: BookingSummary, showBranch: Boolean) {
     val walkIn = b.channel.lowercase() == "offline"
-    val unpaid = b.paymentStatus.lowercase() != "paid" && !b.isCancelled
+    // A zero-rupee booking has nothing to collect, so flagging it UNPAID puts a
+    // debt on screen that nobody can ever settle.
+    val unpaid = b.paymentStatus.lowercase() != "paid" && !b.isCancelled && b.amount > 0
     LayoutBox(Modifier.fillMaxWidth().premiumSurface(16.dp)) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             // Initial, tinted by channel — walk-in vs online is the first thing
@@ -5067,105 +5596,11 @@ private fun BookingRow(b: BookingSummary, showBranch: Boolean) {
 
 @Composable
 private fun ScanTab(api: PartnerApi, token: String) {
-    var code by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
-    fun submit(value: String) {
-        val trimmed = value.trim()
-        if (trimmed.isEmpty() || busy) return
-        busy = true
-        result = null
-        scope.launch {
-            result = try {
-                api.checkIn(token, trimmed).message
-            } catch (e: ApiException) {
-                e.message
-            } catch (e: Exception) {
-                e.message ?: "Check-in failed"
-            } finally {
-                busy = false
-                code = ""
-            }
-        }
-    }
-
-    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { scan ->
-        scan.contents?.let { submit(it) }
-    }
-
-    Column(
-        Modifier.fillMaxSize().background(AuthPageBg).padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        AuthIconBadge(Icons.Filled.QrCodeScanner)
-        Spacer(Modifier.height(16.dp))
-        Text("Ticket check-in", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Scan the attendee's ticket QR, or enter the code by hand.",
-            fontSize = 13.5.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 19.sp,
-        )
-        Spacer(Modifier.height(24.dp))
-        GradientCta(
-            text = if (busy) "Checking…" else "Scan ticket QR",
-            enabled = !busy,
-            loading = busy,
-        ) {
-            result = null
-            scanLauncher.launch(
-                ScanOptions()
-                    .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    .setPrompt("Scan ticket QR")
-                    .setBeepEnabled(true)
-                    .setOrientationLocked(false),
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-        Text("or enter the code manually", fontSize = 12.sp, color = AuthMuted)
-        Spacer(Modifier.height(14.dp))
-        OutlinedTextField(
-            value = code,
-            onValueChange = { code = it; result = null },
-            label = { Text("Ticket code") },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
-                cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        TextButton(
-            enabled = !busy && code.isNotBlank(),
-            onClick = { submit(code) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (busy) "Checking…" else "Check in by code", color = AuthAccent, fontWeight = FontWeight.SemiBold) }
-        if (result != null) {
-            val r = result!!
-            val ok = r.startsWith("Checked in", ignoreCase = true)
-            val warn = r.startsWith("Already", ignoreCase = true)
-            val tone = if (ok) GREEN else if (warn) Color(0xFFF59E0B) else RED
-            Spacer(Modifier.height(18.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                    .background(tone.copy(alpha = 0.10f))
-                    .border(1.dp, tone.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
-                    .padding(16.dp),
-            ) {
-                LayoutBox(Modifier.size(9.dp).clip(RoundedCornerShape(99.dp)).background(tone))
-                Spacer(Modifier.width(10.dp))
-                Text(r, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tone)
-            }
-        }
-    }
+    // The whole tab is the viewfinder. See ScanScreen.kt for why the poster that
+    // used to live here — icon, paragraph, "Scan ticket QR" button — was the
+    // wrong shape for somebody standing at a gate.
+    ScanScreen(api = api, token = token, accent = AuthAccent)
 }
-
-// ---- Small building blocks ---------------------------------------------
 
 @Composable
 private fun <T> Loaded(state: UiState<T>, content: @Composable (T) -> Unit) {

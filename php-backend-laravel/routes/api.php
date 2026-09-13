@@ -533,6 +533,90 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         });
     });
 
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\ShiftController::class)
+    ->group(function (): void {
+        Route::get('/venues/{id}/shift/current', 'current')->whereNumber('id');
+        Route::post('/venues/{id}/shift/open', 'open')->whereNumber('id');
+        Route::post('/venues/{id}/shift/drop', 'drop')->whereNumber('id');
+        Route::post('/venues/{id}/shift/close', 'close')->whereNumber('id');
+        Route::get('/venues/{id}/shifts', 'history')->whereNumber('id');
+        Route::get('/venues/{id}/shifts/{shiftId}', 'show')->whereNumber('id')->whereNumber('shiftId');
+    });
+
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\StandingContractController::class)
+    ->group(function (): void {
+        Route::get('/venues/{id}/standing-contracts/dashboard', 'dashboard')->whereNumber('id');
+        Route::get('/venues/{id}/standing-contracts', 'index')->whereNumber('id');
+        Route::post('/venues/{id}/standing-contracts/check-conflicts', 'checkConflicts')->whereNumber('id');
+        Route::post('/venues/{id}/standing-contracts', 'store')->whereNumber('id');
+        Route::get('/venues/{id}/standing-contracts/{contractId}', 'show')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/skip-date', 'skipDate')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/pause', 'pause')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/resume', 'resume')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/terminate', 'terminate')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/transfer-court', 'transferCourt')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/attendance', 'attendance')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/payment', 'payment')->whereNumber('id')->whereNumber('contractId');
+    });
+
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\PricingMatrixController::class)
+    ->group(function (): void {
+        Route::get('/venues/{id}/pricing/dashboard', 'dashboard')->whereNumber('id');
+        Route::get('/venues/{id}/pricing/matrix', 'matrix')->whereNumber('id');
+        Route::get('/venues/{id}/pricing/rules', 'rules')->whereNumber('id');
+        Route::post('/venues/{id}/pricing/rules', 'storeRule')->whereNumber('id');
+        Route::put('/venues/{id}/pricing/rules/{ruleId}', 'updateRule')->whereNumber('id')->whereNumber('ruleId');
+        Route::post('/venues/{id}/pricing/rules/{ruleId}/toggle', 'toggleRule')->whereNumber('id')->whereNumber('ruleId');
+        Route::delete('/venues/{id}/pricing/rules/{ruleId}', 'destroyRule')->whereNumber('id')->whereNumber('ruleId');
+        Route::get('/venues/{id}/pricing/hierarchy', 'hierarchy')->whereNumber('id');
+        Route::post('/venues/{id}/pricing/hierarchy/split', 'splitCourt')->whereNumber('id');
+        Route::post('/venues/{id}/pricing/hierarchy/merge', 'mergeCourts')->whereNumber('id');
+        Route::get('/venues/{id}/pricing/recommendations', 'recommendations')->whereNumber('id');
+        Route::post('/venues/{id}/pricing/recommendations/apply', 'applyRecommendation')->whereNumber('id');
+    });
+
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\WhatsAppDeskController::class)
+    ->group(function (): void {
+        Route::get('/venues/{id}/whatsapp/dashboard', 'dashboard')->whereNumber('id');
+        Route::get('/venues/{id}/whatsapp/conversations', 'index')->whereNumber('id');
+        Route::get('/venues/{id}/whatsapp/conversations/{convId}', 'show')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/messages', 'sendMessage')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/extract-intent', 'extractIntent')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/hold-slot', 'holdSlot')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/release-hold', 'releaseHold')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/send-payment-link', 'sendPaymentLink')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/mark-paid', 'markPaid')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/notes', 'addNote')->whereNumber('id')->whereNumber('convId');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/assign', 'assignStaff')->whereNumber('id')->whereNumber('convId');
+        Route::get('/venues/{id}/whatsapp/quick-replies', 'quickReplies')->whereNumber('id');
+        Route::get('/venues/{id}/whatsapp/availability', 'availability')->whereNumber('id');
+    });
+
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\OwnerOperationsController::class)
+    ->group(function (): void {
+        Route::get('/venues/{id}/operations/overview', 'overview')->whereNumber('id');
+        Route::get('/venues/{id}/operations/revenue', 'revenue')->whereNumber('id');
+        Route::get('/venues/{id}/operations/occupancy', 'occupancy')->whereNumber('id');
+        Route::get('/venues/{id}/operations/staff', 'staff')->whereNumber('id');
+        Route::get('/venues/{id}/operations/funnel', 'funnel')->whereNumber('id');
+        Route::get('/venues/{id}/operations/alerts', 'alerts')->whereNumber('id');
+        Route::post('/venues/{id}/operations/alerts/{alertId}/resolve', 'resolveAlert')->whereNumber('id')->whereNumber('alertId');
+        Route::get('/venues/{id}/operations/suggestions', 'suggestions')->whereNumber('id');
+        Route::post('/venues/{id}/operations/suggestions/{suggestionId}/apply', 'applySuggestion')->whereNumber('id')->whereNumber('suggestionId');
+        Route::post('/venues/{id}/operations/suggestions/{suggestionId}/dismiss', 'dismissSuggestion')->whereNumber('id')->whereNumber('suggestionId');
+    });
+
+
 // Razorpay billing webhook — subscription lifecycle and prepaid credit grants.
 // Unauthenticated by necessity; the HMAC signature check in the controller is
 // the authentication, and it fails closed.
@@ -569,3 +653,33 @@ Route::post('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookC
 Route::get('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'ping'])
     ->middleware('throttle:60,1')
     ->name('webhooks.msg91.whatsapp.ping');
+
+// -------------------------------------------------------------------------
+//  Workforce Operating System — Edge Ingestion, Intelligence & Health
+// -------------------------------------------------------------------------
+
+Route::prefix('v1/workforce')->middleware('auth.jwt')->group(function (): void {
+    // Health & System Monitoring
+    Route::get('/health', function (\App\Services\Hrms\WorkforceHealthService $service) {
+        return response()->json($service->checkHealth());
+    })->middleware('throttle:60,1');
+
+    // Edge Ingestion & Sync (Phase 3)
+    Route::post('/punch', [\App\Http\Controllers\Api\WorkforceSyncController::class, 'punch'])
+        ->middleware('throttle:120,1');
+    Route::post('/sync-batch', [\App\Http\Controllers\Api\WorkforceSyncController::class, 'syncBatch'])
+        ->middleware('throttle:120,1');
+
+    // Workforce Intelligence, Predictive Labor & Statutory Payroll (Phase 4)
+    Route::post('/roster/auto-schedule', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'autoSchedule'])
+        ->middleware('throttle:60,1');
+    Route::get('/labor/forecast', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'forecastLabor'])
+        ->middleware('throttle:60,1');
+    Route::post('/payroll/generate-batch', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'generatePayrollBatch'])
+        ->middleware('throttle:60,1');
+    Route::post('/payroll/lock-batch', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'lockPayrollBatch'])
+        ->middleware('throttle:60,1');
+    Route::get('/payroll/compliance-export', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'complianceExport'])
+        ->middleware('throttle:60,1');
+});
+

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\BookingPayment;
 use App\Models\Event;
+use App\Models\LiveMatch;
 use App\Models\BatchAttendance;
 use App\Models\BatchEnrollment;
 use App\Models\CustomerPackage;
@@ -355,6 +356,447 @@ class PartnerController extends Controller
         return response()->json(['data' => $bookings]);
     }
 
+    /** Pull the ticket code out of `haraan:ticket:<code>`, or accept it raw. */
+    private static function ticketCodeOf(string $raw): string
+    {
+        $raw = trim($raw);
+
+        if (preg_match('/ticket[:\/]([A-Za-z0-9]{6,})/i', $raw, $m) === 1) {
+            return $m[1];
+        }
+
+        return $raw;
+    }
+
+    /**
+     * GET /api/partner/today — the shift board.
+     *
+     * Home used to open on all-time revenue and a strip counting how many venues
+     * the owner has. Neither answers the question somebody actually opens this
+     * app between customers to ask, which is "what is happening on my courts
+     * today, and who owes me money". This endpoint answers exactly that and
+     * nothing else.
+     *
+     * Two rules it holds to:
+     *  - Capacity counts CELLS, court by court, the same unit the desk grid draws,
+     *    so "6 of 54" here and the grid over there can never disagree.
+     *  - Money outstanding is `total - paid`, never the full total of an unpaid
+     *    row: a booking half-settled in cash is not still owed in full.
+     */
+    public function today(Request $request): JsonResponse
+    {
+        $venues = $request->user()->branches()
+            ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
+            ->get(['id', 'name', 'branch_label']);
+
+        $date = now()->toDateString();
+
+        if ($venues->isEmpty()) {
+            return response()->json(['data' => $this->emptyDay($date)]);
+        }
+
+        $venueIds = $venues->pluck('id');
+
+        // A venue closed for maintenance has no capacity today — counting its
+        // slots would report an occupancy the owner cannot possibly fill.
+        $blocked = VenueBlockedDate::query()
+            ->whereIn('venue_id', $venueIds)->whereDate('date', $date)
+            ->pluck('venue_id')->map(fn ($v) => (int) $v)->all();
+
+        $slots = $this->runsOnDay(
+            VenueSlot::query()->whereIn('venue_id', $venueIds)->where('is_available', true),
+            $date,
+        )->orderBy('sort_order')->get(['id', 'venue_id', 'time']);
+        $slotsByVenue = $slots->groupBy('venue_id');
+        $slotById = $slots->keyBy('id');
+
+        $courtsByVenue = VenueCourt::query()
+            ->whereIn('venue_id', $venueIds)->where('is_active', true)
+            ->get(['id', 'venue_id', 'name'])
+            ->groupBy('venue_id');
+
+        $capacity = 0;
+        foreach ($venues as $venue) {
+            if (in_array((int) $venue->id, $blocked, true)) {
+                continue;
+            }
+            $slotCount = ($slotsByVenue->get($venue->id) ?? collect())->count();
+            // A venue with no courts configured still sells its slots once.
+            $courtCount = max(($courtsByVenue->get($venue->id) ?? collect())->count(), 1);
+            $capacity += $slotCount * $courtCount;
+        }
+
+        $bookings = Booking::query()
+            ->where('booking_type', 'venue')
+            ->whereIn('venue_id', $venueIds)
+            ->whereDate('slot_date', $date)
+            ->with(['user:id,name'])
+            ->get();
+
+        $live = $bookings->reject(fn (Booking $b): bool => $this->isDead($b));
+
+        $expected = round((float) $live->sum('total_amount'), 2);
+        $collected = round((float) $live->sum('amount_paid'), 2);
+
+        $courtName = function (Booking $b) use ($courtsByVenue): string {
+            $court = ($courtsByVenue->get($b->venue_id) ?? collect())
+                ->firstWhere('id', (int) ($b->venue_court_id ?? 0));
+
+            return (string) ($court->name ?? '');
+        };
+        $venueName = fn (Booking $b): string => (string) ($venues->firstWhere('id', $b->venue_id)?->name ?? '');
+
+        $now = now();
+        $rows = $live->map(function (Booking $b) use ($slotById, $date, $now, $courtName, $venueName): array {
+            $time = (string) ($slotById->get($b->venue_slot_id)?->time ?? '');
+            $start = $this->startOf($date, $time);
+            // An hour is the slot length everywhere in this product; when the time
+            // cannot be parsed at all the booking sorts last rather than vanishing.
+            $end = $start?->copy()->addHour();
+
+            return [
+                'time'     => $time,
+                'sort'     => $start?->timestamp ?? PHP_INT_MAX,
+                'running'  => $start !== null && $end !== null && $now->betweenIncluded($start, $end),
+                'past'     => $end !== null && $now->greaterThan($end),
+                'customer' => strtolower((string) $b->channel) === 'offline'
+                    ? ($b->guest_name ?: 'Walk-in')
+                    : ($b->attendee_name ?: $b->user?->name ?: 'Guest'),
+                'venue'    => $venueName($b),
+                'court'    => $courtName($b),
+                'amount'   => round((float) $b->total_amount, 2),
+                'paid'     => strtolower((string) $b->payment_status) === 'paid',
+                'walk_in'  => strtolower((string) $b->channel) === 'offline',
+            ];
+        })->sortBy('sort')->values();
+
+        // What is still to come, with anything on court right now pinned in front.
+        $ahead = $rows->filter(fn (array $r): bool => $r['running'] || ! $r['past'])->values();
+
+        return response()->json([
+            'data' => [
+                'date'      => $date,
+                'day_label' => now()->format('D, j M'),
+                'capacity'  => [
+                    'total'  => $capacity,
+                    'booked' => $live->count(),
+                    'done'   => $rows->where('past', true)->count(),
+                ],
+                'money'     => [
+                    'expected'  => $expected,
+                    'collected' => $collected,
+                    'due'       => round(max($expected - $collected, 0), 2),
+                ],
+                'chase'     => $this->chaseTotal($venueIds),
+                'closed'    => $venues->whereIn('id', $blocked)
+                    ->map(fn (Venue $v): array => ['id' => (int) $v->id, 'name' => (string) $v->name])
+                    ->values(),
+                'next'      => $ahead->take(4)->map(fn (array $r): array => collect($r)->except('sort')->all())->values(),
+            ],
+        ]);
+    }
+
+    /** A day with no venues in scope still has to answer in the same shape. */
+    private function emptyDay(string $date): array
+    {
+        return [
+            'date'      => $date,
+            'day_label' => now()->format('D, j M'),
+            'capacity'  => ['total' => 0, 'booked' => 0, 'done' => 0],
+            'money'     => ['expected' => 0.0, 'collected' => 0.0, 'due' => 0.0],
+            'chase'     => ['count' => 0, 'amount' => 0.0],
+            'closed'    => [],
+            'next'      => [],
+        ];
+    }
+
+    /**
+     * Money owed across every date, not just today — the chase list does not
+     * reset at midnight.
+     *
+     * Rows worth nothing are skipped: a zero-rupee booking carrying an "unpaid"
+     * status is a data artefact, and counting it puts a debt on screen that
+     * nobody can ever collect.
+     */
+    private function chaseTotal($venueIds): array
+    {
+        $owed = Booking::query()
+            ->where('booking_type', 'venue')
+            ->whereIn('venue_id', $venueIds)
+            ->whereRaw('lower(coalesce(payment_status, ?)) <> ?', ['unpaid', 'paid'])
+            ->where('total_amount', '>', 0)
+            ->get(['status', 'total_amount', 'amount_paid'])
+            ->reject(fn (Booking $b): bool => $this->isDead($b));
+
+        return [
+            'count'  => $owed->count(),
+            'amount' => round(
+                (float) $owed->sum(fn (Booking $b): float => max((float) $b->total_amount - (float) $b->amount_paid, 0)),
+                2,
+            ),
+        ];
+    }
+
+    /** Cancelled, refunded and failed rows are not part of any day's numbers. */
+    private function isDead(Booking $b): bool
+    {
+        return in_array(strtolower((string) $b->status), ['cancelled', 'refunded', 'failed'], true);
+    }
+
+    /**
+     * A slot's start as a real moment.
+     *
+     * `venue_slots.time` is free text a partner typed ("6:00 AM"), and
+     * `venue_slots.day` beside it is a TEMPLATE weekday, not a date — reading the
+     * day from there is what put "Monday" under a Tuesday header in the bookings
+     * feed. The date always comes from the caller.
+     */
+    private function startOf(string $date, string $time): ?Carbon
+    {
+        $time = trim($time);
+        if ($time === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($date.' '.$time);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Narrow a venue-slot query to the rows that actually run on one date.
+     *
+     * `venue_slots` is a WEEKLY TEMPLATE: a venue carries a row per weekday per
+     * time, so a turf open sixteen hours a day holds 112 rows, not 16. Reading
+     * them all as one day's inventory is how Home first reported "0 of 696 slots
+     * booked" — seven days of capacity stacked on a Saturday — and why the desk
+     * grid drew every weekday's rows under a single date.
+     *
+     * Rows tagged with a weekday match that weekday. Rows tagged "Today",
+     * "Everyday"/"Daily", or left blank belong to every day.
+     */
+    private function runsOnDay($query, string $date)
+    {
+        $weekday = strtolower(Carbon::parse($date)->format('l'));
+
+        return $query->where(function ($q) use ($weekday): void {
+            $q->whereRaw('lower(trim(coalesce(day, ?))) in (?, ?, ?, ?)', ['', $weekday, 'today', 'everyday', 'daily'])
+                ->orWhereNull('day')
+                ->orWhere('day', '');
+        });
+    }
+
+    /**
+     * GET /api/partner/matches — the games actually being played on this
+     * partner's courts.
+     *
+     * Two groups, and the split is the whole point:
+     *
+     *   confirmed  the match sits on a CONFIRMED booking at one of these venues
+     *              (`live_matches.venue_booking_id` -> `bookings.venue_id`). That
+     *              is not an inference — the player booked this turf.
+     *   nearby     a public match whose GPS lands inside {@see self::NEARBY_M} of
+     *              the venue. Almost certainly on this turf; not provably so.
+     *
+     * They stay separate rather than merged and sorted, because an owner reading
+     * "3 matches on right now" has to be able to tell which of the three the house
+     * can actually vouch for. Private matches appear in neither group: their share
+     * code is the only grant, and a venue owner does not hold it.
+     */
+    public function matches(Request $request): JsonResponse
+    {
+        $venues = $request->user()->branches()
+            ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
+            ->get(['id', 'name', 'location', 'branch_label', 'latitude', 'longitude']);
+
+        if ($venues->isEmpty()) {
+            return response()->json(['data' => ['confirmed' => [], 'nearby' => []]]);
+        }
+
+        // Booking -> venue in one lookup, so mapping each match below stays a
+        // memory read instead of a query inside a loop.
+        $bookingVenue = Booking::query()
+            ->whereIn('venue_id', $venues->pluck('id'))
+            ->pluck('venue_id', 'id');
+
+        $byId = $venues->keyBy('id');
+        $confirmed = collect();
+
+        if ($bookingVenue->isNotEmpty()) {
+            $confirmed = LiveMatch::query()
+                ->whereIn('venue_booking_id', $bookingVenue->keys())
+                ->where('updated_at', '>=', now()->subDays(30))
+                ->orderByDesc('id')
+                ->limit(80)
+                ->get()
+                ->map(function (LiveMatch $m) use ($bookingVenue, $byId): array {
+                    $venue = $byId->get($bookingVenue[$m->venue_booking_id] ?? null);
+
+                    return $this->matchRow($m, $venue, 'booking', null);
+                });
+        }
+
+        $nearby = $this->nearbyMatches($venues, $confirmed->pluck('id'));
+
+        return response()->json([
+            'data' => [
+                'confirmed' => $this->sortMatches($confirmed)->values(),
+                'nearby'    => $this->sortMatches($nearby)->values(),
+            ],
+        ]);
+    }
+
+    /** How close a match's GPS has to land to count as "on this turf". */
+    private const NEARBY_M = 200;
+
+    /**
+     * Public matches sitting on top of these venues by coordinates alone.
+     *
+     * SQL narrows with a bounding box per venue — a box can use the geo index
+     * where haversine cannot — and the real circle is applied in PHP after, which
+     * is what stops a corner of the box counting as "here". A venue with no
+     * coordinates contributes nothing rather than matching everything.
+     *
+     * @param  \Illuminate\Support\Collection<int, Venue>  $venues
+     * @param  \Illuminate\Support\Collection<int, string>  $excludeIds
+     */
+    private function nearbyMatches($venues, $excludeIds)
+    {
+        $located = $venues->filter(fn (Venue $v) => $v->latitude !== null && $v->longitude !== null);
+        if ($located->isEmpty()) {
+            return collect();
+        }
+
+        // ~200 m as degrees of latitude. Longitude degrees shrink towards the
+        // poles, so the box is widened by 1/cos(lat) per venue below; skipping
+        // that clips its east and west edges.
+        $dLat = self::NEARBY_M / 111320;
+
+        $rows = LiveMatch::query()
+            ->whereNotNull('latitude')
+            ->whereNotNull('longitude')
+            ->where('is_private', false)
+            ->where('updated_at', '>=', now()->subDays(7))
+            ->when($excludeIds->isNotEmpty(), fn ($q) => $q->whereNotIn('id', $excludeIds))
+            ->where(function ($q) use ($located, $dLat): void {
+                foreach ($located as $v) {
+                    $lat = (float) $v->latitude;
+                    $lng = (float) $v->longitude;
+                    $dLng = $dLat / max(cos(deg2rad($lat)), 0.01);
+                    $q->orWhere(function ($b) use ($lat, $lng, $dLat, $dLng): void {
+                        $b->whereBetween('latitude', [$lat - $dLat, $lat + $dLat])
+                            ->whereBetween('longitude', [$lng - $dLng, $lng + $dLng]);
+                    });
+                }
+            })
+            ->orderByDesc('id')
+            ->limit(120)
+            ->get();
+
+        return $rows->map(function (LiveMatch $m) use ($located): ?array {
+            // Nearest venue wins, so a match between two of this partner's own
+            // outlets is filed under the one it is actually on.
+            $best = null;
+            $bestM = null;
+            foreach ($located as $v) {
+                $d = $this->metresBetween(
+                    (float) $m->latitude,
+                    (float) $m->longitude,
+                    (float) $v->latitude,
+                    (float) $v->longitude,
+                );
+                if ($bestM === null || $d < $bestM) {
+                    $bestM = $d;
+                    $best = $v;
+                }
+            }
+
+            return ($bestM !== null && $bestM <= self::NEARBY_M)
+                ? $this->matchRow($m, $best, 'nearby', (int) round($bestM))
+                : null;
+        })->filter();
+    }
+
+    /** Great-circle distance in metres. */
+    private function metresBetween(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+
+        return 6371000 * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
+    /** Live first, then most recent — what is happening now sits at the top. */
+    private function sortMatches($rows)
+    {
+        return $rows->sortByDesc(fn (array $r): string => ($r['isLive'] ? '1' : '0') . ($r['sortAt'] ?? ''));
+    }
+
+    /**
+     * One match as the partner app reads it.
+     *
+     * Scores are read off the row rather than re-derived: cricket carries the
+     * batting side's line in `score_text` ("120/4") while every other sport keeps
+     * a plain number per side — the same rule the public match feed applies.
+     */
+    private function matchRow(LiveMatch $m, ?Venue $venue, string $source, ?int $distanceM): array
+    {
+        $status = strtolower((string) ($m->status ?? ''));
+        $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
+        $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
+
+        // A set sport's scoreline counts SETS, so a live volleyball game in its
+        // first set reads "0 - 0" and the card looks idle while a rally is being
+        // played. The points inside the current set go in the small slot cricket
+        // uses for overs — same rule the public match feed applies.
+        $rally = ['', ''];
+        if (! $isCricket) {
+            $state = is_array($m->sport_state) ? $m->sport_state : [];
+            $points = $state['points'] ?? null;    // tennis: the 15/30/40 ladder
+            $current = $state['current'] ?? null;  // everything else: raw points
+            if (is_array($points) && count($points) >= 2) {
+                $rally = [(string) $points[0], (string) $points[1]];
+            } elseif (is_array($current) && count($current) >= 2
+                && ((int) $current[0] > 0 || (int) $current[1] > 0)) {
+                $rally = [(string) $current[0], (string) $current[1]];
+            }
+        }
+
+        return [
+            'id'         => (string) $m->id,
+            'sport'      => strtolower((string) ($m->sport ?: 'cricket')),
+            'title'      => (string) ($m->title ?? ''),
+            'home'       => (string) $m->home,
+            'away'       => (string) $m->away,
+            'score1'     => $scoreText !== '' ? $scoreText : (string) ($m->home_score ?? 0),
+            'score2'     => (string) ($m->away_score ?? 0),
+            'overs'      => $isCricket ? (string) ($m->overs ?? '') : '',
+            'rally1'     => $rally[0],
+            'rally2'     => $rally[1],
+            'status'     => (string) ($m->status ?? ''),
+            'isLive'     => $status === 'live',
+            'isFinished' => in_array($status, ['completed', 'finished', 'ended'], true),
+            'startsAt'   => optional($m->scheduled_at)->toIso8601String(),
+            'time'       => in_array(strtolower(trim((string) ($m->time ?? ''))),
+                ['', 'scheduled', 'live', 'completed', 'finished', 'upcoming'], true)
+                ? '' : (string) $m->time,
+            'typedVenue' => (string) ($m->venue ?? ''),
+            'venueId'    => $venue !== null ? (int) $venue->id : null,
+            'venueName'  => (string) ($venue->name ?? ''),
+            'branch'     => $venue !== null ? $venue->branchName() : '',
+            'source'     => $source,
+            'distanceM'  => $distanceM,
+            // Sort key, kept out of the client's way: scheduled time when there is
+            // one, otherwise when the scorer last touched it.
+            'sortAt'     => (string) (optional($m->scheduled_at)->toIso8601String()
+                ?: optional($m->updated_at)->toIso8601String()),
+        ];
+    }
+
     /**
      * POST /api/partner/check-in — resolve a scanned ticket code and mark it
      * arrived, in one call. Only succeeds if the ticket belongs to one of this
@@ -363,7 +805,12 @@ class PartnerController extends Controller
     public function checkInByCode(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
-        $code = trim((string) $request->input('code'));
+        // A scanner hands over the whole QR payload, `haraan:ticket:<code>`, while
+        // a person typing hands over the bare code. The lookup below matches
+        // `ticket_code` exactly, so until this extraction existed every genuine
+        // scan came back "Ticket not found" — the web check-in page has always
+        // applied this rule; the API had not.
+        $code = self::ticketCodeOf((string) $request->input('code'));
 
         if ($code === '') {
             return response()->json(['error' => 'Missing ticket code'], 422);
@@ -426,25 +873,51 @@ class PartnerController extends Controller
         $isBlocked = VenueBlockedDate::query()
             ->where('venue_id', $venue->id)->whereDate('date', $date)->exists();
 
-        $slots = VenueSlot::query()->where('venue_id', $venue->id)->orderBy('sort_order')->get();
+        // One date, one day's template rows. Without this the grid stacked all
+        // seven weekdays under whichever date was selected.
+        $slots = $this->runsOnDay(
+            VenueSlot::query()->where('venue_id', $venue->id),
+            $date,
+        )->orderBy('sort_order')->get();
         $courts = VenueCourt::query()->where('venue_id', $venue->id)
             ->where('is_active', true)->orderBy('sort_order')->get();
 
-        $bookings = Booking::query()
+        // Confirmed sales AND live holds. A hold is a player part-way through paying in
+        // the app: the conflict engine already refuses to sell that court-hour twice, so
+        // a grid showing only confirmed rows drew the cell Open and then answered the
+        // desk's tap with "already booked for this time" — an error about a booking the
+        // desk could not see. They stay in separate buckets below: a hold blocks the
+        // cell, but it is not a sale and must never be counted as one.
+        $all = Booking::query()
             ->where('booking_type', 'venue')->where('venue_id', $venue->id)
-            ->whereDate('slot_date', $date)->where('status', self::PAID)
+            ->whereDate('slot_date', $date)
+            ->where(function ($q): void {
+                $q->where('status', self::PAID)
+                    ->orWhere(fn ($hold) => $hold
+                        ->whereRaw('lower(status) = ?', ['pending'])
+                        ->whereNotNull('reserved_until')
+                        ->where('reserved_until', '>', now()));
+            })
             ->with('user:id,name')->get();
+
+        $isHold = static fn (Booking $b): bool => strtoupper((string) $b->status) === 'PENDING';
+        $bookings = $all->reject($isHold);
+        $holds = $all->filter($isHold);
+
         $bySlot = $bookings->groupBy('venue_slot_id');
+        $holdsBySlot = $holds->groupBy('venue_slot_id');
         // One bucket per (court, slot) cell so the grid can render each court column.
         // Court id 0 keys the bookings made before courts existed (venue-level only).
-        $byCell = $bookings->groupBy(
-            fn (Booking $b): string => ((int) ($b->venue_court_id ?? 0)).'-'.((int) ($b->venue_slot_id ?? 0)),
-        );
+        $cellKey = static fn (Booking $b): string => ((int) ($b->venue_court_id ?? 0)).'-'.((int) ($b->venue_slot_id ?? 0));
+        $byCell = $bookings->groupBy($cellKey);
+        $holdsByCell = $holds->groupBy($cellKey);
 
-        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $courts, $date, $venue): array {
+        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $holdsBySlot, $holdsByCell, $courts, $date, $venue): array {
             $b = $bySlot->get($s->id) ?? collect();
-            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell, $date, $venue): array {
+            $sHeld = $holdsBySlot->get($s->id) ?? collect();
+            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell, $holdsByCell, $date, $venue): array {
                 $cb = $byCell->get($c->id.'-'.$s->id) ?? collect();
+                $ch = $holdsByCell->get($c->id.'-'.$s->id) ?? collect();
                 // The rate this cell would actually CHARGE — peak included. Showing the
                 // base rate here while reserveVenue() bills the peak one would have the
                 // desk quoting a price the customer is never charged.
@@ -454,8 +927,19 @@ class PartnerController extends Controller
                     'court_id'  => $c->id,
                     'booked'    => $cb->count(),
                     'is_booked' => $cb->isNotEmpty(),
+                    // Someone is at the payment screen for this court-hour right now.
+                    // Not sold, not free — and the desk needs to be told which.
+                    'held'      => $ch->count(),
+                    'is_held'   => $cb->isEmpty() && $ch->isNotEmpty(),
                     'price'     => (float) $rate,
                     'is_peak'   => $c->isPeak(Carbon::parse($date), $s->time),
+                    // Whether this court may be sold at all at this time — the slot runs
+                    // for sports this court doesn't host, or the other way round. Decided
+                    // here rather than left to each client to intersect the two lists,
+                    // because the answer has to match what reserveVenue() will accept:
+                    // a cell drawn Open that answers the tap with 409 is the worst of
+                    // both. False cells are unsellable, not merely busy.
+                    'allowed'   => $s->allowsCourt($c),
                     'bookings'  => $cb->map(fn (Booking $x): array => $this->slotBooking($x))->values(),
                 ];
             })->values();
@@ -466,8 +950,13 @@ class PartnerController extends Controller
                 'time'      => $s->time,
                 'price'     => (float) $s->price,
                 'capacity'  => (int) $s->capacity,
+                // Which sports this time runs for; empty = all of them.
+                'sports'    => $s->sportsList(),
                 'booked'    => $b->count(),
-                'available' => max((int) $s->capacity - $b->count(), 0),
+                // Held court-hours are out of stock without being sold, so they come
+                // off `available` while staying out of `booked`.
+                'held'      => $sHeld->count(),
+                'available' => max((int) $s->capacity - $b->count() - $sHeld->count(), 0),
                 'is_open'   => (bool) $s->is_available,
                 'bookings'  => $b->map(fn (Booking $x): array => $this->slotBooking($x))->values(),
                 'courts'    => $cells,
@@ -1585,19 +2074,42 @@ class PartnerController extends Controller
         $venue = $this->branch($request, $id);
 
         $data = $request->validate([
-            'day'      => ['nullable', 'string', 'max:40'],
-            'time'     => ['required', 'string', 'max:60'],
-            'price'    => ['nullable', 'numeric', 'min:0'],
-            'capacity' => ['nullable', 'integer', 'min:1'],
-            'isOpen'   => ['nullable', 'boolean'],
+            'day'       => ['nullable', 'string', 'max:40'],
+            'time'      => ['required', 'string', 'max:60'],
+            'price'     => ['nullable', 'numeric', 'min:0'],
+            'capacity'  => ['nullable', 'integer', 'min:1'],
+            'isOpen'    => ['nullable', 'boolean'],
+            // Which of the venue's sports this time runs for. Absent = unchanged,
+            // [] = every sport (the pre-column behaviour).
+            'sports'    => ['nullable', 'array'],
+            // Nullable per entry because ConvertEmptyStringsToNull turns a blank chip
+            // into null: a stray empty entry should be dropped by the normalisation
+            // below, not 422 the whole save.
+            'sports.*'  => ['nullable', 'string', 'max:40'],
         ]);
 
         $attrs = [
             'time'         => $data['time'],
-            'price'        => $data['price'] ?? 0,
-            'capacity'     => $data['capacity'] ?? 1,
             'is_available' => $data['isOpen'] ?? true,
         ];
+
+        // Both are optional, so an update that omits one must keep what the slot
+        // already has — `?? 0` here would quietly wipe a rate the partner set from
+        // another screen. On create the column defaults are the right answer:
+        // capacity 1, and a null price meaning "charge the venue rate".
+        foreach (['price', 'capacity'] as $optional) {
+            if (array_key_exists($optional, $data) && $data[$optional] !== null) {
+                $attrs[$optional] = $data[$optional];
+            }
+        }
+
+        // Same rule, but an empty list is a real answer here — "this time runs for
+        // every sport" — so only an absent key leaves the slot's sports alone.
+        if (array_key_exists('sports', $data) && $data['sports'] !== null) {
+            $attrs['sports'] = array_values(array_unique(array_filter(
+                array_map(static fn ($s): string => trim((string) $s), $data['sports']),
+            )));
+        }
 
         // `day` is NOT NULL — only overwrite it when supplied, so an update that
         // omits it keeps the existing value.
@@ -1614,6 +2126,11 @@ class PartnerController extends Controller
             $attrs['sort_order'] = (int) VenueSlot::query()->where('venue_id', $venue->id)->max('sort_order') + 1;
             $slot = VenueSlot::query()->create($attrs);
         }
+
+        // Read back before serialising: on a create that left price and capacity to
+        // the column defaults, the in-memory model has neither attribute set and
+        // would report capacity 0 for a row the database stores as 1.
+        $slot->refresh();
 
         return response()->json(['status' => 'ok', 'slot' => $this->slotRow($slot)]);
     }
@@ -1637,6 +2154,8 @@ class PartnerController extends Controller
             'time'     => $s->time,
             'price'    => (float) $s->price,
             'capacity' => (int) $s->capacity,
+            // Empty list = runs for every sport the venue offers.
+            'sports'   => $s->sportsList(),
             'is_open'  => (bool) $s->is_available,
         ];
     }

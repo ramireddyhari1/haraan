@@ -41,7 +41,7 @@ class WaitlistEntryResource extends Resource
 
     protected static ?string $pluralModelLabel = 'waitlist';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 8;
 
     /** Entries own through their venue, like blocks, shifts and venue bookings. */
     public static function getEloquentQuery(): Builder

@@ -26,49 +26,54 @@
         </div>
     </div>
 
-    {{-- For You: full-bleed poster carousel (mirrors HaraanEventCard) --}}
+    {{-- For You: customized fluid motion HorizontalPager --}}
+    @if($mEvents->count())
     <div class="mhome__head">
         <h3>For You</h3>
         <a href="/events">See all</a>
     </div>
-    <div class="mhome__scroll">
-        @forelse($mEvents as $ev)
-            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
-            <a class="mposter" href="/events/{{ $ev->id }}" style="background-image:url('{{ $img }}')">
-                <span class="mposter__grad"></span>
-                <span class="mposter__cat">{{ $ev->category ?? 'Event' }}</span>
-                @if(!empty($ev->rating) && $ev->rating > 0)
-                    <span class="mposter__rating"><i>★</i>{{ number_format($ev->rating, 1) }}</span>
-                @else
-                    <span class="mposter__rating mposter__rating--soon">NEW</span>
-                @endif
-                <div class="mposter__overlay">
-                    <div class="mposter__text">
-                        <p class="mposter__date">{{ optional($ev->date)->format('D, M j • g:i A') }}</p>
-                        <h4>{{ $ev->title }}</h4>
-                        <p class="mposter__meta">📍 {{ $ev->venue }} · {{ $ev->fromPrice() > 0 ? '₹'.number_format($ev->fromPrice()) : 'Free' }}</p>
+    <div class="mpager-container">
+        <div class="mpager" data-mpager-fluid>
+            <div class="mpager__track" data-mpager-track>
+                @foreach($mEvents as $ev)
+                    @php
+                        $img = $ev->heroImageUrl() ?? '/bv-white.png';
+                        $whenParts = array_filter([
+                            optional($ev->date)?->format('j M'),
+                            trim((string) $ev->time) ?: null,
+                        ]);
+                        $whenLine = implode(' • ', $whenParts);
+                        $priceFrom  = $ev->fromPrice();
+                        $priceLabel = $priceFrom > 0
+                            ? '₹' . number_format($priceFrom) . ($ev->priceTierCount() > 1 ? ' onwards' : '')
+                            : 'Free';
+                        $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
+                    @endphp
+                    <div class="mfy__page" data-mpager-card>
+                        <a class="mfy" href="/events/{{ $ev->id }}">
+                            <img class="mfy__img" src="{{ $img }}" alt=""
+                                 decoding="async"
+                                 loading="{{ $loop->first ? 'eager' : 'lazy' }}"
+                                 @if($loop->first) fetchpriority="high" @endif>
+                            <span class="mfy__grad"></span>
+                            <span class="mfy__sheen" aria-hidden="true"></span>
+                            <span class="mfy__cat">{{ $ev->category ?? 'Event' }}</span>
+                            @if(!empty($ev->rating) && $ev->rating > 0)
+                                <span class="mfy__rating"><i>★</i><b>{{ number_format($ev->rating, 1) }}</b></span>
+                            @endif
+                            <span class="mfy__foot">
+                                <span class="mfy__date">{{ $whenLine }}</span>
+                                <span class="mfy__title">{{ $ev->title }}</span>
+                                <span class="mfy__venue">{{ $venueLabel }}</span>
+                                <span class="mfy__price">{{ $priceLabel }}</span>
+                            </span>
+                        </a>
                     </div>
-                    <span class="mposter__book" aria-label="Book">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-                    </span>
-                </div>
-            </a>
-        @empty
-            <a class="mposter" href="/events" style="background:linear-gradient(135deg,#2563EB,#1e40af)">
-                <span class="mposter__grad"></span>
-                <span class="mposter__cat">Events</span>
-                <div class="mposter__overlay">
-                    <div class="mposter__text">
-                        <h4>Live nights & shows</h4>
-                        <p class="mposter__meta">📍 Near you</p>
-                    </div>
-                    <span class="mposter__book" aria-label="Explore">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-                    </span>
-                </div>
-            </a>
-        @endforelse
+                @endforeach
+            </div>
+        </div>
     </div>
+    @endif
 
     {{-- Trending: ranked Top-10 (mirrors TrendingRowSection) --}}
     @if($mEvents->count())
@@ -77,7 +82,7 @@
         @foreach($mEvents->take(10) as $ev)
             @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
             <a class="mtrend" href="/events/{{ $ev->id }}">
-                <span class="mtrend__rank">{{ $loop->iteration }}</span>
+                <span class="mtrend__rank" data-rank="{{ $loop->iteration }}">{{ $loop->iteration }}</span>
                 <div class="mtrend__img" style="background-image:url('{{ $img }}')">
                     <span class="mtrend__grad"></span>
                     <span class="mtrend__sold"><i>🔥</i>Trending</span>

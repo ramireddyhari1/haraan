@@ -4,9 +4,12 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
+import com.haraan.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,8 +95,6 @@ import com.haraan.app.ui.components.AutoRefresh
 import com.haraan.app.data.AccountInfo
 import com.haraan.app.data.ApiConfig
 import com.haraan.app.data.BookingLite
-import com.haraan.app.data.BookingRepository
-import com.haraan.app.data.BookingResult
 import com.haraan.app.data.PlayerProfile
 import com.haraan.app.data.PrivacyRepository
 import com.haraan.app.data.PrivacySettings
@@ -101,7 +102,6 @@ import com.haraan.app.data.ProfileRepository
 import com.haraan.app.data.TokenStore
 import com.haraan.app.data.VenueApiItem
 import com.haraan.app.data.VenueRepository
-import com.haraan.app.data.VenueSlotItem
 import kotlinx.coroutines.launch
 import com.haraan.app.ui.theme.HaraanColors
 
@@ -236,6 +236,8 @@ fun AccountProfileScreen(
     onOpenPlayerProfile: () -> Unit,
     onOpenPass: (BookingLite) -> Unit,
     onOpenSupport: () -> Unit,
+    /** "Book a venue slot" hands off here — booking lives on the venue page, not in a sheet. */
+    onOpenVenue: (VenueApiItem) -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
     isGuest: Boolean = false,
@@ -282,7 +284,7 @@ fun AccountProfileScreen(
     if (showVenueSheet) {
         VenueBookingSheet(
             onDismiss = { showVenueSheet = false },
-            onBooked = { showVenueSheet = false; reloadKey++ },
+            onPickVenue = { v -> showVenueSheet = false; onOpenVenue(v) },
         )
     }
 
@@ -571,9 +573,11 @@ private fun IdentityHero(a: AccountInfo, uploadingPhoto: Boolean, onEditPhoto: (
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize().clip(CircleShape),
                         )
-                        else -> Text(
-                            a.name.take(1).uppercase().ifBlank { "?" },
-                            color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                        else -> Image(
+                            painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                            contentDescription = "Profile photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
                         )
                     }
                 }
@@ -1604,168 +1608,64 @@ private fun memberSinceYear(raw: String?): String? {
     return year.takeIf { it.all(Char::isDigit) }
 }
 
-// ─────────────────────────────────────────── Venue-slot booking sheet ───────────
-// Pick a bookable venue → a date (next 7 days) → an available slot → confirm.
-// POSTs /api/bookings/venue; on success the caller reloads so the booking shows in Tickets.
+// ───────────────────────────────────────── Venue picker ───────
+/**
+ * "Book a venue slot" from the Tickets lane — a list of bookable venues that hands
+ * the chosen one to the venue page.
+ *
+ * It used to book here as well: pick a date, pick a slot, confirm. That was a second
+ * booking flow beside the venue page's, and it had fallen behind the product on all
+ * three things that matter. It couldn't pick a court, so on a multi-court turf it
+ * wrote a court-less booking that the conflict engine checks against nothing (two
+ * people could hold the same 7 PM), and that the partner's day grid has no cell to
+ * draw. It couldn't set a duration. And it answered every paid venue with "Payment
+ * isn't supported for venue slots yet" — after the server had already reserved the
+ * court, so a customer who tried left the slot held for fifteen minutes and walked
+ * away with nothing.
+ *
+ * One booking flow, on the screen that owns it.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VenueBookingSheet(onDismiss: () -> Unit, onBooked: () -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+private fun VenueBookingSheet(onDismiss: () -> Unit, onPickVenue: (VenueApiItem) -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var venues by remember { mutableStateOf<List<VenueApiItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
-    var venue by remember { mutableStateOf<VenueApiItem?>(null) }
-    var slots by remember { mutableStateOf<List<VenueSlotItem>>(emptyList()) }
-    var slot by remember { mutableStateOf<VenueSlotItem?>(null) }
-    var booking by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    // Next 7 days as (isoDate, label, offset) — Calendar/SimpleDateFormat to stay below API 26.
-    val days = remember {
-        val iso = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-        val lbl = java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.US)
-        (0..6).map { off ->
-            val c = java.util.Calendar.getInstance(); c.add(java.util.Calendar.DAY_OF_YEAR, off)
-            Triple(iso.format(c.time), lbl.format(c.time), off)
-        }
-    }
-    var date by remember { mutableStateOf(days.first().first) }
 
     LaunchedEffect(Unit) {
         venues = runCatching { VenueRepository().getVenues().filter { it.isBookable } }.getOrDefault(emptyList())
         loading = false
     }
-    LaunchedEffect(venue?.id) {
-        val v = venue ?: return@LaunchedEffect
-        slot = null
-        slots = runCatching { VenueRepository().getVenueSlots(v.id) }.getOrDefault(emptyList())
-    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Surface) {
         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
-            Text(
-                if (venue == null) "Book a venue slot" else venue!!.name,
-                color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-            )
+            Text("Book a venue slot", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             Spacer(Modifier.height(4.dp))
-            Text(
-                if (venue == null) "Choose a venue, then a date & slot" else "₹${venue!!.price} · ${venue!!.location}",
-                color = Text3, fontSize = 12.5.sp,
-            )
+            Text("Choose a venue — courts, timings and prices are on its page.", color = Text3, fontSize = 12.5.sp)
             Spacer(Modifier.height(16.dp))
 
             when {
                 loading -> Box(Modifier.fillMaxWidth().padding(24.dp), Alignment.Center) {
                     CircularProgressIndicator(color = BlueBright)
                 }
-                venue == null -> {
-                    if (venues.isEmpty()) {
-                        Text("No bookable venues right now.", color = Text3, fontSize = 13.sp)
-                    } else {
-                        venues.forEach { v ->
-                            Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, Stroke, RoundedCornerShape(12.dp))
-                                    .clickable { venue = v }.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                GradientIcon(Icons.Default.Place)
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(v.name, color = Text1, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                    Text("${v.category} · ${v.location}", color = Text3, fontSize = 12.sp, maxLines = 1)
-                                }
-                                Text("₹${v.price}", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Spacer(Modifier.height(8.dp))
-                        }
-                    }
-                }
-                else -> {
-                    Text("Date", color = Text2, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(days) { d ->
-                            val sel = d.first == date
-                            Box(
-                                Modifier.clip(RoundedCornerShape(12.dp)).background(if (sel) Text1 else Bg)
-                                    .border(1.dp, if (sel) Color.Transparent else Stroke, RoundedCornerShape(12.dp))
-                                    .clickable { date = d.first }.padding(horizontal = 14.dp, vertical = 10.dp),
-                            ) {
-                                Text(
-                                    if (d.third == 0) "Today" else d.second,
-                                    color = if (sel) Color.White else Text2, fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold, maxLines = 1,
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Text("Slot", color = Text2, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    if (slots.isEmpty()) {
-                        Text("No slots listed for this venue.", color = Text3, fontSize = 13.sp)
-                    } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(slots) { s ->
-                                val sel = slot?.id == s.id
-                                val enabled = s.available
-                                Column(
-                                    Modifier.clip(RoundedCornerShape(12.dp))
-                                        .background(if (sel) BlueBright else if (enabled) Bg else Color(0xFFF1F1F4))
-                                        .border(1.dp, if (sel) Color.Transparent else Stroke, RoundedCornerShape(12.dp))
-                                        .then(if (enabled) Modifier.clickable { slot = s } else Modifier)
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    Text(s.time, color = if (sel) Color.White else if (enabled) Text1 else Text3, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                    Text(
-                                        if (!enabled) "Booked" else if (s.fillingFast) "Filling fast" else s.day,
-                                        color = if (sel) Color.White.copy(alpha = 0.85f) else Text3, fontSize = 10.5.sp, maxLines = 1,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    error?.let { Spacer(Modifier.height(10.dp)); Text(it, color = Danger, fontSize = 12.5.sp) }
-                    Spacer(Modifier.height(18.dp))
-                    val canBook = slot != null && !booking
-                    Box(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
-                            .background(if (canBook) Green else Color(0xFFBFC8D2))
-                            .then(
-                                if (canBook) Modifier.clickable {
-                                    booking = true; error = null
-                                    scope.launch {
-                                        val token = TokenStore.getToken(ctx) ?: ""
-                                        val res = BookingRepository().bookVenueSlot(token, venue!!.id.toIntOrNull() ?: 0, slot!!.id, date)
-                                        booking = false
-                                        when (res) {
-                                            is BookingResult.Success -> {
-                                                Toast.makeText(ctx, "Slot booked!", Toast.LENGTH_SHORT).show(); onBooked()
-                                            }
-                                            is BookingResult.Error -> error = res.message
-                                            // Venue slots don't use the reserve→pay flow.
-                                            is BookingResult.PaymentRequired -> error = "Payment isn't supported for venue slots yet."
-                                        }
-                                    }
-                                } else Modifier,
-                            )
-                            .padding(vertical = 15.dp),
-                        contentAlignment = Alignment.Center,
+                venues.isEmpty() -> Text("No bookable venues right now.", color = Text3, fontSize = 13.sp)
+                else -> venues.forEach { v ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, Stroke, RoundedCornerShape(12.dp))
+                            .clickable { onPickVenue(v) }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            if (booking) "Booking…" else "Confirm booking · ₹${venue!!.price}",
-                            color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                        )
+                        GradientIcon(Icons.Default.Place)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(v.name, color = Text1, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text("${v.category} · ${v.location}", color = Text3, fontSize = 12.sp, maxLines = 1)
+                        }
+                        Text("₹${v.price}", color = Text2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Box(
-                        Modifier.fillMaxWidth().clickable { venue = null; slot = null; error = null }.padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { Text("← Choose a different venue", color = Text3, fontSize = 12.5.sp, fontWeight = FontWeight.Medium) }
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }

@@ -291,7 +291,7 @@ fun ScoringScreen(
                 }
             }
         },
-        onBowlerChange = { member ->
+        onBowlerChange = { member, bowlerType ->
             // End of over → a new bowler must come on; this also rolls the over server-side.
             scope.launch {
                 val token = scoringToken() ?: return@launch
@@ -299,6 +299,12 @@ fun ScoringScreen(
                     val payload = JSONObject()
                         .put("type", "change_bowler")
                         .put("bowler_id", playerRef(member) ?: "Bowler")
+                        // Pace or spin, recorded on the SPELL rather than on the player:
+                        // a gully all-rounder bowls both, and a profile field could never
+                        // say which one this over was. Written from today so that a
+                        // wicket split becomes computable later — it is the one thing
+                        // about a delivery that cannot be reconstructed afterwards.
+                        .also { if (bowlerType != null) it.put("bowler_type", bowlerType) }
                     val sent3 = repo.sendScoreAction(token, matchId, payload)
                     if (!sent3.ok) {
                         Toast.makeText(ctx, sent3.refusal ?: "Bowler change didn't save.", Toast.LENGTH_LONG).show()
@@ -444,7 +450,8 @@ private fun ScorerLoaded(
     secondBattingSquad: List<SquadMember> = emptyList(),
     secondBowlingSquad: List<SquadMember> = emptyList(),
     onEvent: (event: String, after: ScorerState, shot: ShotPlot?) -> Unit = { _, _, _ -> },
-    onBowlerChange: (SquadMember?) -> Unit = {},
+    /** The bowler coming on, and whether they bowl pace or spin ("pace"/"spin"/null). */
+    onBowlerChange: (SquadMember?, String?) -> Unit = { _, _ -> },
     onWicket: (newBatsman: SquadMember?, dismissal: String, fielder: SquadMember?) -> Unit = { _, _, _ -> },
     onStartSecondInnings: (striker: String, nonStriker: String, bowler: String) -> Unit = { _, _, _ -> },
     onChangeBatsman: (role: String, member: SquadMember) -> Unit = { _, _ -> },
@@ -471,6 +478,13 @@ private fun ScorerLoaded(
     // A bowler must be on before any ball: at the over-end the next bowler is forced, and
     // for a fresh innings the opening bowler is forced before the first delivery.
     var pickBowler by remember { mutableStateOf(false) }
+    // Held so the innings 'start' action can carry the opening bowler's type too — that
+    // spell is sent lazily on the first ball, long after the picker has closed.
+    var pendingBowlerType by remember { mutableStateOf<String?>(null) }
+    // Asked ONCE per bowler per match, not once per over. A scorer between overs has a
+    // fielding side waiting on them, and a question they have already answered about
+    // this bowler is the kind of friction that gets a feature switched off.
+    val bowlerTypes = remember { mutableStateMapOf<String, String>() }
     var showLanguage by remember { mutableStateOf(false) }
     // The boundary waiting on a direction. Null when nothing is pending.
     var pendingShot by remember { mutableStateOf<String?>(null) }
@@ -560,7 +574,7 @@ private fun ScorerLoaded(
         pickBatsman = false
         val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
         if (next.balls > before && next.balls % 6 == 0 && !nextOver) {
-            if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null)
+            if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null, null)
         }
     }
 
@@ -604,7 +618,7 @@ private fun ScorerLoaded(
         // over). Skip the prompt when that ball also ended the innings.
         val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
         if (next.balls > before && next.balls % 6 == 0 && !nextOver) {
-            if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null)
+            if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null, null)
         }
     }
 
@@ -728,8 +742,11 @@ private fun ScorerLoaded(
             squad = activeBowlingSquad,
             currentName = state.bowler.name,
             opening = pickingOpening,
-            onPick = { member ->
+            knownTypes = bowlerTypes,
+            onPick = { member, bowlerType ->
                 state = state.copy(bowler = ScorerBowler(member.name, 0, 0, 0))
+                pendingBowlerType = bowlerType
+                if (bowlerType != null) bowlerTypes[member.name] = bowlerType
                 if (pickingOpening) {
                     // Opening bowler locked in.
                     openingBowlerSet = true
@@ -742,7 +759,7 @@ private fun ScorerLoaded(
                     }
                     // Otherwise (1st innings) the 'start' is sent lazily on the first ball.
                 } else {
-                    onBowlerChange(member)
+                    onBowlerChange(member, bowlerType)
                 }
                 pickBowler = false
             }
@@ -1586,9 +1603,24 @@ private fun BatsmanPicker(
     }
 }
 
-// Over-end bowler chooser. Forced (can't dismiss) so the over always rolls with a bowler.
+/**
+ * Over-end bowler chooser. Forced (can't dismiss) so the over always rolls with a bowler.
+ *
+ * Two steps, and the second is skipped for anyone already bowled this match: pick the
+ * bowler, then say whether they bowl pace or spin. That second answer is the only fact
+ * about a delivery that cannot be recovered afterwards — a profile's "bowling style"
+ * cannot say which of the two an all-rounder used for THIS over — so it is collected
+ * now, even though nothing reads it yet.
+ */
 @Composable
-private fun BowlerPicker(squad: List<SquadMember>, currentName: String, opening: Boolean = false, onPick: (SquadMember) -> Unit) {
+private fun BowlerPicker(
+    squad: List<SquadMember>,
+    currentName: String,
+    opening: Boolean = false,
+    knownTypes: Map<String, String> = emptyMap(),
+    onPick: (SquadMember, String?) -> Unit,
+) {
+    var awaitingType by remember { mutableStateOf<SquadMember?>(null) }
     Dialog(
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
@@ -1616,7 +1648,12 @@ private fun BowlerPicker(squad: List<SquadMember>, currentName: String, opening:
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(ScDark)
-                            .clickable { onPick(member) }
+                            .clickable {
+                                // Already answered for this bowler in this match: do not
+                                // ask a scorer the same question every over.
+                                val known = knownTypes[member.name]
+                                if (known != null) onPick(member, known) else awaitingType = member
+                            }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1636,6 +1673,70 @@ private fun BowlerPicker(squad: List<SquadMember>, currentName: String, opening:
                         }
                     }
                 }
+            }
+        }
+    }
+
+    awaitingType?.let { member ->
+        BowlerTypePicker(member) { chosen ->
+            awaitingType = null
+            onPick(member, chosen)
+        }
+    }
+}
+
+/** Pace, spin, or an honest "not sure" — which is a real answer, not a skipped one. */
+@Composable
+private fun BowlerTypePicker(member: SquadMember, onPick: (String?) -> Unit) {
+    Dialog(
+        onDismissRequest = { onPick(null) },
+        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false),
+    ) {
+        Column(
+            Modifier.clip(RoundedCornerShape(18.dp)).background(ScPanel).padding(20.dp),
+        ) {
+            Text("BOWLING TYPE", color = ScTeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "How does ${member.name} bowl?",
+                color = ScInk,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Asked once per bowler. It is what lets Haraan show how wickets fall at a ground.",
+                color = ScInk2,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+            listOf(
+                Triple("Pace", "Fast, medium, seam", "pace"),
+                Triple("Spin", "Off, leg, orthodox", "spin"),
+                Triple("Not sure", "Leaves it unrecorded", null),
+            ).forEach { (label, sub, value) ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ScDark)
+                        .clickable { onPick(value) }
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            label,
+                            color = if (value == null) ScInk2 else ScInk,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(sub, color = ScInk2, fontSize = 11.5.sp)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
             }
         }
     }

@@ -38,6 +38,8 @@ data class VenueSlotItem(
     val fillingFast: Boolean,
     val price: Int = 0,
     val capacity: Int = 1,
+    /** Sports this time runs for; empty = all of them. */
+    val sports: List<String> = emptyList(),
 )
 
 /** A single user review on a venue detail page. */
@@ -108,7 +110,23 @@ data class VenueDetailData(
     val slots: List<VenueSlotItem>,
     val reviews: List<VenueReviewItem>,
     val priceChart: List<VenuePriceVariant>,
-)
+    // Booking fee, mirroring the backend's two columns: "none" | "flat" | "percent".
+    // Read through [convenienceFeeOn] rather than by hand — the order summary has to
+    // quote the fee the server will actually add, or the total on screen isn't the
+    // total charged.
+    val convenienceFeeType: String = "none",
+    val convenienceFeeValue: Double = 0.0,
+) {
+    /** The fee this venue adds to a [subtotal], rounded to whole rupees like the summary. */
+    fun convenienceFeeOn(subtotal: Int): Int {
+        if (subtotal <= 0 || convenienceFeeValue <= 0.0) return 0
+        return when (convenienceFeeType.lowercase()) {
+            "flat" -> kotlin.math.round(convenienceFeeValue).toInt()
+            "percent" -> kotlin.math.round(subtotal * convenienceFeeValue / 100.0).toInt()
+            else -> 0
+        }
+    }
+}
 
 /** Outcome of submitting a venue review. */
 sealed interface ReviewResult {
@@ -164,6 +182,7 @@ class VenueRepository {
                 fillingFast = o.optBoolean("filling_fast", false),
                 price = o.optInt("price", 0),
                 capacity = o.optInt("capacity", 1),
+                sports = o.optJSONArray("sports").toStringList(),
             )
         }
     }
@@ -251,6 +270,9 @@ class VenueRepository {
                     },
                 )
             },
+            // Absent on older servers, which is the "none" case anyway.
+            convenienceFeeType = s("convenience_fee_type").ifBlank { "none" },
+            convenienceFeeValue = d.optDouble("convenience_fee_value", 0.0).let { if (it.isNaN()) 0.0 else it },
         )
     }
 

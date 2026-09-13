@@ -81,6 +81,16 @@ class ShiftSession extends Model
         return $this->hasMany(BookingPayment::class, 'shift_session_id');
     }
 
+    public function drops(): HasMany
+    {
+        return $this->hasMany(ShiftDrop::class, 'shift_session_id');
+    }
+
+    public function totalDrops(): float
+    {
+        return (float) $this->drops()->sum('amount');
+    }
+
     public function scopeOpen(Builder $query): Builder
     {
         return $query->whereNull('closed_at');
@@ -102,10 +112,10 @@ class ShiftSession extends Model
             ->sum('amount');
     }
 
-    /** What should physically be in the drawer right now. */
+    /** What should physically be in the drawer right now (float + cash in - cash drops). */
     public function expectedCash(): float
     {
-        return round((float) $this->opening_float + $this->cashMovement(), 2);
+        return round((float) $this->opening_float + $this->cashMovement() - $this->totalDrops(), 2);
     }
 
     /** UPI + card taken at the counter — reconciled against statements, not counted. */

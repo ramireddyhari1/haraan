@@ -6,8 +6,11 @@
 package com.haraan.app.ui.social
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.res.painterResource
+import com.haraan.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -508,11 +511,11 @@ private fun Avatar(url: String?, name: String, size: androidx.compose.ui.unit.Dp
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
             )
         } else {
-            Text(
-                name.trim().take(1).uppercase().ifBlank { "?" },
-                color = HaraanColors.EventsBlue,
-                fontSize = (size.value / 2.6f).sp,
-                fontWeight = FontWeight.Bold,
+            Image(
+                painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
             )
         }
     }

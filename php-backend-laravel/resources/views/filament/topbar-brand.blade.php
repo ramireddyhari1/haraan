@@ -5,9 +5,3 @@
 <a href="{{ url('control') }}" class="hrn-topbrand" aria-label="Haraan Control — home">
     <img src="{{ asset('images/haraan-mark.png') }}" alt="Haraan">
 </a>
-<style>
-    .hrn-topbrand{display:none;align-items:center;margin-inline-start:.4rem;margin-inline-end:.1rem;flex-shrink:0;}
-    .hrn-topbrand img{height:24px;width:auto;display:block;}
-    .dark .hrn-topbrand img{filter:brightness(0) invert(1);}
-    @media (max-width:1023px){ .hrn-topbrand{display:inline-flex;} }
-</style>

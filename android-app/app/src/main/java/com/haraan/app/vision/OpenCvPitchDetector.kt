@@ -31,10 +31,49 @@ import kotlin.math.min
  * the bowler narrows with distance, and that single constraint throws out most impostors.
  * When nothing survives, the answer is null and the caller falls back to tapped corners.
  */
+/**
+ * Why the detector said no.
+ *
+ * A null answer is useless to anyone trying to make this work: "no pitch" looks identical
+ * whether the camera saw no lines at all, saw plenty but none at a crease angle, or found
+ * a perfectly good quad and rejected it as the wrong shape. Each of those wants a
+ * different fix, and on a ground there is no chance to attach a debugger.
+ *
+ * So the detector reports where it stopped. This is instrumentation, never a claim about
+ * the pitch - a high line count means the frame was busy, not that anything was found.
+ */
+data class PitchDetectorReport(
+    val framesSeen: Int,
+    val houghSegments: Int,
+    val creaseSegments: Int,
+    val railSegments: Int,
+    val agreeingFrames: Int,
+    val averageProcessingMs: Double,
+    /** Where the last frame gave up, in plain words. Null once a quad is being returned. */
+    val lastRejection: String?,
+)
+
 class OpenCvPitchDetector(
     private val analysisWidth: Int = 480,
 ) {
     val available: Boolean = OpenCvBallTracker.ensureLoaded()
+
+    private var framesSeen = 0
+    private var houghSegments = 0
+    private var creaseSegments = 0
+    private var railSegments = 0
+    private var totalProcessingMs = 0L
+    private var lastRejection: String? = "nothing analysed yet"
+
+    fun report() = PitchDetectorReport(
+        framesSeen = framesSeen,
+        houghSegments = houghSegments,
+        creaseSegments = creaseSegments,
+        railSegments = railSegments,
+        agreeingFrames = recent.size,
+        averageProcessingMs = if (framesSeen == 0) 0.0 else totalProcessingMs.toDouble() / framesSeen,
+        lastRejection = lastRejection,
+    )
 
     /** Recent accepted quads, for the stability check. A tripod does not move. */
     private val recent = ArrayDeque<PitchQuad>()
@@ -48,28 +87,58 @@ class OpenCvPitchDetector(
      * line, a shadow edge, one bad Hough threshold — and a guide that jitters between two
      * interpretations is worse than one that does not move at all.
      */
-    fun detect(luma: ByteArray, width: Int, height: Int, rowStride: Int): PitchQuad? {
+    fun detect(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        /**
+         * How far the buffer must be turned clockwise to appear the way the viewer sees it,
+         * straight from ImageInfo.rotationDegrees.
+         *
+         * This is not a detail. Camera frames arrive in the SENSOR's orientation, which on a
+         * phone held upright is a quarter turn away from the screen. Every rule below is
+         * written in the viewer's terms - creases run across, pitch edges run away, the far
+         * edge is narrower - and all three are false in a buffer lying on its side. Ignoring
+         * this does not merely rotate the overlay; it makes the detector reject real pitches,
+         * because it is looking for a shape that is no longer there.
+         */
+        rotationDegrees: Int,
+    ): PitchQuad? {
         if (!available || released || width <= 0 || height <= 0) return null
 
+        framesSeen++
+        val startedAt = System.nanoTime()
         return try {
-            val candidate = findQuad(luma, width, height, rowStride) ?: run {
+            val candidate = findQuad(luma, width, height, rowStride, rotationDegrees) ?: run {
                 // A miss decays the history rather than clearing it: the pitch does not
                 // vanish because one frame had a fielder standing on the crease.
                 if (recent.isNotEmpty()) recent.removeFirst()
-                return stableQuad()
+                val whyThisFrameFailed = lastRejection
+                val stable = stableQuad()
+                // Only the stability window may explain a null when the frame itself was
+                // fine. Otherwise the frame's own reason is the true one.
+                if (stable == null && whyThisFrameFailed != null) {
+                    lastRejection = whyThisFrameFailed
+                }
+                return stable
             }
 
             recent.addLast(candidate)
             while (recent.size > STABILITY_WINDOW) recent.removeFirst()
-            stableQuad()
+            stableQuad().also { if (it != null) lastRejection = null }
         } catch (t: Throwable) {
             Log.w(TAG, "pitch detection failed", t)
+            lastRejection = "OpenCV threw: ${t.javaClass.simpleName}"
             null
+        } finally {
+            totalProcessingMs += (System.nanoTime() - startedAt) / 1_000_000
         }
     }
 
     fun reset() {
         recent.clear()
+        lastRejection = "reset"
     }
 
     fun release() {
@@ -85,13 +154,19 @@ class OpenCvPitchDetector(
      * flickering between candidates, and the honest output then is nothing.
      */
     private fun stableQuad(): PitchQuad? {
-        if (recent.size < STABILITY_WINDOW) return null
+        if (recent.size < STABILITY_WINDOW) {
+            lastRejection = "waiting: ${recent.size}/$STABILITY_WINDOW frames agree"
+            return null
+        }
 
         val corners = (0 until 4).map { i ->
             val xs = recent.map { it.corners[i].x }
             val ys = recent.map { it.corners[i].y }
             val spread = max(xs.max() - xs.min(), ys.max() - ys.min())
-            if (spread > MAX_CORNER_SPREAD) return null
+            if (spread > MAX_CORNER_SPREAD) {
+                lastRejection = "corner $i drifted ${"%.3f".format(spread)} between frames"
+                return null
+            }
             Point2(xs.average(), ys.average())
         }
 
@@ -103,11 +178,29 @@ class OpenCvPitchDetector(
             // is: how much the detector agreed with itself.
             confidence = recent.map { it.confidence }.average().toFloat(),
         )
-        return if (quad.isPlausible()) quad else null
+        if (!quad.isPlausible()) {
+            lastRejection = "the averaged quad is not a pitch shape"
+            return null
+        }
+        return quad
     }
 
     /** One frame's best guess at the pitch, before any smoothing. */
-    private fun findQuad(luma: ByteArray, width: Int, height: Int, rowStride: Int): PitchQuad? {
+    private fun findQuad(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        rotationDegrees: Int,
+    ): PitchQuad? {
+        // Cleared per frame. Leaving them to carry over showed "2 straight edges" beside
+        // "2 crease-angle, 1 down-pitch" - three segments sorted out of two, which is
+        // arithmetically impossible and exactly the kind of readout that sends somebody
+        // chasing the wrong stage.
+        houghSegments = 0
+        creaseSegments = 0
+        railSegments = 0
+
         val packed = if (rowStride == width) luma else ByteArray(width * height).also { out ->
             for (row in 0 until height) {
                 val from = row * rowStride
@@ -128,8 +221,18 @@ class OpenCvPitchDetector(
         }
         full.release()
 
+        val upright = when (((rotationDegrees % 360) + 360) % 360) {
+            90 -> Mat().also { Core.rotate(small, it, Core.ROTATE_90_CLOCKWISE); small.release() }
+            180 -> Mat().also { Core.rotate(small, it, Core.ROTATE_180); small.release() }
+            270 -> Mat().also {
+                Core.rotate(small, it, Core.ROTATE_90_COUNTERCLOCKWISE)
+                small.release()
+            }
+            else -> small
+        }
+
         val blurred = Mat()
-        Imgproc.GaussianBlur(small, blurred, Size(5.0, 5.0), 0.0)
+        Imgproc.GaussianBlur(upright, blurred, Size(5.0, 5.0), 0.0)
 
         // Creases are BRIGHT. Isolating the bright end before edge detection throws away
         // most of the outfield's texture, which otherwise generates hundreds of Hough
@@ -149,16 +252,18 @@ class OpenCvPitchDetector(
             1.0,
             Math.PI / 180.0,
             HOUGH_THRESHOLD,
-            small.cols() * MIN_LINE_FRACTION,
+            upright.cols() * MIN_LINE_FRACTION,
             MAX_LINE_GAP,
         )
-        val w = small.cols().toDouble()
-        val h = small.rows().toDouble()
-        small.release()
+        val w = upright.cols().toDouble()
+        val h = upright.rows().toDouble()
+        upright.release()
         edges.release()
 
+        houghSegments = lines.rows()
         if (lines.rows() < 4) {
             lines.release()
+            lastRejection = "only ${lines.rows()} straight edges in frame"
             return null
         }
 
@@ -177,23 +282,39 @@ class OpenCvPitchDetector(
             }
         }
         lines.release()
+        creaseSegments = creases.size
+        railSegments = rails.size
 
-        if (creases.size < 2 || rails.size < 2) return null
+        if (creases.size < 2 || rails.size < 2) {
+            lastRejection =
+                "need 2 of each: ${creases.size} crease-angle, ${rails.size} down-pitch"
+            return null
+        }
 
         // The two creases furthest apart vertically are the near and far ones; the two
         // rails furthest apart horizontally are the pitch's edges.
         val near = creases.maxByOrNull { it.midY } ?: return null
         val far = creases.minByOrNull { it.midY } ?: return null
-        if (near.midY - far.midY < h * MIN_CREASE_SEPARATION) return null
+        if (near.midY - far.midY < h * MIN_CREASE_SEPARATION) {
+            lastRejection = "the two creases are too close together to be a pitch"
+            return null
+        }
 
         val left = rails.minByOrNull { it.midX } ?: return null
         val right = rails.maxByOrNull { it.midX } ?: return null
-        if (right.midX - left.midX < w * MIN_RAIL_SEPARATION) return null
+        if (right.midX - left.midX < w * MIN_RAIL_SEPARATION) {
+            lastRejection = "the pitch edges are too close together"
+            return null
+        }
 
-        val nearLeft = intersect(near, left) ?: return null
-        val nearRight = intersect(near, right) ?: return null
-        val farRight = intersect(far, right) ?: return null
-        val farLeft = intersect(far, left) ?: return null
+        val nearLeft = intersect(near, left)
+        val nearRight = intersect(near, right)
+        val farRight = intersect(far, right)
+        val farLeft = intersect(far, left)
+        if (nearLeft == null || nearRight == null || farRight == null || farLeft == null) {
+            lastRejection = "the crease and edge lines never meet"
+            return null
+        }
 
         val quad = PitchQuad(
             corners = listOf(
@@ -206,7 +327,11 @@ class OpenCvPitchDetector(
             // More supporting segments means the lines were not flukes.
             confidence = ((creases.size + rails.size) / 12f).coerceIn(0.1f, 1f),
         )
-        return if (quad.isPlausible()) quad else null
+        if (!quad.isPlausible()) {
+            lastRejection = "found four corners, but they are not a pitch shape"
+            return null
+        }
+        return quad
     }
 
     /** Where two infinite lines cross, or null when they are parallel. */

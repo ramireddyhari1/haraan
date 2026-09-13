@@ -1,8 +1,11 @@
 package com.haraan.app.ui.matches.tabs
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.res.painterResource
+import com.haraan.app.R
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -131,17 +134,16 @@ private fun PlayerFace(
             if (url != null) {
                 AsyncImage(
                     model = url,
-                    contentDescription = null,
+                    contentDescription = name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(inner).clip(CircleShape)
                 )
             } else {
-                Text(
-                    name.trim().take(1).uppercase().ifBlank { "?" },
-                    color = initialColor,
-                    fontSize = (inner.value * 0.42f).sp,
-                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                Image(
+                    painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                    contentDescription = name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(inner).clip(CircleShape)
                 )
             }
         }
@@ -248,6 +250,12 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     }
                 }
 
+                val allSquad = remember(state.homeSquad, state.awaySquad) { state.homeSquad + state.awaySquad }
+                fun findPhoto(pName: String): String {
+                    val clean = pName.trimEnd('*', ' ').trim()
+                    return allSquad.firstOrNull { it.name.equals(clean, ignoreCase = true) }?.avatar.orEmpty()
+                }
+
                 if (state.striker.isNotEmpty()) {
                     val stats = state.strikerStats
                     val runs = stats?.runs?.toString() ?: "0"
@@ -257,7 +265,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     val sr = if (stats != null && stats.balls > 0) {
                         String.format("%.2f", (stats.runs.toFloat() / stats.balls) * 100)
                     } else "0.00"
-                    BatterRow(name = state.striker + " *", runs = runs, balls = balls, fours = fours, sixes = sixes, sr = sr)
+                    BatterRow(name = state.striker + " *", runs = runs, balls = balls, fours = fours, sixes = sixes, sr = sr, photoUrl = findPhoto(state.striker))
                 }
                 if (state.nonStriker.isNotEmpty()) {
                     val stats = state.nonStrikerStats
@@ -268,7 +276,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     val sr = if (stats != null && stats.balls > 0) {
                         String.format("%.2f", (stats.runs.toFloat() / stats.balls) * 100)
                     } else "0.00"
-                    BatterRow(name = state.nonStriker, runs = runs, balls = balls, fours = fours, sixes = sixes, sr = sr)
+                    BatterRow(name = state.nonStriker, runs = runs, balls = balls, fours = fours, sixes = sixes, sr = sr, photoUrl = findPhoto(state.nonStriker))
                 }
 
                 // ── Partnership / last wicket — only real values ──
@@ -313,7 +321,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     val econ = if (balls > 0) {
                         String.format("%.2f", (runs.toFloat() / balls) * 6)
                     } else "0.00"
-                    BowlerRow(name = state.bowler, figures = "$wickets-$runs", overs = oversDecimal, econ = econ)
+                    BowlerRow(name = state.bowler, figures = "$wickets-$runs", overs = oversDecimal, econ = econ, photoUrl = findPhoto(state.bowler))
                 }
             }
         }
@@ -656,14 +664,12 @@ private fun MilestoneFace(text: String, photoUrl: String, accent: Color) {
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
             )
         } else {
-            // The headline starts with the player's name, so its initials are theirs.
-            val parts = text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-            val initials = when {
-                parts.isEmpty() -> "?"
-                parts.size == 1 -> parts[0].take(2).uppercase()
-                else -> (parts[0].take(1) + parts[1].take(1)).uppercase()
-            }
-            Text(initials, color = accent, fontSize = 27.sp, fontWeight = FontWeight.ExtraBold)
+            Image(
+                painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                contentDescription = text,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
         }
     }
 }
@@ -763,7 +769,15 @@ private fun CommentaryRow(line: CommentaryLine) {
 }
 
 @Composable
-fun BatterRow(name: String, runs: String, balls: String, fours: String, sixes: String, sr: String) {
+fun BatterRow(
+    name: String,
+    runs: String,
+    balls: String,
+    fours: String,
+    sixes: String,
+    sr: String,
+    photoUrl: String = "",
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -773,6 +787,7 @@ fun BatterRow(name: String, runs: String, balls: String, fours: String, sixes: S
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val url = remember(photoUrl) { if (photoUrl.isNotBlank()) ApiConfig.mediaUrl(photoUrl) else null }
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -780,7 +795,21 @@ fun BatterRow(name: String, runs: String, balls: String, fours: String, sixes: S
                     .background(CrexColors.Background),
                 contentAlignment = Alignment.Center
             ) {
-                Text(name.first().toString(), color = CrexColors.TextSecondary)
+                if (url != null) {
+                    AsyncImage(
+                        model = url,
+                        contentDescription = name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                        contentDescription = name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                }
             }
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -803,7 +832,13 @@ fun BatterRow(name: String, runs: String, balls: String, fours: String, sixes: S
 }
 
 @Composable
-fun BowlerRow(name: String, figures: String, overs: String, econ: String) {
+fun BowlerRow(
+    name: String,
+    figures: String,
+    overs: String,
+    econ: String,
+    photoUrl: String = "",
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -813,6 +848,7 @@ fun BowlerRow(name: String, figures: String, overs: String, econ: String) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val url = remember(photoUrl) { if (photoUrl.isNotBlank()) ApiConfig.mediaUrl(photoUrl) else null }
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -820,7 +856,21 @@ fun BowlerRow(name: String, figures: String, overs: String, econ: String) {
                     .background(CrexColors.Background),
                 contentAlignment = Alignment.Center
             ) {
-                Text(name.first().toString(), color = CrexColors.TextSecondary)
+                if (url != null) {
+                    AsyncImage(
+                        model = url,
+                        contentDescription = name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_default_player_avatar),
+                        contentDescription = name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                }
             }
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

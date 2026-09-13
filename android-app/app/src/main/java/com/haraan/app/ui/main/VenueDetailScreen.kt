@@ -1378,7 +1378,11 @@ internal fun BookingSheet(
   var couponMessage by remember { mutableStateOf<String?>(null) }
   var appliedCode by remember { mutableStateOf<String?>(null) }
   var discountRs by remember { mutableStateOf(0) }
-  var feeRs by remember { mutableStateOf(0) }
+  // The fee the server quoted for this order, once it has quoted one. Until then the
+  // venue's own rule stands in — see [feeRs] below. It used to be a plain 0 that only
+  // filled in if the customer happened to try a coupon, so a fee-charging venue showed
+  // a total on the summary that wasn't the total Razorpay then asked for.
+  var quotedFeeRs by remember { mutableStateOf<Int?>(null) }
 
   // Only the courts that can host the chosen sport. A court with no sports listed hosts any.
   // One physical court shared by two sports appears under both — booking it blocks the other.
@@ -1390,9 +1394,21 @@ internal fun BookingSheet(
   // The slot rows are keyed by a free-text "day" label (Today / Tomorrow / weekday), so we
   // map the calendar date back to that label to find its availability.
   val selectedDayLabel = dayLabelFor(selectedDate)
-  // Bookable start times for the chosen date.
-  val startTimes = remember(venue, selectedDayLabel) {
-    venue.slots.filter { it.day.equals(selectedDayLabel, ignoreCase = true) && it.available }
+  // Bookable start times for the chosen date. Once a court is chosen the list narrows to
+  // the times that actually run its sport — offering a 6 AM turf slot the server refuses
+  // wastes the tap and reads as a bug. Either side listing no sports means no restriction,
+  // so a single-sport venue sees exactly what it saw before.
+  val startTimes = remember(venue, selectedDayLabel, selectedCourt) {
+    val courtSports = selectedCourt?.sports.orEmpty()
+    venue.slots.filter { slot ->
+      slot.day.equals(selectedDayLabel, ignoreCase = true) && slot.available &&
+        (slot.sports.isEmpty() || courtSports.isEmpty() || slot.sports.any { it in courtSports })
+    }
+  }
+  // Court can be chosen after the time. If that narrowing drops the time already picked,
+  // let it go rather than submit a pair the server will refuse.
+  LaunchedEffect(startTimes) {
+    if (selectedSlot != null && startTimes.none { it.id == selectedSlot?.id }) selectedSlot = null
   }
   // Per-court price wins over the slot/venue price when a court is chosen, and peak pricing
   // wins over that when the picked day/time falls in the court's peak window.
@@ -1401,8 +1417,24 @@ internal fun BookingSheet(
     ?: venue.price
   val isPeakNow = selectedCourt?.let { isCourtPeak(it, selectedDate, selectedSlot?.time) } == true
   val subtotalRs = perHour * duration
+  // The venue's fee rule until the server quotes its own for this order. Both are the
+  // same arithmetic on the same two columns, so the summary reads the charge either way.
+  val feeRs = quotedFeeRs ?: venue.convenienceFeeOn(subtotalRs)
   // Fee is added and the discount taken off, mirroring reserveVenue's order exactly.
   val total = (subtotalRs + feeRs - discountRs).coerceAtLeast(0)
+
+  // A coupon is quoted against ONE subtotal. Change the duration, court or slot and that
+  // quote is about a different order — and since the code now travels with the booking,
+  // the server would resolve a discount the summary never showed. Drop it and say so,
+  // rather than let the screen and the charge tell two stories.
+  LaunchedEffect(subtotalRs) {
+    if (appliedCode != null) {
+      appliedCode = null
+      discountRs = 0
+      quotedFeeRs = null
+      couponMessage = "Re-apply your coupon for the new total."
+    }
+  }
   val canBook = selectedSlot != null && (!courtNeeded || selectedCourt != null) && !submitting
   // The chosen window as "7:00 PM – 8:00 PM" (null when the time string can't be parsed).
   val endLabel = selectedSlot?.let { slotWindowLabel(it.time, duration) }
@@ -1437,6 +1469,9 @@ internal fun BookingSheet(
       when (val r = BookingRepository().bookVenueSlot(
         token, venue.id.toIntOrNull() ?: 0, slot.id, date,
         courtId = selectedCourt?.id, duration = duration,
+        // The code the summary discounted by. Without it the server priced the order
+        // at full rate: the screen said one number and Razorpay asked for another.
+        couponCode = appliedCode,
       )) {
         is BookingResult.Success -> {
           // Free slot, or a server that still confirms without payment.
@@ -1598,7 +1633,7 @@ internal fun BookingSheet(
                 if (r.valid) {
                   appliedCode = r.code ?: code
                   discountRs = r.discount.toInt()
-                  feeRs = r.fee.toInt()
+                  quotedFeeRs = r.fee.toInt()
                 }
               }
             }
@@ -1607,6 +1642,8 @@ internal fun BookingSheet(
         onRemoveCoupon = {
           appliedCode = null
           discountRs = 0
+          // Back to the venue's own fee rule — the quote came with the coupon.
+          quotedFeeRs = null
           couponInput = ""
           couponMessage = null
         },

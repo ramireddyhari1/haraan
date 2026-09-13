@@ -79,7 +79,7 @@
     <div class="app">
         <aside class="sidebar">
             <div class="logo-wrap">
-                <div class="brand">Book &amp; Vibe Admin</div>
+                <div class="brand">Haraan Admin</div>
             </div>
             <nav class="nav">
                 <div class="section-label">Event Operations</div>

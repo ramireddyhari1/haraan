@@ -56,23 +56,39 @@ final class AdminDashboardController extends Controller
         return view('admin.pages.login', ['title' => 'Admin Login']);
     }
 
-    public function bookings(): View
+    public function bookings(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/bookings');
+        }
+
         return view('admin.pages.bookings', ['title' => 'Bookings']);
     }
 
-    public function coupons(): View
+    public function coupons(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/coupons');
+        }
+
         return view('admin.pages.coupons', ['title' => 'Coupons']);
     }
 
-    public function events(): View
+    public function events(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/events');
+        }
+
         return view('admin.pages.events', ['title' => 'Events']);
     }
 
-    public function eventsNew(): View
+    public function eventsNew(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/events/create');
+        }
+
         return view('admin.pages.events-new', ['title' => 'Create Event']);
     }
 
@@ -88,8 +104,12 @@ final class AdminDashboardController extends Controller
         ]);
     }
 
-    public function partners(): View
+    public function partners(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/partners');
+        }
+
         return view('admin.pages.partners', [
             'title' => 'Partners',
             'partners' => [
@@ -124,18 +144,30 @@ final class AdminDashboardController extends Controller
         ]);
     }
 
-    public function payments(): View
+    public function payments(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/payments');
+        }
+
         return view('admin.pages.payments', ['title' => 'Payments']);
     }
 
-    public function payouts(): View
+    public function payouts(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/payouts');
+        }
+
         return view('admin.pages.payouts', ['title' => 'Payout Requests']);
     }
 
-    public function scan(): View
+    public function scan(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/events/ticket-check-in');
+        }
+
         return view('admin.pages.scan', ['title' => 'Scan QR']);
     }
 
@@ -144,8 +176,12 @@ final class AdminDashboardController extends Controller
         return view('admin.pages.settings', ['title' => 'Settings']);
     }
 
-    public function users(): View
+    public function users(): \Illuminate\Http\RedirectResponse|\Illuminate\Contracts\View\View
     {
+        if (!request()->boolean('legacy')) {
+            return redirect('/control/users');
+        }
+
         // Executive Command Strip Stats
         $totalUsers = \App\Models\User::count();
         $activeToday = \App\Models\User::whereDate('updated_at', '>=', now()->toDateString())->count();

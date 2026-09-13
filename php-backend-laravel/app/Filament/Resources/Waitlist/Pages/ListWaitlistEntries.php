@@ -15,6 +15,13 @@ class ListWaitlistEntries extends ListRecords
 {
     protected static string $resource = WaitlistEntryResource::class;
 
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            \App\Filament\Resources\Waitlist\Widgets\WaitlistExecutiveHeroWidget::class,
+        ];
+    }
+
     protected function getHeaderActions(): array
     {
         return [

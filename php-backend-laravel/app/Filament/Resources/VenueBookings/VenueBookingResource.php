@@ -43,7 +43,7 @@ class VenueBookingResource extends Resource
 
     protected static ?string $title = 'Bookings & payments';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $recordTitleAttribute = 'ticket_code';
 

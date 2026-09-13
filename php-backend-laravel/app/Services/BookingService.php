@@ -54,7 +54,10 @@ final class BookingService
      */
     public const RESERVATION_HOLD_MINUTES = 15;
 
-    public function __construct(private readonly RazorpayGateway $razorpay) {}
+    public function __construct(
+        private readonly RazorpayGateway $razorpay,
+        private readonly BookingLedger $ledger,
+    ) {}
 
     /**
      * Create a new confirmed booking inside a DB transaction.
@@ -493,6 +496,14 @@ final class BookingService
                     $booking->razorpay_payment_id = $paymentId;
                 }
                 $booking->save();
+
+                // The money, not just the state. Both routes into this method carry a
+                // verified gateway payment — the buyer's confirm call and the webhook
+                // backstop — and until this line neither of them told the ledger, so a
+                // court paid for in the app read 'unpaid' at the partner's desk. The
+                // ledger row is idempotent on the payment id, so whichever of the two
+                // arrives second is a no-op rather than double takings.
+                $this->ledger->settleOnline($booking, $booking->amountCharged(), $paymentId);
             }
 
             // Count the coupon use now that the order is paid — once, and not on a re-confirm.
@@ -652,6 +663,60 @@ final class BookingService
         }
 
         return $released;
+    }
+
+    /**
+     * Put the gateway money for already-confirmed online bookings onto the ledger.
+     *
+     * Checkout used to confirm a booking without telling {@see BookingLedger} anything, so
+     * every order paid before that was fixed still reads `amount_paid = 0` /
+     * `payment_status = 'unpaid'` — indistinguishable from a walk-in who hasn't paid yet.
+     * Live rows, not history: those bookings are on partner chase lists right now, and
+     * their venues' "collected today" is short by exactly this money.
+     *
+     * Only touches rows that carry a Razorpay payment id (so the money is not in
+     * question) and have no ledger row at all (so a desk payment recorded by hand is
+     * never doubled). Reports by default; changes nothing until $apply is true.
+     *
+     * @return list<array{booking: int, type: string, amount: float, payment: string}>
+     */
+    public function backfillOnlinePayments(bool $apply = false): array
+    {
+        $rows = Booking::query()
+            ->whereNotNull('razorpay_payment_id')
+            ->where('razorpay_payment_id', '!=', '')
+            ->whereRaw('upper(status) = ?', ['CONFIRMED'])
+            ->whereDoesntHave('payments')
+            ->orderBy('id')
+            ->get();
+
+        $found = [];
+
+        foreach ($rows as $booking) {
+            $amount = $booking->amountCharged();
+
+            if ($amount <= 0.0) {
+                continue;
+            }
+
+            $found[] = [
+                'booking' => (int) $booking->id,
+                'type'    => (string) ($booking->booking_type ?: 'event'),
+                'amount'  => $amount,
+                'payment' => (string) $booking->razorpay_payment_id,
+            ];
+
+            if ($apply) {
+                $this->ledger->settleOnline(
+                    $booking,
+                    $amount,
+                    (string) $booking->razorpay_payment_id,
+                    'Razorpay checkout (backfilled)',
+                );
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -893,8 +958,12 @@ final class BookingService
 
     /**
      * Shared reservation routine behind the online and offline venue-booking paths.
-     * Validates the venue/slot/court, rejects blocked dates, enforces the court+window
-     * overlap rule, and writes the confirmed booking — all inside one locked transaction.
+     * Validates the venue/slot/court, rejects blocked dates, refuses a court whose sports
+     * the slot doesn't run for, enforces the court+window overlap rule, and writes the
+     * confirmed booking — all inside one locked transaction.
+     *
+     * Both public entry points funnel through here, so every rule below applies to the
+     * customer app and the partner desk alike.
      *
      * @param array{user_id:int,channel:string,guest_name:?string,guest_phone:?string,user?:?User,coupon_code?:?string} $meta
      */
@@ -966,6 +1035,22 @@ final class BookingService
                 $dayLabel = $slot->day;
                 $timeLabel = $slot->time;
                 $startMin = $this->timeToMinutes($slot->time);
+            }
+
+            // A slot may run for only some of the venue's sports, and a court hosts only
+            // some too. Without this a three-sport venue sold its football turf at a
+            // 06:00 AM row that exists for the badminton courts, at the full turf rate.
+            //
+            // Refuse only when both sides name sports and share none: either side left
+            // empty still means "no restriction", so a venue that never touches sports is
+            // unaffected, and a booking with no court at all (every row from before courts
+            // existed) is never rejected here.
+            if ($slot !== null && $court !== null && ! $slot->allowsCourt($court)) {
+                throw new ConflictHttpException(sprintf(
+                    'That time is for %s only — %s cannot be booked then',
+                    implode(', ', $slot->sportsList()),
+                    $court->name,
+                ));
             }
 
             // Per-court peak pricing wins when it applies (weekday/time window on the court).
@@ -1101,13 +1186,16 @@ final class BookingService
     private function assertNoBookingOverlap(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
     {
         if ($courtId !== null) {
+            $court = VenueCourt::find($courtId);
+            $courtIds = $court ? $court->allRelatedCourtIds() : [$courtId];
+
             $existing = Booking::query()
                 ->where('booking_type', 'venue')
                 ->where('venue_id', $venueId)
-                ->where('venue_court_id', $courtId)
+                ->whereIn('venue_court_id', $courtIds)
                 ->whereDate('slot_date', $date)
                 ->where(fn ($q) => $this->occupyingStatuses($q))
-                ->get(['start_time', 'end_time']);
+                ->get(['start_time', 'end_time', 'venue_court_id']);
 
             foreach ($existing as $b) {
                 $es = $this->timeToMinutes($b->start_time);
@@ -1120,7 +1208,11 @@ final class BookingService
                 }
 
                 if ($startMin < $ee && $endMin > $es) {
-                    throw new ConflictHttpException('That court is already booked for this time');
+                    if ((int) $b->venue_court_id === (int) $courtId) {
+                        throw new ConflictHttpException('That court is already booked for this time');
+                    } else {
+                        throw new ConflictHttpException('Court conflict: Connected composite or sub-court is already booked for this time');
+                    }
                 }
             }
 

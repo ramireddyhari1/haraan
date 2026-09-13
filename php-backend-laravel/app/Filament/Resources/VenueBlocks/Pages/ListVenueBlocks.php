@@ -18,4 +18,11 @@ class ListVenueBlocks extends ListRecords
             CreateAction::make()->label('Block time'),
         ];
     }
+
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            \App\Filament\Resources\VenueBlocks\Widgets\VenueBlocksExecutiveHeroWidget::class,
+        ];
+    }
 }

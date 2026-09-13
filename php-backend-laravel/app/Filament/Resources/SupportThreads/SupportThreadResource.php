@@ -21,9 +21,11 @@ class SupportThreadResource extends Resource
 
     protected static ?string $navigationLabel = 'Support';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Support & Moderation';
+
     protected static ?string $modelLabel = 'support conversation';
 
-    protected static ?int $navigationSort = 20;
+    protected static ?int $navigationSort = 1;
 
     /**
      * Support conversations are private user data. Limit them to super-admins

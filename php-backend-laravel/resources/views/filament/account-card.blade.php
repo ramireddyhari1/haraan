@@ -1,12 +1,5 @@
 {{-- Sidebar footer identity card for /control.
-
-     The partner console gained a footer "who am I + sign out" card that makes
-     its shell read finished; /control's footer was empty. This is the control
-     twin: same shape, but role-aware (Admin / Co-admin / Operations …) rather
-     than partner's event/venue "lane", pointed at the control logout route,
-     and fully dark-mode aware (partner is light-only). Styling lives in
-     resources/views/filament/theme.blade.php (.hrn-acct*), which is injected
-     on /control only. --}}
+     Linear / Stripe elevated SaaS design with session status and desktop collapsed rail support. --}}
 @php
     $u = auth()->user();
     $name = $u?->name ?: 'Admin';
@@ -16,34 +9,56 @@
     $hue = crc32($name) % 360;
     $role = strtolower((string) ($u?->role ?? ''));
     $roleLabel = match ($role) {
-        'admin' => 'Admin',
+        'admin' => 'Super Admin',
         'coadmin' => 'Co-admin',
         'ops' => 'Operations',
         'finance' => 'Finance',
         'marketing' => 'Marketing',
-        default => 'Team',
+        default => 'Staff',
     };
     $photo = \App\Support\MediaUrl::resolve($u?->avatar);
     $profileUrl = \Filament\Facades\Filament::getProfileUrl();
-    $tag = $profileUrl ? 'a' : 'span';
+    $tag = $profileUrl ? 'a' : 'div';
 @endphp
-<div class="hrn-acct">
-    <{{ $tag }} @if ($profileUrl) href="{{ $profileUrl }}" @endif class="hrn-acct-link" title="View profile">
-        @if ($photo)
-            <img src="{{ $photo }}" alt="{{ $name }}" class="hrn-acct-av hrn-acct-av-img">
-        @else
-            <span class="hrn-acct-av" style="background:hsl({{ $hue }} 52% 46%)">{{ $init }}</span>
-        @endif
-        <span class="hrn-acct-meta">
+<div class="hrn-acct" x-bind:class="{ 'hrn-acct-collapsed': ! $store.sidebar.isOpen }">
+    <{{ $tag }}
+        @if ($profileUrl) href="{{ $profileUrl }}" @endif
+        class="hrn-acct-link"
+        x-data="{ tooltip: false }"
+        x-effect="
+            tooltip = $store.sidebar.isOpen
+                ? false
+                : {
+                      content: @js($name . ' (' . $roleLabel . ')'),
+                      placement: document.dir === 'rtl' ? 'left' : 'right',
+                      theme: $store.theme,
+                  }
+        "
+        x-tooltip.html="tooltip"
+        title="View profile & account settings"
+    >
+        <div class="hrn-acct-av-wrapper">
+            @if ($photo)
+                <img src="{{ $photo }}" alt="{{ $name }}" class="hrn-acct-av hrn-acct-av-img">
+            @else
+                <span class="hrn-acct-av" style="background: hsl({{ $hue }} 52% 40%); color: #fff;">{{ $init }}</span>
+            @endif
+            <span class="hrn-live-dot hrn-acct-dot" title="Active Session"></span>
+        </div>
+
+        <div class="hrn-acct-meta" x-show="$store.sidebar.isOpen" x-transition:enter="hrn-fade-enter">
             <span class="hrn-acct-name">{{ $name }}</span>
-            <span class="hrn-acct-lane">{{ $roleLabel }}</span>
-        </span>
+            <span class="hrn-acct-lane">
+                <span class="hrn-acct-role-dot"></span>
+                {{ $roleLabel }}
+            </span>
+        </div>
     </{{ $tag }}>
-    <form method="POST" action="{{ route('filament.control.auth.logout') }}" class="hrn-acct-form">
+
+    <form method="POST" action="{{ route('filament.control.auth.logout') }}" class="hrn-acct-form" x-show="$store.sidebar.isOpen" x-transition:enter="hrn-fade-enter">
         @csrf
-        <button type="submit" class="hrn-acct-out" title="Sign out" aria-label="Sign out">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <button type="submit" class="hrn-acct-out" title="Sign out of console" aria-label="Sign out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M15 17l5-5-5-5M20 12H9M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/>
             </svg>
         </button>

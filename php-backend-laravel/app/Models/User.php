@@ -136,6 +136,14 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             return $this->hasRoleEither(['PARTNER']);
         }
 
+        if ($panel->getId() === 'employee') {
+            if (strtoupper((string) $this->status) === 'SUSPENDED') {
+                return false;
+            }
+
+            return $this->employeeProfile()->exists() || $this->hasRoleEither(['EMPLOYEE', 'WORKER']) || $this->isDeskStaff();
+        }
+
         // /control — internal staff and super-admins, never partners.
         if ($this->isSuperAdmin()) {
             return true;
@@ -361,6 +369,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     public function assignedEvents(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Event::class, 'staff_events');
+    }
+
+    /** Employee HRMS profile for this user */
+    public function employeeProfile(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(\App\Models\Hrms\EmployeeProfile::class);
     }
 
     /**

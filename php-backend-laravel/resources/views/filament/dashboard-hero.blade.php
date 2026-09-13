@@ -23,17 +23,3 @@
         <p class="hrn-dash-hero-sub">Here's what's happening across Haraan today.</p>
     </div>
 </div>
-<style>
-    /* Drop the redundant "Dashboard" page title so the hero leads the page.
-       Scoped: this hook only injects on the control Dashboard page. */
-    .fi-header{display:none!important;}
-
-    .hrn-dash-hero{margin-bottom:1.35rem;}
-    .hrn-dash-hero-in{position:relative;z-index:1;}
-    .hrn-dash-hero-eyebrow{margin:0;font-size:12px;font-weight:600;letter-spacing:.06em;
-        text-transform:uppercase;color:rgba(255,255,255,.82);}
-    .hrn-dash-hero-h{margin:6px 0 0;font-size:26px;line-height:1.15;font-weight:800;
-        letter-spacing:-.02em;color:#fff;}
-    .hrn-dash-hero-sub{margin:7px 0 0;font-size:13.5px;color:rgba(255,255,255,.9);}
-    @media (max-width:640px){.hrn-dash-hero-h{font-size:22px;}}
-</style>

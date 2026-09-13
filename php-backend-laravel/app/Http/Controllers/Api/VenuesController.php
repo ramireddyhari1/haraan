@@ -43,6 +43,13 @@ final class VenuesController extends Controller
             'rules' => $venue->rules ?? [],
             'price_chart' => $venue->price_chart ?? [],
             'price_note' => $venue->price_note,
+            // The booking fee, quoted before checkout rather than after it. The app used
+            // to learn this venue charged one only if the customer happened to apply a
+            // coupon (the only response that carried a fee), so a fee venue showed a
+            // total on the order summary that was not the total Razorpay then charged.
+            // Same two fields the model prices from — none | flat | percent.
+            'convenience_fee_type' => $venue->convenience_fee_type ?? 'none',
+            'convenience_fee_value' => (float) ($venue->convenience_fee_value ?? 0),
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
             // Courts are physical bookable units, each carrying the sports it can host and its
@@ -73,6 +80,9 @@ final class VenuesController extends Controller
                 // Per-slot price + court capacity — the slot chips render both.
                 'price' => $s->price,
                 'capacity' => $s->capacity,
+                // Which sports this time runs for; empty = all of them. A player
+                // picking a sport shouldn't be offered a time that doesn't run it.
+                'sports' => $s->sportsList(),
             ]),
             'reviews' => $venue->reviews->map(fn ($r) => [
                 'name' => $r->name,

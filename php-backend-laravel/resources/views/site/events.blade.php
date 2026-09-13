@@ -80,66 +80,51 @@
     <div class="mhome__head mhome__head--bare">
         <h3>For You</h3>
     </div>
-    <div class="mpager" data-mpager>
-            @foreach($forYou as $ev)
-                @php
-                    $img = $ev->heroImageUrl() ?? '/bv-white.png';
-                    // Mirrors EventRepository.formatWhen(): "27 Jun • 12:00 AM", then
-                    // uppercased by the card. Not the site's old "Sat, Jun 27" shape.
-                    $whenParts = array_filter([
-                        optional($ev->date)?->format('j M'),
-                        trim((string) $ev->time) ?: null,
-                    ]);
-                    $whenLine = implode(' • ', $whenParts);
-                    // Mirrors EventRepository.formatPrice(): "₹249 onwards" / "Free".
-                    $priceFrom  = $ev->fromPrice();
-                    $priceLabel = $priceFrom > 0
-                        ? '₹' . number_format($priceFrom) . ($ev->priceTierCount() > 1 ? ' onwards' : '')
-                        : 'Free';
-                    // Mirrors the app: venue, falling back to location.
-                    $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
-                @endphp
-                <div class="mfy__page" data-mpager-page>
-                {{-- The app's card, 1:1 on geometry: full page width (the app's own
-                     0.72f is dead code — see the CSS) at aspectRatio 0.75. Portrait
-                     3:4 artwork suits it best; a landscape banner loses its sides. --}}
-                <a class="mfy" href="/events/{{ $ev->id }}">
-                    {{-- The first poster is the hero of the page — lazy-loading it would
-                         delay the largest paint. The rest of the rail can wait.
+    <div class="mpager-container">
+        <div class="mpager" data-mpager data-mpager-fluid>
+            <div class="mpager__track" data-mpager-track>
+                @foreach($forYou as $ev)
+                    @php
+                        $img = $ev->heroImageUrl() ?? '/bv-white.png';
+                        // Mirrors EventRepository.formatWhen(): "27 Jun • 12:00 AM", then
+                        // uppercased by the card. Not the site's old "Sat, Jun 27" shape.
+                        $whenParts = array_filter([
+                            optional($ev->date)?->format('j M'),
+                            trim((string) $ev->time) ?: null,
+                        ]);
+                        $whenLine = implode(' • ', $whenParts);
+                        // Mirrors EventRepository.formatPrice(): "₹249 onwards" / "Free".
+                        $priceFrom  = $ev->fromPrice();
+                        $priceLabel = $priceFrom > 0
+                            ? '₹' . number_format($priceFrom) . ($ev->priceTierCount() > 1 ? ' onwards' : '')
+                            : 'Free';
+                        // Mirrors the app: venue, falling back to location.
+                        $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
+                    @endphp
+                    <div class="mfy__page" data-mpager-page data-mpager-card>
+                        <a class="mfy" href="/events/{{ $ev->id }}">
+                            <img class="mfy__img" src="{{ $img }}" alt=""
+                                 decoding="async"
+                                 loading="{{ $loop->first ? 'eager' : 'lazy' }}"
+                                 @if($loop->first) fetchpriority="high" @endif>
+                            <span class="mfy__grad"></span>
+                            <span class="mfy__sheen" aria-hidden="true"></span>
+                            <span class="mfy__cat">{{ $ev->category ?? 'Event' }}</span>
+                            @if(!empty($ev->rating) && $ev->rating > 0)
+                                <span class="mfy__rating"><i>★</i><b>{{ number_format($ev->rating, 1) }}</b></span>
+                            @endif
 
-                         decoding="async" is load-bearing, not a nicety: these posters are
-                         1600×900 landing in a 283px slot (5.7× oversized), and a synchronous
-                         decode of one costs tens of ms on the main thread — landing right in
-                         the middle of a swipe. That was the stutter. --}}
-                    <img class="mfy__img" src="{{ $img }}" alt=""
-                         decoding="async"
-                         loading="{{ $loop->first ? 'eager' : 'lazy' }}"
-                         @if($loop->first) fetchpriority="high" @endif>
-                    <span class="mfy__grad"></span>
-                    <span class="mfy__cat">{{ $ev->category ?? 'Event' }}</span>
-                    {{-- Star only when the event genuinely has a rating — the app
-                         fabricates nothing here, and neither does this. --}}
-                    @if(!empty($ev->rating) && $ev->rating > 0)
-                        <span class="mfy__rating"><i>★</i><b>{{ number_format($ev->rating, 1) }}</b></span>
-                    @endif
-
-                    {{-- Facts over the art: a tall poster has room for a scrim, and it
-                         keeps the card compact. No ticket button — the app's sits INSIDE
-                         its own card link and fires the same onClick, a decorative
-                         affordance that ate 27% of the width and truncated the price
-                         ("Quake Arena • ₹59…"). The whole card is the tap target. --}}
-                    <span class="mfy__foot">
-                        <span class="mfy__date">{{ $whenLine }}</span>
-                        <span class="mfy__title">{{ $ev->title }}</span>
-                        <span class="mfy__venue">{{ $venueLabel }}</span>
-                        {{-- Its own line. At the app's card width (204px at 375) the
-                             text column is 172px, and "venue · price" needs 183 — one
-                             line would ellipsise the venue away. --}}
-                        <span class="mfy__price">{{ $priceLabel }}</span>
-                    </span>
-                </a>
-                </div>
-            @endforeach
+                            <span class="mfy__foot">
+                                <span class="mfy__date">{{ $whenLine }}</span>
+                                <span class="mfy__title">{{ $ev->title }}</span>
+                                <span class="mfy__venue">{{ $venueLabel }}</span>
+                                <span class="mfy__price">{{ $priceLabel }}</span>
+                            </span>
+                        </a>
+                    </div>
+                @endforeach
+            </div>
+        </div>
     </div>
     @endif
 
@@ -157,7 +142,7 @@
         @foreach($mTrending as $ev)
             @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
             <a class="mtrend" href="/events/{{ $ev->id }}">
-                <span class="mtrend__rank" aria-hidden="true">{{ $loop->iteration }}</span>
+                <span class="mtrend__rank" data-rank="{{ $loop->iteration }}" aria-hidden="true">{{ $loop->iteration }}</span>
                 <span class="mtrend__img">
                     <img src="{{ $img }}" alt="" loading="lazy" decoding="async">
                     <span class="mtrend__grad"></span>
@@ -454,95 +439,4 @@
     });
     </script>
 </section>
-
-<script>
-/**
- * "For You" rail.
- *
- * Deliberately NOT a port of the app's InfiniteLoopBookPager. Its look — upcoming
- * pages dragged left 0.85×page and scaled toward 0.88 — comes from a graphicsLayer
- * recomputed on every scroll frame. Compose runs that on the same frame as the
- * scroll; the web can't. Touch scrolling is driven on the compositor thread while
- * script runs on the main one, so the stacked card lagged the card under your finger
- * and the rail stuttered. The effect was the cause, so the effect is gone.
- *
- * What's left is a native scroll-snap carousel: the browser owns every frame of the
- * motion. No scroll listener, nothing per-frame — the only script here runs once the
- * rail has already come to rest.
- */
-(() => {
-    const pager = document.querySelector('[data-mpager]');
-    if (!pager) return;
-    const originals = [...pager.querySelectorAll('[data-mpager-page]')];
-    const N = originals.length;
-    if (N < 2) return;
-
-    /* A real loop, the way the app fakes one with Int.MAX_VALUE virtual pages — but
-       with TWO clones, not two strips.
-
-       Since the rail snaps a card at a time you can only ever be one card past either
-       end, so one spare each side is enough: [last', R0…Rn, first']. Sit on R0, and
-       when a swipe settles on a spare, hop one strip — identical content, so nothing
-       moves on screen. Cloning the whole strip (the first attempt) put NINE 1600×900
-       posters in this rail for three events; each is 5.7× oversized for its 283px slot,
-       and decoding one costs real main-thread time mid-swipe. Two clones, not eight. */
-    const lead = originals[N - 1].cloneNode(true);
-    const tail = originals[0].cloneNode(true);
-    for (const c of [lead, tail]) {
-        c.setAttribute('aria-hidden', 'true');
-        c.querySelectorAll('a').forEach(a => a.setAttribute('tabindex', '-1'));
-        // A spare is never the LCP candidate; let the real hero win the priority.
-        c.querySelectorAll('img').forEach(i => {
-            i.setAttribute('loading', 'lazy');
-            i.removeAttribute('fetchpriority');
-        });
-    }
-    pager.prepend(lead);
-    pager.append(tail);
-
-    const pages = [...pager.querySelectorAll('[data-mpager-page]')];
-    // Snap pitch = card + gap. Measured off the DOM so a resize can't stale it.
-    const pitch = () => {
-        const a = pages[0].getBoundingClientRect();
-        const b = pages[1].getBoundingClientRect();
-        return Math.round(b.left - a.left) || Math.round(a.width);
-    };
-    // The real cards start at index 1, after the leading spare.
-    const home = () => pitch();
-
-    /* Hop off a spare once a swipe has settled on it. Fires on scrollend — never
-       mid-gesture, so it can't fight the finger. */
-    const recentre = () => {
-        const p = pitch();
-        const x = pager.scrollLeft;
-        if (x >= (N + 1) * p - 1) pager.scrollLeft = x - N * p;   // past the end
-        else if (x < p - 1) pager.scrollLeft = x + N * p;          // before the start
-    };
-    const hasScrollEnd = 'onscrollend' in window;
-    if (hasScrollEnd) pager.addEventListener('scrollend', recentre);
-
-    window.addEventListener('resize', () => { pager.scrollLeft = home(); });
-
-    // Auto-advance, as in the pager's LaunchedEffect. scrollTo({behavior:'smooth'}) is
-    // the browser's own animation, so this stays off the main thread too.
-    const still = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let lastTouch = 0;
-    for (const e of ['pointerdown', 'touchstart', 'wheel']) {
-        pager.addEventListener(e, () => { lastTouch = Date.now(); }, {passive: true});
-    }
-
-    setInterval(() => {
-        if (still.matches || document.hidden) return;
-        // Hands off for a beat after a touch: the rail must never yank a card away
-        // from someone who is reading it.
-        if (Date.now() - lastTouch < 6000) return;
-
-        const p = pitch();
-        pager.scrollTo({left: (Math.round(pager.scrollLeft / p) + 1) * p, behavior: 'smooth'});
-        if (!hasScrollEnd) setTimeout(recentre, 700);   // Safari < 17
-    }, 3000);
-
-    pager.scrollLeft = home();
-})();
-</script>
 @endsection

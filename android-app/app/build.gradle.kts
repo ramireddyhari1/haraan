@@ -22,16 +22,14 @@ android {
         applicationId = "com.haraan.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 30
-        versionName = "1.0.29"
+        versionCode = 32
+        versionName = "1.0.31"
         // Without this, `connectedDebugAndroidTest` builds the androidTest APK and then runs
         // nothing — the androidTest deps below are inert until a runner is named.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Points at the deployed server over HTTPS (nginx TLS -> Laravel) so the app works
-        // on any device on any network without `adb reverse`. For local dev, switch back to
-        // "http://127.0.0.1:8000" + `adb reverse tcp:8000 tcp:8000` (and temporarily allow
-        // cleartext in the manifest).
-        buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:8000\"")
+        // Points at the deployed server over HTTPS (nginx TLS -> Laravel) for production.
+        // For local dev in debug builds, defaults to http://127.0.0.1:8000 + adb reverse.
+        buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
         // Google Sign-In: the OAuth **Web application** client ID (serverClientId) from the
         // Google Cloud Console. The backend uses the same value as the token audience. Empty
         // until configured — the "Continue with Google" button hides itself when blank.
@@ -53,7 +51,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("DEV_API_BASE_URL") ?: "https://haraan.app"}\"")
+        }
         release {
+            buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Sign with the release key when the keystore is present (Play upload). Without

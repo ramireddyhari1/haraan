@@ -15,13 +15,13 @@
     $tone = $attempted === 0 ? 'idle' : ($rate >= 10 ? 'down' : ($rate >= 2 ? 'warn' : 'ok'));
 
     $hero = match ($tone) {
-        'down' => ['grad' => 'linear-gradient(135deg,#ef4444,#e11d48)', 'head' => 'Delivery is failing',
+        'down' => ['grad' => 'linear-gradient(135deg,#ef4444,#dc2626)', 'head' => 'Delivery is failing',
                    'sub' => $totals['failed'] . ' of ' . $attempted . ' messages never reached anyone'],
-        'warn' => ['grad' => 'linear-gradient(135deg,#f59e0b,#ea580c)', 'head' => 'Some messages aren\'t landing',
+        'warn' => ['grad' => 'linear-gradient(135deg,#f59e0b,#d97706)', 'head' => 'Some messages aren\'t landing',
                    'sub' => $rate . '% of sends failed this period'],
-        'ok'   => ['grad' => 'linear-gradient(135deg,#10b981,#0d9488)', 'head' => 'Delivery is healthy',
+        'ok'   => ['grad' => 'linear-gradient(135deg,#064e3b 0%,#047857 50%,#10b981 100%)', 'head' => 'Delivery is healthy',
                    'sub' => number_format($totals['sent']) . ' messages delivered, ' . $rate . '% failed'],
-        default => ['grad' => 'linear-gradient(135deg,#64748b,#475569)', 'head' => 'Nothing sent yet',
+        default => ['grad' => 'linear-gradient(135deg,#334155,#1e293b)', 'head' => 'Nothing sent yet',
                    'sub' => 'No messages recorded for ' . $this->periodLabel()],
     };
 
@@ -234,94 +234,228 @@
     </div>
 
     <style>
-        .hmu{--card:#fff;--border:#e8ecf3;--ink:#0b1220;--ink2:#5a6579;--ink3:#8a94a6;
-             --bad:#dc2626;--ok:#059669;--accent:#2563eb;
-             display:flex;flex-direction:column;gap:20px;}
-        .dark .hmu{--card:#111726;--border:rgba(255,255,255,.08);--ink:#f3f5f9;--ink2:#aeb7c6;--ink3:#7b8698;}
+        .hmu {
+            --card: var(--hrn-surface, #ffffff);
+            --border: var(--hrn-border, #e2e8f0);
+            --ink: var(--hrn-ink, #070c18);
+            --ink2: var(--hrn-ink-2, #2d3748);
+            --ink3: var(--hrn-ink-3, #5a6a85);
+            --bad: var(--hrn-down, #dc2626);
+            --ok: var(--hrn-ok, #059669);
+            --accent: var(--primary-500, #10b981);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
 
-        /* ---- period switch ---- */
-        .hmu-months{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
-        .hmu-month{border:0;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--ink2);
-            padding:7px 13px;border-radius:999px;background:var(--card);
-            box-shadow:inset 0 0 0 1px var(--border);}
-        .hmu-month.is-on{background:var(--accent);color:#fff;box-shadow:none;}
-        .hmu-period{margin-left:auto;font-size:12.5px;font-weight:700;color:var(--ink3);}
+        /* ── Period Switcher ────────────────────────────────────────── */
+        .hmu-months {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .hmu-month {
+            border: 1px solid var(--border);
+            cursor: pointer;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--ink2);
+            padding: 7px 15px;
+            border-radius: 999px;
+            background: var(--card);
+            box-shadow: var(--hrn-shadow-xs);
+            transition: all 0.16s var(--hrn-ease-spring);
+        }
+        .hmu-month:hover {
+            border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+            color: var(--ink);
+            transform: translateY(-1px);
+        }
+        .hmu-month.is-on {
+            background: var(--accent);
+            color: #ffffff;
+            border-color: var(--accent);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+        }
+        .hmu-period {
+            margin-left: auto;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--ink3);
+        }
 
-        /* ---- hero ---- */
-        .hmu-hero{border-radius:18px;padding:20px 24px;color:#fff;
-            box-shadow:0 10px 30px -14px rgba(2,6,23,.45);}
-        .hmu-hero-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-        .hmu-h1{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em;}
-        .hmu-beta{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.4);padding:3px 8px;border-radius:999px;line-height:1;}
-        .hmu-hsub{margin:3px 0 0;font-size:13px;color:rgba(255,255,255,.88);}
+        /* ── Hero Telemetry ─────────────────────────────────────────── */
+        .hmu-hero {
+            border-radius: var(--hrn-radius-lg);
+            padding: 22px 28px;
+            color: #ffffff;
+            box-shadow: 0 16px 36px -12px rgba(5, 150, 105, 0.45), 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+        .hmu-hero-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .hmu-h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+        .hmu-beta {
+            font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
+            text-transform: uppercase; color: #ffffff;
+            background: rgba(255, 255, 255, 0.22);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            padding: 3px 9px; border-radius: 999px; line-height: 1;
+        }
+        .hmu-hsub { margin: 4px 0 0; font-size: 13.5px; color: rgba(255, 255, 255, 0.9); }
 
-        /* ---- kpis ---- */
-        .hmu-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
-        .hmu-kpi{background:var(--card);border-radius:14px;padding:14px 16px;
-            box-shadow:inset 0 0 0 1px var(--border);display:flex;flex-direction:column;}
-        .hmu-kpi-lab{font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
-            color:var(--ink3);}
-        .hmu-kpi-val{font-size:28px;font-weight:800;letter-spacing:-.03em;color:var(--ink);
-            margin:6px 0 2px;font-variant-numeric:tabular-nums;}
-        .hmu-kpi-val.tone-bad{color:var(--bad);}
-        .hmu-kpi-val.tone-ok{color:var(--ink);}
-        .hmu-kpi-sub{font-size:11.5px;color:var(--ink3);line-height:1.4;}
+        /* ── KPIs (Stripe Telemetry Aesthetic) ──────────────────────── */
+        .hmu-kpis {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 14px;
+        }
+        .hmu-kpi {
+            background: var(--card);
+            border-radius: var(--hrn-radius);
+            padding: 18px 20px;
+            border: 1px solid var(--border);
+            box-shadow: var(--hrn-shadow-card);
+            display: flex;
+            flex-direction: column;
+            transition: transform var(--hrn-transition-smooth),
+                        box-shadow var(--hrn-transition-smooth),
+                        border-color var(--hrn-transition-smooth);
+        }
+        .hmu-kpi:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--hrn-shadow-hover);
+            border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+        }
+        .hmu-kpi-lab {
+            font-size: 11.5px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--ink3);
+        }
+        .hmu-kpi-val {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            color: var(--ink);
+            margin: 8px 0 3px;
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
+        }
+        .hmu-kpi-val.tone-bad { color: var(--bad); }
+        .hmu-kpi-val.tone-ok { color: var(--ink); }
+        .hmu-kpi-sub { font-size: 12px; color: var(--ink3); line-height: 1.45; }
 
-        /* ---- cards ---- */
-        .hmu-split{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
-        .hmu-card{background:var(--card);border-radius:16px;padding:16px 18px 18px;
-            box-shadow:inset 0 0 0 1px var(--border);}
-        .hmu-card-title{margin:0;font-size:14.5px;font-weight:800;color:var(--ink);letter-spacing:-.01em;}
-        .hmu-card-sub{margin:3px 0 12px;font-size:12.5px;color:var(--ink3);}
-        .hmu-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
-            padding:9px 0;border-top:1px solid var(--border);}
-        .hmu-row:first-of-type{border-top:0;}
-        .hmu-row-name{font-size:13.5px;font-weight:700;color:var(--ink);}
-        .hmu-row-meta{font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums;}
-        .hmu-bad{color:var(--bad);font-weight:700;}
-        .hmu-empty-line{font-size:12.5px;color:var(--ink3);margin:8px 0 0;}
+        /* ── Cards & Data Grids ─────────────────────────────────────── */
+        .hmu-split {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 14px;
+        }
+        .hmu-card {
+            background: var(--card);
+            border-radius: var(--hrn-radius);
+            padding: 20px 22px;
+            border: 1px solid var(--border);
+            box-shadow: var(--hrn-shadow-card);
+        }
+        .hmu-card-title {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--ink);
+            letter-spacing: -0.015em;
+        }
+        .hmu-card-sub {
+            margin: 4px 0 14px;
+            font-size: 12.5px;
+            color: var(--ink3);
+            line-height: 1.45;
+        }
+        .hmu-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 0;
+            border-top: 1px solid var(--border);
+        }
+        .hmu-row:first-of-type { border-top: 0; }
+        .hmu-row-name { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+        .hmu-row-meta { font-size: 12.5px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+        .hmu-bad { color: var(--bad); font-weight: 700; }
+        .hmu-empty-line { font-size: 12.5px; color: var(--ink3); margin: 8px 0 0; }
 
-        /* ---- journey queue ---- */
-        .hmu-note{font-size:12.5px;line-height:1.5;color:#92400e;background:#fffbeb;
-            border-radius:11px;padding:10px 12px;margin-bottom:12px;
-            box-shadow:inset 0 0 0 1px rgba(217,119,6,.22);}
-        .dark .hmu-note{color:#fcd34d;background:rgba(245,158,11,.12);}
-        .hmu-note code{font-size:11.5px;padding:1px 5px;border-radius:5px;
-            background:rgba(0,0,0,.06);}
-        .dark .hmu-note code{background:rgba(255,255,255,.1);}
-        .hmu-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;}
-        .hmu-chip{font-size:12px;font-weight:600;color:var(--ink2);padding:5px 11px;
-            border-radius:999px;box-shadow:inset 0 0 0 1px var(--border);}
-        .hmu-chip-n{font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;}
-        .hmu-skips{font-size:11.5px;color:var(--ink3);margin:0 0 8px;}
+        /* ── Journey Queue ──────────────────────────────────────────── */
+        .hmu-note {
+            font-size: 12.5px;
+            line-height: 1.5;
+            color: #92400e;
+            background: #fffbeb;
+            border-radius: 11px;
+            padding: 11px 14px;
+            margin-bottom: 14px;
+            box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.22);
+        }
+        .dark .hmu-note { color: #fcd34d; background: rgba(245, 158, 11, 0.12); }
+        .hmu-note code {
+            font-size: 11.5px; padding: 2px 6px; border-radius: 5px;
+            background: rgba(0, 0, 0, 0.06);
+        }
+        .dark .hmu-note code { background: rgba(255, 255, 255, 0.1); }
+        .hmu-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .hmu-chip {
+            font-size: 12px; font-weight: 600; color: var(--ink2);
+            padding: 5px 12px; border-radius: 999px;
+            border: 1px solid var(--border); background: var(--hrn-surface);
+        }
+        .hmu-chip-n { font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+        .hmu-skips { font-size: 12px; color: var(--ink3); margin: 0 0 8px; }
 
-        /* ---- table ---- */
-        .hmu-table-wrap{overflow-x:auto;}
-        .hmu-table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px;}
-        .hmu-table th{text-align:left;font-size:11px;font-weight:700;letter-spacing:.06em;
-            text-transform:uppercase;color:var(--ink3);padding:0 10px 8px 0;}
-        .hmu-table th.num,.hmu-table td.num{text-align:right;padding-right:0;
-            font-variant-numeric:tabular-nums;}
-        .hmu-table td{padding:10px 10px 10px 0;border-top:1px solid var(--border);color:var(--ink);}
-        .hmu-tag{display:inline-block;margin-left:7px;font-size:10.5px;font-weight:700;
-            padding:2px 7px;border-radius:999px;color:var(--ink3);
-            box-shadow:inset 0 0 0 1px var(--border);}
+        /* ── High-Precision Data Table ──────────────────────────────── */
+        .hmu-table-wrap { overflow-x: auto; }
+        .hmu-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 520px; }
+        .hmu-table th {
+            text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+            text-transform: uppercase; color: var(--ink3); padding: 0 12px 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .hmu-table th.num, .hmu-table td.num { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums; }
+        .hmu-table td {
+            padding: 11px 12px 11px 0; border-top: 1px solid var(--border); color: var(--ink);
+            transition: background-color 0.12s ease;
+        }
+        .hmu-table tbody tr:hover td {
+            background-color: rgba(15, 23, 42, 0.02);
+        }
+        .dark .hmu-table tbody tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+        .hmu-tag {
+            display: inline-block; margin-left: 8px; font-size: 10.5px; font-weight: 700;
+            padding: 2px 8px; border-radius: 999px; color: var(--ink3);
+            border: 1px solid var(--border);
+        }
 
-        /* ---- failures ---- */
-        .hmu-fail{padding:11px 0;border-top:1px solid var(--border);}
-        .hmu-fail:first-of-type{border-top:0;}
-        .hmu-fail-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-        .hmu-pill{font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:999px;
-            text-transform:capitalize;color:var(--ink2);box-shadow:inset 0 0 0 1px var(--border);}
-        .hmu-pill.tone-bad{color:var(--bad);box-shadow:inset 0 0 0 1px rgba(220,38,38,.25);}
-        .hmu-fail-to{font-size:13px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;}
-        .hmu-fail-when{font-size:11.5px;color:var(--ink3);margin-left:auto;}
-        .hmu-fail-sub{display:block;font-size:11.5px;color:var(--ink3);margin-top:4px;}
-        .hmu-fail-err{display:block;margin-top:5px;font-size:11px;line-height:1.5;color:var(--ink2);
-            word-break:break-word;}
+        /* ── Recent Failures ────────────────────────────────────────── */
+        .hmu-fail { padding: 12px 0; border-top: 1px solid var(--border); }
+        .hmu-fail:first-of-type { border-top: 0; }
+        .hmu-fail-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .hmu-pill {
+            font-size: 10.5px; font-weight: 800; padding: 3px 9px; border-radius: 999px;
+            text-transform: capitalize; color: var(--ink2); border: 1px solid var(--border);
+        }
+        .hmu-pill.tone-bad { color: var(--bad); border-color: rgba(220, 38, 38, 0.25); background: rgba(220, 38, 38, 0.08); }
+        .hmu-fail-to { font-size: 13px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+        .hmu-fail-when { font-size: 11.5px; color: var(--ink3); margin-left: auto; }
+        .hmu-fail-sub { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 4px; }
+        .hmu-fail-err {
+            display: block; margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--ink2);
+            word-break: break-word; background: var(--hrn-surface-subtle); padding: 6px 10px; border-radius: 6px;
+        }
 
-        @media (max-width:640px){
-            .hmu-fail-when{margin-left:0;}
+        @media (max-width: 640px) {
+            .hmu-fail-when { margin-left: 0; }
         }
     </style>
 </x-filament-panels::page>

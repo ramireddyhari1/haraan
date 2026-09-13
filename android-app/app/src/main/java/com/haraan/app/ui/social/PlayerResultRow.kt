@@ -1,8 +1,11 @@
 package com.haraan.app.ui.social
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
+import com.haraan.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -125,13 +128,11 @@ private fun PlayerAvatar(player: DiscoveredPlayer) {
         contentScale = ContentScale.Crop,
       )
     } else {
-      // Initials beat a generic silhouette — the list stays scannable when most
-      // players have no photo, which is the normal case.
-      Text(
-        text = player.name.trim().take(1).uppercase().ifBlank { "?" },
-        fontSize = 17.sp,
-        fontWeight = FontWeight.Bold,
-        color = Muted,
+      Image(
+        painter = painterResource(id = R.drawable.ic_default_player_avatar),
+        contentDescription = player.name,
+        modifier = Modifier.size(44.dp).clip(CircleShape),
+        contentScale = ContentScale.Crop,
       )
     }
   }

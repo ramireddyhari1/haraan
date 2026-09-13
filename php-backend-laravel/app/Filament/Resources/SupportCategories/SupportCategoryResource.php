@@ -30,9 +30,11 @@ class SupportCategoryResource extends Resource
 
     protected static ?string $navigationLabel = 'Support topics';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Support & Moderation';
+
     protected static ?string $modelLabel = 'support topic';
 
-    protected static ?int $navigationSort = 21;
+    protected static ?int $navigationSort = 3;
 
     protected static ?string $recordTitleAttribute = 'label';
 

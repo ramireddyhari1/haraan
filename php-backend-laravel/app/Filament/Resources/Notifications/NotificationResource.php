@@ -31,9 +31,11 @@ class NotificationResource extends Resource
 
     protected static ?string $navigationLabel = 'Notifications';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Marketing';
+
     protected static ?string $modelLabel = 'notification';
 
-    protected static ?int $navigationSort = 22;
+    protected static ?int $navigationSort = 5;
 
     protected static ?string $recordTitleAttribute = 'title';
 

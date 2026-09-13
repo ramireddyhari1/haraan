@@ -167,6 +167,11 @@ data class MatchUiState(
     /** Backend verification state: "" (n/a), "pending", "settled", or "expired". */
     val verificationStatus: String = "",
     /**
+     * True when this match may record WHERE boundaries went — reserved for matches created
+     * by a verified account. See LiveMatchController for why the gate exists.
+     */
+    val shotPlotting: Boolean = false,
+    /**
      * Why scoring would be refused despite [canScore] — currently only "profile_incomplete".
      * Blank when nothing is in the way. Lets the Score button explain itself instead of
      * opening a scorer that rejects every ball.

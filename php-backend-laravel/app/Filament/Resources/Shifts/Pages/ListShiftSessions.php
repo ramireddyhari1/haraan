@@ -17,6 +17,13 @@ class ListShiftSessions extends ListRecords
 {
     protected static string $resource = ShiftSessionResource::class;
 
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            \App\Filament\Resources\Shifts\Widgets\ShiftSessionsExecutiveHeroWidget::class,
+        ];
+    }
+
     /**
      * Opening a shift by hand is the exception, not the rule — a shift opens
      * itself on the first cash taken. This exists for the one case that matters:

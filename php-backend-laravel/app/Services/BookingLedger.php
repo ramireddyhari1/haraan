@@ -57,6 +57,46 @@ class BookingLedger
     }
 
     /**
+     * Gateway money for an order the customer paid through checkout (app or web).
+     *
+     * This exists because online money never reached the ledger at all. Checkout
+     * flipped the booking to CONFIRMED and stopped there, so `amount_paid` stayed 0
+     * and `payment_status` stayed 'unpaid' — which is exactly the shape of an unpaid
+     * desk booking. The partner's shift board then listed a court the player had
+     * already paid for on the chase list, and the day's "collected" read zero on a
+     * day of online sales.
+     *
+     * Two deliberate differences from {@see collect()}:
+     *
+     *  - No receipt. The buyer watched the payment succeed and gets the ticket
+     *    itself moments later; a "payment received" message on top of that is noise.
+     *  - Idempotent on the gateway payment id. The client's confirm call and
+     *    Razorpay's `payment.captured` webhook both land here for the same rupees,
+     *    and the second one must not double-count the venue's takings.
+     */
+    public function settleOnline(
+        Booking $booking,
+        float $amount,
+        ?string $paymentId,
+        string $note = 'Razorpay checkout',
+    ): ?BookingPayment {
+        if ($amount <= 0.0) {
+            return null;
+        }
+
+        $reference = $paymentId !== null && trim($paymentId) !== '' ? trim($paymentId) : null;
+
+        if ($reference !== null && BookingPayment::query()
+            ->where('booking_id', $booking->id)
+            ->where('reference', $reference)
+            ->exists()) {
+            return null;
+        }
+
+        return $this->record($booking, abs($amount), 'online', null, $reference, $note);
+    }
+
+    /**
      * Record money going back out. Stored as a negative row rather than a
      * separate table, so amount_paid stays a single SUM and a partial refund
      * needs no new concept.
@@ -136,7 +176,11 @@ class BookingLedger
 
         $booking->forceFill([
             'amount_paid' => round($paid, 2),
-            'payment_status' => $this->statusFor($paid, (float) $booking->total_amount, $hasRefund),
+            // Settled against what the customer was CHARGED, not the ticket subtotal.
+            // On a venue row those are the same number. On an event row they are not:
+            // `total_amount` there is the tickets alone, so a ₹100-off order paid in
+            // full read 'partial' and asked the desk to chase a ₹100 nobody owed.
+            'payment_status' => $this->statusFor($paid, $booking->amountCharged(), $hasRefund),
         ])->save();
 
         return $booking;

@@ -26,7 +26,7 @@ class LiveMatchResource extends Resource
 
     protected static ?string $cluster = \App\Filament\Clusters\GameHub\GameHubCluster::class;
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     protected static ?string $modelLabel = 'Match';
 

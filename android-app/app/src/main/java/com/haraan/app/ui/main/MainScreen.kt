@@ -132,6 +132,11 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.material.icons.outlined.SportsTennis
 import androidx.compose.material.icons.outlined.SportsFootball
 import androidx.compose.material.icons.filled.Stadium
@@ -1793,7 +1798,13 @@ private fun GameHubTabScreen(
   // nothing is live, so the card shows an honest "no live matches" state instead. Loaded in
   // the main effect below so it shares the Reverb collector (refreshes on a "matches" push).
   val gameHubCtx = LocalContext.current
+  val gameHubScope = androidx.compose.runtime.rememberCoroutineScope()
   var liveMatches by remember { mutableStateOf<List<com.haraan.app.data.LiveMatchRow>>(emptyList()) }
+
+  // Nearby games still short of players (GET /api/matches/open). These already existed, but only
+  // behind the ActionBoard → Scheduled → "Open near me" sub-tab, which is three taps from here —
+  // and a game short a player is the one thing on this screen that expires. null = still loading.
+  var openGames by remember { mutableStateOf<List<com.haraan.app.data.OpenMatch>?>(null) }
 
   // Live venues from the Filament admin (GET /api/venues). null = still loading (shows a
   // skeleton); an empty list after load means "none / unreachable" — an honest empty state.
@@ -1845,6 +1856,19 @@ private fun GameHubTabScreen(
   val loadFeed: suspend () -> Unit = remember {
     { feedSections = runCatching { contentRepo.getFeed() }.getOrDefault(emptyMap()) }
   }
+  // Deliberately NOT remembered: this one reads `locationState`, so a cached lambda would keep
+  // querying the location the screen had on first composition. AutoRefresh holds it in a
+  // rememberUpdatedState, so the fresh instance is what actually runs.
+  val loadOpenGames: suspend () -> Unit = {
+    val here = locationState as? com.haraan.app.data.LocationState.Resolved
+    openGames = matchRepo.getOpenMatches(
+      token = com.haraan.app.data.TokenStore.getToken(gameHubCtx),
+      latitude = here?.latitude,
+      longitude = here?.longitude,
+      locality = here?.area.orEmpty(),
+      district = here?.district.orEmpty().ifBlank { here?.city.orEmpty() },
+    )
+  }
   LaunchedEffect(Unit) {
     loadVenues()
     loadLayout()
@@ -1858,16 +1882,22 @@ private fun GameHubTabScreen(
         "home" -> { loadLayout(); loadFeed() }
         "venues" -> loadVenues()
         // Keep the ActionBoard live score fresh when a match/score is broadcast.
-        "matches", "live" -> loadLive()
+        "matches", "live" -> { loadLive(); loadOpenGames() }
       }
     }
   }
+  // Re-pull the open games the moment the fix lands (or the user picks another city) rather
+  // than waiting out the 20s tick — the list is distance-ranked server-side, so a stale
+  // location shows the right games in the wrong order.
+  LaunchedEffect(locationState) { loadOpenGames() }
   // No-manual-refresh: re-pull the volatile data (live scores, venue availability)
   // whenever the user returns to this screen or the app comes back to the foreground,
   // and tick every 20s while it's on-screen. Paused entirely in the background.
   AutoRefresh(intervalMs = 20_000L) {
     loadLive()
     loadVenues()
+    // Open games fill up and kick off; a spot shown here has to still exist when it's tapped.
+    loadOpenGames()
   }
 
   val isVenuesLoading = venuesData == null
@@ -2049,7 +2079,7 @@ private fun GameHubTabScreen(
       remoteBlocks.isNotEmpty()
     val orderedBlocks: List<com.haraan.app.data.HomeBlock> =
       (if (useRemoteLayout) remoteBlocks
-      else listOf("actionboard", "leaderboard", "sports_chips", "venues", "top_players")
+      else listOf("actionboard", "leaderboard", "sports_chips", "venues", "open_games", "top_players")
         .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) })
         // The "For You" curated rail was cut — it duplicated the Events "For You" and added
         // clutter without pulling its weight on GameHub. Drop any for_you feed_section from
@@ -2065,6 +2095,18 @@ private fun GameHubTabScreen(
         .let { blocks ->
           if (blocks.any { it.type == "top_players" }) blocks
           else blocks + com.haraan.app.data.HomeBlock(id = "top_players", type = "top_players", title = null)
+        }
+        // Same treatment for the open-games list: a /control layout saved before this block
+        // existed would otherwise drop it. Slotted straight after the venues block (its home in
+        // the built-in order), not appended to the tail, and it self-hides when nothing is open.
+        .let { blocks ->
+          if (blocks.any { it.type == "open_games" }) blocks
+          else {
+            val games = com.haraan.app.data.HomeBlock(id = "open_games", type = "open_games", title = null)
+            val after = blocks.indexOfFirst { it.type == "venues" }
+            if (after < 0) blocks + games
+            else blocks.toMutableList().also { it.add(after + 1, games) }
+          }
         }
     // Real per-sport filter now that /api/live-matches tags each row (it defaults to
     // cricket, so matches created before the column existed still show). This used to
@@ -2329,6 +2371,74 @@ private fun GameHubTabScreen(
       items(moreVenues.size) { i ->
         Box(modifier = Modifier.padding(horizontal = 16.dp)) {
           VenueListCard(moreVenues[i], onClick = { onVenueClick(moreVenues[i]) })
+        }
+      }
+    }
+    },
+    "open_games" to {
+    // 7. Games short of players — a vertical list under the venues. Venues answer "where can I
+    // play"; this answers "who needs me tonight", which is the only thing on this screen with a
+    // deadline. Obeys the sport chips like everything else here.
+    val games = openGames?.filter {
+      selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true)
+    }
+
+    // Loaded-and-empty hides the whole section rather than parking an empty-state card on the
+    // home screen. The ActionBoard's "Open near me" tab is where the honest empty state lives —
+    // there the user went looking for open games, so "none right now" is an answer. Here it
+    // would just be a dead band between venues and the players rail.
+    if (games == null || games.isNotEmpty()) {
+      item {
+        GameHubSectionHeader(
+          title = "Games looking for players",
+          subtitle = when {
+            games == null -> "Checking who needs a player…"
+            userLat != null -> "${games.size} nearby · nearest first"
+            else -> "${games.size} open near you"
+          },
+          actionText = "View all",
+          onActionClick = onActionBoardClick,
+        )
+      }
+      if (games == null) {
+        item { OpenGameRowSkeleton() }
+      } else {
+        // Three is the section's job: a glance at what needs a player, not the whole board.
+        // "View all" in the header carries the rest.
+        items(games.take(3), key = { "open-game-" + it.id }) { game ->
+          Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+            OpenGameRow(
+              match = game,
+              onOpen = { onMatchClick(game.id) },
+              onRequest = {
+                gameHubScope.launch {
+                  val token = com.haraan.app.data.TokenStore.getSignedInToken(gameHubCtx)
+                  if (token == null) {
+                    Toast.makeText(gameHubCtx, "Sign in to ask for a spot.", Toast.LENGTH_SHORT).show()
+                  } else if (matchRepo.requestToJoin(token, game.id)) {
+                    Toast.makeText(gameHubCtx, "Request sent to the match owner.", Toast.LENGTH_SHORT).show()
+                    // Flip this row to "Requested" now instead of waiting for the next pull —
+                    // the server is the source of truth and the 20s tick will confirm it.
+                    openGames = openGames?.map {
+                      if (it.id == game.id) it.copy(myStatus = "pending") else it
+                    }
+                  } else {
+                    Toast.makeText(gameHubCtx, "Couldn't send that request. Try again.", Toast.LENGTH_SHORT).show()
+                  }
+                }
+              },
+              onCancel = {
+                gameHubScope.launch {
+                  val token = com.haraan.app.data.TokenStore.getSignedInToken(gameHubCtx)
+                  if (token != null && matchRepo.cancelJoinRequest(token, game.id)) {
+                    openGames = openGames?.map {
+                      if (it.id == game.id) it.copy(myStatus = "none") else it
+                    }
+                  }
+                }
+              },
+            )
+          }
         }
       }
     }
@@ -8222,6 +8332,199 @@ private fun OpenMatchCard(
   }
 }
 
+/**
+ * One open game as it appears on the Pulse home list — a tighter relative of [OpenMatchCard].
+ *
+ * The board's card is built for a screen the user opened *to* browse games, so it can afford a
+ * stacked layout with its own icon rows. Here the row is competing with venue cards for a
+ * glance, so it is two lines: who's playing and what it is, then when/where with the action
+ * inline. Nothing is shown that the API didn't send — a game with no kick-off time says
+ * "Starting soon" (that's what a null `scheduledAt` means: it's waiting on a toss, not on a date
+ * we could invent), and the distance chip is simply absent for venues nobody has pinned yet.
+ */
+@Composable
+private fun OpenGameRow(
+  match: com.haraan.app.data.OpenMatch,
+  onOpen: () -> Unit,
+  onRequest: () -> Unit,
+  onCancel: () -> Unit,
+) {
+  val blue = HaraanColors.EventsBlue
+  val green = HaraanColors.Success
+
+  val kickOff = remember(match.scheduledAtIso) {
+    val iso = match.scheduledAtIso
+    if (iso.isNullOrBlank()) "Starting soon"
+    else runCatching {
+      val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(iso)
+      java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(parsed!!)
+    }.getOrDefault("Scheduled")
+  }
+  // Venue and locality are separate fields and either can be blank — and on a lot of gully
+  // matches they're the same word typed twice, so they're de-duped before joining.
+  val place = listOf(match.venue, match.locality)
+    .map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" · ")
+  val format = listOf(sportDisplayName(match.sport), match.competition.trim())
+    .filter { it.isNotEmpty() }.joinToString(" · ")
+
+  Column(
+    Modifier
+      .pressable(onClick = onOpen)
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(UnifiedCornerRadius))
+      .background(Color.White)
+      .border(1.dp, HaraanColors.BorderLight.copy(alpha = 0.7f), RoundedCornerShape(UnifiedCornerRadius))
+      .padding(horizontal = 14.dp, vertical = 13.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      // Overlapped crests — the two sides read as one fixture at a glance, and it's the same
+      // emblem art the match itself carries, so the row is recognisable from the board.
+      Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.CenterStart) {
+        ScheduledCrest(match.team1Emblem, blue, match.team1, size = 30.dp)
+        Box(modifier = Modifier.padding(start = 18.dp)) {
+          ScheduledCrest(match.team2Emblem, HaraanColors.Warning, match.team2, size = 30.dp)
+        }
+      }
+      Spacer(Modifier.width(11.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "${match.team1.ifBlank { "Team A" }} vs ${match.team2.ifBlank { "Team B" }}",
+          color = HaraanColors.TextPrimary,
+          fontSize = 15.sp,
+          fontWeight = FontWeight.ExtraBold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        if (format.isNotEmpty()) {
+          Text(
+            text = format,
+            color = HaraanColors.TextSecondary,
+            fontSize = 12.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 2.dp),
+          )
+        }
+      }
+      if (match.slotsNeeded > 0) {
+        Spacer(Modifier.width(10.dp))
+        MetaPill(
+          text = "${match.slotsNeeded} " + if (match.slotsNeeded == 1) "spot" else "spots",
+          color = green,
+          bg = green.copy(alpha = 0.10f),
+          icon = Icons.Filled.Groups,
+        )
+      }
+    }
+
+    Spacer(Modifier.height(11.dp))
+
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+      Column(modifier = Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.Event, null, tint = blue, modifier = Modifier.size(14.dp))
+          Spacer(Modifier.width(6.dp))
+          Text(
+            text = kickOff,
+            color = HaraanColors.TextPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+        if (place.isNotEmpty() || match.distanceKm != null) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 5.dp),
+          ) {
+            Icon(Icons.Filled.Place, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+              text = listOfNotNull(
+                place.takeIf { it.isNotEmpty() },
+                match.distanceKm?.let { formatKm(it) },
+              ).joinToString(" · "),
+              color = HaraanColors.TextSecondary,
+              fontSize = 12.5.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+        }
+      }
+      Spacer(Modifier.width(12.dp))
+      // Asking for a spot is a step forward, not a commitment — the owner still has to accept —
+      // so it's the blue action, and it's sized to its label instead of spanning the card.
+      when (match.myStatus) {
+        "pending" -> Row(
+          Modifier
+            .pressable(onClick = onCancel)
+            .clip(RoundedCornerShape(11.dp))
+            .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(11.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("Requested", color = HaraanColors.TextSecondary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+        }
+        "accepted" -> Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Filled.Check, null, tint = green, modifier = Modifier.size(15.dp))
+          Spacer(Modifier.width(4.dp))
+          Text("You're in", color = green, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+        }
+        "declined" -> Text(
+          "Not accepted", color = HaraanColors.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        )
+        else -> Row(
+          Modifier
+            .pressable(onClick = onRequest)
+            .clip(RoundedCornerShape(11.dp))
+            .background(blue)
+            .padding(horizontal = 13.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(Icons.Filled.PersonAddAlt1, null, tint = Color.White, modifier = Modifier.size(14.dp))
+          Spacer(Modifier.width(5.dp))
+          Text("Ask to join", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+        }
+      }
+    }
+  }
+}
+
+/** Loading shell for [OpenGameRow] — same footprint, so the list doesn't jump when it resolves. */
+@Composable
+private fun OpenGameRowSkeleton() {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 16.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    repeat(2) {
+      Column(
+        Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(UnifiedCornerRadius))
+          .background(Color.White)
+          .border(1.dp, HaraanColors.BorderLight.copy(alpha = 0.7f), RoundedCornerShape(UnifiedCornerRadius))
+          .padding(horizontal = 14.dp, vertical = 13.dp),
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Box(Modifier.size(30.dp).clip(CircleShape).haraanShimmer())
+          Spacer(Modifier.width(29.dp))
+          Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.fillMaxWidth(0.55f).height(13.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
+            Box(Modifier.fillMaxWidth(0.35f).height(11.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
+          }
+        }
+        Spacer(Modifier.height(14.dp))
+        Box(Modifier.fillMaxWidth(0.45f).height(11.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
+      }
+    }
+  }
+}
+
 /** Honest empty state for an ActionBoard tab/sport that has no real data yet. */
 @Composable
 private fun CrexTabEmpty(message: String) {
@@ -9335,209 +9638,310 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
 }
 
 @Composable
+private fun MatchScoreIcon(
+    selected: Boolean
+) {
+    val blue = Color(0xFF1769E8)
+    val inactive = Color(0xFF5F6B7A)
+
+    Box(
+        modifier = Modifier.size(21.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val color = if (selected) blue else inactive
+            val stroke = 1.6.dp.toPx()
+
+            // Outer scoreboard
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(
+                    size.width * 0.15f,
+                    size.height * 0.20f
+                ),
+                size = Size(
+                    size.width * 0.70f,
+                    size.height * 0.68f
+                ),
+                cornerRadius = CornerRadius(
+                    2.dp.toPx(),
+                    2.dp.toPx()
+                ),
+                style = Stroke(stroke)
+            )
+
+            // Top divider
+            drawLine(
+                color = color,
+                start = Offset(
+                    size.width * 0.15f,
+                    size.height * 0.40f
+                ),
+                end = Offset(
+                    size.width * 0.85f,
+                    size.height * 0.40f
+                ),
+                strokeWidth = stroke
+            )
+
+            // Left binding
+            drawLine(
+                color = color,
+                start = Offset(
+                    size.width * 0.30f,
+                    size.height * 0.10f
+                ),
+                end = Offset(
+                    size.width * 0.30f,
+                    size.height * 0.27f
+                ),
+                strokeWidth = stroke
+            )
+
+            // Right binding
+            drawLine(
+                color = color,
+                start = Offset(
+                    size.width * 0.70f,
+                    size.height * 0.10f
+                ),
+                end = Offset(
+                    size.width * 0.70f,
+                    size.height * 0.27f
+                ),
+                strokeWidth = stroke
+            )
+        }
+
+        // Score text overlay
+        Text(
+            text = "2:0",
+            fontSize = 7.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (selected)
+                blue
+            else
+                inactive,
+            modifier = Modifier.offset(y = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun HaraanNavItem(
+    label: String,
+    selected: Boolean,
+    showNotification: Boolean = false,
+    onClick: () -> Unit
+) {
+    val blue = Color(0xFF1769E8)
+    val inactive = Color(0xFF5F6B7A)
+    val selectedBg = Color(0xFFEAF2FF)
+
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .fillMaxHeight()
+            .clickable(
+                indication = null,
+                interactionSource = remember {
+                    MutableInteractionSource()
+                },
+                onClick = onClick
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Spacer(modifier = Modifier.height(1.dp))
+
+        Box(
+            modifier = Modifier
+                .size(
+                    width = if (selected) 52.dp else 32.dp,
+                    height = 32.dp
+                )
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    if (selected) selectedBg
+                    else Color.Transparent
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+
+            when (label) {
+
+                "Home" -> {
+                    Icon(
+                        imageVector =
+                            if (selected)
+                                Icons.Filled.Home
+                            else
+                                Icons.Outlined.Home,
+                        contentDescription = null,
+                        modifier = Modifier.size(21.dp),
+                        tint = if (selected) blue else inactive
+                    )
+                }
+
+                "Matches" -> {
+                    MatchScoreIcon(
+                        selected = selected
+                    )
+                }
+
+                "Chat" -> {
+                    Icon(
+                        imageVector =
+                            if (selected)
+                                Icons.AutoMirrored.Filled.Send
+                            else
+                                Icons.AutoMirrored.Outlined.Send,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (selected) blue else inactive
+                    )
+                }
+
+                "Alerts" -> {
+
+                    Box {
+
+                        Icon(
+                            imageVector =
+                                if (selected)
+                                    Icons.Filled.Notifications
+                                else
+                                    Icons.Outlined.Notifications,
+                            contentDescription = null,
+                            modifier = Modifier.size(21.dp),
+                            tint = if (selected) blue else inactive
+                        )
+
+                        if (showNotification) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .align(Alignment.TopEnd)
+                                    .offset(
+                                        x = 1.dp,
+                                        y = (-1).dp
+                                    )
+                                    .clip(CircleShape)
+                                    .background(blue)
+                            )
+                        }
+                    }
+                }
+
+                "Player" -> {
+                    Icon(
+                        imageVector =
+                            if (selected)
+                                Icons.Filled.AccountCircle
+                            else
+                                Icons.Outlined.AccountCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = if (selected) blue else inactive
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            fontWeight = if (selected)
+                FontWeight.SemiBold
+            else
+                FontWeight.Normal,
+            color = if (selected)
+                blue
+            else
+                inactive
+        )
+    }
+}
+
+@Composable
+fun HaraanBottomBar(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit
+) {
+    val items = listOf(
+        "Home",
+        "Matches",
+        "Chat",
+        "Alerts",
+        "Player"
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = Color.White,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, Color(0xFFEDEFF3))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            items.forEachIndexed { index, label ->
+
+                HaraanNavItem(
+                    label = label,
+                    selected = selectedTab == index,
+                    showNotification = label == "Alerts",
+                    onClick = {
+                        onTabSelected(index)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun CrexBottomBar(
-  /** The destination currently on screen — "Matches" while the board is up. */
   current: String,
   onHomeClick: () -> Unit,
   onMatchesClick: () -> Unit = {},
   onChatClick: () -> Unit = {},
   onAlertsClick: () -> Unit = {},
   onOthersClick: () -> Unit = {},
-  /** The signed-in player's avatar; rendered as the Player tab so it carries a real face. */
   avatarUrl: String? = null,
-  /** The player's name — its initial is shown when there's no photo (matches the profile). */
   avatarName: String? = null,
 ) {
-  // Primary navigation — DESTINATIONS, not filters.
-  //
-  // Three of these five slots used to be sports (Cricket / Badminton / Football),
-  // which made the app's top-level structure "which sport am I looking at" and left
-  // Chat and Alerts buried behind header icons. Sport is a filter over one list, not
-  // a place you go, so it moved into the board as a chip row; the freed slots now
-  // carry the things a player actually returns for.
-  //
-  // (label, active icon, idle icon) — softer Rounded family when active, geometric Outlined
-  // when idle, for a cohesive, modern set. Matches uses a sport-neutral Scoreboard (the board
-  // is multi-sport and score-led) rather than the old cricket bat, which was both
-  // cricket-specific and muddy at this size.
-  val items = listOf(
-    Triple("Home", Icons.Rounded.Home, Icons.Outlined.Home),
-    Triple("Matches", Icons.Rounded.Scoreboard, Icons.Outlined.Scoreboard),
-    // Telegram-style paper-plane for Chat (Send glyph) instead of a speech bubble.
-    Triple("Chat", Icons.AutoMirrored.Rounded.Send, Icons.Outlined.ChatBubbleOutline),
-    // A ringing bell (with sound waves) — more character/presence than a plain flat bell.
-    Triple("Alerts", Icons.Rounded.NotificationsActive, Icons.Outlined.Notifications),
-    Triple("Player", Icons.Rounded.Person, Icons.Outlined.Person),
-  )
+  val items = listOf("Home", "Matches", "Chat", "Alerts", "Player")
+  val selectedIndex = items.indexOf(current).coerceAtLeast(0)
 
-  // Deliberately NOT Material3's NavigationBar: its item internals carry padding
-  // tuned for the 80dp default, so constraining the container to the 56dp spec left
-  // the icon+label stack sitting high (measured 6.1dp above / 8.0dp below). A plain
-  // Row owns the vertical rhythm instead, so the content is genuinely centred in
-  // whatever HaraanBottomBar.Height says.
-  val selectedColor = Color(0xFF2563EB)
-  // A solid slate, not a washed-out light grey — idle icons are FILLED (below) so this reads
-  // as real weight rather than a faint outline. This is what gives the bar physical presence.
-  val idleColor = Color(0xFF5B6472)
-
-  // The Chat paper-plane flies for ~2s ONLY when its tab is tapped, then settles at rest.
-  // A one-shot Animatable driven from the click handler below, not an always-on loop.
-  val navScope = rememberCoroutineScope()
-  val chatFly = remember { Animatable(0f) }
-
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
-      // Clear the system navigation FIRST, then size the bar — so the 56dp is the
-      // bar itself and never swallows the inset.
-      .navigationBarsPadding()
-      .padding(horizontal = 8.dp, vertical = 8.dp)
-      .height(com.haraan.app.ui.theme.HaraanBottomBar.Height)
-      // Softer, lighter float — refined elevation + a single hairline border.
-      .shadow(
-        elevation = 7.dp,
-        shape = RoundedCornerShape(26.dp),
-        ambientColor = Color.Black.copy(alpha = 0.04f),
-        spotColor = Color.Black.copy(alpha = 0.06f)
-      )
-      .background(Color.White, RoundedCornerShape(26.dp))
-      .border(BorderStroke(1.dp, Color(0xFFEDEFF3)), RoundedCornerShape(26.dp))
-      .clip(RoundedCornerShape(26.dp)),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    items.forEach { (label, filledIcon, _) ->
-      val isSelected = label == current
-      // Springy scale + lift on the active icon — the bit of motion that reads premium.
-      val sel by animateFloatAsState(
-        targetValue = if (isSelected) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.5f, stiffness = 320f),
-        label = "navSel",
-      )
-      Column(
-        modifier = Modifier
-          .weight(1f)
-          .fillMaxHeight()
-          // No ripple bounds to fight the pill's rounded corners; the indicator and
-          // the icon lift already answer the tap.
-          .clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-          ) {
-            when (label) {
-              "Home" -> onHomeClick()
-              "Matches" -> onMatchesClick()
-              "Chat" -> {
-                // A ~2s "flying" gesture that DECAYS to rest: the plane surges up-right, then
-                // each swing gets smaller and every segment is eased, so it settles softly
-                // instead of the loop halting abruptly.
-                navScope.launch {
-                  chatFly.snapTo(0f)
-                  chatFly.animateTo(
-                    targetValue = 0f,
-                    animationSpec = keyframes {
-                      durationMillis = 2000
-                      0f at 0 with FastOutSlowInEasing
-                      1f at 260 with FastOutSlowInEasing
-                      0.10f at 640 with FastOutSlowInEasing
-                      0.55f at 1020 with FastOutSlowInEasing
-                      0.06f at 1400 with FastOutSlowInEasing
-                      0.24f at 1720 with FastOutSlowInEasing
-                      0f at 2000 with FastOutSlowInEasing
-                    },
-                  )
-                }
-                onChatClick()
-              }
-              "Alerts" -> onAlertsClick()
-              else -> onOthersClick()
-            }
-          },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-      ) {
-        // Selection pill sized to the icon, so it can never crowd the label.
-        Box(
-          modifier = Modifier
-            .size(width = 46.dp, height = 26.dp)
-            .background(
-              color = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
-              shape = RoundedCornerShape(13.dp)
-            ),
-          contentAlignment = Alignment.Center,
-        ) {
-          val iconScale = Modifier.graphicsLayer {
-            val s = 1f + 0.14f * sel
-            scaleX = s
-            scaleY = s
-            if (label == "Chat") {
-              // Tilt the paper plane so its nose points up-and-forward (Telegram-style).
-              rotationZ = -25f
-              // Flies up-and-to-the-right while the tap-triggered animation runs, then rests.
-              translationX = chatFly.value * 5.dp.toPx()
-              translationY = -chatFly.value * 5.dp.toPx()
-            }
-          }
-          if (label == "Player") {
-            // The Player tab carries the user's identity. The initial is always drawn; a
-            // real photo (when present) is overlaid on top — so a missing or broken avatar
-            // shows the initial (like the profile) rather than an empty circle. A ring marks
-            // it active.
-            val photo = avatarUrl?.let { com.haraan.app.data.ApiConfig.mediaUrl(it) }
-            Box(
-              modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(HaraanColors.Field, CircleShape)
-                .border(
-                  width = if (isSelected) 2.dp else 1.5.dp,
-                  color = if (isSelected) selectedColor else Color(0xFFCBD2DC),
-                  shape = CircleShape,
-                )
-                .then(iconScale),
-              contentAlignment = Alignment.Center,
-            ) {
-              Text(
-                text = avatarName?.trim()?.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                color = if (isSelected) selectedColor else idleColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-              )
-              if (!photo.isNullOrBlank()) {
-                AsyncImage(
-                  model = photo,
-                  contentDescription = "Player",
-                  contentScale = ContentScale.Crop,
-                  modifier = Modifier.fillMaxSize().clip(CircleShape),
-                )
-              }
-            }
-          } else {
-            Icon(
-              // Always the FILLED (Rounded) glyph — even when idle — so every tab has real
-              // body and weight. The old outline-when-idle read as thin and washed out; only
-              // colour + the pill + a scale lift now separate active from idle.
-              imageVector = filledIcon,
-              contentDescription = label,
-              tint = if (isSelected) selectedColor else idleColor,
-              modifier = Modifier
-                .size(23.dp)
-                .then(iconScale)
-            )
-          }
-        }
-        Spacer(Modifier.height(2.dp))
-        Text(
-          text = label,
-          fontSize = 10.sp,
-          lineHeight = 12.sp,
-          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-          color = if (isSelected) selectedColor else idleColor,
-          maxLines = 1,
-          softWrap = false,
-        )
+  HaraanBottomBar(
+    selectedTab = selectedIndex,
+    onTabSelected = { index ->
+      when (items.getOrNull(index)) {
+        "Home" -> onHomeClick()
+        "Matches" -> onMatchesClick()
+        "Chat" -> onChatClick()
+        "Alerts" -> onAlertsClick()
+        "Player" -> onOthersClick()
       }
     }
-  }
+  )
 }
 
 

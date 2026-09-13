@@ -21,6 +21,17 @@ android {
     }
 
     buildTypes {
+        // Debug talks to a local `php artisan serve`, reached over
+        // `adb reverse tcp:8000 tcp:8000` so 127.0.0.1 means the dev machine on
+        // both emulator and a USB device. Point it somewhere else without
+        // editing this file: -PPARTNER_API_BASE_URL=https://haraan.app
+        debug {
+            buildConfigField(
+                "String",
+                "API_BASE_URL",
+                "\"${project.findProperty("PARTNER_API_BASE_URL") ?: "https://haraan.app"}\""
+            )
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

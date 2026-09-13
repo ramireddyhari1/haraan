@@ -23,6 +23,13 @@ class ListVenueBookings extends ListRecords
 {
     protected static string $resource = VenueBookingResource::class;
 
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            \App\Filament\Resources\VenueBookings\Widgets\VenueBookingsExecutiveHeroWidget::class,
+        ];
+    }
+
     private const LIVE = ['confirmed', 'paid', 'completed', 'checked_in'];
 
     public function getTabs(): array

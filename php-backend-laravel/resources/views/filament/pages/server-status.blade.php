@@ -9,10 +9,10 @@
         $anyDown = $down > 0; $anyWarn = $warn > 0;
 
         $hero = $anyDown
-            ? ['grad' => 'linear-gradient(135deg,#ef4444,#e11d48)', 'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed', 'sub' => $down.' system'.($down===1?'':'s').' down'.($anyWarn?' · '.$warn.' to watch':'')]
+            ? ['grad' => 'linear-gradient(135deg,#ef4444,#dc2626)', 'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed', 'sub' => $down.' system'.($down===1?'':'s').' down'.($anyWarn?' · '.$warn.' to watch':'')]
             : ($anyWarn
-                ? ['grad' => 'linear-gradient(135deg,#f59e0b,#ea580c)', 'icon' => 'heroicon-o-exclamation-circle', 'head' => 'All up — '.$warn.' to watch', 'sub' => 'No outages. Some metrics are elevated.']
-                : ['grad' => 'linear-gradient(135deg,#10b981,#0d9488)', 'icon' => 'heroicon-o-check-circle', 'head' => 'All systems operational', 'sub' => 'Every probe is green.']);
+                ? ['grad' => 'linear-gradient(135deg,#f59e0b,#d97706)', 'icon' => 'heroicon-o-exclamation-circle', 'head' => 'All up — '.$warn.' to watch', 'sub' => 'No outages. Some metrics are elevated.']
+                : ['grad' => 'linear-gradient(135deg,#064e3b 0%,#047857 50%,#10b981 100%)', 'icon' => 'heroicon-o-check-circle', 'head' => 'All systems operational', 'sub' => 'Every probe is green.']);
 
         $sections = [
             'data'     => ['label' => 'Data & cache',   'icon' => 'heroicon-m-circle-stack'],
@@ -24,12 +24,29 @@
     @endphp
 
     <style>
-        .hss{--card:#fff;--border:#e8ecf3;--ink:#0b1220;--ink2:#5a6579;--ink3:#8a94a6;--track:#eef1f6;
-             --ok:#059669;--ok-d:#10b981;--ok-bg:#ecfdf5;--warn:#d97706;--warn-d:#f59e0b;--warn-bg:#fffbeb;
-             --down:#dc2626;--down-d:#ef4444;--down-bg:#fef2f2;--idle:#9aa4b2;--idle-d:#cbd2dd;--idle-bg:#f1f3f7;
-             display:flex;flex-direction:column;gap:28px;}
-        .dark .hss{--card:#111726;--border:rgba(255,255,255,.08);--ink:#f3f5f9;--ink2:#aeb7c6;--ink3:#7b8698;--track:rgba(255,255,255,.09);
-             --ok-bg:rgba(16,185,129,.13);--warn-bg:rgba(245,158,11,.13);--down-bg:rgba(239,68,68,.13);--idle-bg:rgba(255,255,255,.05);}
+        .hss {
+            --card: var(--hrn-surface, #ffffff);
+            --border: var(--hrn-border, #e2e8f0);
+            --ink: var(--hrn-ink, #070c18);
+            --ink2: var(--hrn-ink-2, #2d3748);
+            --ink3: var(--hrn-ink-3, #5a6a85);
+            --track: var(--hrn-track, #edf2f7);
+            --ok: var(--hrn-ok, #059669);
+            --ok-d: var(--hrn-ok-strong, #10b981);
+            --ok-bg: var(--hrn-ok-bg, #ecfdf5);
+            --warn: var(--hrn-warn, #d97706);
+            --warn-d: var(--hrn-warn-strong, #f59e0b);
+            --warn-bg: var(--hrn-warn-bg, #fffbeb);
+            --down: var(--hrn-down, #dc2626);
+            --down-d: var(--hrn-down-strong, #ef4444);
+            --down-bg: var(--hrn-down-bg, #fef2f2);
+            --idle: var(--hrn-idle, #64748b);
+            --idle-d: var(--hrn-idle-strong, #94a3b8);
+            --idle-bg: var(--hrn-idle-bg, #f1f5f9);
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
 
         .hss-hero{position:relative;overflow:hidden;border-radius:18px;padding:22px 24px;color:#fff;box-shadow:0 10px 30px -14px rgba(2,6,23,.45);}
         .hss-hero-row{position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;}
@@ -56,9 +73,32 @@
         @media(max-width:1100px){.hss-grid{grid-template-columns:repeat(2,1fr);}}
         @media(max-width:640px){.hss-grid{grid-template-columns:1fr;}}
 
-        .hss-card{position:relative;overflow:hidden;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;box-shadow:0 1px 2px rgba(11,18,32,.04);transition:transform .18s,box-shadow .18s;}
-        .hss-card:hover{transform:translateY(-2px);box-shadow:0 14px 26px -16px rgba(11,18,32,.28);}
-        .hss-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;}
+        .hss-card {
+            position: relative;
+            overflow: hidden;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--hrn-radius, 14px);
+            padding: 18px 20px 16px;
+            box-shadow: var(--hrn-shadow-card);
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                        box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                        border-color 0.2s ease;
+        }
+        .hss-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--hrn-shadow-hover);
+            border-color: color-mix(in srgb, var(--primary-500, #10b981) 32%, var(--border));
+        }
+        .hss-card::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3.5px;
+            border-radius: 4px 0 0 4px;
+        }
         .hss-card.ok::before{background:var(--ok-d);} .hss-card.warn::before{background:var(--warn-d);}
         .hss-card.down::before{background:var(--down-d);} .hss-card.idle::before{background:var(--idle-d);}
         .hss-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
@@ -74,7 +114,15 @@
         .hss-chip.warn{color:var(--warn);} .hss-chip.warn b{background:var(--warn-d);}
         .hss-chip.down{color:var(--down);} .hss-chip.down b{background:var(--down-d);}
         .hss-chip.idle{color:var(--idle);} .hss-chip.idle b{background:var(--idle-d);}
-        .hss-val{margin:15px 0 0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:var(--ink);line-height:1.15;}
+        .hss-val {
+            margin: 15px 0 0;
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            color: var(--ink);
+            line-height: 1.15;
+            font-variant-numeric: tabular-nums;
+        }
         .hss-meter{margin-top:11px;height:6px;border-radius:999px;background:var(--track);overflow:hidden;}
         .hss-meter i{display:block;height:100%;border-radius:999px;transition:width .5s ease;}
         .hss-meter i.ok{background:var(--ok-d);} .hss-meter i.warn{background:var(--warn-d);} .hss-meter i.down{background:var(--down-d);} .hss-meter i.idle{background:var(--idle-d);}

@@ -504,6 +504,7 @@ private fun CameraMode(
                             width = image.width,
                             height = image.height,
                             rowStride = plane.rowStride,
+                            rotationDegrees = image.imageInfo.rotationDegrees,
                         )?.let { pitchQuad = it }
                     }
                 }

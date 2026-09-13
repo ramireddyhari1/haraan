@@ -52,6 +52,30 @@ Artisan::command('bookings:reconcile-payments {--days=30} {--apply}', function (
     $this->warn(count($found) . ' order(s) listed.' . ($this->option('apply') ? '' : ' Re-run with --apply to confirm them.'));
 })->purpose('Find (and optionally fix) ticket orders Razorpay captured but that never confirmed');
 
+// Bookings the customer paid for in the app before online money reached the ledger.
+// They read 'unpaid' at the partner desk, so a court someone already paid for sits on
+// the chase list and the venue's collected total is short. Reports only; --apply writes
+// the ledger rows. Safe to re-run: a booking that already has one is skipped.
+Artisan::command('bookings:backfill-online-payments {--apply}', function (BookingService $bookings) {
+    $found = $bookings->backfillOnlinePayments((bool) $this->option('apply'));
+
+    if ($found === []) {
+        $this->info('No online-paid bookings are missing their ledger row.');
+
+        return;
+    }
+
+    $this->table(
+        ['Booking', 'Type', 'Amount', 'Razorpay payment'],
+        array_map(fn (array $r): array => [$r['booking'], $r['type'], $r['amount'], $r['payment']], $found),
+    );
+
+    $total = array_sum(array_column($found, 'amount'));
+
+    $this->warn(count($found) . ' booking(s), ₹' . number_format($total, 2) . '.'
+        . ($this->option('apply') ? ' Recorded.' : ' Re-run with --apply to record them.'));
+})->purpose('Record gateway money for online bookings confirmed before the ledger did');
+
 // Waitlist offers on a freed court-hour are time-boxed. Without this they never
 // lapse, so the first person offered silently holds a slot they may never pay for
 // — which is worse than having no waitlist, because it looks sold and earns

@@ -22,6 +22,19 @@
             </intent-filter>
         </activity>
         <activity
+            android:name="com.haraan.app.vision.PitchCheckActivity"
+            android:exported="true"
+            android:label="Pitch check"
+            android:keepScreenOn="true"
+            android:theme="@style/Theme.Haraan.Camera">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="pitch-check" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name="com.haraan.app.vision.VisionFieldTestActivity"
             android:exported="true"
             android:label="Vision field test"

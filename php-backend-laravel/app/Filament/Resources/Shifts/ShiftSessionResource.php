@@ -38,7 +38,7 @@ class ShiftSessionResource extends Resource
 
     protected static ?string $modelLabel = 'shift';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 7;
 
     /** Shifts own through their venue, like blocks and venue bookings. */
     public static function getEloquentQuery(): Builder

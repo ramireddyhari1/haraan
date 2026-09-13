@@ -95,6 +95,7 @@ final class Booking extends Model
         'channel',
         'guest_name',
         'guest_phone',
+        'standing_contract_id',
         // Who the ticket is for, captured at checkout (see the add_attendee_contact
         // migration). The account is who paid; these are the order's contact details.
         'attendee_name',
@@ -133,10 +134,32 @@ final class Booking extends Model
         return $this->hasMany(BookingPayment::class);
     }
 
+    /**
+     * What the gateway actually charged for this row.
+     *
+     * The two booking types keep their totals differently, and a single ledger has
+     * to read both: a venue row's `total_amount` is already the settled figure
+     * (subtotal + fee − discount, written that way by BookingService::reserveVenue),
+     * while an event row holds the ticket subtotal with the fee and discount beside
+     * it. Adding the fee to a venue row would bill it twice; ignoring it on an event
+     * row would under-record the sale.
+     */
+    public function amountCharged(): float
+    {
+        if ($this->booking_type === 'venue') {
+            return max(0.0, round((float) $this->total_amount, 2));
+        }
+
+        return max(0.0, round(
+            (float) $this->total_amount + (float) $this->convenience_fee - (float) $this->discount,
+            2,
+        ));
+    }
+
     /** What the customer still owes. Zero once settled, never negative. */
     public function balanceDue(): float
     {
-        return max(0.0, round((float) $this->total_amount - (float) $this->amount_paid, 2));
+        return max(0.0, round($this->amountCharged() - (float) $this->amount_paid, 2));
     }
 
     /** Took an advance but hasn't settled — the chase list on the dashboard. */
@@ -201,5 +224,11 @@ final class Booking extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(OrganizationUnit::class, 'organization_id');
+    }
+
+    /** The parent standing contract if this booking was generated from a recurring contract. */
+    public function standingContract(): BelongsTo
+    {
+        return $this->belongsTo(StandingContract::class, 'standing_contract_id');
     }
 }
