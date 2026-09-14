@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BroadcastsVenueAvailability;
 use App\Models\Concerns\BroadcastsContentChanges;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,6 +20,8 @@ use Illuminate\Support\Carbon;
  */
 final class VenueCourt extends Model
 {
+    use BroadcastsVenueAvailability;
+
     use BroadcastsContentChanges;
 
     /** Clients refetch venue lists when a court changes. */

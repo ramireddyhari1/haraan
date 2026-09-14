@@ -1245,7 +1245,7 @@ final class BookingService
      *
      * Filament-created bookings store lowercase 'confirmed', so match case-insensitively.
      */
-    private function occupyingStatuses(Builder $query): Builder
+    public static function occupyingStatuses(Builder $query): Builder
     {
         return $query
             ->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed', 'checked_in'])
@@ -1268,7 +1268,7 @@ final class BookingService
     }
 
     /** Parse a time label ("7:00 PM", "07:00", "19:00") to minutes-from-midnight, or null. */
-    private function timeToMinutes(?string $label): ?int
+    public static function timeToMinutes(?string $label): ?int
     {
         if ($label === null || trim($label) === '') {
             return null;

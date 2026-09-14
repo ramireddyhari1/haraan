@@ -127,6 +127,17 @@ object RealtimeClient {
                     }
                     if (id.isNotBlank()) ChatRealtimeBus.emit(id)
                 }
+                "venue.availability" -> {
+                    // A booking, hold, block or slot change at one venue. Id only — the open
+                    // venue page refetches /availability, never trusts the frame.
+                    val data = frame.opt("data")
+                    val id = when (data) {
+                        is JSONObject -> data.optString("id")
+                        is String -> JSONObject(data).optString("id")
+                        else -> ""
+                    }
+                    if (id.isNotBlank()) VenueRealtimeBus.emit(id)
+                }
                 "match.updated" -> {
                     val data = frame.opt("data")
                     val id = when (data) {

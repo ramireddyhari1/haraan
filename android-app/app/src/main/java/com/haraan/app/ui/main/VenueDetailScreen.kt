@@ -89,6 +89,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,6 +125,7 @@ import com.haraan.app.data.VenueDetailData
 import com.haraan.app.data.VenueRepository
 import com.haraan.app.data.VenueReviewItem
 import com.haraan.app.data.VenueSlotItem
+import com.haraan.app.data.SlotAvailability
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.premiumCardShadow
 import kotlinx.coroutines.launch
@@ -230,33 +233,22 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
             .height(280.dp)
             .graphicsLayer { translationY = scroll.value * 0.4f }
         ) {
-          if (images.size > 1) {
-            val pager = rememberPagerState(pageCount = { images.size })
-            HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-              AsyncImage(
-                model = images[page],
-                contentDescription = name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-              )
-            }
-            // Page dots.
-            Row(
-              modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              repeat(images.size) { i ->
-                Box(
-                  modifier = Modifier
-                    .size(if (i == pager.currentPage) 8.dp else 6.dp)
-                    .clip(CircleShape)
-                    .background(if (i == pager.currentPage) Color.White else Color.White.copy(alpha = 0.5f))
-                )
-              }
-            }
-          } else {
+          // One pager for every venue, even a single-photo one: swapping a plain image for a
+          // pager when the detail (and its full gallery) lands would recreate the hero and
+          // flash it. With one page, swiping is simply off. The pager only claims horizontal
+          // drags, so a vertical drag on the photo still scrolls the page.
+          val heroPager = rememberPagerState(pageCount = { images.size })
+          HorizontalPager(
+            state = heroPager,
+            userScrollEnabled = images.size > 1,
+            key = { page -> images.getOrElse(page) { page } },
+            modifier = Modifier.fillMaxSize(),
+          ) { page ->
+            val url = images.getOrNull(page)
             AsyncImage(
-              model = images.first(),
+              model = remember(url) {
+                coil.request.ImageRequest.Builder(ctx).data(url).crossfade(200).build()
+              },
               contentDescription = name,
               contentScale = ContentScale.Crop,
               modifier = Modifier.fillMaxSize()
@@ -339,6 +331,19 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
               }
             }
           }
+
+          // Photo position — only when there's more than one to swipe to. Sits on the rating
+          // line's right edge: the bottom 24dp of the hero is under the content sheet, which
+          // is where the old dots were hiding.
+          if (images.size > 1) {
+            HeroPhotoDots(
+              count = images.size,
+              current = heroPager.currentPage,
+              modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 41.dp),
+            )
+          }
         }
 
         // ── 2. Content sheet (laps 24dp over the hero) ─────────────────────────────
@@ -358,6 +363,10 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
           detail?.let { d ->
             TodaySlotRail(
               venue = d,
+              // Highlight the chip the booking sheet is open on (or parked behind sign-in).
+              selectedSlotId = (pendingBooking?.slot ?: pickedSlot)?.takeIf { showBooking || showLoginGate }?.id,
+              selectedDate = pendingBooking?.date ?: pickedDate,
+              sheetOpen = showBooking || showLoginGate,
               onPickSlot = { slot, date ->
                 // Carry the choice into the sheet — see BookingSheet's initialSlot.
                 pickedSlot = slot
@@ -676,6 +685,35 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
   }
 }
 
+/** Hero page indicator: the current photo stretches into a short pill, the rest stay dots. */
+@Composable
+private fun HeroPhotoDots(count: Int, current: Int, modifier: Modifier = Modifier) {
+  // A 12-photo gallery shouldn't grow a bar across the photo; the last dot stands for the rest.
+  val shown = count.coerceAtMost(6)
+  val active = current.coerceAtMost(shown - 1)
+  Row(
+    modifier = modifier,
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    repeat(shown) { i ->
+      val selected = i == active
+      val width by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (selected) 14.dp else 5.dp,
+        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 500f),
+        label = "heroDotWidth",
+      )
+      Box(
+        modifier = Modifier
+          .height(5.dp)
+          .width(width)
+          .clip(RoundedCornerShape(50))
+          .background(Color.White.copy(alpha = if (selected) 1f else 0.55f))
+      )
+    }
+  }
+}
+
 // A thin divider that separates sections on the single white sheet.
 @Composable
 private fun SectionDivider() {
@@ -703,21 +741,27 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 /**
  * Today's slots, on the page instead of behind the Book Now modal.
  *
- * This is the whole point of the redesign. Every fact the old page led with — name,
- * stars, address, amenities — is something a directory listing has too, which is why it
- * read as a clone. The venue's own start times and per-slot prices are the thing this
- * app holds and a listing doesn't, and they answer the only question a player came with:
- * can I play tonight, and what does it cost.
+ * The venue's own start times and per-slot prices answer the only question a player came
+ * with: can I play tonight, and what does it cost.
  *
- * **Honesty constraint, do not "improve" this into a live counter.** The API's
- * `available` flag is `VenueSlot.is_available` — the venue's own open/closed switch on a
- * slot *template*. It does NOT subtract existing bookings. So these chips may say a slot
- * is open when it has already been taken, and the labels stay deliberately vague
- * ("Open" / "Closed", never "3 left" or "free now"). Making this real means computing
- * availability against bookings server-side first.
+ * **Availability is real.** Each chip's state comes from GET /api/venues/{id}/availability,
+ * which checks occupying bookings, live checkout holds and court blocks with the same rules
+ * checkout enforces — so "Booked" means checkout would refuse the hour, and an open chip means
+ * it would take it. It stays current three ways: a `venue.{id}` WebSocket nudge the moment a
+ * booking/hold/block changes, a 20s poll while the page is visible (socket down, or a hold
+ * quietly expiring), and a refetch whenever the booking sheet closes.
+ *
+ * Until that answer arrives — or if it can't be fetched — chips fall back to the template's
+ * own open/closed switch and claim nothing about bookings, rather than guessing.
  */
 @Composable
-private fun TodaySlotRail(venue: VenueDetailData, onPickSlot: (VenueSlotItem, LocalDate) -> Unit) {
+private fun TodaySlotRail(
+  venue: VenueDetailData,
+  selectedSlotId: Int?,
+  selectedDate: LocalDate?,
+  sheetOpen: Boolean,
+  onPickSlot: (VenueSlotItem, LocalDate) -> Unit,
+) {
   // Slot rows are keyed by a free-text day label, so match the day's, then fall back to
   // the venue's everyday template rather than showing nothing.
   fun slotsFor(date: LocalDate): List<VenueSlotItem> {
@@ -727,8 +771,7 @@ private fun TodaySlotRail(venue: VenueDetailData, onPickSlot: (VenueSlotItem, Lo
   }
 
   // Drop the hours that have already gone. A rail headed "today" that opens on 6:00 AM
-  // at midday reads as canned sample data — the single fastest way to lose the trust
-  // this whole section exists to earn. Slots whose time can't be parsed are kept:
+  // at midday reads as canned sample data. Slots whose time can't be parsed are kept:
   // hiding a real bookable slot is worse than showing one that may have passed.
   // Keyed on the venue so the on-resume refresh (AutoRefresh) re-reads the clock; an
   // unkeyed remember would freeze the cutoff at whenever the page first opened.
@@ -739,10 +782,50 @@ private fun TodaySlotRail(venue: VenueDetailData, onPickSlot: (VenueSlotItem, Lo
   // Everything today is behind us — roll the rail forward rather than showing an empty
   // shelf or, worse, this morning's times.
   val showingTomorrow = todayRemaining.isEmpty()
-  val slots = if (showingTomorrow) slotsFor(LocalDate.now().plusDays(1)) else todayRemaining
+  val railDate = if (showingTomorrow) LocalDate.now().plusDays(1) else LocalDate.now()
+  val slots = if (showingTomorrow) slotsFor(railDate) else todayRemaining
+
+  // ── Live availability ────────────────────────────────────────────────────────────
+  val repo = remember { VenueRepository() }
+  // Keyed by venue + day: a rail rolling over to tomorrow must never paint today's answer.
+  var availability by remember(venue.id, railDate) { mutableStateOf<Map<Int, SlotAvailability>?>(null) }
+  val loadAvailability: suspend () -> Unit = {
+    // A failed refresh keeps the last good answer instead of wiping chips back to "unknown".
+    repo.getSlotAvailability(venue.id, railDate)?.let { availability = it }
+  }
+  // First load, and again every time the booking sheet closes — whatever happened in there
+  // (booked, abandoned, refused because someone beat them to it) changed what's free.
+  LaunchedEffect(venue.id, railDate, sheetOpen) {
+    if (!sheetOpen) loadAvailability()
+  }
+  if (venue.id.isNotBlank()) {
+    androidx.compose.runtime.DisposableEffect(venue.id) {
+      com.haraan.app.data.RealtimeClient.subscribe("venue.${venue.id}")
+      onDispose { com.haraan.app.data.RealtimeClient.unsubscribe("venue.${venue.id}") }
+    }
+    LaunchedEffect(venue.id, railDate) {
+      kotlinx.coroutines.flow.merge(
+        com.haraan.app.data.VenueRealtimeBus.updates,
+        // Nudges sent while the socket was down are gone; resync on reconnect.
+        com.haraan.app.data.RealtimeBus.updates,
+      ).collect { signal ->
+        if (signal == venue.id || signal == com.haraan.app.data.RealtimeBus.RECONNECTED) loadAvailability()
+      }
+    }
+  }
+  // Fallback when the socket isn't connected, and the thing that notices a checkout hold
+  // expiring (an expiry is a clock passing, not a write, so nothing broadcasts it).
+  AutoRefresh(intervalMs = 20_000L) { loadAvailability() }
+
   if (slots.isEmpty()) return
 
-  val open = slots.count { it.available }
+  val live = availability
+  fun stateOf(slot: VenueSlotItem): SlotAvailability.State? = when {
+    !slot.available -> SlotAvailability.State.CLOSED
+    live == null -> null
+    else -> live[slot.id]?.state
+  }
+  val openCount = slots.count { stateOf(it).let { s -> s == null || s == SlotAvailability.State.OPEN } }
 
   Spacer(Modifier.height(18.dp))
   Row(verticalAlignment = Alignment.CenterVertically) {
@@ -754,11 +837,12 @@ private fun TodaySlotRail(venue: VenueDetailData, onPickSlot: (VenueSlotItem, Lo
     )
     Spacer(Modifier.width(8.dp))
     Text(
-      // A fact about the clock and the venue's published list — never about bookings.
       when {
-        open == 0 -> "none open"
-        showingTomorrow -> "$open slot${if (open == 1) "" else "s"} listed"
-        else -> "$open still to come"
+        // Only claim "booked" once the server has actually said so.
+        live != null && openCount == 0 && slots.any { stateOf(it) == SlotAvailability.State.BOOKED } -> "fully booked"
+        openCount == 0 -> "none open"
+        live == null -> if (showingTomorrow) "$openCount slot${if (openCount == 1) "" else "s"} listed" else "$openCount still to come"
+        else -> "$openCount open"
       },
       color = HaraanColors.TextMuted,
       fontSize = 12.sp,
@@ -771,57 +855,123 @@ private fun TodaySlotRail(venue: VenueDetailData, onPickSlot: (VenueSlotItem, Lo
       .horizontalScroll(rememberScrollState()),
     horizontalArrangement = Arrangement.spacedBy(9.dp),
   ) {
-    val railDate = if (showingTomorrow) LocalDate.now().plusDays(1) else LocalDate.now()
-    slots.forEach { slot -> SlotChip(slot, venue.price) { onPickSlot(slot, railDate) } }
+    slots.forEach { slot ->
+      SlotChip(
+        slot = slot,
+        venuePrice = venue.price,
+        availability = live?.get(slot.id),
+        state = stateOf(slot),
+        // Slot ids are day-agnostic templates, so the day has to match too.
+        selected = slot.id == selectedSlotId && selectedDate == railDate,
+      ) { onPickSlot(slot, railDate) }
+    }
   }
 }
 
-/** One start time: the hour, what it costs, and the venue's own "filling fast" flag. */
+/**
+ * One start time. Four honest states:
+ * - open: white, blue hairline, the price; "1 LEFT" when it's the venue's last free court;
+ * - selected: the time the booking sheet is open on — blue tint, blue ring, check mark;
+ * - booked: someone holds every court that can run it — muted, struck through, not tappable;
+ * - closed: the venue isn't selling it (switched off, blocked, closed day) — muted, not tappable.
+ * State changes cross-fade so a slot being taken live reads as a change, not a flicker.
+ */
 @Composable
-private fun SlotChip(slot: VenueSlotItem, venuePrice: Int, onClick: () -> Unit) {
-  val closed = !slot.available
+private fun SlotChip(
+  slot: VenueSlotItem,
+  venuePrice: Int,
+  availability: SlotAvailability?,
+  state: SlotAvailability.State?,
+  selected: Boolean,
+  onClick: () -> Unit,
+) {
+  val booked = state == SlotAvailability.State.BOOKED
+  val closed = state == SlotAvailability.State.CLOSED
+  val unavailable = booked || closed
+  val showSelected = selected && !unavailable
   val rate = slot.price.takeIf { it > 0 } ?: venuePrice
+  val lastCourt = !unavailable && availability != null &&
+    availability.courtsTotal > 1 && availability.courtsFree == 1
+  val blue = HaraanColors.EventsBlue
+  val shape = RoundedCornerShape(14.dp)
+  val colorTween = androidx.compose.animation.core.tween<Color>(220)
+
+  val bg by androidx.compose.animation.animateColorAsState(
+    when {
+      unavailable -> Color(0xFFF3F5F8)
+      showSelected -> blue.copy(alpha = 0.08f)
+      else -> Color.White
+    }, colorTween, label = "slotBg",
+  )
+  val borderColor by androidx.compose.animation.animateColorAsState(
+    when {
+      unavailable -> HaraanColors.BorderLight
+      showSelected -> blue
+      lastCourt || slot.fillingFast -> HaraanColors.RatingGold.copy(alpha = 0.55f)
+      else -> blue.copy(alpha = 0.35f)
+    }, colorTween, label = "slotBorder",
+  )
+  val timeColor by androidx.compose.animation.animateColorAsState(
+    when {
+      unavailable -> HaraanColors.TextMuted
+      showSelected -> blue
+      else -> HaraanColors.TextPrimary
+    }, colorTween, label = "slotTime",
+  )
+
   Column(
     modifier = Modifier
-      .then(if (closed) Modifier else Modifier.pressable { onClick() })
-      .clip(RoundedCornerShape(14.dp))
-      .background(if (closed) Color(0xFFF3F5F8) else Color.White)
-      .border(
-        1.dp,
-        when {
-          closed -> HaraanColors.BorderLight
-          slot.fillingFast -> HaraanColors.RatingGold.copy(alpha = 0.55f)
-          else -> HaraanColors.EventsBlue.copy(alpha = 0.35f)
-        },
-        RoundedCornerShape(14.dp),
-      )
+      .then(if (unavailable) Modifier else Modifier.pressable { onClick() })
+      .clip(shape)
+      .background(bg)
+      .border(if (showSelected) 1.5.dp else 1.dp, borderColor, shape)
+      .semantics {
+        stateDescription = when {
+          booked -> "Booked"
+          closed -> "Closed"
+          showSelected -> "Selected"
+          else -> "Available"
+        }
+      }
       .padding(horizontal = 14.dp, vertical = 10.dp),
     horizontalAlignment = Alignment.Start,
   ) {
-    Text(
-      slot.time,
-      color = if (closed) HaraanColors.TextMuted else HaraanColors.TextPrimary,
-      fontWeight = FontWeight.Bold,
-      fontSize = 14.sp,
-      maxLines = 1,
-    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Text(
+        slot.time,
+        color = timeColor,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        maxLines = 1,
+        textDecoration = if (booked) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+      )
+      if (showSelected) {
+        Spacer(Modifier.width(5.dp))
+        Icon(Icons.Default.Check, null, tint = blue, modifier = Modifier.size(14.dp))
+      }
+    }
     Spacer(Modifier.height(3.dp))
     Text(
       when {
+        booked -> "Booked"
         closed -> "Closed"
         rate > 0 -> "₹$rate"
         else -> "Tap to book"
       },
-      color = if (closed) HaraanColors.TextMuted else HaraanColors.TextSecondary,
+      color = when {
+        unavailable -> HaraanColors.TextMuted
+        showSelected -> blue.copy(alpha = 0.85f)
+        else -> HaraanColors.TextSecondary
+      },
       fontSize = 12.sp,
-      fontWeight = FontWeight.Medium,
+      fontWeight = if (booked) FontWeight.SemiBold else FontWeight.Medium,
       maxLines = 1,
     )
-    // The venue's own flag, printed as the venue set it — not a computed urgency.
-    if (!closed && slot.fillingFast) {
+    // The real "last court" wins over the venue's hand-set flag; both stay a quiet amber.
+    if (!unavailable && (lastCourt || slot.fillingFast)) {
       Spacer(Modifier.height(5.dp))
       Text(
-        "FILLING FAST",
+        if (lastCourt) "1 LEFT" else "FILLING FAST",
         color = Color(0xFF9A6700),
         fontSize = 8.5.sp,
         fontWeight = FontWeight.ExtraBold,

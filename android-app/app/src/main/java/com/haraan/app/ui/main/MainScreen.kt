@@ -1805,13 +1805,7 @@ private fun GameHubTabScreen(
   // nothing is live, so the card shows an honest "no live matches" state instead. Loaded in
   // the main effect below so it shares the Reverb collector (refreshes on a "matches" push).
   val gameHubCtx = LocalContext.current
-  val gameHubScope = androidx.compose.runtime.rememberCoroutineScope()
   var liveMatches by remember { mutableStateOf<List<com.haraan.app.data.LiveMatchRow>>(emptyList()) }
-
-  // Nearby games still short of players (GET /api/matches/open). These already existed, but only
-  // behind the ActionBoard → Scheduled → "Open near me" sub-tab, which is three taps from here —
-  // and a game short a player is the one thing on this screen that expires. null = still loading.
-  var openGames by remember { mutableStateOf<List<com.haraan.app.data.OpenMatch>?>(null) }
 
   // Live venues from the Filament admin (GET /api/venues). null = still loading (shows a
   // skeleton); an empty list after load means "none / unreachable" — an honest empty state.
@@ -1843,6 +1837,7 @@ private fun GameHubTabScreen(
           id = c.id, title = c.name, location = c.location, rating = c.rating,
           category = c.category, sports = c.sports, price = c.price,
           imageUrl = c.image ?: venueCategoryImage(c.category),
+          images = c.images.ifEmpty { listOf(c.image ?: venueCategoryImage(c.category)) },
           tagline = c.tagline, distance = c.distance, availableTonight = true,
           latitude = c.latitude, longitude = c.longitude,
         )
@@ -1863,19 +1858,6 @@ private fun GameHubTabScreen(
   val loadFeed: suspend () -> Unit = remember {
     { feedSections = runCatching { contentRepo.getFeed() }.getOrDefault(emptyMap()) }
   }
-  // Deliberately NOT remembered: this one reads `locationState`, so a cached lambda would keep
-  // querying the location the screen had on first composition. AutoRefresh holds it in a
-  // rememberUpdatedState, so the fresh instance is what actually runs.
-  val loadOpenGames: suspend () -> Unit = {
-    val here = locationState as? com.haraan.app.data.LocationState.Resolved
-    openGames = matchRepo.getOpenMatches(
-      token = com.haraan.app.data.TokenStore.getToken(gameHubCtx),
-      latitude = here?.latitude,
-      longitude = here?.longitude,
-      locality = here?.area.orEmpty(),
-      district = here?.district.orEmpty().ifBlank { here?.city.orEmpty() },
-    )
-  }
   LaunchedEffect(Unit) {
     loadVenues()
     loadLayout()
@@ -1889,22 +1871,16 @@ private fun GameHubTabScreen(
         "home" -> { loadLayout(); loadFeed() }
         "venues" -> loadVenues()
         // Keep the ActionBoard live score fresh when a match/score is broadcast.
-        "matches", "live" -> { loadLive(); loadOpenGames() }
+        "matches", "live" -> loadLive()
       }
     }
   }
-  // Re-pull the open games the moment the fix lands (or the user picks another city) rather
-  // than waiting out the 20s tick — the list is distance-ranked server-side, so a stale
-  // location shows the right games in the wrong order.
-  LaunchedEffect(locationState) { loadOpenGames() }
   // No-manual-refresh: re-pull the volatile data (live scores, venue availability)
   // whenever the user returns to this screen or the app comes back to the foreground,
   // and tick every 20s while it's on-screen. Paused entirely in the background.
   AutoRefresh(intervalMs = 20_000L) {
     loadLive()
     loadVenues()
-    // Open games fill up and kick off; a spot shown here has to still exist when it's tapped.
-    loadOpenGames()
   }
 
   val isVenuesLoading = venuesData == null
@@ -2086,7 +2062,7 @@ private fun GameHubTabScreen(
       remoteBlocks.isNotEmpty()
     val orderedBlocks: List<com.haraan.app.data.HomeBlock> =
       (if (useRemoteLayout) remoteBlocks
-      else listOf("actionboard", "leaderboard", "sports_chips", "venues", "open_games", "top_players")
+      else listOf("actionboard", "leaderboard", "sports_chips", "venues", "top_players")
         .map { com.haraan.app.data.HomeBlock(id = it, type = it, title = null) })
         // The "For You" curated rail was cut — it duplicated the Events "For You" and added
         // clutter without pulling its weight on GameHub. Drop any for_you feed_section from
@@ -2103,18 +2079,11 @@ private fun GameHubTabScreen(
           if (blocks.any { it.type == "top_players" }) blocks
           else blocks + com.haraan.app.data.HomeBlock(id = "top_players", type = "top_players", title = null)
         }
-        // Same treatment for the open-games list: a /control layout saved before this block
-        // existed would otherwise drop it. Slotted straight after the venues block (its home in
-        // the built-in order), not appended to the tail, and it self-hides when nothing is open.
-        .let { blocks ->
-          if (blocks.any { it.type == "open_games" }) blocks
-          else {
-            val games = com.haraan.app.data.HomeBlock(id = "open_games", type = "open_games", title = null)
-            val after = blocks.indexOfFirst { it.type == "venues" }
-            if (after < 0) blocks + games
-            else blocks.toMutableList().also { it.add(after + 1, games) }
-          }
-        }
+        // "Games looking for players" no longer lives on Pulse — the venue list runs straight
+        // into "All Venues". A /control layout saved while it existed may still carry the block;
+        // drop it so it can never reappear between the venue sections. (Open games are still on
+        // ActionBoard → Scheduled → "Open near me".)
+        .filterNot { it.type == "open_games" }
     // Real per-sport filter now that /api/live-matches tags each row (it defaults to
     // cricket, so matches created before the column existed still show). This used to
     // be hard-coded to hand back an empty list for anything but cricket, which made
@@ -2299,13 +2268,13 @@ private fun GameHubTabScreen(
 
     },
     "venues" to {
-    // One catalogue, two presentations — no venue is shown twice. The reel is a top-rated
-    // highlight; "More venues" is strictly everything the reel did NOT show. (Previously
-    // "Popular" and "Featured" overlapped heavily because every venue was flagged
-    // availableTonight, so the same cards appeared in both sections.)
+    // Two presentations of one catalogue. The reel is a top-rated highlight; "All Venues" is the
+    // complete, location-ordered list the user scrolls straight into — no separate section breaks
+    // the venue flow. The reel's picks do appear again in the full list, on purpose: the list is
+    // the catalogue, and a venue vanishing from it because it was highlighted reads as missing.
     val popularVenues = filteredVenues.sortedByDescending { it.rating.toFloatOrNull() ?: 0f }.take(5)
-    val popularIds = popularVenues.map { it.id }.toSet()
-    val moreVenues = filteredVenues.filterNot { it.id in popularIds }
+    // distinctBy guards the lazy keys below — a duplicated id from the API must not crash the tab.
+    val allVenues = filteredVenues.distinctBy { it.id }
 
     // 4. Header
     item {
@@ -2315,15 +2284,14 @@ private fun GameHubTabScreen(
       Box(modifier = Modifier.overlapAbove(12.dp)) {
       GameHubSectionHeader(
         title = "Popular Venues",
-        // Contextual subtitle — carries a real venue count so the section feels inhabited.
         subtitle = when {
           isVenuesLoading -> "Finding venues near you…"
           filteredVenues.isEmpty() && userLat != null && searchRadiusKm > 0 ->
             "None within ${searchRadiusKm} km — widen the radius"
           filteredVenues.isEmpty() -> "No venues yet"
-          // Only claim "near you" when we actually ranked by GPS distance.
-          userLat != null -> "${filteredVenues.size} venues • nearest first"
-          else -> "${filteredVenues.size} venues • top rated"
+          // The reel is ranked by rating; "near you" is only claimed with a real GPS fix.
+          userLat != null -> "Top rated near you"
+          else -> "Top rated"
         },
         actionText = "View all",
         onActionClick = { showSearch = true },
@@ -2366,86 +2334,38 @@ private fun GameHubTabScreen(
       }
     }
 
-    // 6. "More venues" — only the venues the reel didn't surface, so nothing repeats. Skipped
-    // entirely when the reel already covered the whole catalogue (≤ 5 venues).
-    if (!isVenuesLoading && moreVenues.isNotEmpty()) {
-      item {
+    // 6. "All Venues" — the full catalogue as a vertical list, continuing the page's own scroll
+    // (items of this LazyColumn, not a nested scroller). Hidden while loading (the reel skeleton
+    // holds the space) and when empty (the reel already shows the honest empty note).
+    if (!isVenuesLoading && allVenues.isNotEmpty()) {
+      item(key = "all-venues-header") {
         GameHubSectionHeader(
-          title = "More venues",
-          subtitle = "${moreVenues.size} more to explore"
-        )
-      }
-      items(moreVenues.size) { i ->
-        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-          VenueListCard(moreVenues[i], onClick = { onVenueClick(moreVenues[i]) })
-        }
-      }
-    }
-    },
-    "open_games" to {
-    // 7. Games short of players — a vertical list under the venues. Venues answer "where can I
-    // play"; this answers "who needs me tonight", which is the only thing on this screen with a
-    // deadline. Obeys the sport chips like everything else here.
-    val games = openGames?.filter {
-      selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true)
-    }
-
-    // Loaded-and-empty hides the whole section rather than parking an empty-state card on the
-    // home screen. The ActionBoard's "Open near me" tab is where the honest empty state lives —
-    // there the user went looking for open games, so "none right now" is an answer. Here it
-    // would just be a dead band between venues and the players rail.
-    if (games == null || games.isNotEmpty()) {
-      item {
-        GameHubSectionHeader(
-          title = "Games looking for players",
-          subtitle = when {
-            games == null -> "Checking who needs a player…"
-            userLat != null -> "${games.size} nearby · nearest first"
-            else -> "${games.size} open near you"
+          title = "All Venues",
+          subtitle = buildString {
+            append(allVenues.size)
+            append(if (allVenues.size == 1) " venue" else " venues")
+            // Order mirrors filteredVenues: distance-ranked with a fix, city-first without.
+            if (userLat != null) append(" · nearest first")
+            else if (!selectedCity.isNullOrBlank()) append(" · $selectedCity first")
           },
-          actionText = "View all",
-          onActionClick = onActionBoardClick,
         )
       }
-      if (games == null) {
-        item { OpenGameRowSkeleton() }
-      } else {
-        // Three is the section's job: a glance at what needs a player, not the whole board.
-        // "View all" in the header carries the rest.
-        items(games.take(3), key = { "open-game-" + it.id }) { game ->
-          Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-            OpenGameRow(
-              match = game,
-              onOpen = { onMatchClick(game.id) },
-              onRequest = {
-                gameHubScope.launch {
-                  val token = com.haraan.app.data.TokenStore.getSignedInToken(gameHubCtx)
-                  if (token == null) {
-                    Toast.makeText(gameHubCtx, "Sign in to ask for a spot.", Toast.LENGTH_SHORT).show()
-                  } else if (matchRepo.requestToJoin(token, game.id)) {
-                    Toast.makeText(gameHubCtx, "Request sent to the match owner.", Toast.LENGTH_SHORT).show()
-                    // Flip this row to "Requested" now instead of waiting for the next pull —
-                    // the server is the source of truth and the 20s tick will confirm it.
-                    openGames = openGames?.map {
-                      if (it.id == game.id) it.copy(myStatus = "pending") else it
-                    }
-                  } else {
-                    Toast.makeText(gameHubCtx, "Couldn't send that request. Try again.", Toast.LENGTH_SHORT).show()
-                  }
-                }
-              },
-              onCancel = {
-                gameHubScope.launch {
-                  val token = com.haraan.app.data.TokenStore.getSignedInToken(gameHubCtx)
-                  if (token != null && matchRepo.cancelJoinRequest(token, game.id)) {
-                    openGames = openGames?.map {
-                      if (it.id == game.id) it.copy(myStatus = "none") else it
-                    }
-                  }
-                }
-              },
-            )
-          }
+      items(
+        items = allVenues,
+        key = { "all-venue-" + it.id },
+        contentType = { "venue-list-card" },
+      ) { venue ->
+        // animateItem: a sport-chip or radius change re-flows the list with a soft move/fade
+        // instead of cards snapping into new slots.
+        // overlapAbove trims the screen-wide 16dp item gap to 12dp inside this list only, so the
+        // cards read as one set rather than separate islands (other sections keep their spacing).
+        Box(
+          modifier = Modifier
+            .animateItem()
+            .overlapAbove(4.dp)
+            .padding(horizontal = 16.dp)
+        ) {
+          VenueListCard(venue, onClick = { onVenueClick(venue) })
         }
       }
     }
@@ -3353,6 +3273,9 @@ private data class VenueItem(
   val sports: List<String> = emptyList(),
   val price: Int,
   val imageUrl: String,
+  // Full photo set for the All Venues carousel, cover first. Never empty — falls back to
+  // [imageUrl] so a venue with one (or no) uploaded photo still renders a single frame.
+  val images: List<String> = listOf(imageUrl),
   val tagline: String,
   val distance: String,
   val availableTonight: Boolean = true,
@@ -3387,144 +3310,311 @@ private fun venueCategoryImage(category: String): String = when {
   else -> "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=600&q=80"
 }
 
+/**
+ * One venue in the Pulse "All Venues" list — a compact, photo-led card.
+ *
+ * The photo area is a swipeable gallery of the venue's real uploads, so a player can size up the
+ * place without leaving the list. Everything else is three tight lines: name + price, what's
+ * there, where it is + the booking action. Rating rides on the photo, where it's read first.
+ */
 @Composable
 private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
   val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
   val pressed by interaction.collectIsPressedAsState()
   val scale by animateFloatAsState(
-    targetValue = if (pressed) 0.98f else 1f,
+    targetValue = if (pressed) 0.985f else 1f,
     animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
     label = "venueListPress"
   )
+  val cardShape = RoundedCornerShape(UnifiedCornerRadius)
   Card(
     modifier = Modifier
       .fillMaxWidth()
       .graphicsLayer { scaleX = scale; scaleY = scale }
-      .premiumCardShadow(radius = UnifiedCornerRadius, ambient = 14.dp, contact = 2.dp)
+      .premiumCardShadow(radius = UnifiedCornerRadius, ambient = 12.dp, contact = 2.dp)
+      .clip(cardShape)
       .clickable(interactionSource = interaction, indication = null) { onClick() },
-    shape = RoundedCornerShape(UnifiedCornerRadius),
+    shape = cardShape,
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    // No border — unified shadow-based card language.
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-      // Clean photo — no badges, no scrim, no overlaid tagline. Everything reads in the
-      // structured block below.
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(150.dp)
-          .background(rememberShimmerBrush())
+          .height(176.dp)
       ) {
-        AsyncImage(
-          model = venue.imageUrl,
+        VenuePhotoCarousel(
+          images = venue.images,
           contentDescription = venue.title,
-          contentScale = ContentScale.Crop,
-          modifier = Modifier.fillMaxSize()
+          sport = venue.category,
+          modifier = Modifier.fillMaxSize(),
         )
+
+        val ratingValue = venue.rating.toFloatOrNull()
+        if (ratingValue != null && ratingValue > 0f) {
+          Row(
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .padding(10.dp)
+              .clip(RoundedCornerShape(50))
+              .background(Color.White.copy(alpha = 0.94f))
+              .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Icon(
+              imageVector = Icons.Filled.Star,
+              contentDescription = null,
+              tint = HaraanColors.RatingGold,
+              modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = venue.rating,
+              color = HaraanColors.TextPrimary,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+            )
+          }
+        }
       }
 
-      Column(modifier = Modifier.padding(HaraanSpacing.Medium)) {
+      Column(
+        modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp)
+      ) {
+        // Line 1 — name, with the hourly price opposite it: the two facts a player compares.
         Row(
           modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.Top
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Column(modifier = Modifier.weight(1f)) {
-            Text(
-              text = venue.title,
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.Bold,
-              fontSize = 16.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(3.dp))
-            // Sport + room detail, quiet and muted (replaces the pill + image-overlay tagline).
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              if (venue.sports.isNotEmpty()) {
-                VenueSportsIcons(sports = venue.sports)
-                Spacer(modifier = Modifier.width(7.dp))
-              }
+          Text(
+            text = venue.title,
+            color = HaraanColors.TextPrimary,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            letterSpacing = (-0.1).sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+          )
+          if (venue.price > 0) {
+            Spacer(modifier = Modifier.width(10.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
               Text(
-                text = venue.tagline,
+                text = "₹${venue.price}",
+                color = HaraanColors.TextPrimary,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 16.sp,
+              )
+              Text(
+                text = "/hr",
+                color = HaraanColors.TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 1.dp, bottom = 1.dp),
+              )
+            }
+          }
+        }
+
+        // Line 2 — sports played + the venue's own one-liner. Admin copy often arrives with a
+        // stray leading " - " separator; trim it so the line starts on a word.
+        val tagline = venue.tagline.trim().trimStart('-', '–', '·', '|').trim()
+          .takeUnless { it.equals("null", ignoreCase = true) }.orEmpty()
+        if (venue.sports.isNotEmpty() || tagline.isNotEmpty()) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 3.dp),
+          ) {
+            if (venue.sports.isNotEmpty()) {
+              VenueSportsIcons(sports = venue.sports)
+              if (tagline.isNotEmpty()) Spacer(modifier = Modifier.width(7.dp))
+            }
+            if (tagline.isNotEmpty()) {
+              Text(
+                text = tagline,
                 color = HaraanColors.TextSecondary,
                 fontSize = 13.sp,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
               )
             }
           }
-          val ratingValue = venue.rating.toFloatOrNull()
-          if (ratingValue != null && ratingValue > 0f) {
-            Spacer(modifier = Modifier.width(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(text = "★", color = HaraanColors.RatingGold, fontSize = 14.sp)
+        }
+
+        // Line 3 — where it is, with the booking action on the same line.
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          // Unpinned venues come back with distance serialised as the string "null" — drop it
+          // rather than printing "tadepalle • null".
+          val place = listOf(venue.location, venue.distance)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+            .joinToString(" · ")
+          Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            if (place.isNotEmpty()) {
+              Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = null,
+                tint = HaraanColors.TextMuted,
+                modifier = Modifier.size(14.dp)
+              )
               Spacer(modifier = Modifier.width(3.dp))
               Text(
-                text = venue.rating,
-                color = HaraanColors.TextPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
+                text = place,
+                color = HaraanColors.TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
               )
             }
           }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        // Location + distance — quiet metadata line.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.LocationOn,
-            contentDescription = null,
-            tint = HaraanColors.TextMuted,
-            modifier = Modifier.size(13.dp)
-          )
-          Spacer(modifier = Modifier.width(3.dp))
-          Text(
-            text = listOf(venue.location, venue.distance).filter { it.isNotBlank() }.joinToString(" • "),
-            color = HaraanColors.TextSecondary,
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-              text = "₹${venue.price}",
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 17.sp
-            )
-            Text(
-              text = "/hr",
-              color = HaraanColors.TextSecondary,
-              fontSize = 12.sp,
-              modifier = Modifier.padding(bottom = 2.dp)
-            )
-          }
-          // CTA — bright "commit" green (reserved for actions), tighter button radius than the
-          // 20dp card so it doesn't read as a nested card.
+          Spacer(modifier = Modifier.width(12.dp))
+          // Same destination as tapping the card (the venue page, where slots are picked) — it
+          // gets its own ripple so the action reads as a real button, not a painted label.
           Box(
             modifier = Modifier
+              .height(36.dp)
               .clip(RoundedCornerShape(HaraanRadius.Small))
               .background(HaraanColors.GameHubGreen)
-              .padding(horizontal = 16.dp, vertical = 10.dp)
+              .clickable { onClick() }
+              .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
           ) {
             Text(
               text = "Book Slot",
               color = Color.White,
-              fontSize = 12.sp,
+              fontSize = 13.sp,
               fontWeight = FontWeight.Bold
             )
           }
         }
       }
+    }
+  }
+}
+
+/**
+ * Inline photo gallery for a venue card.
+ *
+ * HorizontalPager only claims drags that start out horizontal, so a vertical fling on the photo
+ * still scrolls the list; taps fall through to the card. Pages compose lazily (the visible one
+ * plus whichever is mid-swipe), and a single photo disables paging entirely — no dots, no
+ * rubber-band wiggle on a gallery of one.
+ */
+@Composable
+private fun VenuePhotoCarousel(
+  images: List<String>,
+  contentDescription: String,
+  sport: String,
+  modifier: Modifier = Modifier,
+) {
+  val photos = remember(images) { images.filter { it.isNotBlank() }.distinct() }
+  val pagerState = rememberPagerState(pageCount = { photos.size.coerceAtLeast(1) })
+  val context = LocalContext.current
+
+  Box(modifier = modifier.background(Color(0xFFE9EDF2))) {
+    HorizontalPager(
+      state = pagerState,
+      userScrollEnabled = photos.size > 1,
+      key = { page -> photos.getOrNull(page) ?: page },
+      modifier = Modifier.fillMaxSize(),
+    ) { page ->
+      val url = photos.getOrNull(page)
+      var failed by remember(url) { mutableStateOf(url == null) }
+      var loaded by remember(url) { mutableStateOf(false) }
+      Box(modifier = Modifier.fillMaxSize()) {
+        if (!loaded && !failed) {
+          Box(Modifier.fillMaxSize().haraanShimmer())
+        }
+        if (url != null) {
+          AsyncImage(
+            model = remember(url) {
+              coil.request.ImageRequest.Builder(context)
+                .data(url)
+                .crossfade(180)
+                .build()
+            },
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Crop,
+            onState = { state ->
+              loaded = state is AsyncImagePainter.State.Success
+              failed = state is AsyncImagePainter.State.Error
+            },
+            modifier = Modifier.fillMaxSize(),
+          )
+        }
+        // A broken upload shouldn't look like a photo that's still loading forever — show the
+        // venue's sport glyph on a quiet ground instead.
+        if (failed) {
+          Icon(
+            imageVector = venueSportIcon(sport),
+            contentDescription = null,
+            tint = HaraanColors.TextMuted.copy(alpha = 0.55f),
+            modifier = Modifier.align(Alignment.Center).size(34.dp),
+          )
+        }
+      }
+    }
+
+    if (photos.size > 1) {
+      // Soft floor under the dots so they read on bright photos without tinting the whole image.
+      Box(
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .fillMaxWidth()
+          .height(44.dp)
+          .background(
+            Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.28f)))
+          )
+      )
+      VenuePhotoDots(
+        count = photos.size,
+        pagerState = pagerState,
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 10.dp),
+      )
+    }
+  }
+}
+
+/** Page indicator: the current photo stretches into a short pill, the rest stay small dots. */
+@Composable
+private fun VenuePhotoDots(
+  count: Int,
+  pagerState: androidx.compose.foundation.pager.PagerState,
+  modifier: Modifier = Modifier,
+) {
+  // Long galleries would turn the row into a bar; cap the dots and let the last one stand for
+  // "and more" — the swipe itself still reaches every photo.
+  val maxDots = 6
+  val shown = count.coerceAtMost(maxDots)
+  val current = pagerState.currentPage.coerceAtMost(shown - 1)
+  Row(
+    modifier = modifier,
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    repeat(shown) { i ->
+      val selected = i == current
+      val width by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (selected) 14.dp else 5.dp,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f),
+        label = "venueDotWidth",
+      )
+      Box(
+        modifier = Modifier
+          .height(5.dp)
+          .width(width)
+          .clip(RoundedCornerShape(50))
+          .background(Color.White.copy(alpha = if (selected) 1f else 0.6f))
+      )
     }
   }
 }
@@ -8407,199 +8497,6 @@ private fun OpenMatchCard(
           Spacer(Modifier.width(5.dp))
           Text("Request to join", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
-      }
-    }
-  }
-}
-
-/**
- * One open game as it appears on the Pulse home list — a tighter relative of [OpenMatchCard].
- *
- * The board's card is built for a screen the user opened *to* browse games, so it can afford a
- * stacked layout with its own icon rows. Here the row is competing with venue cards for a
- * glance, so it is two lines: who's playing and what it is, then when/where with the action
- * inline. Nothing is shown that the API didn't send — a game with no kick-off time says
- * "Starting soon" (that's what a null `scheduledAt` means: it's waiting on a toss, not on a date
- * we could invent), and the distance chip is simply absent for venues nobody has pinned yet.
- */
-@Composable
-private fun OpenGameRow(
-  match: com.haraan.app.data.OpenMatch,
-  onOpen: () -> Unit,
-  onRequest: () -> Unit,
-  onCancel: () -> Unit,
-) {
-  val blue = HaraanColors.EventsBlue
-  val green = HaraanColors.Success
-
-  val kickOff = remember(match.scheduledAtIso) {
-    val iso = match.scheduledAtIso
-    if (iso.isNullOrBlank()) "Starting soon"
-    else runCatching {
-      val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(iso)
-      java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(parsed!!)
-    }.getOrDefault("Scheduled")
-  }
-  // Venue and locality are separate fields and either can be blank — and on a lot of gully
-  // matches they're the same word typed twice, so they're de-duped before joining.
-  val place = listOf(match.venue, match.locality)
-    .map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" · ")
-  val format = listOf(sportDisplayName(match.sport), match.competition.trim())
-    .filter { it.isNotEmpty() }.joinToString(" · ")
-
-  Column(
-    Modifier
-      .pressable(onClick = onOpen)
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(UnifiedCornerRadius))
-      .background(Color.White)
-      .border(1.dp, HaraanColors.BorderLight.copy(alpha = 0.7f), RoundedCornerShape(UnifiedCornerRadius))
-      .padding(horizontal = 14.dp, vertical = 13.dp),
-  ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      // Overlapped crests — the two sides read as one fixture at a glance, and it's the same
-      // emblem art the match itself carries, so the row is recognisable from the board.
-      Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.CenterStart) {
-        ScheduledCrest(match.team1Emblem, blue, match.team1, size = 30.dp)
-        Box(modifier = Modifier.padding(start = 18.dp)) {
-          ScheduledCrest(match.team2Emblem, HaraanColors.Warning, match.team2, size = 30.dp)
-        }
-      }
-      Spacer(Modifier.width(11.dp))
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = "${match.team1.ifBlank { "Team A" }} vs ${match.team2.ifBlank { "Team B" }}",
-          color = HaraanColors.TextPrimary,
-          fontSize = 15.sp,
-          fontWeight = FontWeight.ExtraBold,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-        if (format.isNotEmpty()) {
-          Text(
-            text = format,
-            color = HaraanColors.TextSecondary,
-            fontSize = 12.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp),
-          )
-        }
-      }
-      if (match.slotsNeeded > 0) {
-        Spacer(Modifier.width(10.dp))
-        MetaPill(
-          text = "${match.slotsNeeded} " + if (match.slotsNeeded == 1) "spot" else "spots",
-          color = green,
-          bg = green.copy(alpha = 0.10f),
-          icon = Icons.Filled.Groups,
-        )
-      }
-    }
-
-    Spacer(Modifier.height(11.dp))
-
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-      Column(modifier = Modifier.weight(1f)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Default.Event, null, tint = blue, modifier = Modifier.size(14.dp))
-          Spacer(Modifier.width(6.dp))
-          Text(
-            text = kickOff,
-            color = HaraanColors.TextPrimary,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-        }
-        if (place.isNotEmpty() || match.distanceKm != null) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 5.dp),
-          ) {
-            Icon(Icons.Filled.Place, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-              text = listOfNotNull(
-                place.takeIf { it.isNotEmpty() },
-                match.distanceKm?.let { formatKm(it) },
-              ).joinToString(" · "),
-              color = HaraanColors.TextSecondary,
-              fontSize = 12.5.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
-          }
-        }
-      }
-      Spacer(Modifier.width(12.dp))
-      // Asking for a spot is a step forward, not a commitment — the owner still has to accept —
-      // so it's the blue action, and it's sized to its label instead of spanning the card.
-      when (match.myStatus) {
-        "pending" -> Row(
-          Modifier
-            .pressable(onClick = onCancel)
-            .clip(RoundedCornerShape(11.dp))
-            .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(11.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text("Requested", color = HaraanColors.TextSecondary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-        }
-        "accepted" -> Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Filled.Check, null, tint = green, modifier = Modifier.size(15.dp))
-          Spacer(Modifier.width(4.dp))
-          Text("You're in", color = green, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-        }
-        "declined" -> Text(
-          "Not accepted", color = HaraanColors.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
-        )
-        else -> Row(
-          Modifier
-            .pressable(onClick = onRequest)
-            .clip(RoundedCornerShape(11.dp))
-            .background(blue)
-            .padding(horizontal = 13.dp, vertical = 8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Icon(Icons.Filled.PersonAddAlt1, null, tint = Color.White, modifier = Modifier.size(14.dp))
-          Spacer(Modifier.width(5.dp))
-          Text("Ask to join", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-        }
-      }
-    }
-  }
-}
-
-/** Loading shell for [OpenGameRow] — same footprint, so the list doesn't jump when it resolves. */
-@Composable
-private fun OpenGameRowSkeleton() {
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(horizontal = 16.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
-  ) {
-    repeat(2) {
-      Column(
-        Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(UnifiedCornerRadius))
-          .background(Color.White)
-          .border(1.dp, HaraanColors.BorderLight.copy(alpha = 0.7f), RoundedCornerShape(UnifiedCornerRadius))
-          .padding(horizontal = 14.dp, vertical = 13.dp),
-      ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Box(Modifier.size(30.dp).clip(CircleShape).haraanShimmer())
-          Spacer(Modifier.width(29.dp))
-          Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.fillMaxWidth(0.55f).height(13.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
-            Box(Modifier.fillMaxWidth(0.35f).height(11.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
-          }
-        }
-        Spacer(Modifier.height(14.dp))
-        Box(Modifier.fillMaxWidth(0.45f).height(11.dp).clip(RoundedCornerShape(4.dp)).haraanShimmer())
       }
     }
   }

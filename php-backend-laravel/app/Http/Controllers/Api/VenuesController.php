@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Venue;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 final class VenuesController extends Controller
 {
@@ -94,6 +95,35 @@ final class VenuesController extends Controller
         ]]);
     }
 
+    /**
+     * GET /api/venues/{id}/availability?date=YYYY-MM-DD — per-slot bookability for one day.
+     *
+     * Computed against real bookings, live payment holds and court blocks (see
+     * VenueSlotAvailability), unlike the detail payload's `slots[].available`, which is only
+     * the venue's template switch. Dates outside today…+60 days are refused so the endpoint
+     * can't be used to sweep a venue's whole history.
+     */
+    public function availability(Request $request, int $id, \App\Services\VenueSlotAvailability $availability): JsonResponse
+    {
+        $venue = Venue::query()->where('is_active', true)->findOrFail($id);
+
+        $validated = $request->validate([
+            'date' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+        $date = isset($validated['date'])
+            ? \Illuminate\Support\Carbon::createFromFormat('Y-m-d', $validated['date'])->startOfDay()
+            : now()->startOfDay();
+
+        if ($date->lt(now()->startOfDay()->subDay()) || $date->gt(now()->startOfDay()->addDays(60))) {
+            return response()->json(['message' => 'Date out of range'], 422);
+        }
+
+        return response()->json(['data' => [
+            'date' => $date->toDateString(),
+            'slots' => $availability->forDate($venue, $date),
+        ]]);
+    }
+
     /** Compact card shape shared by list + detail. */
     private function card(Venue $v): array
     {
@@ -115,6 +145,9 @@ final class VenuesController extends Controller
             'reviews_count' => $v->reviews_count,
             'tagline' => $v->tagline,
             'image' => \App\Support\MediaUrl::resolve(is_array($v->images) ? ($v->images[0] ?? null) : null),
+            // Every photo, so list cards can swipe through the gallery without opening the
+            // venue. Additive: `image` above stays for older app builds.
+            'images' => \App\Support\MediaUrl::resolveMany(is_array($v->images) ? $v->images : null),
             'is_bookable' => $v->is_bookable,
             'is_featured' => $v->is_featured,
             // The owner's public page, when they have a live one (host-profile twin).

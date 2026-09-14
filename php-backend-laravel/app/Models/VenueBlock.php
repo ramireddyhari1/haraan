@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BroadcastsVenueAvailability;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,6 +26,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class VenueBlock extends Model
 {
+    use BroadcastsVenueAvailability;
+
     /** @use HasFactory<\Database\Factories\VenueBlockFactory> */
     use HasFactory;
 

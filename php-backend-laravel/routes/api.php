@@ -133,6 +133,8 @@ Route::middleware('auth.jwt')->post('/host/{slug}/follow', [\App\Http\Controller
 Route::prefix('venues')->controller(\App\Http\Controllers\Api\VenuesController::class)->group(function (): void {
     Route::get('/', 'index');
     Route::get('/{id}', 'show')->whereNumber('id');
+    // Real per-slot bookability for a day (bookings + holds + blocks), polled by the venue page.
+    Route::get('/{id}/availability', 'availability')->whereNumber('id');
 });
 
 // Home feed content (ads + For You / Trending), managed in Filament admin.

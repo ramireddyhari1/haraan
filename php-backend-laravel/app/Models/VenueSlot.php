@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BroadcastsVenueAvailability;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 final class VenueSlot extends Model
 {
+    use BroadcastsVenueAvailability;
+
     /**
      * `price` and `capacity` belong here. They were missing while saveSlot() wrote
      * both, so mass assignment dropped them in silence: the partner set a slot rate

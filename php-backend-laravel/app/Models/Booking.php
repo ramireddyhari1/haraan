@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BroadcastsVenueAvailability;
 use App\Observers\BookingObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -34,7 +35,15 @@ use Illuminate\Support\Str;
 #[ObservedBy(BookingObserver::class)]
 final class Booking extends Model
 {
+    use BroadcastsVenueAvailability;
     use HasFactory;
+
+    /** Only venue bookings hold a court-hour; event tickets never touch slot availability. */
+    public function affectsVenueAvailability(): bool
+    {
+        return $this->getAttribute('booking_type') === 'venue'
+            || $this->getOriginal('booking_type') === 'venue';
+    }
 
     /**
      * Every booking gets a unique, scannable ticket code the moment it's created — the app

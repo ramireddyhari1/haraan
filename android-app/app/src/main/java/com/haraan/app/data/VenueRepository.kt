@@ -19,6 +19,8 @@ data class VenueApiItem(
     val sports: List<String>,
     val price: Int,
     val image: String?,
+    /** Every venue photo, first = [image]. Empty on servers that only send `image`. */
+    val images: List<String> = emptyList(),
     val tagline: String,
     val distance: String,
     val isBookable: Boolean = false,
@@ -41,6 +43,23 @@ data class VenueSlotItem(
     /** Sports this time runs for; empty = all of them. */
     val sports: List<String> = emptyList(),
 )
+
+/**
+ * Whether one slot can really be booked on a given date (GET /api/venues/{id}/availability).
+ *
+ * Unlike [VenueSlotItem.available] — the venue's own template switch — this is computed
+ * server-side against occupying bookings, live checkout holds and court blocks, with the same
+ * rules checkout enforces.
+ */
+data class SlotAvailability(
+    val slotId: Int,
+    val state: State,
+    /** Courts that can still take this hour (1 for venues that don't model courts). */
+    val courtsFree: Int,
+    val courtsTotal: Int,
+) {
+    enum class State { OPEN, BOOKED, CLOSED }
+}
 
 /** A single user review on a venue detail page. */
 data class VenueReviewItem(
@@ -158,6 +177,8 @@ class VenueRepository {
                 sports = o.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(category.takeIf { it.isNotBlank() }) },
                 price = o.optInt("price", 0),
                 image = o.optString("image").takeIf { it.isNotBlank() && it != "null" },
+                images = o.optJSONArray("images").toStringList()
+                    .filter { it.isNotBlank() && it != "null" }.distinct(),
                 tagline = o.optString("tagline"),
                 distance = o.optString("distance"),
                 isBookable = o.optBoolean("is_bookable", false),
@@ -186,6 +207,35 @@ class VenueRepository {
             )
         }
     }
+
+    /**
+     * Real per-slot availability for [date], keyed by slot id. Null when the request or parse
+     * fails, so callers can tell "unknown" apart from "known and empty" and fall back to the
+     * template flags instead of painting every slot booked.
+     */
+    suspend fun getSlotAvailability(venueId: String, date: java.time.LocalDate): Map<Int, SlotAvailability>? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = ConditionalHttp.getText("${ApiConfig.BASE_URL}/api/venues/$venueId/availability?date=$date")
+                    ?: return@runCatching null
+                val arr = JSONObject(body).optJSONObject("data")?.optJSONArray("slots")
+                    ?: return@runCatching null
+                (0 until arr.length()).associate { i ->
+                    val o = arr.getJSONObject(i)
+                    val id = o.optInt("id")
+                    id to SlotAvailability(
+                        slotId = id,
+                        state = when (o.optString("state")) {
+                            "booked" -> SlotAvailability.State.BOOKED
+                            "closed" -> SlotAvailability.State.CLOSED
+                            else -> SlotAvailability.State.OPEN
+                        },
+                        courtsFree = o.optInt("courts_free", 0),
+                        courtsTotal = o.optInt("courts_total", 1),
+                    )
+                }
+            }.getOrNull()
+        }
 
     /** Full venue detail (GET /api/venues/{id}); null on network/parse failure. */
     suspend fun getVenueDetail(id: String): VenueDetailData? = withContext(Dispatchers.IO) {
