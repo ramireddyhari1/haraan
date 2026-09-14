@@ -721,6 +721,7 @@ internal fun MainAppContainer(
       DistrictActionBoardScreen(
         onBack = { showActionBoardDetail = false },
         onMatchClick = { matchId -> onItemClick(com.haraan.app.MatchDetails(id = matchId)) },
+        onTournamentClick = { id -> onItemClick(com.haraan.app.TournamentDetails(id)) },
         onJoinByCode = { code -> onItemClick(com.haraan.app.MatchDetails(code = code)) },
         onHomeClick = {
           showActionBoardDetail = false
@@ -3727,10 +3728,11 @@ private fun DistrictActionBoardScreen(
   onOpenChat: () -> Unit = {},
   onSignedOutCompletely: () -> Unit = {},
   onSessionChanged: () -> Unit = {},
+  onTournamentClick: (String) -> Unit = {},
 ) {
   CrexMatchesScreen(
     onBack, onMatchClick, onHomeClick, onJoinByCode, onOpenChat,
-    onSignedOutCompletely, onSessionChanged,
+    onSignedOutCompletely, onSessionChanged, onTournamentClick,
   )
 }
 
@@ -3746,6 +3748,8 @@ private fun CrexMatchesScreen(
   onSignedOutCompletely: () -> Unit = {},
   /** A different account is now active; the caller rebuilds the signed-in shell. */
   onSessionChanged: () -> Unit = {},
+  /** Opens a tournament's page (a pushed destination, so Back returns here). */
+  onTournamentClick: (String) -> Unit = {},
 ) {
   val view = LocalView.current
 
@@ -3778,6 +3782,12 @@ private fun CrexMatchesScreen(
     mutableStateOf<Triple<String, com.haraan.app.ui.social.FollowRelation, String>?>(null)
   }
   var isCreatingMatch by remember { mutableStateOf(false) }
+  // Host-a-tournament wizard. null = closed; "" = open and asking for the sport first (from
+  // the profile); a sport key = open for that sport (handed over by the match wizard).
+  // Saveable so a trip to the photo picker, which can recreate the activity on low-memory
+  // phones, doesn't throw the half-filled form away.
+  var createTournamentSport by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+  var isCreatingTournament by remember { mutableStateOf(false) }
   // Holds the share code after a private match is created (drives the share dialog).
   var createdJoinCode by remember { mutableStateOf<String?>(null) }
   // The creator's not-yet-started matches, for the Scheduled tab. null = still loading.
@@ -3804,7 +3814,7 @@ private fun CrexMatchesScreen(
   var showPlayerSearch by remember { mutableStateOf(false) }
   // A player opened FROM search. Layered over it, so backing out returns to the
   // results rather than dumping the user on the board.
-  var searchedPlayerId by remember { mutableStateOf<String?>(null) }
+  var searchedPlayerId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val matchRepository = remember { com.haraan.app.data.MatchRepository() }
@@ -3814,7 +3824,7 @@ private fun CrexMatchesScreen(
   val authRepository = remember { com.haraan.app.data.HaraanAuthRepository() }
   var showMenu by remember { mutableStateOf(false) }
   var showSettings by remember { mutableStateOf(false) }
-  var showProfile by remember { mutableStateOf(false) }
+  var showProfile by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
   // The Instagram-style social Home feed — a bottom-bar destination opened by the Home
   // button. Renders inside the scaffold (bar stays visible), the same way Chat/Player do.
   var showHomeFeed by remember { mutableStateOf(false) }
@@ -4408,6 +4418,9 @@ private fun CrexMatchesScreen(
             showProfile = false
             requireRankedAccess { showCreateWizard = true }
           },
+          // A card in the Tournaments tab opens that tournament's page.
+          onOpenTournament = onTournamentClick,
+          onCreateTournament = { requireRankedAccess { createTournamentSport = "" } },
           onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
           onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
           onMessage = { pid, name ->
@@ -4437,6 +4450,10 @@ private fun CrexMatchesScreen(
       com.haraan.app.ui.matches.create.CreateMatchWizard(
         sport = selectedSport,
         onDismiss = { showCreateWizard = false },
+        onHostTournament = { sport ->
+          showCreateWizard = false
+          createTournamentSport = sport
+        },
         onCreate = { draft ->
           if (!isCreatingMatch) {
             isCreatingMatch = true
@@ -4583,6 +4600,48 @@ private fun CrexMatchesScreen(
         loadBookings = {
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) emptyList() else accountRepository.fetchBookings(token)
+        },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    createTournamentSport?.let { tournamentSport ->
+      com.haraan.app.ui.matches.create.CreateTournamentWizard(
+        sport = tournamentSport.ifEmpty { null },
+        onDismiss = { createTournamentSport = null },
+        creating = isCreatingTournament,
+        // The organiser is usually the host: prefill from the signed-in account.
+        loadOrganizer = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null
+          else runCatching { accountRepository.fetchAccount(token) }.getOrNull()?.let { it.name to it.phone }
+        },
+        onCreate = { draft ->
+          if (!isCreatingTournament) {
+            isCreatingTournament = true
+            scope.launch {
+              try {
+                val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                if (token == null) {
+                  Toast.makeText(context, "Please sign in to host a tournament.", Toast.LENGTH_LONG).show()
+                } else {
+                  val created = com.haraan.app.data.TournamentRepository()
+                    .create(context, token, draft.toNewTournament())
+                  createTournamentSport = null
+                  Toast.makeText(context, "Tournament created", Toast.LENGTH_SHORT).show()
+                  onTournamentClick(created.id)
+                }
+              } catch (e: com.haraan.app.data.TournamentCreateException) {
+                Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+              } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+              } catch (_: Exception) {
+                Toast.makeText(context, "Couldn't reach Haraan. Check your connection and try again.", Toast.LENGTH_LONG).show()
+              } finally {
+                isCreatingTournament = false
+              }
+            }
+          }
         },
         modifier = Modifier.statusBarsPadding(),
       )
@@ -4780,6 +4839,7 @@ private fun CrexMatchesScreen(
             }
           }
         },
+        onOpenTournament = onTournamentClick,
         modifier = Modifier.statusBarsPadding(),
       )
     }
@@ -4997,6 +5057,7 @@ private fun CrexMatchesScreen(
             }
           }
         },
+        onOpenTournament = onTournamentClick,
         modifier = Modifier.statusBarsPadding(),
       )
     }

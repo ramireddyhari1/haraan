@@ -350,6 +350,18 @@ Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersContro
 // or the single-segment players/{playerId} above.
 Route::middleware('auth.jwt.optional')->get('players/{player}/posts', [PlayersController::class, 'posts']);
 
+// Tournaments a player hosts — the profile's Tournaments tab. OPTIONAL auth so the host's
+// own request comes back with `mine` set.
+Route::middleware('auth.jwt.optional')->get('players/{player}/tournaments', [PlayersController::class, 'tournaments']);
+
+// Player-hosted tournaments, every sport. Creating one is a ranked action (complete profile +
+// trust gate in the controller); reading one is public.
+Route::middleware(['auth.jwt', 'actionboard.profile'])
+    ->post('tournaments', [\App\Http\Controllers\Api\TournamentsController::class, 'store']);
+Route::middleware('auth.jwt.optional')
+    ->get('tournaments/{id}', [\App\Http\Controllers\Api\TournamentsController::class, 'show'])
+    ->whereNumber('id');
+
 // The Instagram-style Home feed: recent posts from public accounts + a stories strip.
 // OPTIONAL auth so a guest can browse; a signed-in viewer gets `liked`/`mine` populated.
 // Literal 'posts/feed' — two segments, registered after the /players/* group, so it never

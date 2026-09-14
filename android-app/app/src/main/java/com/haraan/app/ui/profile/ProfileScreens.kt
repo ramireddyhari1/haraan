@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -123,6 +124,8 @@ import com.haraan.app.data.ApiConfig
 import kotlinx.coroutines.launch
 import com.haraan.app.data.PlayerProfile
 import com.haraan.app.data.RecentMatch
+import com.haraan.app.data.Tournament
+import com.haraan.app.data.TournamentRepository
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.premiumCardShadow
 import androidx.compose.ui.draw.shadow
@@ -641,6 +644,10 @@ fun PlayerProfileScreen(
     onSetBlocked: (suspend (Boolean) -> Boolean?)? = null,
     /** File a report. Returns whether it landed. Null hides the item. */
     onReport: (suspend (reason: String, details: String?) -> Boolean)? = null,
+    /** Open a tournament's page by id. Null leaves the Tournaments tab's cards inert. */
+    onOpenTournament: ((tournamentId: String) -> Unit)? = null,
+    /** Start the host-a-tournament wizard. Only offered on your own profile. */
+    onCreateTournament: (() -> Unit)? = null,
 ) {
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
@@ -727,6 +734,8 @@ fun PlayerProfileScreen(
                 onOpenFollowing = onOpenFollowing,
                 onMessage = onMessage,
                 onSetBlocked = onSetBlocked,
+                onOpenTournament = onOpenTournament,
+                onCreateTournament = onCreateTournament,
                 showShare = showShare,
                 onShowShare = { showShare = it },
             )
@@ -823,14 +832,16 @@ private fun ProfileContent(
     onOpenFollowing: ((playerId: String, name: String) -> Unit)? = null,
     onMessage: ((playerId: String, name: String) -> Unit)? = null,
     onSetBlocked: (suspend (Boolean) -> Boolean?)? = null,
+    onOpenTournament: ((tournamentId: String) -> Unit)? = null,
+    onCreateTournament: (() -> Unit)? = null,
     /** Owned by the screen so the top-bar overflow can raise the same sheet. */
     showShare: Boolean = false,
     onShowShare: (Boolean) -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
     var showEditProfile by remember { mutableStateOf(false) }
-    // Which content tab is open: 0 = Matches, 1 = Stats, 2 = About, 3 = Posts.
-    var selectedTab by remember { mutableStateOf(0) }
+    // Which content tab is open: 0 = Matches, 1 = Tournaments, 2 = Stats, 3 = About, 4 = Posts.
+    var selectedTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) }
     val view = LocalView.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -859,7 +870,22 @@ private fun ProfileContent(
         if (fetched != null) posts = fetched
     }
 
+    // ── Tournaments ──────────────────────────────────────────────────────────
+    // Same null-vs-empty contract as posts: a failed fetch must not read as "never hosted".
+    var tournaments by remember(p.playerId) { mutableStateOf<List<Tournament>?>(null) }
+    var tournamentsFailed by remember(p.playerId) { mutableStateOf(false) }
+
+    suspend fun loadTournaments() {
+        // Public list; our token only marks our own as `mine`.
+        val fetched = TournamentRepository().forPlayer(TokenStore.getToken(context), p.playerId)
+        tournamentsFailed = fetched == null
+        if (fetched != null) tournaments = fetched
+    }
+
     LaunchedEffect(p.playerId) { loadPosts() }
+    // Re-read whenever a pull-to-refresh settles too: a tournament created a minute ago, or
+    // one that just went live, should appear without leaving the screen.
+    LaunchedEffect(p.playerId, refreshing) { if (!refreshing) loadTournaments() }
 
     val postPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(10),
@@ -890,7 +916,7 @@ private fun ProfileContent(
     // first post. Their empty Matches tab still leads with the first-match card, so the
     // purposeful onboarding moment survives — it just lives one tab in.
     val showTabs = played || about.isNotEmpty() || e.achievements.isNotEmpty() ||
-        e.chips.isNotEmpty() || !posts.isNullOrEmpty() || isSelf
+        e.chips.isNotEmpty() || !posts.isNullOrEmpty() || !tournaments.isNullOrEmpty() || isSelf
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -980,8 +1006,56 @@ private fun ProfileContent(
                     Spacer(Modifier.height(10.dp))
                 }
             }
+            // ── Tournaments ──────────────────────────────────────────────────
+            1 -> {
+                val list = tournaments
+                when {
+                    list == null && !tournamentsFailed -> item {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 44.dp), Alignment.Center) {
+                            CircularProgressIndicator(color = BlueBright, modifier = Modifier.size(26.dp))
+                        }
+                    }
+                    list == null -> item {
+                        TabEmpty("Couldn't load tournaments", "Check your connection and pull down to refresh.")
+                    }
+                    list.isEmpty() -> item {
+                        if (isSelf && onCreateTournament != null) {
+                            Spacer(Modifier.height(14.dp)); HostTournamentCard(onCreateTournament)
+                        } else {
+                            TabEmpty(
+                                "No tournaments yet",
+                                if (isSelf) "Tournaments you host will show up here." else "This player hasn't hosted a tournament yet.",
+                            )
+                        }
+                    }
+                    else -> {
+                        val running = list.count { it.phase == "ongoing" }
+                        item {
+                            Spacer(Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) {
+                                    SectionTitle(
+                                        if (isSelf) "My tournaments" else "Tournaments",
+                                        if (running > 0) "$running live · ${list.size} total" else "${list.size} total",
+                                    )
+                                }
+                            }
+                            if (isSelf && onCreateTournament != null) {
+                                HostTournamentButton(onCreateTournament)
+                            } else {
+                                Spacer(Modifier.height(12.dp))
+                            }
+                        }
+                        items(list.size, key = { i -> "tournament-${list[i].id}" }) { i ->
+                            val t = list[i]
+                            TournamentRow(t = t, onOpen = onOpenTournament?.let { open -> { open(t.id) } })
+                            Spacer(Modifier.height(12.dp))
+                        }
+                    }
+                }
+            }
             // ── Stats ────────────────────────────────────────────────────────
-            1 -> if (!statsHasAny) {
+            2 -> if (!statsHasAny) {
                 item { TabEmpty("No stats yet", "Play a match to start building a record.") }
             } else {
                 if (played) item { Spacer(Modifier.height(6.dp)); DistrictRankCard(p) }
@@ -998,7 +1072,7 @@ private fun ProfileContent(
                 }
             }
             // ── About ────────────────────────────────────────────────────────
-            2 -> if (about.isEmpty()) {
+            3 -> if (about.isEmpty()) {
                 item {
                     TabEmpty(
                         "No details yet",
@@ -1184,7 +1258,7 @@ private fun PostGridRow(row: List<PlayerPost>, onDelete: (PlayerPost) -> Unit) {
 }
 
 /**
- * The profile's content switcher — Matches / Stats / About / Posts as Instagram-style icon
+ * The profile's content switcher — Matches / Tournaments / Stats / About / Posts as Instagram-style icon
  * tabs: an icon over a label, a hairline across the top, and an underline bar under the
  * active one. Opaque (white) so list content scrolls cleanly beneath it when pinned.
  */
@@ -1192,6 +1266,7 @@ private fun PostGridRow(row: List<PlayerPost>, onDelete: (PlayerPost) -> Unit) {
 private fun ProfileTabs(selected: Int, onSelect: (Int) -> Unit) {
     val tabs = listOf(
         "Matches" to Icons.Filled.SportsCricket,
+        "Tournaments" to Icons.Filled.EmojiEvents,
         "Stats" to Icons.Filled.BarChart,
         "About" to Icons.Filled.Person,
         "Posts" to Icons.Filled.GridOn,
@@ -1222,12 +1297,17 @@ private fun ProfileTabs(selected: Int, onSelect: (Int) -> Unit) {
                 ) {
                     Icon(icon, null, tint = iconTint, modifier = Modifier.size(19.dp))
                     Spacer(Modifier.height(5.dp))
+                    // Five tabs share the width, and "Tournaments" is the longest label:
+                    // one line, a touch smaller, never wrapping into a two-line tab.
                     Text(
                         label,
                         color = labelTint,
-                        fontSize = 11.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                        letterSpacing = 0.1.sp,
+                        letterSpacing = 0.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(9.dp))
                     Box(
@@ -2359,6 +2439,147 @@ private fun MatchBadgeFooter(m: RecentMatch) {
             // list instead of each finding its own.
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         )
+    }
+}
+
+/**
+ * One tournament the player hosts: its banner with the logo over the lower edge, then the
+ * name, dates, place and format — the tournament page in miniature, so the tap is expected.
+ */
+@Composable
+private fun TournamentRow(t: Tournament, onOpen: (() -> Unit)?) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(if (onOpen != null) Modifier.pressable(haptic = Feel.SELECT) { onOpen() } else Modifier)
+            .premiumCardShadow(radius = 18.dp, ambient = 12.dp, contact = 2.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Surface),
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2.4f)
+                    .background(Brush.linearGradient(listOf(Color(0xFF0F2A5C), Color(0xFF1D4ED8)))),
+            ) {
+                if (t.banner != null) {
+                    HaraanImage(
+                        model = ApiConfig.mediaUrl(t.banner),
+                        contentDescription = "${t.name} banner",
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Box(Modifier.align(Alignment.TopEnd).padding(10.dp)) {
+                    com.haraan.app.ui.tournaments.TournamentPhasePill(t.phase)
+                }
+            }
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = 14.dp, y = 26.dp)
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Surface)
+                    .padding(2.5.dp)
+                    .clip(CircleShape)
+                    .background(BlueTint),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (t.logo != null) {
+                    HaraanImage(
+                        model = ApiConfig.mediaUrl(t.logo),
+                        contentDescription = "${t.name} logo",
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Icon(Icons.Filled.EmojiEvents, null, tint = BlueBright, modifier = Modifier.size(24.dp))
+                }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 80.dp, end = 14.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Pill(t.sportLabel.uppercase(), BlueBright, BlueTint)
+            Spacer(Modifier.width(6.dp))
+            Pill(t.formatShort.uppercase(), Text2, Bg)
+        }
+        Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 14.dp)) {
+            Text(
+                t.name,
+                color = Text1,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.2).sp,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                listOf(
+                    com.haraan.app.ui.tournaments.tournamentDateRange(t.startDate, t.endDate),
+                    t.city,
+                    t.teamsCount?.let { if (t.entryNoun == "team") "$it teams" else "$it entries" },
+                ).filterNotNull().joinToString("  ·  "),
+                color = Text2,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The host's "new tournament" affordance above their list — a tool, so self-width. */
+@Composable
+private fun HostTournamentButton(onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 12.dp)) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .pressable(haptic = Feel.SELECT) { onClick() }
+                .background(BlueBright)
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.EmojiEvents, null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Host a tournament", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** The host's empty Tournaments tab: say what lands here, and offer the way to make one. */
+@Composable
+private fun HostTournamentCard(onCreateTournament: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .premiumCardShadow(radius = 20.dp, ambient = 16.dp, contact = 2.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Surface)
+            .padding(20.dp),
+    ) {
+        Text("Host a tournament", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Give it a banner and logo, set the dates and format, and add the organiser's " +
+                "number so teams can call to enter. It lives here once it's created.",
+            color = Text2, fontSize = 14.sp, lineHeight = 20.sp,
+        )
+        Spacer(Modifier.height(16.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(BlueBright)
+                .pressable(haptic = Feel.SELECT) { onCreateTournament() }
+                .padding(vertical = 13.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Host a tournament", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 

@@ -34,6 +34,27 @@ data class MatchCard(
   val locality: String,
 )
 
+/** The feed-shaped scoreboard card the server attaches to a profile's match rows. */
+internal fun parseMatchCard(c: JSONObject): MatchCard = MatchCard(
+  team1 = c.optString("team1"),
+  team2 = c.optString("team2"),
+  team1Logo = c.optString("team1Logo"),
+  team2Logo = c.optString("team2Logo"),
+  team1Emblem = c.optString("team1Emblem"),
+  team2Emblem = c.optString("team2Emblem"),
+  score1 = c.optString("score1"),
+  score2 = c.optString("score2"),
+  overs1 = c.optString("overs1"),
+  overs2 = c.optString("overs2"),
+  battingTeam = c.optInt("battingTeam", 1),
+  sport = c.optString("sport", "cricket"),
+  isLive = c.optBoolean("isLive"),
+  competition = c.optString("competition"),
+  venue = c.optString("venue"),
+  district = c.optString("district"),
+  locality = c.optString("locality"),
+)
+
 data class RecentMatch(
   val matchId: Long,
   val title: String,
@@ -488,27 +509,7 @@ class ProfileRepository(
         val o = arr.getJSONObject(i)
         recent.add(
           RecentMatch(
-            card = o.optJSONObject("card")?.let { c ->
-              MatchCard(
-                team1 = c.optString("team1"),
-                team2 = c.optString("team2"),
-                team1Logo = c.optString("team1Logo"),
-                team2Logo = c.optString("team2Logo"),
-                team1Emblem = c.optString("team1Emblem"),
-                team2Emblem = c.optString("team2Emblem"),
-                score1 = c.optString("score1"),
-                score2 = c.optString("score2"),
-                overs1 = c.optString("overs1"),
-                overs2 = c.optString("overs2"),
-                battingTeam = c.optInt("battingTeam", 1),
-                sport = c.optString("sport", "cricket"),
-                isLive = c.optBoolean("isLive"),
-                competition = c.optString("competition"),
-                venue = c.optString("venue"),
-                district = c.optString("district"),
-                locality = c.optString("locality"),
-              )
-            },
+            card = o.optJSONObject("card")?.let(::parseMatchCard),
             matchId = o.optLong("match_id", 0L),
             title = o.optString("title", ""),
             matchType = o.optString("match_type", ""),

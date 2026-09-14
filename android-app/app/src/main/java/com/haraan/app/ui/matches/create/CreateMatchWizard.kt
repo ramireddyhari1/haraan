@@ -58,6 +58,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
@@ -614,6 +615,13 @@ fun CreateMatchWizard(
      * decision — and the choice is visible and changeable.
      */
     sport: String = "Cricket",
+    /**
+     * A tournament is its own record — banner, logo, dates, organiser, the format every
+     * fixture follows — so choosing it hands off to the tournament wizard, for the sport
+     * picked on the first step, instead of carrying on as a one-off match. Null keeps the
+     * tier locked.
+     */
+    onHostTournament: ((sport: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Now wizard state, not a parameter: changing it rebuilds the draft, because
@@ -659,7 +667,7 @@ fun CreateMatchWizard(
         ) { s ->
             when (s) {
                 0 -> StepSport(selected = sportKey, onSelect = { sportKey = it })
-                1 -> StepType(draft)
+                1 -> StepType(draft, onHostTournament)
                 2 -> StepRules(draft, loadBookings)
                 3 -> StepTeams(draft, searchPlayers)
                 else -> StepReview(draft)
@@ -702,7 +710,7 @@ private fun StepSport(selected: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun SportCard(spec: SportSpec, selected: Boolean, onClick: () -> Unit) {
+internal fun SportCard(spec: SportSpec, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -799,12 +807,13 @@ private fun missingOn(d: CreateMatchDraft, step: Int): String? = when (step) {
 
 // ─────────────────────────────────────────────────────────────── Top bar ──────
 @Composable
-private fun WizardTopBar(
+internal fun WizardTopBar(
     step: Int,
     total: Int,
     onBack: () -> Unit,
     onClose: () -> Unit,
     sport: String = "",
+    title: String = "Create Match",
 ) {
     Column(
         modifier = Modifier
@@ -816,7 +825,7 @@ private fun WizardTopBar(
             IconCircle(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("Create Match", color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = Text1, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Text(
                     if (sport.isBlank()) "Step ${step + 1} of $total" else "$sport · Step ${step + 1} of $total",
                     color = Text3,
@@ -840,7 +849,7 @@ private fun WizardTopBar(
 }
 
 @Composable
-private fun IconCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, cd: String, onClick: () -> Unit) {
+internal fun IconCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, cd: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(36.dp)
@@ -855,12 +864,15 @@ private fun IconCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, cd
 
 // ─────────────────────────────────────────────────────────────── Footer ────────
 @Composable
-private fun WizardFooter(
+internal fun WizardFooter(
     step: Int,
     lastStep: Int,
     canContinue: Boolean,
     onContinue: () -> Unit,
     missing: String? = null,
+    commitLabel: String = "Create Match",
+    /** The commit is in flight (uploading, say): the button shows progress and ignores taps. */
+    busy: Boolean = false,
 ) {
     Column(
         Modifier
@@ -915,7 +927,7 @@ private fun WizardFooter(
                 view.performHapticFeedback(if (isCommit) Feel.COMMIT else Feel.SELECT)
                 onContinue()
             },
-            enabled = canContinue,
+            enabled = canContinue && !busy,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
@@ -927,8 +939,12 @@ private fun WizardFooter(
                 disabledContentColor = Color.White.copy(alpha = 0.7f),
             ),
         ) {
+            if (busy) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+            }
             Text(
-                if (isCommit) "Create Match" else "Continue",
+                if (isCommit) commitLabel else "Continue",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -938,7 +954,7 @@ private fun WizardFooter(
 
 // ─────────────────────────────────────────────────────── Step 1 · Type ─────────
 @Composable
-private fun StepType(draft: CreateMatchDraft) {
+private fun StepType(draft: CreateMatchDraft, onHostTournament: ((String) -> Unit)?) {
     StepScaffold(
         title = "What kind of match?",
         subtitle = if (draft.isPrivate)
@@ -958,21 +974,24 @@ private fun StepType(draft: CreateMatchDraft) {
         if (!draft.isPrivate) {
             val ctx = androidx.compose.ui.platform.LocalContext.current
             MatchType.entries.forEach { type ->
-                // Only Casual/Gully is open for now; League & Tournament are concierge-only.
-                val locked = type != MatchType.CASUAL
+                // A tournament is set up in its own wizard, in every sport. League stays
+                // concierge-only.
+                val opensTournament = type == MatchType.TOURNAMENT && onHostTournament != null
+                val locked = type != MatchType.CASUAL && !opensTournament
                 MatchTypeCard(
                     type = type,
                     spec = draft.spec,
-                    selected = draft.type == type && !locked,
+                    selected = draft.type == type && !locked && !opensTournament,
                     locked = locked,
+                    opensFlow = opensTournament,
                     onClick = {
-                        if (locked) {
-                            android.widget.Toast.makeText(
+                        when {
+                            opensTournament -> onHostTournament?.invoke(draft.spec.key)
+                            locked -> android.widget.Toast.makeText(
                                 ctx, "Contact Haraan to host ${type.label} matches.",
                                 android.widget.Toast.LENGTH_SHORT
                             ).show()
-                        } else {
-                            draft.type = type
+                            else -> draft.type = type
                         }
                     },
                 )
@@ -1051,12 +1070,18 @@ private fun MatchTypeCard(
     selected: Boolean,
     onClick: () -> Unit,
     locked: Boolean = false,
+    /** Tapping continues into a separate setup flow rather than selecting the tier. */
+    opensFlow: Boolean = false,
 ) {
     // The casual tier is the one that speaks the sport's own language — "Gully" in
     // cricket, "kickabout" in football. League and Tournament read the same everywhere.
     val isCasual = type == MatchType.CASUAL
     val label = if (isCasual) spec.casualLabel else type.label
-    val tagline = if (isCasual) spec.casualTagline else type.tagline
+    val tagline = when {
+        isCasual -> spec.casualTagline
+        opensFlow -> "Banner, format, dates & organiser"
+        else -> type.tagline
+    }
     val icon = if (isCasual) spec.icon else type.icon
     Row(
         modifier = Modifier
@@ -1090,7 +1115,19 @@ private fun MatchTypeCard(
             Text(tagline, color = Text2, fontSize = 13.sp, maxLines = 1)
         }
         Spacer(Modifier.width(10.dp))
-        if (locked) {
+        if (opensFlow) {
+            Row(
+                Modifier.clip(RoundedCornerShape(8.dp)).background(BlueTint)
+                    .padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Set up", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
+                    tint = Blue, modifier = Modifier.size(16.dp),
+                )
+            }
+        } else if (locked) {
             // Concierge-only tier — a pill that signals it's enabled by Haraan, not self-serve.
             Box(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(Bg).border(1.dp, Stroke, RoundedCornerShape(8.dp))
@@ -1119,7 +1156,7 @@ private fun XpBadge(xp: Int) {
 }
 
 @Composable
-private fun SelectDot(selected: Boolean) {
+internal fun SelectDot(selected: Boolean) {
     Box(
         Modifier
             .size(22.dp)
@@ -2710,7 +2747,7 @@ private fun SummaryCard(draft: CreateMatchDraft) {
 }
 
 @Composable
-private fun SummaryRow(label: String, value: String) {
+internal fun SummaryRow(label: String, value: String) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -2724,7 +2761,7 @@ private fun SummaryRow(label: String, value: String) {
 
 // ─────────────────────────────────────────────────────── Shared pieces ─────────
 @Composable
-private fun StepScaffold(title: String, subtitle: String, content: @Composable () -> Unit) {
+internal fun StepScaffold(title: String, subtitle: String, content: @Composable () -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -2740,14 +2777,14 @@ private fun StepScaffold(title: String, subtitle: String, content: @Composable (
 }
 
 @Composable
-private fun FieldLabel(text: String) {
+internal fun FieldLabel(text: String) {
     Text(text, color = Text1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(10.dp))
 }
 
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+internal fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
     androidx.compose.foundation.layout.FlowRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2776,7 +2813,7 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onS
 // One cohesive pill — [ − | value | + ] — rather than three floating tiles. The ∓ zones
 // dim and stop responding at the bounds so the limits read visually, not just by clamping.
 @Composable
-private fun Stepper(
+internal fun Stepper(
     value: Int,
     onChange: (Int) -> Unit,
     min: Int,
@@ -2818,7 +2855,7 @@ private fun Stepper(
  * Each increment ticks, so the count can be felt without watching the number.
  */
 @Composable
-private fun StepperZone(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun StepperZone(symbol: String, enabled: Boolean, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val view = LocalView.current
@@ -2864,7 +2901,7 @@ private fun StepperZone(symbol: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StepperDivider() {
+internal fun StepperDivider() {
     Box(Modifier.width(1.dp).height(24.dp).background(Stroke))
 }
 
@@ -2900,20 +2937,31 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (B
 }
 
 @Composable
-private fun WizardTextField(
+internal fun WizardTextField(
     value: String,
     onChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    singleLine: Boolean = true,
+    minLines: Int = 1,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         placeholder = { Text(placeholder, color = Text3, fontSize = 14.sp) },
-        singleLine = true,
+        singleLine = singleLine,
+        minLines = minLines,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = keyboardType,
+            capitalization = if (keyboardType == KeyboardType.Text) {
+                androidx.compose.ui.text.input.KeyboardCapitalization.Words
+            } else {
+                androidx.compose.ui.text.input.KeyboardCapitalization.None
+            },
+        ),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Blue,
             unfocusedBorderColor = Stroke,
@@ -2927,7 +2975,7 @@ private fun WizardTextField(
 }
 
 @Composable
-private fun ImpactNote(title: String, body: String) {
+internal fun ImpactNote(title: String, body: String) {
     Column(
         Modifier
             .fillMaxWidth()

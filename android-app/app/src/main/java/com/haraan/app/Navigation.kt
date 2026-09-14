@@ -80,6 +80,12 @@ fun MainNavigation() {
             onBack = { backStack.removeLastOrNull() }
           )
         }
+        entry<TournamentDetails> { t ->
+          com.haraan.app.ui.tournaments.TournamentDetailScreen(
+            tournamentId = t.id,
+            onBack = { backStack.removeLastOrNull() },
+          )
+        }
         entry<Scoring> { s ->
           ScoringScreen(matchId = s.id, code = s.code, onBack = { backStack.removeLastOrNull() })
         }

@@ -62,6 +62,9 @@ data class MatchDetails(val id: String = "", val code: String = "") : NavKey
 data class Scoring(val id: String = "", val code: String = "") : NavKey
 
 @Serializable
+data class TournamentDetails(val id: String) : NavKey
+
+@Serializable
 data class VenueDetail(
 	val id: String,
 	val title: String,

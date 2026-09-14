@@ -323,50 +323,61 @@ final class PlayersController extends Controller
                 continue;
             }
 
-            // Which side batted last — drives score attribution and which team the card
-            // puts on top. Same derivation the feed uses.
-            $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
-            $battingTeam = 1;
-            for ($j = count($overSummary) - 1; $j >= 0; $j--) {
-                $tag = $overSummary[$j]['batting'] ?? null;
-                if ($tag !== null && $tag !== '') {
-                    $battingTeam = ($tag === $m->away || $tag === 'away') ? 2 : 1;
-                    break;
-                }
-            }
-
-            // score_text carries wickets, which only cricket has. On every other sport it
-            // holds the whole line ("2 - 1") and must not be printed as one side's score.
-            $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
-            $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
-            $overs = (string) ($m->overs ?? '');
-
-            $recent[$i]['card'] = [
-                'team1'       => (string) $m->home,
-                'team2'       => (string) $m->away,
-                'team1Full'   => (string) ($m->home_full ?? ''),
-                'team2Full'   => (string) ($m->away_full ?? ''),
-                'team1Logo'   => $this->absoluteMatchLogo($m->home_logo),
-                'team2Logo'   => $this->absoluteMatchLogo($m->away_logo),
-                'team1Emblem' => (string) ($m->home_emblem ?? ''),
-                'team2Emblem' => (string) ($m->away_emblem ?? ''),
-                'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
-                'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
-                'overs1'      => $isCricket && $battingTeam !== 2 ? $overs : '',
-                'overs2'      => $isCricket && $battingTeam === 2 ? $overs : '',
-                'battingTeam' => $battingTeam,
-                'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
-                'status'      => (string) ($m->status ?? ''),
-                'isLive'      => strtolower((string) $m->status) === 'live',
-                'result'      => (string) ($m->result ?? ''),
-                'competition' => (string) ($m->competition ?? ''),
-                'venue'       => (string) ($m->venue ?? ''),
-                'district'    => (string) ($m->district ?? ''),
-                'locality'    => (string) ($m->locality ?? ''),
-            ];
+            $recent[$i]['card'] = $this->matchCard($m);
         }
 
         return $recent;
+    }
+
+    /**
+     * The scoreboard card for one match — the same shape the feed row carries, so the
+     * profile's match history and its tournaments tab draw with the feed's composable.
+     *
+     * @return array<string, mixed>
+     */
+    private function matchCard(LiveMatch $m): array
+    {
+        // Which side batted last — drives score attribution and which team the card
+        // puts on top. Same derivation the feed uses.
+        $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
+        $battingTeam = 1;
+        for ($j = count($overSummary) - 1; $j >= 0; $j--) {
+            $tag = $overSummary[$j]['batting'] ?? null;
+            if ($tag !== null && $tag !== '') {
+                $battingTeam = ($tag === $m->away || $tag === 'away') ? 2 : 1;
+                break;
+            }
+        }
+
+        // score_text carries wickets, which only cricket has. On every other sport it
+        // holds the whole line ("2 - 1") and must not be printed as one side's score.
+        $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
+        $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
+        $overs = (string) ($m->overs ?? '');
+
+        return [
+            'team1'       => (string) $m->home,
+            'team2'       => (string) $m->away,
+            'team1Full'   => (string) ($m->home_full ?? ''),
+            'team2Full'   => (string) ($m->away_full ?? ''),
+            'team1Logo'   => $this->absoluteMatchLogo($m->home_logo),
+            'team2Logo'   => $this->absoluteMatchLogo($m->away_logo),
+            'team1Emblem' => (string) ($m->home_emblem ?? ''),
+            'team2Emblem' => (string) ($m->away_emblem ?? ''),
+            'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
+            'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
+            'overs1'      => $isCricket && $battingTeam !== 2 ? $overs : '',
+            'overs2'      => $isCricket && $battingTeam === 2 ? $overs : '',
+            'battingTeam' => $battingTeam,
+            'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
+            'status'      => (string) ($m->status ?? ''),
+            'isLive'      => strtolower((string) $m->status) === 'live',
+            'result'      => (string) ($m->result ?? ''),
+            'competition' => (string) ($m->competition ?? ''),
+            'venue'       => (string) ($m->venue ?? ''),
+            'district'    => (string) ($m->district ?? ''),
+            'locality'    => (string) ($m->locality ?? ''),
+        ];
     }
 
     /** A stored logo path made absolute; blank stays blank so the app draws its emblem. */
@@ -1324,6 +1335,24 @@ final class PlayersController extends Controller
                 'created_at' => $p->created_at?->toIso8601String(),
                 'mine' => $mine,
             ])->values(),
+        ]);
+    }
+
+    /**
+     * GET /api/players/{player}/tournaments — the tournaments this player hosts, for the
+     * profile's Tournaments tab. Public, like the rest of a profile; `mine` marks the host.
+     */
+    public function tournaments(Request $request, string $playerId): JsonResponse
+    {
+        $target = $this->resolvePlayer($playerId);
+        if ($target === null) {
+            return response()->json(['error' => 'Player not found'], 404);
+        }
+
+        $me = $request->attributes->get('auth_user');
+
+        return response()->json([
+            'results' => TournamentsController::listForHost($target, $me instanceof User ? $me : null),
         ]);
     }
 
