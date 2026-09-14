@@ -710,7 +710,13 @@ private fun StepSport(selected: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-internal fun SportCard(spec: SportSpec, selected: Boolean, onClick: () -> Unit) {
+internal fun SportCard(
+    spec: SportSpec,
+    selected: Boolean,
+    onClick: () -> Unit,
+    /** Overrides the match formats line — the tournament wizard lists tournament formats. */
+    subtitle: String? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -740,10 +746,11 @@ internal fun SportCard(spec: SportSpec, selected: Boolean, onClick: () -> Unit) 
             // The formats it offers — concrete, so the choice is about the game rather
             // than the word.
             Text(
-                spec.presets.joinToString(" · ") { it.label },
+                subtitle ?: spec.presets.joinToString(" · ") { it.label },
                 color = Text2,
                 fontSize = 13.sp,
                 maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
         }
         Spacer(Modifier.width(10.dp))

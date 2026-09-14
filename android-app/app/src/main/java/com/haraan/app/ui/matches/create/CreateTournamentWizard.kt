@@ -462,6 +462,16 @@ fun CreateTournamentWizard(
 }
 
 // ────────────────────────────────────────────────────── Step 0 · Sport ────────
+/** The tournament formats a sport offers, for its card: "T20 · One Day · Box Cricket". */
+private fun tournamentFormatsLine(sport: String): String {
+    val labels = TournamentSportSpec.forKey(sport)?.presets?.map { it.label }
+        ?: listOf(TournamentFormat.T20, TournamentFormat.ODI, TournamentFormat.BOX).map { it.label }
+    // Three short names fit one line; a long one ("12-minute quarters") would push the third
+    // behind an ellipsis, so it is skipped here — the format step still lists every preset.
+    val short = labels.filter { it.length <= 16 }
+    return (if (short.size >= 3) short else labels).take(3).joinToString(" · ")
+}
+
 @Composable
 private fun StepTournamentSport(selected: String, onSelect: (String) -> Unit) {
     StepScaffold(
@@ -470,7 +480,12 @@ private fun StepTournamentSport(selected: String, onSelect: (String) -> Unit) {
     ) {
         SportSpec.supported.forEachIndexed { i, spec ->
             if (i > 0) Spacer(Modifier.height(12.dp))
-            SportCard(spec = spec, selected = spec.key == selected, onClick = { onSelect(spec.key) })
+            SportCard(
+                spec = spec,
+                selected = spec.key == selected,
+                onClick = { onSelect(spec.key) },
+                subtitle = tournamentFormatsLine(spec.key),
+            )
         }
     }
 }
