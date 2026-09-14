@@ -3847,6 +3847,17 @@ private fun CrexMatchesScreen(
   // The roster is state, not a read-through to AccountStore, so the sheet re-renders
   // the moment an account is added or removed.
   var accounts by remember { mutableStateOf(com.haraan.app.data.AccountStore.accounts(context)) }
+  // The roster's photo is written once at sign-in. Refresh it quietly per active account so
+  // the Player tab shows today's face without the user having to open their profile first.
+  val activePlayerId = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.playerId }
+  LaunchedEffect(activePlayerId) {
+    val token = com.haraan.app.data.TokenStore.getToken(context)
+    if (activePlayerId == null || !com.haraan.app.data.TokenStore.isSignedIn(token)) return@LaunchedEffect
+    val profile = runCatching { profileRepository.fetchMe(token!!) }.getOrNull() ?: return@LaunchedEffect
+    if (com.haraan.app.data.AccountStore.refreshDisplay(context, profile)) {
+      accounts = com.haraan.app.data.AccountStore.accounts(context)
+    }
+  }
   var showAccounts by remember { mutableStateOf(false) }
   var switchingAccount by remember { mutableStateOf(false) }
   // Set while the "Add account" login is on screen. The existing session stays active
@@ -4063,7 +4074,8 @@ private fun CrexMatchesScreen(
         // The active account's photo + name, so the Player tab shows a real face (or the
         // name's initial when there's no photo). Keyed on `accounts` so it refreshes when a
         // profile loads or the user switches accounts.
-        avatarUrl = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.avatar },
+        // Stored root-relative ("/storage/avatars/…"); Coil needs the host.
+        avatarUrl = remember(accounts) { com.haraan.app.data.ApiConfig.mediaUrl(com.haraan.app.data.AccountStore.active(context)?.avatar) },
         avatarName = remember(accounts) { com.haraan.app.data.AccountStore.active(context)?.name },
       )
     }
@@ -4412,6 +4424,7 @@ private fun CrexMatchesScreen(
           // user is plainly signed in. Idempotent, so running on every load is fine.
           onProfileLoaded = { profile ->
             com.haraan.app.data.AccountStore.adoptExistingSessionIfNeeded(context, profile)
+            com.haraan.app.data.AccountStore.refreshDisplay(context, profile)
             accounts = com.haraan.app.data.AccountStore.accounts(context)
           },
           onCreateMatch = {

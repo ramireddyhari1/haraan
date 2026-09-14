@@ -202,6 +202,23 @@ object AccountStore {
     )
   }
 
+  /**
+   * Bring a stored account's display fields (name, handle, photo) up to date with a
+   * freshly loaded [profile]. The roster is written once at sign-in, so a photo added or
+   * changed afterwards would otherwise never reach the switcher or the Player tab.
+   *
+   * Touches display material only — never the token, the order, or which account is
+   * active. Returns true when something was rewritten.
+   */
+  fun refreshDisplay(context: Context, profile: PlayerProfile): Boolean {
+    val current = accounts(context)
+    val row = current.firstOrNull { it.playerId == profile.playerId } ?: return false
+    val fresh = row.copy(name = profile.name, username = profile.username, avatar = profile.avatar)
+    if (fresh == row) return false
+    write(context, current.map { if (it.playerId == row.playerId) fresh else it })
+    return true
+  }
+
   private fun write(context: Context, accounts: List<StoredAccount>) {
     try {
       val arr = JSONArray()
