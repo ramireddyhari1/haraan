@@ -2,16 +2,23 @@ package com.haraan.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -35,7 +42,8 @@ import com.haraan.app.ui.theme.LocalSectionTheme
  *
  * While a campaign is live the lane's header (status bar, greeting, search, switch) is painted
  * in the campaign's deep colour by the screen, and [CampaignHeaderStrip] closes it: a short
- * strip carrying the optional decoration (image or Lottie), ending in a scalloped edge that
+ * strip carrying the optional decoration (image or Lottie, shown whole at its own aspect
+ * ratio), ending in a scalloped edge that
  * bites into the feed. No headline, no banner card — the feed starts right below, so the app
  * feels dressed for the occasion without losing a screen of content to it.
  *
@@ -52,10 +60,14 @@ fun CampaignHeaderStrip(
     val campaign = theme.campaign ?: return
     val decoration = campaign.decorationUrl
 
+    // The strip takes the ARTWORK's shape, not a fixed height: admins upload whatever their
+    // designer exported (a "1080 x 240" brief came back as 2172 x 724), and a fixed box either
+    // crops it or letterboxes it. Until the real size is known, the documented 1080 x 240.
+    var artRatio by remember(decoration) { mutableFloatStateOf(DEFAULT_ART_RATIO) }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (decoration != null) DECORATED_HEIGHT else PLAIN_HEIGHT)
             .clipToBounds()
             // Starts exactly on the header's deep colour (no seam) and warms toward the accent.
             .background(Brush.verticalGradient(listOf(theme.deep, lerp(theme.deep, theme.primary, 0.45f))))
@@ -64,19 +76,29 @@ fun CampaignHeaderStrip(
                 scallopedEdge(pageBackground, radius = SCALLOP_RADIUS.toPx())
             },
     ) {
-        if (decoration != null) {
+        if (decoration == null) {
+            Spacer(Modifier.fillMaxWidth().height(PLAIN_HEIGHT))
+        } else {
+            // Bottom padding keeps the art above the scallops, so nothing is bitten off.
             val art = Modifier
-                .fillMaxSize()
-                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(bottom = SCALLOP_RADIUS + 2.dp)
+                .aspectRatio(artRatio.coerceIn(MIN_ART_RATIO, MAX_ART_RATIO))
                 .semantics { contentDescription = campaign.name }
             if (campaign.decorationIsLottie) {
-                LottieDecoration(url = decoration, modifier = art)
+                LottieDecoration(url = decoration, modifier = art, onRatio = { artRatio = it })
             } else {
                 AsyncImage(
                     model = decoration,
                     contentDescription = null,
-                    contentScale = ContentScale.FillWidth,
-                    alignment = Alignment.TopCenter,
+                    // Fit, never crop: an unusual shape is clamped and shown whole.
+                    contentScale = ContentScale.Fit,
+                    onSuccess = { state ->
+                        val size = state.painter.intrinsicSize
+                        if (size.isSpecified && size.width > 0f && size.height > 0f) {
+                            artRatio = size.width / size.height
+                        }
+                    },
                     modifier = art,
                 )
             }
@@ -90,19 +112,27 @@ fun CampaignHeaderStrip(
  * "remove animations" setting on its own.
  */
 @Composable
-private fun LottieDecoration(url: String, modifier: Modifier) {
+private fun LottieDecoration(url: String, modifier: Modifier, onRatio: (Float) -> Unit) {
     val composition by rememberLottieComposition(LottieCompositionSpec.Url(url))
     val progress by animateLottieCompositionAsState(composition, iterations = LottieConstants.IterateForever)
+    LaunchedEffect(composition) {
+        composition?.bounds?.let { b -> if (b.width() > 0 && b.height() > 0) onRatio(b.width().toFloat() / b.height()) }
+    }
     LottieAnimation(
         composition = composition,
         progress = { progress },
-        contentScale = ContentScale.FillWidth,
-        alignment = Alignment.TopCenter,
+        contentScale = ContentScale.Fit,
         modifier = modifier,
     )
 }
 
-private val DECORATED_HEIGHT = 84.dp
+/** The documented 1080 x 240 decoration. */
+private const val DEFAULT_ART_RATIO = 1080f / 240f
+
+/** Clamp for unusual uploads: taller than 5:2 would push the feed down; wider than 8:1 is a sliver. */
+private const val MIN_ART_RATIO = 2.5f
+private const val MAX_ART_RATIO = 8f
+
 private val PLAIN_HEIGHT = 22.dp
 private val SCALLOP_RADIUS = 7.dp
 

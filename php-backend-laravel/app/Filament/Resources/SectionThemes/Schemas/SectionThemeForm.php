@@ -86,7 +86,7 @@ class SectionThemeForm
                     ])->columns(2),
 
                 Section::make('Decoration')
-                    ->description('Optional strip under the switch — lights, garlands, confetti. A transparent PNG/WebP, or a Lottie animation (.json) for movement. Wide and short: about 1080 × 240 px.')
+                    ->description('Optional artwork under the switch — lights, garlands, a festive scene. A transparent PNG/WebP, or a Lottie animation (.json) for movement. Always shown whole, never cropped: the strip takes the shape of the artwork. Best between 3:1 and 4.5:1 (e.g. 2160 × 720 or 1080 × 240); taller than 5:2 is scaled down to fit.')
                     ->schema([
                         FileUpload::make('decoration')
                             ->label('Upload image or Lottie')
@@ -95,7 +95,7 @@ class SectionThemeForm
                             ->disk('public')
                             ->directory('section-themes')
                             ->visibility('public')
-                            ->helperText('PNG, WebP or Lottie .json · up to 4 MB.'),
+                            ->helperText('PNG, WebP or Lottie .json · up to 4 MB · transparent background looks best.'),
                         TextInput::make('decoration_url')
                             ->label('…or paste a link')
                             ->url()
