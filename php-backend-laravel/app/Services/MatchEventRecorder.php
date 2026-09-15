@@ -440,9 +440,11 @@ class MatchEventRecorder
             'run' => $state['run'] ?? null,
             'box' => $state['box'] ?? null,
             'mat' => $state['mat'] ?? null,
-            'raiding' => $state['raiding'] ?? null,
-            'do_or_die' => $state['do_or_die'] ?? false,
-            'empty_streak' => $state['empty_streak'] ?? null,
+            // Whose raid it is only exists when raids themselves were recorded (mat scoring);
+            // on a tally-scored match it would be inferred from point order, i.e. invented.
+            'raiding' => ($state['mat'] ?? null) !== null ? ($state['raiding'] ?? null) : null,
+            'do_or_die' => ($state['mat'] ?? null) !== null && ($state['do_or_die'] ?? false),
+            'empty_streak' => ($state['mat'] ?? null) !== null ? ($state['empty_streak'] ?? null) : null,
             'mat_rules' => $sport === 'kabaddi' ? SportScoreEngine::kabaddiTracksMat($rawState) : null,
             'kabaddi_players' => $state['kabaddi_players'] ?? null,
             'team_stats' => $state['kabaddi_stats'] ?? ($state['tennis_stats'] ?? ($state['rally_stats'] ?? null)),
