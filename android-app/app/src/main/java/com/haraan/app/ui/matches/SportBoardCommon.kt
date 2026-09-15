@@ -439,3 +439,157 @@ fun HaraanVenueRow(name: String, area: String) {
         }
     }
 }
+
+/**
+ * The live feed — every recorded moment, newest first, in the sport's own words.
+ *
+ * Each row carries what the server's replay said the moment MEANT (a break of serve, a super
+ * tackle, a set point saved) as small tags, and the score in the sport's live unit at that
+ * instant. A row that arrives while the screen is open slides in and lifts once; everything
+ * already there stays still.
+ */
+@Composable
+fun LiveFeedPanel(
+    title: String,
+    state: MatchUiState,
+    board: SportBoard,
+    theme: SportTheme,
+    limit: Int = 40,
+    /** Which moments to list — defaults to everything the board sent. */
+    filter: (BoardMoment) -> Boolean = { true },
+) {
+    val rows = board.feed.filter(filter).take(limit)
+    // The first sequence seen when the panel opened: only rows NEWER than it animate in.
+    val baseline = remember { intArrayOf(rows.firstOrNull()?.sequence ?: 0) }
+    BoardPanel {
+        PanelTitle(title, "${rows.size}")
+        Spacer(Modifier.height(8.dp))
+        rows.forEachIndexed { i, m ->
+            androidx.compose.runtime.key(m.sequence) {
+                val fresh = m.sequence > baseline[0]
+                if (i > 0) {
+                    Box(Modifier.fillMaxWidth().padding(start = 44.dp).height(1.dp).background(BoardInk.hairline))
+                }
+                FeedRow(m, state, board, theme, fresh)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedRow(m: BoardMoment, state: MatchUiState, board: SportBoard, theme: SportTheme, fresh: Boolean) {
+    val enter = remember { Animatable(if (fresh) 0f else 1f) }
+    LaunchedEffect(Unit) { if (fresh) enter.animateTo(1f, tween(420)) }
+    val accent = when (m.side) {
+        "home" -> state.team1Color
+        "away" -> state.team2Color
+        else -> BoardInk.muted
+    }
+    val neutral = m.kind == "period" || m.side.isBlank()
+    val badge = when {
+        m.kind == "period" -> "‖"
+        m.kind == "timeout" -> "T"
+        m.kind == "serve" -> "S"
+        m.kind == "raid" -> "0"
+        m.kind in setOf("rebound", "assist", "steal", "block", "foul", "turnover") -> when (m.kind) {
+            "rebound" -> "REB"; "assist" -> "AST"; "steal" -> "STL"; "block" -> "BLK"; "foul" -> "PF"; else -> "TO"
+        }
+        m.value > 0 && board.isPointsSport -> "+${m.value}"
+        else -> teamShortCode(if (m.side == "home") state.team1 else state.team2).take(3)
+    }
+    val tags = feedTagLabels(m, board)
+    val sideName = when (m.side) { "home" -> state.team1; "away" -> state.team2; else -> "" }
+    val subtitle = listOf(
+        if (m.player.isNotBlank()) sideName else "",
+        if (m.related.isNotBlank() && board.sport == "basketball") "ast ${m.related}" else "",
+    ).filter { it.isNotBlank() }.joinToString(" · ")
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = enter.value; translationY = (1f - enter.value) * -18f }
+            .changeFlash(if (fresh) m.sequence else null, accent)
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(RoundedCornerShape(10.dp))
+                .background(if (neutral) Color(0xFFF1F5F9) else accent.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                badge,
+                fontSize = if (badge.length > 2) 9.5.sp else 12.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (neutral) BoardInk.muted else accent,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (m.player.isNotBlank()) m.player else SportLook.momentLabel(board.sport, m).let {
+                    if (sideName.isNotBlank() && m.kind == "point" && !board.isPointsSport) "$it · $sideName" else it
+                },
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = BoardInk.ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            val second = listOf(
+                if (m.player.isNotBlank()) SportLook.momentLabel(board.sport, m) else "",
+                subtitle,
+            ).filter { it.isNotBlank() }.joinToString(" · ")
+            if (second.isNotBlank() || tags.isNotEmpty()) {
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (second.isNotBlank()) {
+                        Text(
+                            second, fontSize = 11.sp, color = BoardInk.faint, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    tags.forEach { (label, color) ->
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            Modifier.clip(RoundedCornerShape(5.dp)).background(color.copy(alpha = 0.12f))
+                                .padding(horizontal = 5.dp, vertical = 1.5.dp),
+                        ) {
+                            Text(label, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = color, letterSpacing = 0.4.sp, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            m.line.ifBlank { "${m.homeScore}–${m.awayScore}" },
+            fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = BoardInk.muted, maxLines = 1,
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/** The tags a feed row shows, in words — at most two, most important first. */
+private fun feedTagLabels(m: BoardMoment, board: SportBoard): List<Pair<String, Color>> {
+    val amber = Color(0xFFD97706)
+    val red = Color(0xFFDC2626)
+    val green = Color(0xFF059669)
+    val slate = Color(0xFF475569)
+    val noun = board.setNoun.uppercase()
+    return buildList {
+        if (m.has("match")) add("MATCH" to green)
+        else if (m.has("set")) add("$noun" to green)
+        else if (m.has("game") && board.sport == "tennis") add("GAME" to slate)
+        if (m.has("all_out")) add("ALL OUT" to red)
+        if (m.has("super_tackle")) add("SUPER TACKLE" to Color(0xFF6D28D9))
+        if (m.has("super_raid")) add("SUPER RAID" to amber)
+        if (m.has("do_or_die")) add("DO-OR-DIE" to red)
+        if (m.has("break")) add("BREAK" to amber)
+        if (m.has("break_point_saved")) add("BP SAVED" to green)
+        if (m.has("saved")) add("$noun PT SAVED" to green)
+        if (m.has("tiebreak")) add("TIE-BREAK" to slate)
+        if (m.has("side_out")) add("SIDE-OUT" to slate)
+        if (m.has("fouled_out")) add("FOULED OUT" to red)
+        if (m.has("penalty")) add("PENALTY" to amber)
+        if (m.has("change_ends")) add("ENDS" to slate)
+    }.take(2)
+}

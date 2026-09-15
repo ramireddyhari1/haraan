@@ -104,7 +104,10 @@ final class KabaddiInsights implements SportInsightBuilder
                 'halves' => $ctx->flow['segments'],
             ],
             'reads' => $this->reads($ctx, $team),
-            'untracked' => ['Raid attempts', 'Empty raids', 'Do-or-die raids'],
+            // A match scored on the mat records every raid, empty ones included.
+            'untracked' => \App\Services\SportScoreEngine::kabaddiTracksMat(is_array($ctx->match->sport_state) ? $ctx->match->sport_state : [])
+                ? []
+                : ['Raid attempts', 'Empty raids', 'Do-or-die raids'],
         ];
     }
 

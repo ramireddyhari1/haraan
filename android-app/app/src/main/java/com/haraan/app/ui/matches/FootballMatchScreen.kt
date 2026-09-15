@@ -418,7 +418,20 @@ private fun CollapsingFootballHero(
                         AnimatedScore(awayScore, bright = awayScore >= homeScore)
                     }
                     Spacer(Modifier.height(8.dp))
-                    HeroClock(football.clockLabel(state.isLive), state.isLive)
+                    HeroClock(rememberLiveClockLabel(football, state.isLive), state.isLive)
+                    // Bookings under the score, the way a broadcast bug carries them.
+                    val yh = football.cardsFor("home", "yellow")
+                    val rh = football.cardsFor("home", "red")
+                    val ya = football.cardsFor("away", "yellow")
+                    val ra = football.cardsFor("away", "red")
+                    if (yh + rh + ya + ra > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CardTally(yh, rh)
+                            Spacer(Modifier.width(18.dp))
+                            CardTally(ya, ra)
+                        }
+                    }
                 }
                 HeroTeam(state.team2FullName.ifBlank { state.team2 }, state.team2Logo, Modifier.weight(1f))
             }
@@ -592,6 +605,44 @@ private fun HeroTeam(name: String, logo: String, modifier: Modifier) {
     }
 }
 
+/**
+ * The clock label, ticking once a second while the scorer's clock runs. Between pushes the
+ * phone counts forward from the anchor itself, so the minute is live without polling.
+ */
+@Composable
+private fun rememberLiveClockLabel(football: FootballState, isLive: Boolean): String {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    val running = isLive && football.clock?.running == true
+    LaunchedEffect(running, football.clock) {
+        now = System.currentTimeMillis()
+        while (running) {
+            kotlinx.coroutines.delay(1000)
+            now = System.currentTimeMillis()
+        }
+    }
+    return football.clockLabelAt(isLive, now)
+}
+
+/** Yellow and red cards for one side, as small card glyphs with counts. */
+@Composable
+private fun CardTally(yellow: Int, red: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (yellow > 0) {
+            Box(Modifier.size(width = 8.dp, height = 11.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFFBBF24)))
+            Spacer(Modifier.width(3.dp))
+            Text("$yellow", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnHero)
+        }
+        if (red > 0) {
+            if (yellow > 0) Spacer(Modifier.width(6.dp))
+            Box(Modifier.size(width = 8.dp, height = 11.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFF87171)))
+            Spacer(Modifier.width(3.dp))
+            Text("$red", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnHero)
+        }
+        // A clean side keeps its slot so the other side's cards stay under its own crest.
+        if (yellow + red == 0) Spacer(Modifier.width(18.dp))
+    }
+}
+
 @Composable
 private fun HeroClock(label: String, isLive: Boolean) {
     Row(
@@ -660,6 +711,28 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
             }
         }
 
+        football.possession?.let { p ->
+            item { PossessionCard(state, p) }
+        }
+        if (football.assists.isNotEmpty()) {
+            item {
+                Card {
+                    CardTitle("Assists")
+                    Spacer(Modifier.height(10.dp))
+                    football.assists.forEachIndexed { i, a ->
+                        if (i > 0) Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(7.dp).clip(CircleShape).background(if (a.side == "home") state.team1Color else state.team2Color))
+                            Spacer(Modifier.width(10.dp))
+                            Text(t(a.name), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(if (a.side == "home") state.team1 else state.team2, fontSize = 11.5.sp, color = Faint, modifier = Modifier.padding(end = 10.dp))
+                            Text("${a.assists}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Match stats preview — top three, with a tap-through to the full Stats tab.
         // Fills the summary with real substance and signposts where the rest lives. ──
         if (previewRows.isNotEmpty()) {
@@ -720,7 +793,8 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
 @Composable
 private fun StatsTab(state: MatchUiState, football: FootballState) {
     val stats = football.stats
-    if (stats == null || !stats.hasAny) {
+    val possession = football.possession
+    if ((stats == null || !stats.hasAny) && possession == null) {
         EmptyNote(
             "No match stats yet",
             "Shots, corners, fouls, offsides and more appear here as the scorer records them.",
@@ -734,7 +808,8 @@ private fun StatsTab(state: MatchUiState, football: FootballState) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { StatsCrestHeader(state) }
-        stats.groups.forEach { group ->
+        possession?.let { p -> item { PossessionCard(state, p) } }
+        stats?.takeIf { it.hasAny }?.groups?.forEach { group ->
             if (group.rows.isEmpty()) return@forEach
             item {
                 Card {
@@ -751,6 +826,41 @@ private fun StatsTab(state: MatchUiState, football: FootballState) {
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Possession as one split bar with both percentages, and — while the match is on — which side
+ * has the ball now. Built only from timed "ball with" taps; the tracked minutes are printed
+ * so nobody mistakes five minutes of tracking for a whole match.
+ */
+@Composable
+private fun PossessionCard(state: MatchUiState, p: Possession) {
+    val share by animateFloatAsState(p.home / 100f, tween(700, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)), label = "possession")
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${p.home}%", fontSize = 22.sp, fontWeight = FontWeight.Black, color = if (p.home >= p.away) state.team1Color else Ink)
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(t("Possession").uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Black, color = Faint, letterSpacing = 1.sp)
+                Text("${p.trackedSec / 60} min tracked", fontSize = 10.5.sp, color = Faint)
+            }
+            Text("${p.away}%", fontSize = 22.sp, fontWeight = FontWeight.Black, color = if (p.away > p.home) state.team2Color else Ink)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))) {
+            Box(Modifier.weight(share.coerceIn(0.01f, 0.99f)).fillMaxHeight().background(state.team1Color))
+            Spacer(Modifier.width(2.dp))
+            Box(Modifier.weight((1f - share).coerceIn(0.01f, 0.99f)).fillMaxHeight().background(state.team2Color))
+        }
+        if (state.isLive && p.current != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Ball with ${if (p.current == "home") state.team1 else state.team2}",
+                fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Muted,
+                textAlign = if (p.current == "home") TextAlign.Start else TextAlign.End,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -803,10 +913,13 @@ private fun StatBar(label: String, home: Int, away: Int, homeColor: Color, awayC
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color(0xFFEDF1F6)),
             ) {
-                val hw = (home.toFloat() / total).coerceIn(0.02f, 0.98f) * grow + 0.0001f
-                Box(Modifier.weight(hw).fillMaxHeight().background(homeColor))
-                Spacer(Modifier.width(2.dp))
-                Box(Modifier.weight((1f - hw)).fillMaxHeight().background(awayColor.copy(alpha = 0.85f)))
+                // Nothing recorded on either side is an empty track, not a bar won by the away side.
+                if (home + away > 0) {
+                    val hw = (home.toFloat() / total).coerceIn(0.02f, 0.98f) * grow + 0.0001f
+                    Box(Modifier.weight(hw).fillMaxHeight().background(homeColor))
+                    Spacer(Modifier.width(2.dp))
+                    Box(Modifier.weight((1f - hw)).fillMaxHeight().background(awayColor.copy(alpha = 0.85f)))
+                }
             }
         }
         Text("$away", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (leadAway) awayColor else Ink, textAlign = TextAlign.End, modifier = Modifier.width(28.dp))
@@ -869,7 +982,12 @@ private fun TimelineTab(state: MatchUiState, football: FootballState) {
             item { PhaseMarker("Full time") }
         }
         itemsIndexed(rows, key = { _, e -> e.sequence }) { _, event ->
-            TimelineRow(event, state)
+            if (event.kind == "period") {
+                PhaseMarker(event.headline.ifBlank { "Half time" })
+            } else {
+                // New events slide into place instead of the list jumping.
+                Box(Modifier.animateItem()) { TimelineRow(event, state) }
+            }
         }
         item { PhaseMarker("Kick-off") }
     }

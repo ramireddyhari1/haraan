@@ -171,7 +171,7 @@ final class SportRules
     /** What one set is called to a player of this sport. */
     public static function setNoun(string $sport): string
     {
-        return self::normalise($sport) === 'badminton' ? 'Game' : 'Set';
+        return in_array(self::normalise($sport), ['badminton', 'table_tennis'], true) ? 'Game' : 'Set';
     }
 
     /** How many periods the sport runs, for the clock/period chip. */

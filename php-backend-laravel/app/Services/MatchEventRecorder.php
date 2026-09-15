@@ -24,6 +24,15 @@ use Illuminate\Support\Facades\DB;
  */
 class MatchEventRecorder
 {
+    /** Engine state that is rebuilt on read and never persisted into sport_state. */
+    private const REPLAY_ONLY = ['box', 'kabaddi_players', 'kabaddi_stats', 'tennis_stats', 'rally_stats'];
+
+    /** Kinds a rally / points board lists in its play-by-play. */
+    private const BOARD_FEED_KINDS = [
+        MatchEvent::POINT, MatchEvent::PERIOD, 'raid', 'timeout', 'serve',
+        'rebound', 'assist', 'steal', 'block', 'foul', 'turnover',
+    ];
+
     /**
      * Append an event and re-derive the score.
      *
@@ -99,13 +108,16 @@ class MatchEventRecorder
      * mis-tap on one team shouldn't reach across and delete the other team's goal
      * just because it happened to be typed last.
      */
-    public function undoLast(LiveMatch $match, ?string $side = null): ?MatchEvent
+    public function undoLast(LiveMatch $match, ?string $side = null, ?int $sequence = null): ?MatchEvent
     {
         $query = MatchEvent::query()
             ->where('live_match_id', $match->id)
             ->orderByDesc('sequence');
 
-        if ($side !== null) {
+        if ($sequence !== null) {
+            // A scorer's feed row names exactly which event it means.
+            $query->where('sequence', $sequence);
+        } elseif ($side !== null) {
             // A side's score is raised by its own goals and by the opposition's own
             // goals, so "undo a point for this side" has to consider both.
             $query->where(fn ($q) => $q
@@ -147,7 +159,10 @@ class MatchEventRecorder
         // manual half — the creator's format, a football clock a scorer is nudging — is
         // merged UNDER it so a recompute can never wipe what only a human can know.
         $state = is_array($match->sport_state) ? $match->sport_state : [];
-        $state = array_merge($state, $board['state']);
+        // The box score, per-player ledgers and serve stats are rebuilt on every read from the
+        // same replay, so they are never stored — a stored copy could only ever go stale.
+        $derived = array_diff_key($board['state'], array_flip(self::REPLAY_ONLY));
+        $state = array_merge(array_diff_key($state, array_flip(self::REPLAY_ONLY)), $derived);
 
         $match->forceFill([
             'home_score' => $board['home'],
@@ -192,7 +207,7 @@ class MatchEventRecorder
 
     /**
      * The football detail payload: the timeline, plus the two summary rows the
-     * hero shows (scorers under each side).
+     * hero shows (scorers under each side), the match clock and possession.
      *
      * @return array<string, mixed>
      */
@@ -204,22 +219,36 @@ class MatchEventRecorder
             ->get();
 
         $state = is_array($match->sport_state) ? $match->sport_state : [];
+        $clock = is_array($state['clock'] ?? null) ? $state['clock'] : null;
 
-        // The timeline is the match's key moments only — goals, cards, subs. Stat-count
-        // events (shots, corners, fouls…) are aggregated into `stats` below, never
+        // The timeline is the match's key moments only — goals, cards, subs, the whistle.
+        // Stat-count events (shots, corners, fouls…) are aggregated into `stats` below, never
         // listed one-by-one, or a busy match's timeline would drown in "Shot" rows.
         $timelineKinds = [
             MatchEvent::GOAL, MatchEvent::OWN_GOAL,
-            MatchEvent::YELLOW, MatchEvent::RED, MatchEvent::SUB,
+            MatchEvent::YELLOW, MatchEvent::RED, MatchEvent::SUB, MatchEvent::PERIOD,
         ];
 
         return [
-            'half' => $state['half'] ?? null,
+            'half' => $clock['half'] ?? ($state['half'] ?? null),
             'clock_min' => $state['clock_min'] ?? null,
             'added' => $state['added'] ?? null,
+            // The scorer's running clock, as an anchor rather than a minute: a viewer's phone
+            // ticks it forward itself between pushes, so the minute is live without polling.
+            'clock' => $clock === null ? null : [
+                'half' => (int) ($clock['half'] ?? 1),
+                'running' => (bool) ($clock['running'] ?? false),
+                'base_sec' => (int) ($clock['base_sec'] ?? 0),
+                'anchor_ms' => (int) ($clock['anchor_ms'] ?? 0),
+                'half_length' => (int) ($clock['half_length'] ?? 45),
+                'phase' => (string) ($clock['phase'] ?? ''),
+                'server_ms' => (int) floor(microtime(true) * 1000),
+            ],
             'home_scorers' => $this->scorerLine($events, 'home'),
             'away_scorers' => $this->scorerLine($events, 'away'),
             'stats' => $this->statsBlock($events),
+            'possession' => $this->possession($events, $clock),
+            'assists' => $this->assistLine($events),
             'timeline' => $events
                 ->filter(fn (MatchEvent $e): bool => in_array($e->kind, $timelineKinds, true))
                 ->map(fn (MatchEvent $e): array => [
@@ -230,6 +259,7 @@ class MatchEventRecorder
                     'kind' => $e->kind,
                     'player' => $e->player_name,
                     'related' => $e->related_name,
+                    'note' => $e->note,
                     'home_score' => $e->home_score,
                     'away_score' => $e->away_score,
                     'headline' => $e->headline(),
@@ -240,12 +270,86 @@ class MatchEventRecorder
     }
 
     /**
+     * Possession, from the scorer's "ball with" taps.
+     *
+     * Only ever the time between two recorded switches. A `possession` event with no side is
+     * a stop (dead ball, half time); the last spell runs to now only while the clock is
+     * running, and to the moment it stopped otherwise. Null until a minute has been tracked:
+     * possession from two taps is a coin toss wearing a percentage.
+     *
+     * @param  \Illuminate\Support\Collection<int, MatchEvent>  $events
+     * @param  array<string, mixed>|null  $clock
+     * @return array{home: int, away: int, tracked_sec: int, current: string|null}|null
+     */
+    private function possession($events, ?array $clock): ?array
+    {
+        $taps = $events->filter(fn (MatchEvent $e): bool => $e->kind === 'possession')->values();
+        if ($taps->isEmpty()) {
+            return null;
+        }
+
+        $seconds = ['home' => 0.0, 'away' => 0.0];
+        $current = null;
+        $since = null;
+        foreach ($taps as $e) {
+            $at = (float) ($e->created_at?->getPreciseTimestamp(3) ?? 0);
+            if ($current !== null && $since !== null) {
+                $seconds[$current] += max(0.0, ($at - $since) / 1000);
+            }
+            $current = in_array($e->side, ['home', 'away'], true) ? $e->side : null;
+            $since = $current === null ? null : $at;
+        }
+
+        if ($current !== null && $since !== null) {
+            $running = (bool) ($clock['running'] ?? false);
+            $end = $running
+                ? floor(microtime(true) * 1000)
+                : max($since, (float) ($clock['anchor_ms'] ?? $since));
+            $seconds[$current] += max(0.0, ($end - $since) / 1000);
+        }
+
+        $total = $seconds['home'] + $seconds['away'];
+        if ($total < 60) {
+            return null;
+        }
+        $home = (int) round($seconds['home'] / $total * 100);
+
+        return [
+            'home' => $home,
+            'away' => 100 - $home,
+            'tracked_sec' => (int) round($total),
+            'current' => $current,
+        ];
+    }
+
+    /**
+     * Assists per player, from the assister recorded on each goal.
+     *
+     * @param  \Illuminate\Support\Collection<int, MatchEvent>  $events
+     * @return array<int, array{side: string, name: string, assists: int}>
+     */
+    private function assistLine($events): array
+    {
+        return $events
+            ->filter(fn (MatchEvent $e): bool => $e->kind === MatchEvent::GOAL
+                && trim((string) $e->related_name) !== '')
+            ->groupBy(fn (MatchEvent $e): string => $e->side.'|'.$e->related_name)
+            ->map(fn ($rows): array => [
+                'side' => (string) $rows->first()->side,
+                'name' => (string) $rows->first()->related_name,
+                'assists' => $rows->count(),
+            ])
+            ->sortByDesc('assists')
+            ->values()
+            ->all();
+    }
+
+    /**
      * The board a rally / points sport's detail screen renders.
      *
-     * Football keeps its own richer payload (scorers, cards, subs, stats). Everything
-     * else shares this one, because a volleyball set list and a basketball quarter line
-     * are the same shape wearing different labels — and one payload means one place to
-     * fix when a label is wrong.
+     * Built from a fresh replay of the event log rather than the stored sport_state, so the
+     * serve, the mat, a tie-break or a break point is always the log's own answer — and a
+     * rule fix reaches every match the moment it ships, not the next time someone scores.
      *
      * @return array<string, mixed>|null  null for cricket and football, which have theirs
      */
@@ -263,44 +367,86 @@ class MatchEventRecorder
             ->inOrder()
             ->get();
 
-        $state = is_array($match->sport_state) ? $match->sport_state : [];
+        $replay = app(SportScoreEngine::class)->replay($match, $events);
+        $state = $replay['state'];
+        $notes = $replay['annotations'];
+        $stamps = $replay['stamps'];
 
-        // Newest first: a live board is read from the top, and the most recent point is
+        // Newest first: a live board is read from the top, and the most recent moment is
         // the one anybody is looking for.
         $feed = $events
-            ->filter(fn (MatchEvent $e): bool => in_array($e->kind, [MatchEvent::POINT, MatchEvent::PERIOD], true))
+            ->filter(fn (MatchEvent $e): bool => in_array($e->kind, self::BOARD_FEED_KINDS, true))
             ->sortByDesc('sequence')
-            ->take(40)
-            ->map(fn (MatchEvent $e): array => [
-                'sequence' => $e->sequence,
-                'side' => $e->side,
-                'kind' => $e->kind,
-                'detail' => $e->detail,
-                'player' => $e->player_name,
-                'home_score' => $e->home_score,
-                'away_score' => $e->away_score,
-                'value' => $e->kind === MatchEvent::POINT
-                    ? SportRules::pointValue($sport, $e->detail)
-                    : 0,
-            ])
+            ->take(60)
+            ->map(function (MatchEvent $e) use ($notes, $stamps): array {
+                $note = $notes[$e->sequence] ?? [];
+
+                return [
+                    'sequence' => $e->sequence,
+                    'side' => $e->side,
+                    'kind' => $e->kind,
+                    'detail' => $e->detail,
+                    'player' => $e->player_name,
+                    'related' => $e->related_name,
+                    'home_score' => $stamps[$e->sequence][0] ?? $e->home_score,
+                    'away_score' => $stamps[$e->sequence][1] ?? $e->away_score,
+                    'value' => (int) ($note['value'] ?? 0),
+                    'tags' => array_values($note['tags'] ?? []),
+                    'line' => $note['line'] ?? null,
+                    'period' => $note['period'] ?? null,
+                    'set_index' => $note['set_index'] ?? null,
+                    'server' => $note['server'] ?? null,
+                    'mat' => $note['mat'] ?? null,
+                    'at' => $e->created_at?->toIso8601String(),
+                ];
+            })
             ->values()
             ->all();
+
+        $rawState = is_array($match->sport_state) ? $match->sport_state : [];
 
         return [
             'sport' => $sport,
             'family' => $family,
             'sets' => $state['sets'] ?? [],
+            'tiebreaks' => $state['tiebreaks'] ?? [],
             'current' => $state['current'] ?? null,
             'games' => $state['games'] ?? null,
             'points' => $state['points'] ?? null,
             'target' => $state['target'] ?? null,
+            'cap' => $state['cap'] ?? null,
             'best_of' => $state['best_of'] ?? SportRules::defaultBestOf($sport),
             'set_noun' => $state['set_noun'] ?? SportRules::setNoun($sport),
             'serving' => $state['serving'] ?? null,
+            'serves_left' => $state['serves_left'] ?? null,
+            'service_court' => $state['service_court'] ?? null,
+            'decider' => $state['decider'] ?? false,
+            'deuce' => $state['deuce'] ?? false,
+            'advantage' => $state['advantage'] ?? null,
+            'tiebreak' => $state['tiebreak'] ?? false,
+            'golden_point' => $state['golden_point'] ?? false,
+            'break_points' => $state['break_points'] ?? 0,
+            'set_point' => $state['set_point'] ?? null,
+            'match_point' => $state['match_point'] ?? null,
+            'decided' => $state['decided'] ?? false,
+            'rotation' => $state['rotation'] ?? null,
+            'timeouts' => $state['timeouts'] ?? null,
+            'timeouts_allowed' => $state['timeouts_allowed'] ?? null,
             'period' => $state['period'] ?? null,
             'period_label' => $state['period_label'] ?? null,
             'periods' => $state['periods'] ?? [],
-            'scorers' => $this->pointScorers($events, $sport),
+            'regulation_periods' => $state['regulation_periods'] ?? null,
+            'team_fouls' => $state['team_fouls'] ?? null,
+            'run' => $state['run'] ?? null,
+            'box' => $state['box'] ?? null,
+            'mat' => $state['mat'] ?? null,
+            'raiding' => $state['raiding'] ?? null,
+            'do_or_die' => $state['do_or_die'] ?? false,
+            'empty_streak' => $state['empty_streak'] ?? null,
+            'mat_rules' => $sport === 'kabaddi' ? SportScoreEngine::kabaddiTracksMat($rawState) : null,
+            'kabaddi_players' => $state['kabaddi_players'] ?? null,
+            'team_stats' => $state['kabaddi_stats'] ?? ($state['tennis_stats'] ?? ($state['rally_stats'] ?? null)),
+            'scorers' => $this->pointScorers($events, $sport, $state),
             'feed' => $feed,
         ];
     }
@@ -312,10 +458,23 @@ class MatchEventRecorder
      * than showing a shorter, true list.
      *
      * @param  \Illuminate\Support\Collection<int, MatchEvent>  $events
+     * @param  array<string, mixed>  $state  the replay, whose ledgers already hold the values
      * @return array<int, array<string, mixed>>
      */
-    private function pointScorers($events, string $sport): array
+    private function pointScorers($events, string $sport, array $state = []): array
     {
+        if ($sport === 'kabaddi' && isset($state['kabaddi_players'])) {
+            return array_values(array_map(static fn (array $p): array => [
+                'side' => $p['side'], 'name' => $p['name'], 'points' => $p['total'],
+            ], array_filter($state['kabaddi_players'], static fn (array $p): bool => $p['total'] > 0)));
+        }
+
+        if ($sport === 'basketball' && isset($state['box']['players'])) {
+            return array_values(array_map(static fn (array $p): array => [
+                'side' => $p['side'], 'name' => $p['name'], 'points' => $p['pts'],
+            ], array_filter($state['box']['players'], static fn (array $p): bool => $p['pts'] > 0)));
+        }
+
         return $events
             ->filter(fn (MatchEvent $e): bool => $e->kind === MatchEvent::POINT
                 && in_array($e->side, ['home', 'away'], true)

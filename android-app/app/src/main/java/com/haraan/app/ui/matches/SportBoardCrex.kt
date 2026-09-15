@@ -254,6 +254,8 @@ fun CrexBoardHero(
     ribbonWord: String,
     ribbonColor: Color,
     ribbonKey: Any?,
+    /** A notable moment to announce over the top of the card, once. */
+    moment: HeroMoment? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // A scoring moment flashes the card and gives it a small heartbeat, the same way a
@@ -291,6 +293,9 @@ fun CrexBoardHero(
                     }
                     .padding(horizontal = 18.dp, vertical = 14.dp),
             ) {
+                // The meta line doubles as the landing strip for a moment banner: the banner
+                // covers it while it is up and the line is back the moment it leaves.
+                Box(Modifier.fillMaxWidth().heightIn(min = 16.dp), contentAlignment = Alignment.Center) {
                 Text(
                     meta,
                     color = Color(0xFF334155).copy(alpha = 0.78f),
@@ -299,8 +304,10 @@ fun CrexBoardHero(
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = if (moment != null) 0f else 1f },
                 )
+                HeroMomentBanner(moment, Modifier.align(Alignment.Center))
+                }
                 Spacer(Modifier.height(10.dp))
                 content()
             }
@@ -452,31 +459,25 @@ fun CrexBoardTabs(
 fun crexRibbonFor(board: SportBoard, theme: SportTheme): Triple<String, Color, Any?> {
     val calm = Triple("HARAAN  LIVE", Color(0xFF64748B).copy(alpha = 0.55f), null)
     val last = board.feed.firstOrNull() ?: return calm
+    val amber = Color(0xFFD97706)
+    val red = Color(0xFFB91C1C)
 
-    return when (board.sport.lowercase()) {
-        // A three changes a game; a free throw is bookkeeping.
-        "basketball" -> if (last.value >= 3) {
-            Triple("THREE", theme.deep, last.sequence)
-        } else {
-            calm
-        }
-        "kabaddi" -> when (last.detail.lowercase()) {
-            "all_out" -> Triple("ALL OUT", Color(0xFFB91C1C), last.sequence)
-            "super_raid" -> Triple("SUPER RAID", Color(0xFFD97706), last.sequence)
-            else -> calm
-        }
-        // Rally sports: a point is a point. What is worth shouting is the SITUATION — one
-        // rally from taking the set — which the board can prove rather than guess.
-        else -> {
-            val cur = board.current
-            val setPoint = cur != null && board.target > 0 &&
-                (cur.first >= board.target - 1 || cur.second >= board.target - 1)
-            if (setPoint) {
-                Triple("${board.setNoun.uppercase()} POINT", Color(0xFFD97706), last.sequence)
-            } else {
-                calm
-            }
-        }
+    return when {
+        last.has("match") -> Triple("GAME  SET  MATCH", theme.deep, last.sequence)
+        board.matchPoint != null -> Triple("MATCH POINT", red, last.sequence)
+        last.has("all_out") -> Triple("ALL OUT", red, last.sequence)
+        last.has("super_tackle") -> Triple("SUPER TACKLE", theme.deep, last.sequence)
+        last.has("super_raid") -> Triple("SUPER RAID", amber, last.sequence)
+        last.has("break") -> Triple("BREAK", amber, last.sequence)
+        last.has("tiebreak") || (board.tiebreak && board.points?.let { it.first == "0" && it.second == "0" } == true) ->
+            Triple("TIE-BREAK", theme.deep, last.sequence)
+        last.has("set") -> Triple("${board.setNoun.uppercase()} WON", theme.deep, last.sequence)
+        last.has("three") -> Triple("THREE", theme.deep, last.sequence)
+        board.goldenPoint -> Triple("GOLDEN POINT", red, last.sequence)
+        board.setPoint != null -> Triple("${board.setNoun.uppercase()} POINT", amber, last.sequence)
+        board.breakPoints > 0 -> Triple("BREAK POINT", amber, last.sequence)
+        board.doOrDie -> Triple("DO  OR  DIE", red, last.sequence)
+        else -> calm
     }
 }
 
@@ -492,23 +493,20 @@ fun crexRibbonFor(board: SportBoard, theme: SportTheme): Triple<String, Color, A
 /** The display numeral: tabular figures, tight tracking, rolling to its new value. */
 @Composable
 fun HeroNumeral(value: Int, color: Color, size: Int, roll: Boolean = true) {
-    val shown by animateIntAsState(
-        targetValue = value,
-        animationSpec = tween(if (roll) 550 else 0, easing = FastOutSlowInEasing),
-        label = "heroNumeral",
-    )
-    Text(
-        "$shown",
-        color = color,
-        fontSize = size.sp,
-        fontFamily = com.haraan.app.theme.ArchivoDisplay,
-        letterSpacing = (-1).sp,
-        maxLines = 1,
-        style = TextStyle(fontFeatureSettings = "tnum"),
-    )
+    if (roll) {
+        RollingFigure("$value", color, size)
+    } else {
+        HeroNumeralText("$value", color, size)
+    }
 }
 
-/** The same numeral for scores that are words — tennis' 40 and AD, a set label. */
+/** The same numeral for scores that are words — tennis' 40 and AD — rolling as they change. */
+@Composable
+fun HeroNumeralRolling(text: String, color: Color, size: Int) {
+    RollingFigure(text, color, size)
+}
+
+/** The same numeral, static — a set label, or a figure that must not move. */
 @Composable
 fun HeroNumeralText(text: String, color: Color, size: Int) {
     Text(

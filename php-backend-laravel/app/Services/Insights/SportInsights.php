@@ -114,7 +114,9 @@ class SportInsights
     private function replay(string $sport, string $family, Collection $events, array $format): array
     {
         return match ($family) {
-            SportRules::POINTS => $this->replayPoints($sport, $events),
+            SportRules::POINTS => $sport === 'kabaddi'
+                ? $this->replayKabaddi($events, $format)
+                : $this->replayPoints($sport, $events),
             SportRules::SETS => $this->replaySets($sport, $events, $format),
             SportRules::TENNIS => $this->replayTennis($events, $format),
             default => $this->replayTally($events),
@@ -254,59 +256,134 @@ class SportInsights
     }
 
     /**
-     * Tennis, mirroring SportScoreEngine::tennis(). `seg_*` is GAMES in the set, because a
-     * lead in tennis is a lead in games; the point ladder is kept on the moment separately.
+     * Kabaddi, walked through the same KabaddiMachine the board uses. One raid can carry
+     * several kinds of point — touches, a bonus, the all-out it caused — so it becomes one
+     * moment per kind, and the moments still sum to the score on the board.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function replayKabaddi(Collection $events, array $format): array
+    {
+        $state = [];
+        $first = $events->first();
+        if ($first !== null && $first->match !== null) {
+            $state = is_array($first->match->sport_state) ? $first->match->sport_state : [];
+        }
+        $machine = new \App\Services\Scoring\KabaddiMachine($format, \App\Services\SportScoreEngine::kabaddiTracksMat($state));
+        $out = [];
+        $period = 0;
+        $segHome = 0;
+        $segAway = 0;
+
+        foreach ($events as $e) {
+            $side = in_array($e->side, ['home', 'away'], true) ? $e->side : null;
+            if ($e->kind === MatchEvent::PERIOD) {
+                $period++;
+                $segHome = 0;
+                $segAway = 0;
+                $machine->period();
+                continue;
+            }
+            if ($e->kind === 'serve' && $side !== null) {
+                $machine->setRaiding($side);
+                continue;
+            }
+            if ($side === null || ! in_array($e->kind, [MatchEvent::POINT, 'raid'], true)) {
+                continue;
+            }
+
+            $before = $machine->stats;
+            $scoreBefore = $machine->score;
+            $r = $machine->apply($e->kind, $side, (string) $e->detail, (string) $e->player_name);
+            if ($r['value'] <= 0) {
+                continue;
+            }
+
+            $parts = [];
+            foreach (['home', 'away'] as $s) {
+                $raid = $machine->stats[$s]['raid_points'] - $before[$s]['raid_points'];
+                $bonus = $machine->stats[$s]['bonus_points'] - $before[$s]['bonus_points'];
+                $tackle = $machine->stats[$s]['tackle_points'] - $before[$s]['tackle_points'];
+                $allOut = $machine->stats[$s]['all_out_points'] - $before[$s]['all_out_points'];
+                $tech = $machine->stats[$s]['technical_points'] - $before[$s]['technical_points'];
+                $super = $machine->stats[$s]['super_raids'] > $before[$s]['super_raids'];
+                if ($raid > 0) {
+                    $parts[] = [$s, $super ? 'super_raid' : 'raid', $raid, (string) $e->player_name];
+                }
+                if ($bonus > 0) {
+                    $parts[] = [$s, 'bonus', $bonus, (string) $e->player_name];
+                }
+                if ($tackle > 0) {
+                    $parts[] = [$s, 'tackle', $tackle, (string) $e->player_name];
+                }
+                if ($tech > 0) {
+                    $parts[] = [$s, 'technical', $tech, ''];
+                }
+                if ($allOut > 0) {
+                    // The team's two points for clearing the mat — never a player's.
+                    $parts[] = [$s, 'all_out', $allOut, ''];
+                }
+            }
+
+            $runHome = $scoreBefore['home'];
+            $runAway = $scoreBefore['away'];
+            foreach ($parts as [$s, $detail, $value, $player]) {
+                if ($s === 'home') {
+                    $runHome += $value;
+                    $segHome += $value;
+                } else {
+                    $runAway += $value;
+                    $segAway += $value;
+                }
+                $m = $this->moment($e, $s, $value, $player, $period, $segHome, $segAway, $runHome, $runAway);
+                $m['detail'] = $detail;
+                $out[] = $m;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Tennis, walked through the same TennisMachine the board uses — tie-breaks included.
+     * `seg_*` is GAMES in the set, because a lead in tennis is a lead in games.
      *
      * @return array<int, array<string, mixed>>
      */
     private function replayTennis(Collection $events, array $format): array
     {
-        $gamesToSet = (int) ($format['gamesTo'] ?? 6);
+        $machine = new \App\Services\Scoring\TennisMachine($format);
         $out = [];
-        $pHome = 0;
-        $pAway = 0;
-        $gHome = 0;
-        $gAway = 0;
-        $setsHome = 0;
-        $setsAway = 0;
-        $index = 0;
         $totalHome = 0;
         $totalAway = 0;
 
         foreach ($events as $e) {
+            if ($e->kind === 'serve' && in_array($e->side, ['home', 'away'], true)) {
+                $machine->setServer($e->side);
+                continue;
+            }
             if ($e->kind !== MatchEvent::POINT || ! in_array($e->side, ['home', 'away'], true)) {
                 continue;
             }
-            $deuce = $pHome >= 3 && $pAway >= 3;
-            if ($e->side === 'home') {
-                $pHome++;
-                $totalHome++;
-            } else {
-                $pAway++;
-                $totalAway++;
+            if ($machine->decided()) {
+                continue;
             }
+            $index = count($machine->completed);
+            $r = $machine->point($e->side, (string) $e->detail);
+            $e->side === 'home' ? $totalHome++ : $totalAway++;
 
-            $closes = null;
-            if (max($pHome, $pAway) >= 4 && abs($pHome - $pAway) >= 2) {
-                $pHome > $pAway ? $gHome++ : $gAway++;
-                $pHome = 0;
-                $pAway = 0;
-                $closes = 'game';
-            }
+            // After a set closes the machine has reset its games; the moment keeps the set's
+            // final games so a set-closing point reads as 7-6, not 0-0.
+            $closedSet = in_array($r['closes'], ['set', 'match'], true);
+            $games = $closedSet ? $machine->completed[$index] : [$machine->gamesHome, $machine->gamesAway];
 
-            $m = $this->moment($e, $e->side, 1, (string) $e->player_name, $index, $gHome, $gAway, $totalHome, $totalAway);
-            $m['deuce'] = $deuce;
-            $m['closes'] = $closes;
-
-            if ($closes === 'game' && max($gHome, $gAway) >= $gamesToSet && abs($gHome - $gAway) >= 2) {
-                $m['closes'] = 'set';
-                $gHome > $gAway ? $setsHome++ : $setsAway++;
-                $gHome = 0;
-                $gAway = 0;
-                $index++;
-            }
-            $m['sets_home'] = $setsHome;
-            $m['sets_away'] = $setsAway;
+            $m = $this->moment($e, $e->side, 1, (string) $e->player_name, $index, (int) $games[0], (int) $games[1], $totalHome, $totalAway);
+            $m['deuce'] = $r['deuce'];
+            $m['tiebreak'] = $r['tiebreak'];
+            $m['break_point'] = $r['break_points'] > 0;
+            $m['closes'] = $r['closes'] === 'match' ? 'set' : $r['closes'];
+            $m['sets_home'] = $machine->setsHome;
+            $m['sets_away'] = $machine->setsAway;
             $out[] = $m;
         }
 

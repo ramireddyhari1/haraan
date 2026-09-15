@@ -121,7 +121,13 @@ final class BasketballInsights implements SportInsightBuilder
                 'best_quarter' => $best,
             ],
             'reads' => $this->reads($ctx, $best, $shotMix),
-            'untracked' => ['Rebounds', 'Assists', 'Steals', 'Shooting %'],
+            // A box-score stat is untracked only while the scorer has never recorded one.
+            'untracked' => array_values(array_filter([
+                $ctx->events->contains('kind', 'rebound') ? null : 'Rebounds',
+                ($ctx->events->contains('kind', 'assist') || $ctx->events->contains(fn ($e) => trim((string) $e->related_name) !== '')) ? null : 'Assists',
+                $ctx->events->contains('kind', 'steal') ? null : 'Steals',
+                'Shooting %',
+            ])),
         ];
     }
 

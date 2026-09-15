@@ -1334,8 +1334,10 @@ final class MatchesController extends Controller
         // With a side, undoes that team's last goal — the "−" beside its tally.
         $side = $request->input('side');
         $side = in_array($side, ['home', 'away'], true) ? $side : null;
+        // A scorer's feed row undoes exactly the event it shows.
+        $sequence = $request->filled('sequence') ? (int) $request->input('sequence') : null;
 
-        if ($recorder->undoLast($match, $side) === null) {
+        if ($recorder->undoLast($match, $side, $sequence) === null) {
             return response()->json(['error' => 'Nothing to undo'], 422);
         }
 
@@ -1347,7 +1349,7 @@ final class MatchesController extends Controller
      * games/serve for badminton. Merged, not replaced, so a client that only knows
      * about the clock cannot wipe the rest.
      */
-    public function updateSportState(Request $request, string $id): JsonResponse
+    public function updateSportState(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
     {
         $gate = $this->gateScorer($request, $id);
         if ($gate instanceof JsonResponse) {
@@ -1365,7 +1367,16 @@ final class MatchesController extends Controller
         $current = is_array($match->sport_state) ? $match->sport_state : [];
         $match->forceFill(['sport_state' => array_merge($current, $incoming)])->save();
 
-        return response()->json(['sport_state' => $match->sport_state]);
+        // The format and the scoring rules change what the log MEANS (a best-of, mat
+        // scoring), so the board is replayed under them straight away.
+        if (array_key_exists('format', $incoming) || array_key_exists('rules', $incoming)) {
+            $recorder->resync($match);
+        }
+
+        // A clock started or stopped is news to everyone watching, same as a goal.
+        \App\Events\MatchUpdated::dispatch($match->id);
+
+        return response()->json(['sport_state' => $match->fresh()?->sport_state]);
     }
 
     /** Read the timeline. Same visibility rules as the match itself. */

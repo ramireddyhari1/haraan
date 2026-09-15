@@ -78,7 +78,7 @@ private val Line = HaraanColors.BorderLight
 @Composable
 fun FootballScorerScreen(
     setup: FootballScorerSetup,
-    onGoal: suspend (side: String, player: String?, minuteLabel: String, minute: Int) -> MatchScoreState?,
+    onGoal: suspend (side: String, player: String?, minuteLabel: String, minute: Int, assist: String?) -> MatchScoreState?,
     onCard: suspend (side: String, player: String?, kind: String, minute: Int) -> MatchScoreState?,
     onUndoGoal: suspend (side: String) -> MatchScoreState?,
     /** Adjust a match-stat tally (shots, corners, fouls…) by one; never touches the score. */
@@ -86,10 +86,18 @@ fun FootballScorerScreen(
     finishMatch: suspend () -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Pushes the clock anchor so every viewer's minute ticks live. */
+    onClock: suspend (org.json.JSONObject) -> Unit = {},
+    /** Records a non-scoring marker: `period` (half/full time) or `possession`. */
+    onMarker: suspend (kind: String, side: String?, minute: Int?, note: String?) -> Unit = { _, _, _, _ -> },
 ) {
     var home by remember { mutableStateOf(setup.initialHome) }
     var away by remember { mutableStateOf(setup.initialAway) }
-    var clock by remember { mutableStateOf(MatchClock(halfLengthMin = setup.halfLengthMin)) }
+    var clock by remember { mutableStateOf(setup.resumeClock ?: MatchClock(halfLengthMin = setup.halfLengthMin)) }
+    // Who has the ball — only tracked once the scorer starts tapping it.
+    var possession by remember { mutableStateOf(setup.resumePossession) }
+    // A goal waiting for its assister, after the scorer was picked.
+    var assistFor by remember { mutableStateOf<Pair<String, String?>?>(null) }
     var finishing by remember { mutableStateOf(false) }
     var confirmFullTime by remember { mutableStateOf(false) }
     var pickerFor by remember { mutableStateOf<String?>(null) }
@@ -123,7 +131,7 @@ fun FootballScorerScreen(
         if (state != null) { home = state.home; away = state.away }
     }
 
-    fun record(side: String, kind: String, player: String?) {
+    fun record(side: String, kind: String, player: String?, assist: String? = null) {
         val label = clock.label
         val minute = clock.minute
         val team = if (side == "home") setup.teamA else setup.teamB
@@ -133,11 +141,23 @@ fun FootballScorerScreen(
         scope.launch {
             runCatching {
                 settle(
-                    if (kind == "goal") onGoal(side, player, label, minute)
+                    if (kind == "goal") onGoal(side, player, label, minute, assist)
                     else onCard(side, player, kind, minute)
                 )
             }
         }
+    }
+
+    /** Push the clock to viewers. Fire-and-forget: a missed push only costs a tick of drift. */
+    fun pushClock(next: MatchClock, phase: String = "") {
+        clock = next
+        scope.launch { runCatching { onClock(next.toJson(phase)) } }
+    }
+
+    fun setPossession(side: String?) {
+        if (possession == side) return
+        possession = side
+        scope.launch { runCatching { onMarker("possession", side, clock.minute, null) } }
     }
 
     fun undo(item: ScorerFeedItem, index: Int) {
@@ -154,9 +174,28 @@ fun FootballScorerScreen(
 
         ClockBar(
             clock = clock,
-            onToggle = { clock = clock.copy(running = !clock.running) },
-            onHalfTime = { clock = clock.copy(running = false) },
-            onSecondHalf = { clock = clock.startSecondHalf() },
+            onToggle = {
+                val next = clock.copy(running = !clock.running)
+                pushClock(next)
+                // A stopped clock is a dead ball for possession, so a pause never counts.
+                if (!next.running && possession != null) {
+                    val had = possession
+                    setPossession(null)
+                    possession = had
+                } else if (next.running && possession != null) {
+                    scope.launch { runCatching { onMarker("possession", possession, clock.minute, null) } }
+                }
+            },
+            onHalfTime = {
+                val next = clock.copy(running = false)
+                pushClock(next, phase = "half_time")
+                if (possession != null) setPossession(null)
+                scope.launch { runCatching { onMarker("period", null, next.minute, "Half time") } }
+            },
+            onSecondHalf = {
+                pushClock(clock.startSecondHalf())
+                scope.launch { runCatching { onMarker("period", null, setup.halfLengthMin, "Second half") } }
+            },
         )
 
         // Score / Stats mode toggle — one dense scorer, two focused panels.
@@ -215,6 +254,9 @@ fun FootballScorerScreen(
                 }
             }
         } else {
+            // Possession — who has the ball, tapped as it changes hands. Only time between
+            // taps while the clock runs counts, so it is only ever as true as the tapping.
+            PossessionBar(setup.teamA, setup.teamB, possession, enabled = clock.running) { setPossession(it) }
             // Stats panel — a compact stepper per stat, per side. Cards stay in Score
             // mode (they carry a scorer + feed row); everything here is a plain tally.
             StatsPanel(
@@ -237,8 +279,30 @@ fun FootballScorerScreen(
             title = if (pickerKind == "goal") "Who scored?" else "Who was booked?",
             team = if (side == "home") setup.teamA else setup.teamB,
             squad = if (side == "home") setup.squadA else setup.squadB,
-            onPick = { name -> record(side, pickerKind, name); pickerFor = null },
+            onPick = { name ->
+                val kind = pickerKind
+                pickerFor = null
+                val squad = if (side == "home") setup.squadA else setup.squadB
+                // A named goal in a squad of more than one asks who set it up.
+                if (kind == "goal" && name != null && squad.count { it.name != name } > 0) {
+                    assistFor = side to name
+                } else {
+                    record(side, kind, name)
+                }
+            },
             onDismiss = { pickerFor = null },
+        )
+    }
+
+    assistFor?.let { (side, scorer) ->
+        PlayerPicker(
+            title = "Assisted by?",
+            team = if (side == "home") setup.teamA else setup.teamB,
+            squad = (if (side == "home") setup.squadA else setup.squadB).filter { it.name != scorer },
+            onPick = { name -> record(side, "goal", scorer, name); assistFor = null },
+            // Dismissing still records the goal — the assist is the optional half.
+            onDismiss = { record(side, "goal", scorer, null); assistFor = null },
+            noneLabel = "No assist",
         )
     }
 
@@ -256,7 +320,7 @@ fun FootballScorerScreen(
                 TextButton(onClick = {
                     confirmFullTime = false
                     finishing = true
-                    clock = clock.copy(running = false)
+                    pushClock(clock.copy(running = false), phase = "full_time")
                     scope.launch { runCatching { finishMatch() }; finishing = false; onDone() }
                 }) { Text("End match", color = Red, fontWeight = FontWeight.Bold) }
             },
@@ -471,6 +535,40 @@ private fun ModeChip(label: String, selected: Boolean, modifier: Modifier, onCli
     }
 }
 
+/**
+ * "Ball with" — three segments: home, dead ball, away. Disabled while the clock is stopped,
+ * because possession during a stoppage is nobody's.
+ */
+@Composable
+private fun PossessionBar(teamA: String, teamB: String, current: String?, enabled: Boolean, onPick: (String?) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Text(
+            if (enabled) "BALL WITH — tap as it changes hands" else "BALL WITH — start the clock to track possession",
+            fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Faint, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF1F5F9)).padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            listOf("home" to teamA, null to "Dead ball", "away" to teamB).forEach { (side, label) ->
+                val on = current == side && (side != null || current == null)
+                Box(
+                    Modifier.weight(if (side == null) 0.8f else 1f).clip(RoundedCornerShape(10.dp))
+                        .background(if (on && enabled) (if (side == null) Surface else Blue) else Color.Transparent)
+                        .clickable(enabled = enabled) { onPick(side) }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = when { !enabled -> Faint; on && side != null -> Color.White; else -> Ink },
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** The tap-to-count stats grid: a stepper per stat, per side. */
 @Composable
 private fun StatsPanel(
@@ -588,6 +686,7 @@ private fun PlayerPicker(
     squad: List<SquadMember>,
     onPick: (String?) -> Unit,
     onDismiss: () -> Unit,
+    noneLabel: String = "Don't know",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -617,7 +716,7 @@ private fun PlayerPicker(
         },
         // Always offer "don't know": in gully football the scorer often doesn't, and
         // forcing a name would either stall the tap or invent one.
-        confirmButton = { TextButton(onClick = { onPick(null) }) { Text("Don't know", color = Blue) } },
+        confirmButton = { TextButton(onClick = { onPick(null) }) { Text(noneLabel, color = Blue) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Muted) } },
     )
 }

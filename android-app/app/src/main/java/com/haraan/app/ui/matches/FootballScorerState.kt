@@ -27,6 +27,10 @@ data class FootballScorerSetup(
     // Seed the tallies — 0/0 for a fresh match, or the current score when resuming.
     val initialHome: Int = 0,
     val initialAway: Int = 0,
+    /** The clock as last pushed, when re-opening a match already under way. */
+    val resumeClock: MatchClock? = null,
+    /** Who had the ball at the last "ball with" tap, when resuming. */
+    val resumePossession: String? = null,
 )
 
 /**
@@ -57,6 +61,21 @@ data class MatchClock(
     }
 
     fun tick(): MatchClock = if (running) copy(elapsedSec = elapsedSec + 1) else this
+
+    /** Whether the whistle has gone for half time and the second half has not begun. */
+    val atHalfTime: Boolean get() = half == 1 && !running && elapsedSec >= halfLengthMin * 60
+
+    /**
+     * The anchor viewers tick from: elapsed seconds NOW, the instant, and whether it runs.
+     * Pushed on every start, pause and half change — never every second.
+     */
+    fun toJson(phase: String = ""): org.json.JSONObject = org.json.JSONObject()
+        .put("half", half)
+        .put("running", running)
+        .put("base_sec", elapsedSec)
+        .put("anchor_ms", System.currentTimeMillis())
+        .put("half_length", halfLengthMin)
+        .put("phase", phase)
 
     /** Second half restarts the count but keeps minutes continuous for display. */
     fun startSecondHalf(): MatchClock =

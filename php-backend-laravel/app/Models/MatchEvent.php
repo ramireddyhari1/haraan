@@ -33,8 +33,19 @@ class MatchEvent extends Model
     public const SUB = 'sub';
     public const PERIOD = 'period';
 
-    // Badminton
+    // Rally / points sports
     public const POINT = 'point';
+
+    /** Who serves now (tennis, table tennis, badminton, volleyball) or raids next (kabaddi). */
+    public const SERVE = 'serve';
+
+    public const TIMEOUT = 'timeout';
+
+    /** Kabaddi: a raid that scored nothing. */
+    public const RAID = 'raid';
+
+    /** Football: the ball changed hands (side), or went dead (no side). */
+    public const POSSESSION = 'possession';
 
     /** Football events that change the scoreline. */
     public const SCORING = [self::GOAL, self::OWN_GOAL];
@@ -103,6 +114,16 @@ class MatchEvent extends Model
             self::POINT => $this->detail === 'error'
                 ? "Point to {$this->side} — unforced error"
                 : "{$who} won the rally",
+            self::SERVE => "Serve: {$this->side}",
+            self::TIMEOUT => "Timeout, {$this->side}",
+            self::RAID => "{$who} — empty raid",
+            self::POSSESSION => $this->side ? "Ball with {$this->side}" : 'Ball dead',
+            'rebound' => "{$who} rebound",
+            'steal' => "{$who} steal",
+            'block' => "{$who} block",
+            'foul' => "{$who} foul",
+            'turnover' => "{$who} turnover",
+            'assist' => "{$who} assist",
             default => $this->note ?: ucfirst($this->kind),
         };
     }

@@ -3897,7 +3897,6 @@ private fun CrexMatchesScreen(
   // Football's counterpart to tossSetup — set after creating a football match, which
   // has no toss to run.
   var footballSetup by remember { mutableStateOf<com.haraan.app.ui.matches.FootballScorerSetup?>(null) }
-  var badmintonSetup by remember { mutableStateOf<com.haraan.app.ui.matches.BadmintonScorerSetup?>(null) }
   // Drives the "Join private match by code" dialog.
   var showJoinDialog by remember { mutableStateOf(false) }
   // Player directory search — opened from the header's search field.
@@ -4624,19 +4623,6 @@ private fun CrexMatchesScreen(
 
                   // Football has no toss and no innings — it goes straight to the goal
                   // scorer. Cricket keeps coin flip → bat/bowl → opening lineup → start.
-                  if (draft.sport.equals("badminton", ignoreCase = true)) {
-                    badmintonSetup = com.haraan.app.ui.matches.BadmintonScorerSetup(
-                      matchId = result.matchId.toString(),
-                      teamA = draft.teamA,
-                      teamB = draft.teamB,
-                      bestOf = draft.bestOf,
-                      formatLabel = draft.formatLabel,
-                      isPrivate = result.isPrivate,
-                      joinCode = result.joinCode,
-                    )
-                    return@launch
-                  }
-
                   if (draft.sport.equals("football", ignoreCase = true)) {
                     footballSetup = com.haraan.app.ui.matches.FootballScorerSetup(
                       matchId = result.matchId.toString(),
@@ -4663,7 +4649,9 @@ private fun CrexMatchesScreen(
                   // below would have opened a CRICKET coin flip on a volleyball match, so
                   // they go straight to their own detail screen, where the creator's Score
                   // button opens the right keypad for the sport.
-                  val boardSports = setOf("volleyball", "basketball", "kabaddi", "tennis", "table_tennis")
+                  // Badminton joined them: its old scorer posted each whole GAME as one rally point,
+                  // which a rally-scored board counts as a single point.
+                  val boardSports = setOf("volleyball", "basketball", "kabaddi", "tennis", "table_tennis", "badminton")
                   if (draft.sport.lowercase() in boardSports) {
                     if (result.isPrivate && result.joinCode.isNotBlank()) createdJoinCode = result.joinCode
                     onMatchClick(result.matchId.toString())
@@ -4757,7 +4745,7 @@ private fun CrexMatchesScreen(
     footballSetup?.let { setup ->
       com.haraan.app.ui.matches.FootballScorerScreen(
         setup = setup,
-        onGoal = { side, player, _, minute ->
+        onGoal = { side, player, _, minute, assist ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) null
           else matchRepository.recordMatchEvent(
@@ -4767,7 +4755,16 @@ private fun CrexMatchesScreen(
             side = side,
             minute = minute,
             playerName = player,
+            relatedName = assist,
           )
+        },
+        onClock = { clockJson ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.updateSportState(token, setup.matchId, org.json.JSONObject().put("clock", clockJson))
+        },
+        onMarker = { kind, side, minute, note ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token != null) matchRepository.recordMatchEvent(token = token, matchId = setup.matchId, kind = kind, side = side, minute = minute, note = note)
         },
         onCard = { side, player, kind, minute ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
@@ -4795,32 +4792,6 @@ private fun CrexMatchesScreen(
           if (token != null) matchRepository.completeMatch(token, setup.matchId)
         },
         onDone = { footballSetup = null },
-        modifier = Modifier.statusBarsPadding(),
-      )
-    }
-
-    // Badminton: games won are the durable result, so each completed game is pushed
-    // as a `point` event for that side and the server counts the games.
-    badmintonSetup?.let { setup ->
-      com.haraan.app.ui.matches.BadmintonScorerScreen(
-        setup = setup,
-        pushGames = { side, _ ->
-          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token != null) {
-            matchRepository.recordMatchEvent(
-              token = token,
-              matchId = setup.matchId,
-              kind = "point",
-              side = side,
-              detail = "game",
-            )
-          }
-        },
-        finishMatch = {
-          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token != null) matchRepository.completeMatch(token, setup.matchId)
-        },
-        onDone = { badmintonSetup = null },
         modifier = Modifier.statusBarsPadding(),
       )
     }

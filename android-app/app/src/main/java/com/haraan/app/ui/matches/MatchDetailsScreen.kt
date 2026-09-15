@@ -173,9 +173,10 @@ fun MatchDetailsScreen(
                 "basketball" -> BasketballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
                 "kabaddi" -> KabaddiMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
                 "tennis" -> TennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
-                // Badminton shares table tennis' shape — rally points into games — so it
-                // shares the screen, which names whichever sport it is actually showing.
-                "table_tennis", "badminton" ->
+                // Badminton serves by the rally and from a service court; table tennis serves in
+                // pairs. Same scoring family, different sports — so different screens.
+                "badminton" -> BadmintonMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
+                "table_tennis" ->
                     TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
                 else -> TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
             }
@@ -321,20 +322,25 @@ fun MatchDetailsScreen(
         SportScorerScreen(
             state = d,
             board = d.board!!,
-            onPoint = { side, detail, player ->
+            onEvent = { e ->
                 val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
-                val ok = tok != null && matchRepo.recordPoint(tok, matchId, side, detail, player)
-                if (ok) {
-                    viewModel.refresh(id = matchId, code = joinCode, token = tok)
-                }
+                val ok = tok != null && matchRepo.recordMatchEvent(
+                    token = tok, matchId = matchId, kind = e.kind, side = e.side,
+                    playerName = e.player, relatedName = e.related, detail = e.detail,
+                ) != null
+                if (ok) viewModel.refresh(id = matchId, code = joinCode, token = tok)
                 ok
             },
-            onUndo = { side ->
+            onUndo = { sequence ->
                 val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
-                val ok = tok != null && matchRepo.undoMatchEvent(tok, matchId, side) != null
-                if (ok) {
-                    viewModel.refresh(id = matchId, code = joinCode, token = tok)
-                }
+                val ok = tok != null && matchRepo.undoMatchEvent(tok, matchId, sequence = sequence) != null
+                if (ok) viewModel.refresh(id = matchId, code = joinCode, token = tok)
+                ok
+            },
+            onSportState = { patch ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                val ok = tok != null && matchRepo.updateSportState(tok, matchId, patch)
+                if (ok) viewModel.refresh(id = matchId, code = joinCode, token = tok)
                 ok
             },
             onFinish = {
@@ -371,10 +377,29 @@ fun MatchDetailsScreen(
                 squadB = d.awaySquad,
                 initialHome = fb.timeline.lastOrNull()?.homeScore ?: 0,
                 initialAway = fb.timeline.lastOrNull()?.awayScore ?: 0,
+                // Re-opening the scorer carries on from the clock viewers are watching.
+                halfLengthMin = fb.clock?.halfLength ?: 45,
+                resumeClock = fb.clock?.let { c ->
+                    MatchClock(
+                        half = c.half,
+                        elapsedSec = c.elapsedSecAt(System.currentTimeMillis()),
+                        running = c.running,
+                        halfLengthMin = c.halfLength,
+                    )
+                },
+                resumePossession = fb.possession?.current,
             ),
-            onGoal = { side, player, _, minute ->
+            onGoal = { side, player, _, minute, assist ->
                 val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
-                if (tok == null) null else matchRepo.recordMatchEvent(tok, matchId, "goal", side, minute, player)
+                if (tok == null) null else matchRepo.recordMatchEvent(tok, matchId, "goal", side, minute, player, relatedName = assist)
+            },
+            onClock = { clockJson ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok != null) matchRepo.updateSportState(tok, matchId, org.json.JSONObject().put("clock", clockJson))
+            },
+            onMarker = { kind, side, minute, note ->
+                val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
+                if (tok != null) matchRepo.recordMatchEvent(token = tok, matchId = matchId, kind = kind, side = side, minute = minute, note = note)
             },
             onCard = { side, player, kind, minute ->
                 val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)

@@ -921,8 +921,10 @@ class MatchRepository(
     playerName: String? = null,
     relatedName: String? = null,
     detail: String? = null,
+    note: String? = null,
   ): MatchScoreState? = withContext(Dispatchers.IO) {
     val body = JSONObject().put("kind", kind)
+    note?.takeIf { it.isNotBlank() }?.let { body.put("note", it) }
     side?.let { body.put("side", it) }
     minute?.let { body.put("minute", it) }
     playerName?.takeIf { it.isNotBlank() }?.let { body.put("player_name", it) }
@@ -971,9 +973,12 @@ class MatchRepository(
     token: String,
     matchId: String,
     side: String? = null,
+    /** Undo exactly this event — a scorer's feed row. Wins over [side]. */
+    sequence: Int? = null,
   ): MatchScoreState? = withContext(Dispatchers.IO) {
     val body = JSONObject()
     side?.let { body.put("side", it) }
+    sequence?.let { body.put("sequence", it) }
 
     try {
       val response = postJson("/api/matches/$matchId/events/undo", body, token)

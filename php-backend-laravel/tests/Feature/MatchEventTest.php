@@ -312,6 +312,19 @@ class MatchEventTest extends TestCase
         $this->assertSame(1, $state['half'], 'The half must survive a clock-only update.');
     }
 
+    /** A clock started on the scorer's phone is news to every viewer, same as a goal. */
+    public function test_a_sport_state_update_is_pushed_to_viewers(): void
+    {
+        \Illuminate\Support\Facades\Event::fake([\App\Events\MatchUpdated::class]);
+        $m = $this->match();
+
+        $this->withHeader('Authorization', 'Bearer ' . $this->token($this->scorer))
+            ->postJson("/api/matches/{$m->id}/sport-state", ['state' => ['clock' => ['running' => true, 'half' => 1]]])
+            ->assertOk();
+
+        \Illuminate\Support\Facades\Event::assertDispatched(\App\Events\MatchUpdated::class);
+    }
+
     public function test_deleting_a_match_takes_its_events_with_it(): void
     {
         $m = $this->match();

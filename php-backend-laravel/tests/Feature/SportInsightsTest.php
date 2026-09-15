@@ -184,7 +184,7 @@ class SportInsightsTest extends TestCase
         $mo = $this->card($d, 'Mo');
         self::assertContains('closer', $this->tagKeys($mo));
         self::assertContains('clutch', $this->tagKeys($mo));
-        self::assertContains('Saved 2 set points', array_column($this->card($d, 'Ana')['tags'], 'label'));
+        self::assertContains('Saved 2 game points', array_column($this->card($d, 'Ana')['tags'], 'label'));
         self::assertSame(0, $d['flow']['lead_changes']);   // HHH led, was caught, never trailed
         self::assertSame(1, $d['flow']['ties']);
     }
