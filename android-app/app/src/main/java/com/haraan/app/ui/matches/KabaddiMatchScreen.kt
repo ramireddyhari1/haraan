@@ -47,6 +47,8 @@ fun KabaddiMatchScreen(
     /** Null unless this viewer may see who is watching. */
     onWatchers: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** Server id — the Insights tab reads this match's event log by it. */
+    matchId: String = "",
 ) {
     val theme = sportThemeFor("kabaddi")
     var tab by remember { mutableStateOf(0) }
@@ -92,7 +94,7 @@ fun KabaddiMatchScreen(
         // Pinned under the hero, so the way back to another tab never scrolls away.
         stickyHeader {
             CrexBoardTabs(
-                tabs = listOf("Summary", "Raid by raid", "Line-ups"),
+                tabs = listOf("Summary", "Raid by raid", "Line-ups", "Insights"),
                 selectedTabIndex = tab,
                 accent = theme.deep,
                 onTabSelected = { tab = it },
@@ -175,7 +177,11 @@ fun KabaddiMatchScreen(
                     }
                 }
 
-                else -> crexItem(tab) { BoardLineups(state) }
+                2 -> crexItem(tab) { BoardLineups(state) }
+                // Each sport reads its own insights — its own figures, its own signature graphic.
+                else -> crexItem(tab) {
+                    com.haraan.app.ui.matches.insights.KabaddiInsightsTab(matchId, state, board, theme)
+                }
             }
         }
     }

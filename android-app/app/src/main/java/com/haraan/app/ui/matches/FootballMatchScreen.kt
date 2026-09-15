@@ -121,10 +121,12 @@ fun FootballMatchScreen(
     /** Null unless this viewer may see who is watching. */
     onWatchers: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** Server id — the Insights tab reads this match's event log by it. */
+    matchId: String = "",
 ) {
     val football = state.football ?: FootballState()
     var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Summary", "Stats", "Timeline", "Line-ups")
+    val tabs = listOf("Summary", "Stats", "Timeline", "Line-ups", "Insights")
 
     // Translate: a language picker in the hero translates every user-facing string on
     // this screen via the server-side Google Translate proxy.
@@ -199,7 +201,9 @@ fun FootballMatchScreen(
                         ) {
                             Text(
                                 t(label),
-                                fontSize = 13.5.sp,
+                                fontSize = 12.5.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                 color = if (active) Blue else Muted,
                             )
@@ -234,7 +238,8 @@ fun FootballMatchScreen(
                     0 -> SummaryTab(state, football, onOpenStats = { tab = 1 })
                     1 -> StatsTab(state, football)
                     2 -> TimelineTab(state, football)
-                    else -> LineupsTab(state)
+                    3 -> LineupsTab(state)
+                    else -> com.haraan.app.ui.matches.insights.FootballInsightsTab(matchId, state, football)
                 }
             }
         }
@@ -260,7 +265,7 @@ private fun t(s: String): String = com.haraan.app.data.TranslationController.tr(
 private fun footballStrings(state: MatchUiState, football: FootballState): List<String> = buildList {
     addAll(
         listOf(
-            "Summary", "Stats", "Timeline", "Line-ups", "Football",
+            "Summary", "Stats", "Timeline", "Line-ups", "Insights", "Football",
             "Result", "Goals", "No goals yet.", "assist",
             "Match stats", "View all", "No match stats yet",
             "Shots, corners, fouls, offsides and more appear here as the scorer records them.",

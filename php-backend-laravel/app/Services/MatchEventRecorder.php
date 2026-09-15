@@ -347,7 +347,7 @@ class MatchEventRecorder
      * @param  \Illuminate\Support\Collection<int, MatchEvent>  $events
      * @return array<string, mixed>
      */
-    private function statsBlock($events): array
+    public function statsBlock($events): array
     {
         $count = static fn (string $kind, string $side): int => $events
             ->where('kind', $kind)->where('side', $side)->count();

@@ -1018,8 +1018,17 @@ class LiveMatchController extends Controller
         if ($match === null) {
             return response()->json(['error' => 'Match not found'], 404);
         }
+        // Same gate as the detail: insights name players, so a private match's insights
+        // must not be reachable by guessing its id either.
+        $viewer = $request->attributes->get('auth_user');
+        if (! $match->isVisibleTo($viewer instanceof User ? $viewer : null)) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+
+        // Every other sport reads its own event log through its own builder — goals and
+        // assists, threes and free throws, raid and tackle points, set points saved.
         if (strtolower((string) ($match->sport ?: 'cricket')) !== 'cricket') {
-            return response()->json(['error' => 'Insights are cricket-only for now'], 422);
+            return response()->json(app(\App\Services\Insights\SportInsights::class)->for($match));
         }
 
         $service = app(CricketInsights::class);

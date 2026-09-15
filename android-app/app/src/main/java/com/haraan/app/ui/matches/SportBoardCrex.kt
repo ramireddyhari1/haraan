@@ -418,7 +418,7 @@ fun CrexBoardTabs(
                                 )
                                 Spacer(Modifier.width(5.dp))
                             }
-                            Text(title, color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(title, color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                         }
                     }
                 }

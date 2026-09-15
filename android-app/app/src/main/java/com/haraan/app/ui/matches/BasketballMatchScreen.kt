@@ -46,6 +46,8 @@ fun BasketballMatchScreen(
     /** Null unless this viewer may see who is watching. */
     onWatchers: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** Server id — the Insights tab reads this match's event log by it. */
+    matchId: String = "",
 ) {
     val theme = sportThemeFor("basketball")
     var tab by remember { mutableStateOf(0) }
@@ -81,7 +83,7 @@ fun BasketballMatchScreen(
         // Pinned under the hero, so the way back to another tab never scrolls away.
         stickyHeader {
             CrexBoardTabs(
-                tabs = listOf("Summary", "Play by play", "Line-ups"),
+                tabs = listOf("Summary", "Play by play", "Line-ups", "Insights"),
                 selectedTabIndex = tab,
                 accent = theme.deep,
                 onTabSelected = { tab = it },
@@ -152,7 +154,11 @@ fun BasketballMatchScreen(
                     }
                 }
 
-                else -> crexItem(tab) { BoardLineups(state) }
+                2 -> crexItem(tab) { BoardLineups(state) }
+                // Each sport reads its own insights — its own figures, its own signature graphic.
+                else -> crexItem(tab) {
+                    com.haraan.app.ui.matches.insights.BasketballInsightsTab(matchId, state, board, theme)
+                }
             }
         }
     }

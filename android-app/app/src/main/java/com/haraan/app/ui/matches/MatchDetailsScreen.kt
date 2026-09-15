@@ -169,15 +169,15 @@ fun MatchDetailsScreen(
             val b = d.board!!
             val openScorer = { sportScoring = true }
             when (b.sport.lowercase()) {
-                "volleyball" -> VolleyballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
-                "basketball" -> BasketballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
-                "kabaddi" -> KabaddiMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
-                "tennis" -> TennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                "volleyball" -> VolleyballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
+                "basketball" -> BasketballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
+                "kabaddi" -> KabaddiMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
+                "tennis" -> TennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
                 // Badminton shares table tennis' shape — rally points into games — so it
                 // shares the screen, which names whichever sport it is actually showing.
                 "table_tennis", "badminton" ->
-                    TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
-                else -> TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier)
+                    TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
+                else -> TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
             }
         }
         is MatchScreenState.Success if state.data.sport.equals("football", ignoreCase = true) -> {
@@ -187,6 +187,7 @@ fun MatchDetailsScreen(
             // with every number blank.
             FootballMatchScreen(
                 state = state.data,
+                matchId = matchId,
                 watching = watching,
                 onBack = onBack,
                 onScore = { footballScoring = true },
