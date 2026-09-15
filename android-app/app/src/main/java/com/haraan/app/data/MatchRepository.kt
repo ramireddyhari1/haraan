@@ -896,9 +896,10 @@ class MatchRepository(
       val body = JSONObject()
         .put("kind", "point")
         .put("side", side)
+        .put("client_event_id", java.util.UUID.randomUUID().toString())
       if (detail.isNotBlank()) body.put("detail", detail)
       if (!player.isNullOrBlank()) body.put("player_name", player)
-      postJson("/api/matches/$matchId/events", body, token).code in 200..299
+      postEventOnceOrRetry(matchId, body, token).code in 200..299
     } catch (_: Exception) {
       false
     }
@@ -923,7 +924,9 @@ class MatchRepository(
     detail: String? = null,
     note: String? = null,
   ): MatchScoreState? = withContext(Dispatchers.IO) {
-    val body = JSONObject().put("kind", kind)
+    // The tap's own id: if the network drops the response and the call is retried, the server
+    // returns the event it already recorded instead of scoring it twice.
+    val body = JSONObject().put("kind", kind).put("client_event_id", java.util.UUID.randomUUID().toString())
     note?.takeIf { it.isNotBlank() }?.let { body.put("note", it) }
     side?.let { body.put("side", it) }
     minute?.let { body.put("minute", it) }
@@ -932,12 +935,24 @@ class MatchRepository(
     detail?.let { body.put("detail", it) }
 
     try {
-      val response = postJson("/api/matches/$matchId/events", body, token)
+      val response = postEventOnceOrRetry(matchId, body, token)
       if (response.code in 200..299) parseScoreState(response.body) else null
     } catch (_: Exception) {
       null
     }
   }
+
+  /**
+   * Post an event, retrying ONCE on a network failure with the same body — and so the same
+   * client_event_id, which the server de-duplicates. A 4xx (a rule the server refused, e.g.
+   * a sent-off player scoring) is an answer, not a failure, and is never retried.
+   */
+  private fun postEventOnceOrRetry(matchId: String, body: JSONObject, token: String): HttpResult =
+    try {
+      postJson("/api/matches/$matchId/events", body, token)
+    } catch (_: java.io.IOException) {
+      postJson("/api/matches/$matchId/events", body, token)
+    }
 
   /**
    * Adjust a football match-stat tally (shots, corners, fouls…) by one. [inc] true
@@ -1201,7 +1216,7 @@ class MatchRepository(
    * Returns null when nobody has faced a ball yet, which is a normal state before a match
    * starts rather than a failure — the caller simply shows nothing.
    */
-  suspend fun fetchIq(matchId: String, player: String? = null): CricketIq? = withContext(Dispatchers.IO) {
+  suspend fun fetchIq(matchId: String, player: String? = null, token: String? = null): CricketIq? = withContext(Dispatchers.IO) {
     try {
       val q = player?.takeIf { it.isNotBlank() }
         ?.let { "?player=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: ""
@@ -1211,6 +1226,8 @@ class MatchRepository(
         connectTimeout = 15000
         readTimeout = 15000
         setRequestProperty("Accept", "application/json")
+        // A private match's IQ is visible only to its creator and squad, so send who's asking.
+        if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
       }
       val code = connection.responseCode
       val body = readBody(connection)
@@ -1267,7 +1284,7 @@ class MatchRepository(
     }
   }
 
-  suspend fun fetchGround(matchId: String): GroundInsights? = withContext(Dispatchers.IO) {
+  suspend fun fetchGround(matchId: String, token: String? = null): GroundInsights? = withContext(Dispatchers.IO) {
     try {
       val connection = (URL(baseUrl.trimEnd('/') + "/api/matches/$matchId/ground").openConnection()
         as HttpURLConnection).apply {
@@ -1275,6 +1292,7 @@ class MatchRepository(
         connectTimeout = 15000
         readTimeout = 15000
         setRequestProperty("Accept", "application/json")
+        if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
       }
       val code = connection.responseCode
       val body = readBody(connection)

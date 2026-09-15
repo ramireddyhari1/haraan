@@ -10,6 +10,7 @@ use App\Models\FeedItem;
 use App\Models\HomeBlock;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use App\Services\AdTracker;
 use Illuminate\Http\Request;
 
 final class AppContentController extends Controller
@@ -37,10 +38,7 @@ final class AppContentController extends Controller
     public function ads(): JsonResponse
     {
         $ads = Ad::query()
-            ->where('is_active', true)
-            ->when(request('placement'), fn ($q, $p) => $q->where('placement', $p))
-            ->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))
-            ->where(fn ($q) => $q->whereNull('ends_at')->orWhere('ends_at', '>=', now()))
+            ->serving(request('placement') ? (string) request('placement') : null)
             ->orderBy('sort_order')
             ->get()
             ->map(fn (Ad $a) => [
@@ -51,11 +49,54 @@ final class AppContentController extends Controller
                 'image' => \App\Support\MediaUrl::resolve($a->image),
                 'logo' => \App\Support\MediaUrl::resolve($a->logo),
                 'cta_text' => $a->cta_text,
-                'cta_url' => $a->cta_url,
+                'cta_url' => $a->link_url,
                 'placement' => $a->placement,
             ]);
 
         return response()->json(['data' => $ads]);
+    }
+
+    /**
+     * POST /api/ads/{id}/impression and /click — the app reports what a viewer saw and tapped.
+     * Body: placement, match_id (optional). The viewer is the X-Install-Id header (hashed
+     * server-side) plus the signed-in user when there is one. Always 200 for a serving ad —
+     * `counted` says whether this call was new or a de-duplicated repeat.
+     */
+    public function trackImpression(Request $request, string $id, AdTracker $tracker): JsonResponse
+    {
+        return $this->track($request, $id, $tracker, 'impression');
+    }
+
+    public function trackClick(Request $request, string $id, AdTracker $tracker): JsonResponse
+    {
+        return $this->track($request, $id, $tracker, 'click');
+    }
+
+    private function track(Request $request, string $id, AdTracker $tracker, string $kind): JsonResponse
+    {
+        $data = $request->validate([
+            'placement' => ['required', 'string', 'max:40'],
+            'match_id' => ['nullable', 'integer'],
+        ]);
+
+        $ad = Ad::query()->find((int) $id);
+        if ($ad === null || ! $ad->isServing()) {
+            return response()->json(['error' => 'Ad not found'], 404);
+        }
+        // An event for a slot the ad isn't booked into is noise, not a sponsor's number.
+        if ($data['placement'] !== $ad->placement) {
+            return response()->json(['error' => 'This ad does not run in that placement.'], 422);
+        }
+
+        $user = $request->attributes->get('auth_user');
+        $userId = $user instanceof User ? (int) $user->id : null;
+        $viewer = (string) $request->header('X-Install-Id', '');
+
+        $counted = $kind === 'click'
+            ? $tracker->click($ad, $data['placement'], 'app', $viewer, $userId, $data['match_id'] ?? null)
+            : $tracker->impression($ad, $data['placement'], 'app', $viewer, $userId, $data['match_id'] ?? null);
+
+        return response()->json(['ok' => true, 'counted' => $counted]);
     }
 
     /** GET /api/home/feed — curated For You + Trending cards, grouped by section. */

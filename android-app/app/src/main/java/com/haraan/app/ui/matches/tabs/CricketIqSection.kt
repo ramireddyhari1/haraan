@@ -87,8 +87,9 @@ fun CricketIqSection(matchId: String, repo: MatchRepository) {
     var chosen by remember(matchId) { mutableStateOf<String?>(null) }
     var open by remember(matchId) { mutableStateOf(false) }
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(matchId, chosen) {
-        iq = repo.fetchIq(matchId, chosen)
+        iq = repo.fetchIq(matchId, chosen, com.haraan.app.data.TokenStore.getSignedInToken(ctx))
     }
 
     // Nothing to say before a ball has been faced, and an empty section is worse than no

@@ -85,6 +85,9 @@ class SportInsights
             'team' => $built['team'] ?? (object) [],
             'reads' => array_values(array_filter($built['reads'] ?? [])),
             'untracked' => $built['untracked'] ?? [],
+            // The same per-player figures the careers are built from — one calculator, so a
+            // player's line on this tab is the line their profile will add up.
+            'playerStats' => app(\App\Services\Stats\MatchPlayerStatsService::class)->forMatch($match),
         ];
     }
 
@@ -269,7 +272,7 @@ class SportInsights
         if ($first !== null && $first->match !== null) {
             $state = is_array($first->match->sport_state) ? $first->match->sport_state : [];
         }
-        $machine = new \App\Services\Scoring\KabaddiMachine($format, \App\Services\SportScoreEngine::kabaddiTracksMat($state));
+        $machine = new \App\Services\Scoring\KabaddiMachine($format, \App\Services\SportScoreEngine::kabaddiTracksMat($state), \App\Support\SportRules::version($state));
         $out = [];
         $period = 0;
         $segHome = 0;

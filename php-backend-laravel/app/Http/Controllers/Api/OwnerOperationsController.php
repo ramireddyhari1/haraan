@@ -20,11 +20,21 @@ final class OwnerOperationsController extends Controller
     ) {}
 
     /**
+     * The venue at {id}, but only if it is one of the caller's own branches (staff with a
+     * venue assignment see only those). Anything else is a 404 rather than a 403, so a
+     * partner probing ids learns nothing about venues that aren't theirs.
+     */
+    private function branch(Request $request, int $id): Venue
+    {
+        return $request->user()->branches()->findOrFail($id);
+    }
+
+    /**
      * Complete operational executive summary.
      */
     public function overview(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $this->operationsService->getOperationsOverview($venue);
 
         return response()->json([
@@ -38,7 +48,7 @@ final class OwnerOperationsController extends Controller
      */
     public function revenue(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $this->operationsService->getRevenueMetrics($venue);
 
         return response()->json([
@@ -52,7 +62,7 @@ final class OwnerOperationsController extends Controller
      */
     public function occupancy(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $matrix = $this->operationsService->getOccupancyHeatmap($venue);
 
         return response()->json([
@@ -68,7 +78,7 @@ final class OwnerOperationsController extends Controller
      */
     public function staff(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $this->operationsService->getStaffPerformance($venue);
 
         return response()->json([
@@ -82,7 +92,7 @@ final class OwnerOperationsController extends Controller
      */
     public function funnel(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $this->operationsService->getWhatsAppFunnel($venue);
 
         return response()->json([
@@ -96,7 +106,7 @@ final class OwnerOperationsController extends Controller
      */
     public function alerts(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $this->operationsService->getRevenueLeakageAlerts($venue);
 
         return response()->json([
@@ -110,7 +120,7 @@ final class OwnerOperationsController extends Controller
      */
     public function resolveAlert(Request $request, int $id, int $alertId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $alert = VenueOperationsAlert::where('venue_id', $venue->id)->findOrFail($alertId);
         $user = $request->user() ?: User::first();
 
@@ -132,7 +142,7 @@ final class OwnerOperationsController extends Controller
      */
     public function suggestions(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $data = $this->operationsService->getBusinessSuggestions($venue);
 
         return response()->json([
@@ -146,7 +156,7 @@ final class OwnerOperationsController extends Controller
      */
     public function applySuggestion(Request $request, int $id, int $suggestionId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $suggestion = VenueBusinessSuggestion::where('venue_id', $venue->id)->findOrFail($suggestionId);
         $user = $request->user() ?: User::first();
 
@@ -164,7 +174,7 @@ final class OwnerOperationsController extends Controller
      */
     public function dismissSuggestion(Request $request, int $id, int $suggestionId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $suggestion = VenueBusinessSuggestion::where('venue_id', $venue->id)->findOrFail($suggestionId);
 
         $suggestion->update(['status' => 'dismissed']);

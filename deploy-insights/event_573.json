@@ -1,0 +1,18 @@
+{
+  "_comment": "match_events row 573 (kabaddi match 49, seq 57), hard-deleted 2026-09-15 11:52:48 UTC by an accidental undo. Values copied from /root/haraan-db-before-tournaments-20260914-165613.sqlite. Preview first: php artisan matches:restore-event 49 --from-json=../deploy-insights/event_573.json  — only add --apply after the preview is checked.",
+  "id": 573,
+  "live_match_id": 49,
+  "sport": "kabaddi",
+  "sequence": 57,
+  "minute": 39,
+  "side": "home",
+  "kind": "point",
+  "player_name": "Suresh Naidu",
+  "player_id": null,
+  "related_name": null,
+  "detail": "raid",
+  "note": null,
+  "recorded_by": null,
+  "created_at": "2026-08-20 12:42:03",
+  "updated_at": "2026-08-20 12:42:03"
+}

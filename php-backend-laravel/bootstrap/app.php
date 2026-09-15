@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'auth.jwt'         => \App\Http\Middleware\EnsureJwtAuthenticated::class,
             'auth.jwt.optional' => \App\Http\Middleware\OptionalJwtAuthenticated::class,
             'auth.partner'     => \App\Http\Middleware\EnsurePartner::class,
+            'auth.admin'       => \App\Http\Middleware\EnsureSuperAdmin::class,
             'partner.can'      => \App\Http\Middleware\EnsurePartnerPermission::class,
             'erp.key'          => \App\Http\Middleware\EnsureErpPortalKey::class,
             'actionboard.profile' => \App\Http\Middleware\EnsureActionboardProfile::class,

@@ -140,6 +140,7 @@ fun MatchDetailsScreen(
     // doesn't feel oversized on compact / lower-density devices. Dial via the factor.
     val baseDensity = LocalDensity.current
     CompositionLocalProvider(
+        LocalMatchAds provides MatchAds(liveAds, matchId),
         LocalDensity provides Density(baseDensity.density * 0.90f, baseDensity.fontScale),
         // Brand typeface for every bare Text in the header + all four tabs (they only set
         // size/weight/colour, so the family is inherited from here).
@@ -150,16 +151,22 @@ fun MatchDetailsScreen(
         is MatchScreenState.Loading -> {
             MatchDetailSkeleton()
         }
-        is MatchScreenState.Error -> {
-            Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
-                Text("Error: ${state.message}", color = Color.Red, fontSize = 16.sp)
-            }
-        }
-        is MatchScreenState.Empty -> {
-            Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
-                Text("No match data available", color = Color.Gray, fontSize = 16.sp)
-            }
-        }
+        is MatchScreenState.Error -> MatchUnavailable(
+            title = "This match didn't load",
+            message = state.message,
+            onBack = onBack,
+            onRetry = {
+                detailScope.launch {
+                    viewModel.load(id = matchId, code = joinCode, token = com.haraan.app.data.TokenStore.getToken(loadContext))
+                }
+            },
+        )
+        is MatchScreenState.Empty -> MatchUnavailable(
+            title = "Nothing to show yet",
+            message = "This match has no score or line-ups recorded.",
+            onBack = onBack,
+            onRetry = null,
+        )
         // Each new sport gets its OWN detail screen. A volleyball set list, a basketball box
         // score, a kabaddi raid ledger and a tennis scoreboard grid are different objects —
         // one shared "generic match" layout would describe none of them properly. They do
@@ -429,12 +436,32 @@ fun MatchDetailsScreen(
     }
 }
 
+/**
+ * A match that couldn't be shown — said plainly, with a way out and, when it can help, a retry.
+ * Replaces a raw red "Error: …" string on a blank white screen.
+ */
 @Composable
-fun PlaceholderTab(name: String) {
+private fun MatchUnavailable(title: String, message: String, onBack: () -> Unit, onRetry: (() -> Unit)?) {
     Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xFFF8FAFC)),
-        contentAlignment = Alignment.Center
+        modifier = Modifier.fillMaxSize().background(CrexColors.Background).padding(24.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text("Coming Soon: $name", color = Color.Gray, fontSize = 18.sp)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, color = CrexColors.TextPrimary, fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                message,
+                color = CrexColors.TextSecondary,
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.material3.OutlinedButton(onClick = onBack) { Text("Go back") }
+                if (onRetry != null) {
+                    androidx.compose.material3.Button(onClick = onRetry) { Text("Try again") }
+                }
+            }
+        }
     }
 }

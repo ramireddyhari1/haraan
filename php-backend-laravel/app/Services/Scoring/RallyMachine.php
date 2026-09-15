@@ -221,7 +221,10 @@ final class RallyMachine
             $this->home = 0;
             $this->away = 0;
             $this->index++;
-            $this->timeouts = ['home' => 0, 'away' => 0];
+            // Volleyball's timeouts are per set; table tennis allows ONE per match.
+            if ($this->sport !== 'table_tennis') {
+                $this->timeouts = ['home' => 0, 'away' => 0];
+            }
             $this->rotation = ['home' => 1, 'away' => 1];
 
             if ($this->sport === 'table_tennis') {

@@ -31,6 +31,23 @@ final class SportRules
     public const SETS = 'sets';
     public const TENNIS = 'tennis';
 
+    /**
+     * The scoring-rules generation a match was created under.
+     *
+     * A rule fix that changes what a recorded event is WORTH (kabaddi's do-or-die, bonus
+     * revivals) must not rewrite results that were already final under the old reading, so
+     * such fixes apply from the version a match was created with. Version 1 is every match
+     * created before 2026-09-16; new matches are stamped CURRENT_VERSION. Fixes that don't
+     * move the score (a basketball foul count, a rejected impossible event) apply to all.
+     */
+    public const CURRENT_VERSION = 2;
+
+    /** @param array<string, mixed> $state */
+    public static function version(array $state): int
+    {
+        return max(1, (int) ($state['rules_version'] ?? 1));
+    }
+
     /** Every sport the ActionBoard can create AND score end to end. */
     public const SUPPORTED = [
         'cricket', 'football', 'badminton',

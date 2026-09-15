@@ -11,7 +11,6 @@ use App\Models\MatchEvent;
 use App\Models\User;
 use App\Services\MatchEventRecorder;
 use App\Services\MatchVerificationService;
-use App\Services\PlayerStatsService;
 use App\Services\ReputationService;
 use App\Services\VenueVerificationService;
 use App\Support\ActionboardXp;
@@ -68,7 +67,14 @@ final class MatchesController extends Controller
             // What ends the match, in that sport's own terms — overs, halves × length,
             // or games × points. Lives alongside the live score under `sport_state`
             // (the scorer's own writes array_merge over this, so it survives).
-            'sport_state'  => isset($v['format']) ? ['format' => $v['format']] : null,
+            // rules_version stamps the scoring-rules generation this match is played under,
+            // so later rule fixes never re-read a finished result (see SportRules::version).
+            // Cricket keeps its own pipeline and has no rules generation to stamp.
+            'sport_state'  => array_filter([
+                'format' => $v['format'] ?? null,
+                'rules_version' => strtolower((string) ($v['sport'] ?? 'cricket')) === 'cricket'
+                    ? null : \App\Support\SportRules::CURRENT_VERSION,
+            ], static fn ($x) => $x !== null) ?: null,
             // Short code for compact displays (hero monogram, live list); full name kept for headers.
             'home'         => self::shortName($v['teamA']),
             'away'         => self::shortName($v['teamB']),
@@ -284,25 +290,18 @@ final class MatchesController extends Controller
      */
     public function complete(Request $request, string $id): JsonResponse
     {
-        $match = LiveMatch::query()->find($id);
-        if ($match === null) {
-            return response()->json(['error' => 'Match not found'], 404);
+        // Only the creator (the scorer) ends a match. Anyone else finishing it would stop the
+        // live board, trigger verification and move careers for a game they aren't running.
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
         }
+        $match = $gate;
 
-        $match->update(['status' => 'Completed']);
-        PlayerStatsService::freezeMatchStats($match);
-        // Re-derive real career batting from the ball log (feeds the "new batter" card).
-        \App\Services\CareerBattingService::rebuildAll();
-
-        // The ground this was played at now has one more match in its record.
-        $ground = app(\App\Services\GroundResolver::class)->resolve($match);
-        if ($ground !== null) {
-            app(\App\Services\GroundInsightsService::class)->refresh($ground);
-        }
-        // Auto-verify Haraan turf matches; otherwise open the captain window.
-        VenueVerificationService::onMatchCompleted($match);
-
-        \App\Events\MatchUpdated::dispatch($match->id);
+        // Per-player stats, careers, rankings, the ground's record and verification all
+        // follow — after the response, so this tap returns at once. A result line cricket
+        // already wrote ("KDW won by 3 wickets") is kept rather than replaced by "Completed".
+        app(\App\Services\MatchCompletion::class)->finish($match);
 
         return response()->json(['message' => 'Match completed', 'data' => $match->fresh()]);
     }
@@ -312,6 +311,11 @@ final class MatchesController extends Controller
      */
     public function confirm(Request $request, string $id): JsonResponse
     {
+        $authUser = $request->attributes->get('auth_user');
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
         $match = LiveMatch::query()->find($id);
         if ($match === null) {
             return response()->json(['error' => 'Match not found'], 404);
@@ -323,6 +327,18 @@ final class MatchesController extends Controller
         $side = (string) $request->input('side');
         if (!in_array($side, ['home', 'away'], true)) {
             return response()->json(['error' => 'side must be home or away'], 422);
+        }
+
+        // A result confirmation is what turns a match into ranked XP, so it has to come from
+        // that side: its captain or vice-captain when the creator marked them, otherwise a
+        // registered player in that side's squad. Nobody confirms for the opposition.
+        if ($match->sideOf($authUser) !== $side) {
+            return response()->json(['error' => 'Only a player on that side can confirm its result.'], 403);
+        }
+        $leaders = $match->leadersOf($side);
+        if ($leaders !== [] && ! in_array((string) $authUser->player_id, array_map(
+            static fn (array $p): string => (string) ($p['id'] ?? ''), $leaders), true)) {
+            return response()->json(['error' => "Only this side's captain or vice-captain can confirm its result."], 403);
         }
 
         $match = MatchVerificationService::confirmByCaptain($match, $side);
@@ -397,6 +413,28 @@ final class MatchesController extends Controller
         $type = (string) $request->input('type', 'match_dispute');
         if (!ActionboardXp::isValidPenalty($type)) {
             return response()->json(['error' => 'Invalid penalty type'], 422);
+        }
+
+        // A dispute costs the target trust score, so it can only come from someone who was
+        // in the match, only about someone else who was, and only once per pair per match.
+        $isParticipant = (int) $match->user_id === (int) $authUser->id || $match->sideOf($authUser) !== null;
+        if (! $isParticipant && ! $authUser->isSuperAdmin()) {
+            return response()->json(['error' => 'Only players in this match can raise a dispute.'], 403);
+        }
+        if ((string) $authUser->player_id === $targetPlayerId) {
+            return response()->json(['error' => 'You cannot dispute yourself.'], 422);
+        }
+        $target = User::query()->where('player_id', $targetPlayerId)->first();
+        if ($target === null || $match->sideOf($target) === null) {
+            return response()->json(['error' => 'That player is not in this match.'], 422);
+        }
+        $already = \App\Models\ReputationEvent::query()
+            ->where('match_id', $match->id)
+            ->where('player_id', $targetPlayerId)
+            ->where('reported_by', $authUser->id)
+            ->exists();
+        if ($already) {
+            return response()->json(['error' => 'You have already disputed this player for this match.'], 409);
         }
 
         $event = ReputationService::penalize(
@@ -522,15 +560,60 @@ final class MatchesController extends Controller
             $explicitId = is_array($p) ? ($p['id'] ?? null) : null;
 
             if ($explicitId) {
-                $resolved[] = ['id' => $explicitId, 'name' => $name];
+                $entry = ['id' => $explicitId, 'name' => $name];
             } elseif ($registered->has($name)) {
-                $resolved[] = ['id' => $name, 'name' => $registered[$name]->name];
+                $entry = ['id' => $name, 'name' => $registered[$name]->name];
             } else {
-                $resolved[] = ['id' => null, 'name' => $name];
+                $entry = ['id' => null, 'name' => $name];
+            }
+
+            // Captain / vice-captain, as the create wizard marks them. Only stored when set,
+            // so squads without leaders keep their old two-key shape.
+            if (is_array($p)) {
+                if (filter_var($p['isCaptain'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                    $entry['isCaptain'] = true;
+                }
+                if (filter_var($p['isViceCaptain'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                    $entry['isViceCaptain'] = true;
+                }
+            }
+            $resolved[] = $entry;
+        }
+
+        return self::oneCaptainOneVice($resolved);
+    }
+
+    /**
+     * A side has at most one captain and one vice-captain, and they are different people.
+     * The first flag wins; later duplicates are dropped rather than rejecting the squad.
+     *
+     * @param  array<int, array<string, mixed>>  $squad
+     * @return array<int, array<string, mixed>>
+     */
+    private static function oneCaptainOneVice(array $squad): array
+    {
+        $captain = false;
+        $vice = false;
+        foreach ($squad as $i => $entry) {
+            if (! empty($entry['isCaptain'])) {
+                if ($captain) {
+                    unset($squad[$i]['isCaptain']);
+                } else {
+                    $captain = true;
+                    unset($squad[$i]['isViceCaptain']);
+                    continue;
+                }
+            }
+            if (! empty($squad[$i]['isViceCaptain'])) {
+                if ($vice) {
+                    unset($squad[$i]['isViceCaptain']);
+                } else {
+                    $vice = true;
+                }
             }
         }
 
-        return $resolved;
+        return array_values($squad);
     }
 
     /**
@@ -555,7 +638,7 @@ final class MatchesController extends Controller
     public function iq(Request $request, string $id): JsonResponse
     {
         $match = LiveMatch::query()->find($id);
-        if ($match === null) {
+        if ($match === null || ! $this->canRead($request, $match)) {
             return response()->json(['error' => 'Match not found'], 404);
         }
 
@@ -572,10 +655,10 @@ final class MatchesController extends Controller
         return response()->json(['available' => true] + $facts);
     }
 
-    public function ground(string $id): JsonResponse
+    public function ground(Request $request, string $id): JsonResponse
     {
         $match = LiveMatch::query()->find($id);
-        if ($match === null) {
+        if ($match === null || ! $this->canRead($request, $match)) {
             return response()->json(['error' => 'Match not found'], 404);
         }
 
@@ -724,9 +807,10 @@ final class MatchesController extends Controller
         }
 
         $status = strtolower((string) $match->status);
-        if ($status === 'completed') {
+        if ($status === 'completed' && (string) $request->input('type') !== 'undo') {
             return response()->json(['error' => 'Match is completed and locked.'], 422);
         }
+        $wasFinished = $match->isFinished();
 
         $type = (string) $request->input('type');
         if ($type === '') {
@@ -776,6 +860,21 @@ final class MatchesController extends Controller
             }
 
             $this->rebuildMatchState($match);
+
+            // Undoing the winning ball un-finishes the match; re-derive the result from the
+            // log that is left, and let careers follow either way.
+            $innings = (int) DB::table('match_actions')->where('match_id', $match->id)
+                ->where('action_type', 'start')->count();
+            self::maybeCompleteMatch($match, max(1, $innings));
+            $completion = app(\App\Services\MatchCompletion::class);
+            if (LiveMatch::statusMeansFinished($match->status)) {
+                $match->save();
+                $completion->refreshAfterCorrection($match);
+            } elseif ($wasFinished) {
+                $completion->reopen($match);
+            } else {
+                $match->save();
+            }
         } else {
             DB::table('match_actions')->insert([
                 'match_id' => $match->id,
@@ -793,7 +892,13 @@ final class MatchesController extends Controller
             self::applyAction($match, $type, $request->all());
             // End the match the moment the chase is won / the 2nd innings is over.
             self::maybeCompleteMatch($match, $currentInnings);
-            $match->save();
+            if (! $wasFinished && LiveMatch::statusMeansFinished($match->status)) {
+                // The same completion path the Finish button takes: stats, careers,
+                // rankings, the ground's record and verification all follow.
+                app(\App\Services\MatchCompletion::class)->finish($match, (string) $match->status);
+            } else {
+                $match->save();
+            }
         }
 
         // Write the broadcast line for the ball just recorded.
@@ -920,10 +1025,13 @@ final class MatchesController extends Controller
     /** Count wickets that fell in a given innings from the action log. */
     private static function countInningsWickets(LiveMatch $match, int $innings): int
     {
-        return (int) DB::table('match_actions')
+        // Retired hurt is recorded as a wicket action but is not a wicket.
+        return DB::table('match_actions')
             ->where('match_id', $match->id)
             ->where('innings', $innings)
             ->where('action_type', 'wicket')
+            ->pluck('payload')
+            ->filter(fn ($p) => \App\Support\CricketRules::countsAsWicket(json_decode((string) $p, true) ?: []))
             ->count();
     }
 
@@ -1110,7 +1218,7 @@ final class MatchesController extends Controller
             if ($isLegal) {
                 $bowler['overs'] = self::addBallToOvers((string) ($bowler['overs'] ?? '0.0'));
             }
-            if ($wicket) {
+            if ($wicket && \App\Support\CricketRules::bowlerCredited($payload)) {
                 $bowler['wickets'] += 1;
             }
             $bowler['figures'] = $bowler['wickets'] . '-' . $bowler['runs'];
@@ -1143,7 +1251,10 @@ final class MatchesController extends Controller
         if ($wicket) {
             $newBatsmanId = $payload['new_batsman_id'] ?? null;
             $newBatsmanName = self::findPlayerName($match, $newBatsmanId);
-            $batters[0] = ['id' => $newBatsmanId, 'name' => $newBatsmanName, 'runs' => 0, 'balls' => 0];
+            // A run-out at the bowler's end removes the non-striker; the new batter takes
+            // that end and the striker stays on strike.
+            $slot = \App\Support\CricketRules::nonStrikerOut($payload) && count($batters) >= 2 ? 1 : 0;
+            $batters[$slot] = ['id' => $newBatsmanId, 'name' => $newBatsmanName, 'runs' => 0, 'balls' => 0];
         }
 
         if ($isLegal && !empty($overSummary)) {
@@ -1305,6 +1416,7 @@ final class MatchesController extends Controller
         }
 
         $data = $request->validate([
+            'client_event_id' => ['nullable', 'string', 'max:64'],
             'kind' => ['required', 'string', 'max:20'],
             'side' => ['nullable', 'in:home,away'],
             'minute' => ['nullable', 'integer', 'min:0', 'max:200'],
@@ -1315,7 +1427,21 @@ final class MatchesController extends Controller
             'note' => ['nullable', 'string', 'max:200'],
         ]);
 
+        // A retry of a tap that already landed is answered from the log, not refused as a
+        // duplicate or re-checked against a state it has itself changed.
+        $isRetry = ! empty($data['client_event_id']) && MatchEvent::query()
+            ->withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)
+            ->where('live_match_id', $match->id)
+            ->where('client_event_id', $data['client_event_id'])
+            ->exists();
+
+        if (! $isRetry && ($reason = app(\App\Services\Scoring\EventGuard::class)->refusal($match, $data)) !== null) {
+            return response()->json(['error' => $reason, 'code' => 'rule_violation'], 422);
+        }
+
         $recorder->record($match, $data, $request->attributes->get('auth_user'));
+        // A correction to a finished match's log moves its stats and careers too.
+        app(\App\Services\MatchCompletion::class)->refreshAfterCorrection($match->fresh() ?? $match);
 
         return response()->json($this->eventState($match->fresh(), $recorder), 201);
     }
@@ -1337,11 +1463,72 @@ final class MatchesController extends Controller
         // A scorer's feed row undoes exactly the event it shows.
         $sequence = $request->filled('sequence') ? (int) $request->input('sequence') : null;
 
-        if ($recorder->undoLast($match, $side, $sequence) === null) {
-            return response()->json(['error' => 'Nothing to undo'], 422);
+        // "Undo the last one" can't tell a second press from the same press delivered twice
+        // — that is how a real kabaddi raid point was lost on 2026-09-15. Naming the event
+        // (sequence) is always safe and idempotent; an unnamed undo right after another is
+        // refused, and the scorer can simply tap again.
+        if ($sequence === null && $recorder->recentlyUndone($match)) {
+            return response()->json([
+                'error' => 'An undo was just applied. Tap undo again if you meant to remove another event.',
+                'code' => 'undo_debounced',
+            ], 409);
         }
 
+        $authUser = $request->attributes->get('auth_user');
+        if ($recorder->undoLast($match, $side, $sequence, $authUser instanceof User ? $authUser : null) === null) {
+            return response()->json(['error' => 'Nothing to undo'], 422);
+        }
+        app(\App\Services\MatchCompletion::class)->refreshAfterCorrection($match->fresh() ?? $match);
+
         return response()->json($this->eventState($match->fresh(), $recorder));
+    }
+
+    /**
+     * Undone events a scorer can put back, newest first.
+     */
+    public function undoneEvents(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
+    {
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
+        }
+
+        return response()->json(['data' => $recorder->undoneEvents($gate)->map(fn (MatchEvent $e) => [
+            'id' => $e->id,
+            'sequence' => $e->sequence,
+            'kind' => $e->kind,
+            'side' => $e->side,
+            'player_name' => $e->player_name,
+            'detail' => $e->detail,
+            'minute' => $e->minute,
+            'headline' => $e->headline(),
+            'undone_at' => $e->undone_at?->toIso8601String(),
+        ])->values()]);
+    }
+
+    /**
+     * Restore an undone event to its original place in the log. Creator only.
+     */
+    public function restoreEvent(Request $request, string $id, string $eventId, MatchEventRecorder $recorder): JsonResponse
+    {
+        $gate = $this->gateScorer($request, $id);
+        if ($gate instanceof JsonResponse) {
+            return $gate;
+        }
+
+        $event = MatchEvent::query()->withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)
+            ->where('live_match_id', $gate->id)
+            ->whereKey((int) $eventId)
+            ->first();
+
+        if ($event === null || ! $event->isUndone()) {
+            return response()->json(['error' => 'That event is not undone.'], 422);
+        }
+
+        $recorder->restore($gate, $event);
+        app(\App\Services\MatchCompletion::class)->refreshAfterCorrection($gate->fresh() ?? $gate);
+
+        return response()->json($this->eventState($gate->fresh(), $recorder));
     }
 
     /**
@@ -1365,6 +1552,12 @@ final class MatchesController extends Controller
         }
 
         $current = is_array($match->sport_state) ? $match->sport_state : [];
+        // The rules generation is the server's to stamp, never the client's.
+        unset($incoming['rules_version']);
+        // `rules` is merged key by key: turning on mat scoring must not wipe another rule.
+        if (is_array($incoming['rules'] ?? null) && is_array($current['rules'] ?? null)) {
+            $incoming['rules'] = array_merge($current['rules'], $incoming['rules']);
+        }
         $match->forceFill(['sport_state' => array_merge($current, $incoming)])->save();
 
         // The format and the scoring rules change what the log MEANS (a best-of, mat
@@ -1380,11 +1573,11 @@ final class MatchesController extends Controller
     }
 
     /** Read the timeline. Same visibility rules as the match itself. */
-    public function events(string $id, MatchEventRecorder $recorder): JsonResponse
+    public function events(Request $request, string $id, MatchEventRecorder $recorder): JsonResponse
     {
         $match = LiveMatch::query()->find($id);
 
-        if ($match === null) {
+        if ($match === null || ! $this->canRead($request, $match)) {
             return response()->json(['error' => 'Match not found'], 404);
         }
 
@@ -1420,6 +1613,25 @@ final class MatchesController extends Controller
     }
 
     /** @return array<string, mixed> */
+    /**
+     * May this request read the match? The same rule as the detail endpoint: anyone for a
+     * public match; for a private one, the creator, a registered squad member, an admin,
+     * or whoever presents the match's share code. A refusal is reported as 404 so a
+     * private match's existence isn't confirmed to someone probing ids.
+     */
+    private function canRead(Request $request, LiveMatch $match): bool
+    {
+        $viewer = $request->attributes->get('auth_user');
+        if ($match->isVisibleTo($viewer instanceof User ? $viewer : null)) {
+            return true;
+        }
+
+        $code = strtoupper(trim((string) $request->query('code', '')));
+
+        return $code !== '' && $match->join_code !== null
+            && hash_equals(strtoupper((string) $match->join_code), $code);
+    }
+
     private function eventState(LiveMatch $match, MatchEventRecorder $recorder): array
     {
         return [

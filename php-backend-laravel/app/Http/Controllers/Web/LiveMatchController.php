@@ -218,13 +218,13 @@ class LiveMatchController extends Controller
             $updateData['timeline'] = $timeline;
         }
 
+        $wasFinished = $match->isFinished();
         $match->update($updateData);
 
         if (in_array(strtolower($validated['status']), ['completed', 'finished'])) {
-            \App\Services\PlayerStatsService::freezeMatchStats($match);
-            // Hand off into ActionBoard verification: auto-verify Haraan turf
-            // matches, else open the captain-confirmation window.
-            \App\Services\VenueVerificationService::onMatchCompleted($match);
+            // One completion path for every surface: real per-player stats, careers,
+            // rankings, the ground's record and (first time only) verification.
+            app(\App\Services\MatchCompletion::class)->finish($match, null, ! $wasFinished);
         }
 
         if ($request->wantsJson()) {

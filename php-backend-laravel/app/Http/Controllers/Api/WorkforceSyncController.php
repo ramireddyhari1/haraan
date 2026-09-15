@@ -9,6 +9,7 @@ use App\Models\Hrms\EmployeeProfile;
 use App\Models\Hrms\EmployeeTask;
 use App\Services\Hrms\PunchIngestionService;
 use App\Services\Hrms\WorkforceAuditService;
+use App\Support\WorkforceAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -51,6 +52,11 @@ final class WorkforceSyncController extends Controller
 
         if (! $employee) {
             return response()->json(['error' => 'Employee profile not found.'], 404);
+        }
+
+        // Punching in as someone else is attendance fraud unless you manage them.
+        if (! WorkforceAccess::canActForEmployee($user, $employee)) {
+            return response()->json(['error' => 'You cannot record attendance for this employee.'], 403);
         }
 
         $idempotencyKey = $request->header('X-Idempotency-Key')
@@ -126,6 +132,9 @@ final class WorkforceSyncController extends Controller
                     if (! $employee) {
                         throw new \RuntimeException('Employee profile not resolved for punch event.');
                     }
+                    if (! WorkforceAccess::canActForEmployee($request->user(), $employee)) {
+                        throw new \RuntimeException('Not permitted to record attendance for this employee.');
+                    }
 
                     $punchResult = $this->ingestionService->ingestPunch(
                         $employee,
@@ -147,6 +156,10 @@ final class WorkforceSyncController extends Controller
                 } elseif ($type === 'task_completion') {
                     $taskId = (int) ($payload['task_id'] ?? 0);
                     $task = EmployeeTask::find($taskId);
+
+                    if ($task && ! WorkforceAccess::canCompleteTask($request->user(), $task)) {
+                        throw new \RuntimeException('Not permitted to complete this task.');
+                    }
 
                     if ($task) {
                         $task->status = 'completed';

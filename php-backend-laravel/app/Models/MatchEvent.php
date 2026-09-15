@@ -54,7 +54,24 @@ class MatchEvent extends Model
         'live_match_id', 'sport', 'sequence', 'minute', 'side', 'kind',
         'player_name', 'player_id', 'related_name',
         'home_score', 'away_score', 'detail', 'note', 'recorded_by',
+        'client_event_id',
     ];
+
+    /** Name of the global scope that hides undone events from every read. */
+    public const ACTIVE_SCOPE = 'active';
+
+    /**
+     * An undone event is hidden, not deleted — see the 2026_09_16 migration. Every query
+     * through the model sees only the live log, so the score engine, the feeds, insights
+     * and player stats never count an undone point. Recovery and audit reads opt out with
+     * `withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)`.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope(self::ACTIVE_SCOPE, static function (Builder $query): void {
+            $query->whereNull($query->getModel()->getTable() . '.undone_at');
+        });
+    }
 
     protected function casts(): array
     {
@@ -63,7 +80,13 @@ class MatchEvent extends Model
             'minute' => 'integer',
             'home_score' => 'integer',
             'away_score' => 'integer',
+            'undone_at' => 'datetime',
         ];
+    }
+
+    public function isUndone(): bool
+    {
+        return $this->undone_at !== null;
     }
 
     public function match(): BelongsTo

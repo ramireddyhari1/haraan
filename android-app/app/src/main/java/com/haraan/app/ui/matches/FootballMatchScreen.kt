@@ -671,6 +671,7 @@ private fun HeroClock(label: String, isLive: Boolean) {
 @Composable
 private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats: () -> Unit) {
     val stats = football.stats
+    val matchAd = LocalMatchAds.current.ads.firstOrNull()
     // The three headline stats to preview here (the full set lives in the Stats tab).
     val previewRows = stats?.takeIf { it.hasAny }?.groups
         ?.flatMap { it.rows }
@@ -778,6 +779,9 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
                 HairlineDivider()
                 InfoRow("Status", if (state.isLive) "In play" else state.status.ifBlank { "Full time" })
             }
+        }
+        matchAd?.let { ad ->
+            item { MatchAdBar(ad) }
         }
     }
 }

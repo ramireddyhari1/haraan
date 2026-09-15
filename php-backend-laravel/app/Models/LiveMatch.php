@@ -28,6 +28,14 @@ class LiveMatch extends Model
      */
     protected static function booted(): void
     {
+        // Whatever writes a finishing status — a result line, "Completed", the web console —
+        // the match is stamped finished. Clearing it is deliberate only (MatchCompletion::reopen).
+        static::saving(function (self $match): void {
+            if ($match->completed_at === null && self::statusMeansFinished($match->status)) {
+                $match->completed_at = now();
+            }
+        });
+
         static::deleting(function (self $match): void {
             DB::transaction(function () use ($match): void {
                 DB::table('match_xp_ledger')->where('match_id', $match->id)->delete();
@@ -67,6 +75,8 @@ class LiveMatch extends Model
         'featured_at' => 'datetime',
         // Future kick-off time when the creator scheduled the match; NULL = play now.
         'scheduled_at' => 'datetime',
+        // When the match finished, by whichever path ended it. The single "is it over" fact.
+        'completed_at' => 'datetime',
         // "Looking for players" — open-to-join discovery + how many more are wanted.
         'open_to_join' => 'boolean',
         'slots_needed' => 'integer',
@@ -122,6 +132,67 @@ class LiveMatch extends Model
     public function scopeByJoinCode(Builder $query, string $code): Builder
     {
         return $query->where('join_code', strtoupper(trim($code)));
+    }
+
+    /**
+     * Matches that are over. Use this, never `lower(status) = 'completed'`: cricket ends a
+     * chase by writing its result into `status`, so a status test misses every cricket match
+     * that finished on the field.
+     */
+    public function scopeFinished(Builder $query): Builder
+    {
+        return $query->whereNotNull('completed_at');
+    }
+
+    public function isFinished(): bool
+    {
+        return $this->completed_at !== null;
+    }
+
+    /**
+     * Does a status string describe a finished match — "Completed", or a result line such as
+     * "KDW won by 3 wickets" / "Match tied"?
+     */
+    public static function statusMeansFinished(?string $status): bool
+    {
+        $s = strtolower(trim((string) $status));
+
+        return in_array($s, ['completed', 'finished', 'match tied'], true)
+            || str_contains($s, ' won by ');
+    }
+
+    /**
+     * Which side a registered player is on in this match — 'home', 'away', or null.
+     */
+    public function sideOf(?User $player): ?string
+    {
+        $pid = trim((string) ($player?->player_id ?? ''));
+        if ($pid === '') {
+            return null;
+        }
+        foreach (['home' => $this->home_squad, 'away' => $this->away_squad] as $side => $squad) {
+            foreach ((array) $squad as $p) {
+                if (is_array($p) && (string) ($p['id'] ?? '') === $pid) {
+                    return $side;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Squad entries flagged captain (or vice-captain) for a side. Empty when the creator
+     * didn't mark anyone.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function leadersOf(string $side, bool $includeVice = true): array
+    {
+        $squad = (array) ($side === 'home' ? $this->home_squad : $this->away_squad);
+
+        return array_values(array_filter($squad, static fn ($p): bool => is_array($p)
+            && (! empty($p['isCaptain']) || ($includeVice && ! empty($p['isViceCaptain'])))));
     }
 
     /** Is this viewer one of the registered players in either squad? */

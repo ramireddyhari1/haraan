@@ -30,11 +30,21 @@ final class WhatsAppDeskController extends Controller
     ) {}
 
     /**
+     * The venue at {id}, but only if it is one of the caller's own branches (staff with a
+     * venue assignment see only those). Anything else is a 404 rather than a 403, so a
+     * partner probing ids learns nothing about venues that aren't theirs.
+     */
+    private function branch(Request $request, int $id): Venue
+    {
+        return $request->user()->branches()->findOrFail($id);
+    }
+
+    /**
      * Desk Dashboard metrics summary.
      */
     public function dashboard(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $metrics = $this->deskService->getDashboardMetrics($venue);
 
         return response()->json([
@@ -48,7 +58,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function index(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $status = $request->query('status'); // all, needs_action, holds, converted, archived
         $search = $request->query('q');
         $page = (int) $request->query('page', 1);
@@ -71,7 +81,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function show(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)
             ->where('id', $convId)
             ->with(['assignedStaff', 'tags', 'activeBooking.venueCourt', 'latestIntent.resolvedCourt'])
@@ -112,9 +122,9 @@ final class WhatsAppDeskController extends Controller
      */
     public function sendMessage(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user() ?: User::first();
+        $user = $request->user();
 
         $validated = $request->validate([
             'body'         => 'required|string|max:4000',
@@ -142,7 +152,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function extractIntent(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
 
         $textToAnalyze = $request->input('text') ?: $conversation->last_message_preview ?: 'Can I book a court today at 6pm?';
@@ -160,7 +170,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function holdSlot(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
         $user = $request->user();
 
@@ -203,7 +213,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function releaseHold(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
         $user = $request->user();
 
@@ -220,7 +230,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function sendPaymentLink(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
         $user = $request->user();
 
@@ -230,8 +240,9 @@ final class WhatsAppDeskController extends Controller
             ]);
         }
 
-        $booking = Booking::findOrFail($conversation->active_booking_id);
-        $amount = (float) ($request->input('amount') ?: $booking->total_amount);
+        $booking = Booking::where('venue_id', $venue->id)->findOrFail($conversation->active_booking_id);
+        $validated = $request->validate(['amount' => 'nullable|numeric|min:1|max:1000000']);
+        $amount = (float) ($validated['amount'] ?? $booking->total_amount);
 
         $link = $this->reservationService->sendPaymentLink($venue, $conversation, $booking, $amount, $user);
 
@@ -247,7 +258,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function markPaid(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
         $user = $request->user();
 
@@ -257,8 +268,8 @@ final class WhatsAppDeskController extends Controller
             ]);
         }
 
-        $booking = Booking::findOrFail($conversation->active_booking_id);
-        $method = $request->input('method', 'cash'); // cash or upi
+        $booking = Booking::where('venue_id', $venue->id)->findOrFail($conversation->active_booking_id);
+        $method = $request->validate(['method' => 'nullable|in:cash,upi'])['method'] ?? 'cash';
 
         $this->reservationService->markPaidManual($venue, $conversation, $booking, $method, $user);
 
@@ -278,9 +289,9 @@ final class WhatsAppDeskController extends Controller
      */
     public function addNote(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user() ?: User::first();
+        $user = $request->user();
 
         $validated = $request->validate(['note' => 'required|string|max:1000']);
 
@@ -302,10 +313,22 @@ final class WhatsAppDeskController extends Controller
      */
     public function assignStaff(Request $request, int $id, int $convId): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
 
         $validated = $request->validate(['staff_id' => 'nullable|integer|exists:users,id']);
+
+        // Only someone on this business's own team: the owner or one of their desk staff.
+        if (! empty($validated['staff_id'])) {
+            $ownerId = (int) $request->user()->effectivePartnerId();
+            $onTeam = User::query()
+                ->whereKey($validated['staff_id'])
+                ->where(fn ($q) => $q->where('id', $ownerId)->orWhere('parent_partner_id', $ownerId))
+                ->exists();
+            if (! $onTeam) {
+                throw ValidationException::withMessages(['staff_id' => ['That person is not on this venue’s team.']]);
+            }
+        }
 
         $conversation->update(['assigned_staff_id' => $validated['staff_id'] ?? null]);
 
@@ -321,7 +344,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function quickReplies(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
 
         $replies = WhatsAppQuickReply::where(function ($q) use ($venue) {
             $q->whereNull('venue_id')->orWhere('venue_id', $venue->id);
@@ -354,7 +377,7 @@ final class WhatsAppDeskController extends Controller
      */
     public function availability(Request $request, int $id): JsonResponse
     {
-        $venue = Venue::findOrFail($id);
+        $venue = $this->branch($request, $id);
         $dateStr = $request->query('date', now()->toDateString());
         $date = Carbon::parse($dateStr);
 

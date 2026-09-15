@@ -222,6 +222,13 @@ fun BoardLineups(state: MatchUiState) {
 /** Match facts every sport's Summary can end with — venue, format, status. */
 @Composable
 fun BoardMatchInfo(state: MatchUiState) {
+    // The live-board sponsor, when there is one, closes the summary on every board sport.
+    LocalMatchAds.current.ads.firstOrNull()?.let { ad ->
+        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+            MatchAdBar(ad)
+            Spacer(Modifier.height(20.dp))
+        }
+    }
     val rows = buildList {
         // A booked Haraan court gets its own row above the rest, because it is the one line
         // here that is a CLAIM rather than a detail: the venue itself stands behind this

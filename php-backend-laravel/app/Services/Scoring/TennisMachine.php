@@ -50,6 +50,15 @@ final class TennisMachine
     private int $tiebreakTo;
     private bool $finalSetTiebreak;
 
+    /** No-ad scoring: at deuce the next point takes the game (one deciding point). */
+    private bool $noAd;
+
+    /** The deciding set is played as a single match tie-break to 10 instead of a full set. */
+    private bool $finalSetSuperTiebreak;
+
+    /** The tie-break in progress is that match tie-break. */
+    public bool $superTiebreak = false;
+
     /** @param array<string, mixed> $format */
     public function __construct(array $format = [])
     {
@@ -58,6 +67,8 @@ final class TennisMachine
         $this->tiebreakTo = max(1, (int) ($format['tiebreakTo'] ?? 7));
         // A final set can be played as an advantage set; the default is the modern tie-break.
         $this->finalSetTiebreak = (bool) ($format['finalSetTiebreak'] ?? true);
+        $this->noAd = (bool) ($format['noAd'] ?? false);
+        $this->finalSetSuperTiebreak = strtolower((string) ($format['finalSet'] ?? '')) === 'super_tiebreak';
 
         $blank = [
             'aces' => 0, 'double_faults' => 0, 'winners' => 0, 'errors' => 0,
@@ -121,6 +132,11 @@ final class TennisMachine
         $s = $server === 'home' ? $this->pointsHome : $this->pointsAway;
         $r = $server === 'home' ? $this->pointsAway : $this->pointsHome;
 
+        // No-ad: the deciding point at deuce is a break point too.
+        if ($this->noAd && $r >= 3 && $s >= 3) {
+            return 1;
+        }
+
         return ($r >= 3 && $r > $s) ? $r - $s : 0;
     }
 
@@ -183,7 +199,8 @@ final class TennisMachine
     {
         $h = $this->pointsHome;
         $a = $this->pointsAway;
-        if (max($h, $a) < 4 || abs($h - $a) < 2) {
+        $decidingPointWon = $this->noAd && max($h, $a) >= 4 && min($h, $a) >= 3;
+        if (max($h, $a) < 4 || (abs($h - $a) < 2 && ! $decidingPointWon)) {
             return null;
         }
 
@@ -223,9 +240,11 @@ final class TennisMachine
     {
         $h = $this->pointsHome;
         $a = $this->pointsAway;
-        if (max($h, $a) < $this->tiebreakTo || abs($h - $a) < 2) {
+        $to = $this->superTiebreak ? 10 : $this->tiebreakTo;
+        if (max($h, $a) < $to || abs($h - $a) < 2) {
             return null;
         }
+        $this->superTiebreak = false;
 
         $winner = $h > $a ? 'home' : 'away';
         $loserPoints = min($h, $a);
@@ -252,6 +271,15 @@ final class TennisMachine
         $this->gamesHome > $this->gamesAway ? $this->setsHome++ : $this->setsAway++;
         $this->gamesHome = 0;
         $this->gamesAway = 0;
+
+        // One set all (or two all): the decider is a single match tie-break when the format
+        // says so. It is scored as a set won 1–0 with the tie-break points alongside.
+        $half = intdiv($this->bestOf, 2);
+        if ($this->finalSetSuperTiebreak && ! $this->decided() && $this->setsHome === $half && $this->setsAway === $half) {
+            $this->tiebreak = true;
+            $this->superTiebreak = true;
+            $this->tiebreakFirst = $this->server;
+        }
     }
 
     private function tiebreakApplies(): bool
@@ -317,6 +345,8 @@ final class TennisMachine
             'raw_points' => [$this->pointsHome, $this->pointsAway],
             'serving' => $server,
             'tiebreak' => $this->tiebreak,
+            'super_tiebreak' => $this->superTiebreak,
+            'no_ad' => $this->noAd,
             'deuce' => ! $this->tiebreak && $this->pointsHome >= 3 && $this->pointsHome === $this->pointsAway,
             'advantage' => $advantage,
             'break_points' => $this->breakPoints(),

@@ -33,7 +33,22 @@ class AdsTable
                     ->color('success'),
                 TextColumn::make('placement')
                     ->badge()
-                    ->color('info'),
+                    ->formatStateUsing(fn ($state) => \App\Models\Ad::PLACEMENTS[$state] ?? "{$state} (unused)")
+                    ->color(fn ($state) => array_key_exists((string) $state, \App\Models\Ad::PLACEMENTS) ? 'info' : 'danger'),
+                // De-duplicated per viewer — see AdTracker. These are the numbers to quote.
+                TextColumn::make('impressions_count')
+                    ->label('Impressions')
+                    ->numeric()
+                    ->sortable(),
+                TextColumn::make('clicks_count')
+                    ->label('Clicks')
+                    ->numeric()
+                    ->sortable(),
+                TextColumn::make('ctr')
+                    ->label('CTR')
+                    ->state(fn ($record) => $record->ctr())
+                    ->formatStateUsing(fn ($state) => $state === null ? '—' : number_format((float) $state, 2) . '%')
+                    ->placeholder('—'),
                 IconColumn::make('is_active')
                     ->label('Live')
                     ->boolean(),
@@ -48,7 +63,7 @@ class AdsTable
             ->defaultSort('sort_order')
             ->filters([
                 \Filament\Tables\Filters\SelectFilter::make('placement')
-                    ->options(['events' => 'Events feed', 'gamehub' => 'GameHub feed']),
+                    ->options(\App\Models\Ad::PLACEMENTS),
                 \Filament\Tables\Filters\TernaryFilter::make('is_active')->label('Live'),
             ])
             ->recordActions([

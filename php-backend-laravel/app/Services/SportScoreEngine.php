@@ -67,7 +67,7 @@ class SportScoreEngine
 
         return match (SportRules::family($sport)) {
             SportRules::POINTS => $sport === 'kabaddi'
-                ? $this->kabaddi($events, $format, self::kabaddiTracksMat($state))
+                ? $this->kabaddi($events, $format, self::kabaddiTracksMat($state), SportRules::version($state))
                 : $this->basketball($sport, $events, $format),
             SportRules::SETS => $this->sets($sport, $events, $format),
             SportRules::TENNIS => $this->tennis($events, $format),
@@ -154,7 +154,11 @@ class SportScoreEngine
                 $periodHome = 0;
                 $periodAway = 0;
                 $period++;
-                $teamFouls = ['home' => 0, 'away' => 0];
+                // Team fouls reset each quarter — but every overtime is an extension of the
+                // fourth quarter, so fouls carry into it (FIBA art. 41).
+                if ($period <= $regulation) {
+                    $teamFouls = ['home' => 0, 'away' => 0];
+                }
                 // Timeouts reset at half time and for each overtime.
                 if ($period === intdiv($regulation, 2) + 1 || $period > $regulation) {
                     $timeouts = ['home' => 0, 'away' => 0];
@@ -288,9 +292,9 @@ class SportScoreEngine
      *
      * @param  Collection<int, MatchEvent>  $events
      */
-    private function kabaddi(Collection $events, array $format, bool $trackMat): array
+    private function kabaddi(Collection $events, array $format, bool $trackMat, int $rulesVersion = 1): array
     {
-        $machine = new KabaddiMachine($format, $trackMat);
+        $machine = new KabaddiMachine($format, $trackMat, $rulesVersion);
         $period = 1;
         $periods = [];
         $periodHome = 0;

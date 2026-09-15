@@ -1027,7 +1027,6 @@ internal fun MainAppContainer(
                       category = event.category,
                       imageUrl = event.imageUrl,
                       description = eventDescription(event.category, event.title, event.venue),
-                      bookedThisWeek = eventBookedThisWeek(event.id),
                       infoNotes = listOf(
                         "Valid ID required at entry.",
                         "Standard safety guidelines apply.",
@@ -1564,7 +1563,6 @@ private fun eventDescription(category: String, title: String, venue: String): St
 
 // Stable, varied "booked this week" count derived from the event id (so it's not a
 // flat literal on every page). Swap for a real popularity metric when wired up.
-private fun eventBookedThisWeek(id: String): Int = 40 + (kotlin.math.abs(id.hashCode()) % 160)
 
 @Composable
 private fun EventListCard(
@@ -10910,7 +10908,7 @@ fun SportsMiniBadge(emoji: String, label: String, isDarkBackground: Boolean = tr
 //  Grounds / Live Matches / Players results as you type. Venues are passed in;
 //  live matches are fetched lazily; players are a curated seed for now.
 // ─────────────────────────────────────────────
-private data class PlayerHit(val name: String, val role: String, val team: String)
+private data class PlayerHit(val name: String, val subtitle: String)
 
 @Composable
 private fun GameHubSearchOverlay(
@@ -10932,26 +10930,33 @@ private fun GameHubSearchOverlay(
   }
 
   val trending = listOf("Box cricket", "Turf near me", "Badminton court", "Football", "Cricket nets")
-  val players = remember {
-    listOf(
-      PlayerHit("Virat Kohli", "Batter", "RCB"),
-      PlayerHit("Rohit Sharma", "Batter", "MI"),
-      PlayerHit("Jasprit Bumrah", "Bowler", "MI"),
-      PlayerHit("Hardik Pandya", "All-rounder", "MI"),
-      PlayerHit("Ravindra Jadeja", "All-rounder", "CSK"),
-      PlayerHit("Suryakumar Yadav", "Batter", "MI"),
-      PlayerHit("Mohammed Siraj", "Bowler", "RCB"),
-      PlayerHit("Ruturaj Gaikwad", "Batter", "CSK"),
-    )
-  }
 
   val q = query.trim()
+  // Real Haraan players from /api/players/find — this list used to be eight hard-coded
+  // IPL stars, so a search for a teammate could only ever surface Virat Kohli.
+  val searchContext = androidx.compose.ui.platform.LocalContext.current
+  val players by produceState(initialValue = emptyList<PlayerHit>(), q) {
+    if (q.length < 2) {
+      value = emptyList()
+      return@produceState
+    }
+    kotlinx.coroutines.delay(300) // let typing settle before asking the server
+    val token = com.haraan.app.data.TokenStore.getSignedInToken(searchContext)
+    value = if (token == null) emptyList() else runCatching {
+      com.haraan.app.data.PlayerRepository().search(token, q).map { p ->
+        PlayerHit(
+          name = p.name,
+          subtitle = listOfNotNull(p.username?.let { "@$it" }, p.district?.takeIf { it.isNotBlank() })
+            .joinToString(" • ").ifBlank { p.playerId },
+        )
+      }
+    }.getOrDefault(emptyList())
+  }
   val groundHits = if (q.isBlank()) emptyList()
     else venues.filter { it.title.contains(q, true) || it.location.contains(q, true) || it.category.contains(q, true) }.take(6)
   val matchHits = if (q.isBlank()) emptyList()
     else matches.filter { it.team1.contains(q, true) || it.team2.contains(q, true) || it.venue.contains(q, true) || it.competition.contains(q, true) }.take(6)
-  val playerHits = if (q.isBlank()) emptyList()
-    else players.filter { it.name.contains(q, true) || it.team.contains(q, true) || it.role.contains(q, true) }.take(6)
+  val playerHits = if (q.isBlank()) emptyList() else players.take(6)
 
   val addRecent = { term: String ->
     val t = term.trim()
@@ -11142,7 +11147,7 @@ private fun PlayerResultRow(p: PlayerHit, accent: Color, onClick: () -> Unit) {
     }
     Column(Modifier.weight(1f)) {
       Text(p.name, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text("${p.role} • ${p.team}", color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1)
+      Text(p.subtitle, color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1)
     }
   }
 }

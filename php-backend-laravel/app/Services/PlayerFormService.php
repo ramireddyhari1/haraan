@@ -62,7 +62,7 @@ final class PlayerFormService
     private function build(string $id): array
     {
         $matches = LiveMatch::query()
-            ->whereRaw('lower(status) = ?', ['completed'])
+            ->finished()
             ->where(function ($q) use ($id): void {
                 $q->where('home_squad', 'like', '%"' . $id . '"%')
                   ->orWhere('away_squad', 'like', '%"' . $id . '"%');

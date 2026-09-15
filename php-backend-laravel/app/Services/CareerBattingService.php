@@ -7,6 +7,7 @@ use App\Models\PlayerCareerBatting;
 use App\Models\PlayerCareerBowling;
 use App\Models\PlayerCareerFielding;
 use App\Models\User;
+use App\Support\CricketRules;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -25,182 +26,46 @@ use Illuminate\Support\Facades\DB;
  */
 class CareerBattingService
 {
-    /** Full rebuild: re-aggregate every completed match and rewrite career + rankings. */
-    public static function rebuildAll(): int
+    /**
+     * Full rebuild for a backfill (`php artisan stats:rebuild`): re-derive every finished
+     * match's player rows, then every career from them, then the rankings.
+     *
+     * Never call this on a request path — it is proportional to every match ever played.
+     * Finishing a match goes through {@see MatchCompletion}, which touches only that match
+     * and its players.
+     *
+     * @return int players whose careers were refreshed
+     */
+    public static function rebuildAll(?callable $progress = null): int
     {
-        $careerBat = [];   // id => batting aggregate (also rows for player_career_batting)
-        $careerBowl = [];  // id => ['wickets','balls','runs']
-        $careerField = []; // id => ['catches','run_outs','stumpings']
-        $matchesOf = [];   // id => [matchId => true]  (for a real match count)
+        $stats = app(\App\Services\Stats\MatchPlayerStatsService::class);
+        $careers = app(\App\Services\Stats\PlayerCareerService::class);
 
-        $matches = LiveMatch::query()
-            ->whereRaw('lower(status) = ?', ['completed'])
-            ->get();
-
-        foreach ($matches as $match) {
-            foreach (self::replayInnings($match) as $inn) {
-                foreach ($inn['batting'] as $pid => $t) {
-                    if ($t['balls'] <= 0 && !$t['out']) {
-                        continue; // didn't actually bat
-                    }
-                    if (!isset($careerBat[$pid])) {
-                        $careerBat[$pid] = [
-                            'player_id' => $pid, 'player_name' => $t['name'],
-                            'innings' => 0, 'runs' => 0, 'balls' => 0,
-                            'fours' => 0, 'sixes' => 0, 'outs' => 0, 'high_score' => 0,
-                            'thirties' => 0, 'fifties' => 0, 'hundreds' => 0,
-                            'zones' => [],
-                        ];
-                    }
-                    $c = &$careerBat[$pid];
-                    $c['player_name'] = $t['name'] ?: $c['player_name'];
-                    $c['innings']    += 1;
-                    $c['runs']       += $t['runs'];
-                    $c['balls']      += $t['balls'];
-                    $c['fours']      += $t['fours'];
-                    $c['sixes']      += $t['sixes'];
-                    $c['outs']       += $t['out'] ? 1 : 0;
-                    $c['high_score']  = max($c['high_score'], $t['runs']);
-                    // Milestones belong to the INNINGS, so they have to be counted here:
-                    // no total can say afterwards whether 150 runs was one hundred or
-                    // five thirties. Each innings counts once, at its best band.
-                    foreach ($t['zones'] ?? [] as $z => $tallyZone) {
-                        $c['zones'][$z] ??= ['shots' => 0, 'fours' => 0, 'sixes' => 0, 'runs' => 0];
-                        $c['zones'][$z]['shots'] += $tallyZone['shots'];
-                        $c['zones'][$z]['fours'] += $tallyZone['fours'];
-                        $c['zones'][$z]['sixes'] += $tallyZone['sixes'];
-                        $c['zones'][$z]['runs'] += $tallyZone['runs'];
-                    }
-                    if ($t['runs'] >= 100) {
-                        $c['hundreds'] += 1;
-                    } elseif ($t['runs'] >= 50) {
-                        $c['fifties'] += 1;
-                    } elseif ($t['runs'] >= 30) {
-                        $c['thirties'] += 1;
-                    }
-                    unset($c);
-                    $matchesOf[$pid][$match->id] = true;
+        LiveMatch::query()->finished()->orderBy('id')->chunkById(100, function ($matches) use ($stats, $progress): void {
+            foreach ($matches as $match) {
+                $stats->rebuild($match);
+                if ($progress !== null) {
+                    $progress($match);
                 }
-                foreach ($inn['bowling'] as $pid => $b) {
-                    if ($b['balls'] <= 0 && $b['wickets'] <= 0) {
-                        continue;
-                    }
-                    if (!isset($careerBowl[$pid])) {
-                        $careerBowl[$pid] = [
-                            'player_id' => $pid, 'player_name' => $b['name'] ?? $pid,
-                            'innings' => 0, 'wickets' => 0, 'balls' => 0, 'runs' => 0,
-                            'best_wickets' => 0, 'best_runs' => 0,
-                            'three_fers' => 0, 'five_fers' => 0, 'maidens' => 0,
-                        ];
-                    }
-                    $c = &$careerBowl[$pid];
-                    $c['innings'] += 1;
-                    $c['wickets'] += $b['wickets'];
-                    $c['balls']   += $b['balls'];
-                    $c['runs']    += $b['runs'];
-                    $c['maidens'] += $b['maidens'] ?? 0;
-                    if ($b['wickets'] >= 5) {
-                        $c['five_fers'] += 1;
-                    } elseif ($b['wickets'] >= 3) {
-                        $c['three_fers'] += 1;
-                    }
-                    // Best figures read the way a scorebook does: more wickets wins, and
-                    // for the same haul the cheaper spell wins.
-                    if ($b['wickets'] > $c['best_wickets']
-                        || ($b['wickets'] > 0 && $b['wickets'] === $c['best_wickets'] && $b['runs'] < $c['best_runs'])
-                    ) {
-                        $c['best_wickets'] = $b['wickets'];
-                        $c['best_runs'] = $b['runs'];
-                    }
-                    unset($c);
-                    $matchesOf[$pid][$match->id] = true;
-                }
-                foreach ($inn['fielding'] ?? [] as $pid => $f) {
-                    if (!isset($careerField[$pid])) {
-                        $careerField[$pid] = [
-                            'player_id' => $pid, 'player_name' => $f['name'] ?? $pid,
-                            'catches' => 0, 'run_outs' => 0, 'stumpings' => 0,
-                        ];
-                    }
-                    $careerField[$pid]['catches'] += $f['catches'];
-                    $careerField[$pid]['run_outs'] += $f['run_outs'];
-                    $careerField[$pid]['stumpings'] += $f['stumpings'];
-                    // A fielder who only caught is still in the match; without this a
-                    // pure fielding appearance would not count as a match played.
-                    $matchesOf[$pid][$match->id] = true;
-                }
-            }
-        }
-
-        // 1. Batting detail table.
-        DB::transaction(function () use ($careerBat) {
-            PlayerCareerBatting::query()->delete();
-            foreach (array_chunk($careerBat, 200, true) as $chunk) {
-                PlayerCareerBatting::insert(array_map(function ($row) {
-                    // Sorted by zone so the wheel is drawn in ground order, and encoded
-                    // here because insert() bypasses the model's casts.
-                    $zones = $row['zones'] ?? [];
-                    ksort($zones);
-                    $row['zones'] = json_encode(array_map(
-                        fn ($z, $t) => ['zone' => (int) $z] + $t,
-                        array_keys($zones),
-                        array_values($zones),
-                    ));
-                    $row['created_at'] = now();
-                    $row['updated_at'] = now();
-                    return $row;
-                }, array_values($chunk)));
             }
         });
 
-        // 1b. Bowling detail table - the other half of the same replay.
-        DB::transaction(function () use ($careerBowl) {
-            PlayerCareerBowling::query()->delete();
-            foreach (array_chunk($careerBowl, 200, true) as $chunk) {
-                PlayerCareerBowling::insert(array_map(function ($row) {
-                    $row['created_at'] = now();
-                    $row['updated_at'] = now();
-                    return $row;
-                }, array_values($chunk)));
-            }
-        });
+        // Careers of players who no longer have any finished match must also be cleared.
+        $ids = array_values(array_unique(array_merge(
+            $careers->allPlayerIds(),
+            PlayerCareerBatting::query()->pluck('player_id')->all(),
+            PlayerCareerBowling::query()->pluck('player_id')->all(),
+            PlayerCareerFielding::query()->pluck('player_id')->all(),
+            \App\Models\PlayerSportCareer::query()->distinct()->pluck('player_id')->all(),
+            // Accounts still carrying career figures from the retired mt_rand generator.
+            User::query()->whereNotNull('player_id')
+                ->where(fn ($q) => $q->where('career_runs', '>', 0)->orWhere('career_wickets', '>', 0)->orWhere('career_matches', '>', 0))
+                ->pluck('player_id')->all(),
+        )));
+        $careers->refresh($ids);
+        app(\App\Services\Stats\LeaderboardRankService::class)->recalculate();
 
-        // 1c. Fielding detail table.
-        DB::transaction(function () use ($careerField) {
-            PlayerCareerFielding::query()->delete();
-            foreach (array_chunk($careerField, 200, true) as $chunk) {
-                PlayerCareerFielding::insert(array_map(function ($row) {
-                    $row['created_at'] = now();
-                    $row['updated_at'] = now();
-                    return $row;
-                }, array_values($chunk)));
-            }
-        });
-
-        // 2. Real aggregate totals onto users.career_* (what leaderboard/profile read).
-        $allIds = array_unique(array_merge(array_keys($careerBat), array_keys($careerBowl)));
-        foreach ($allIds as $pid) {
-            $user = User::where('player_id', $pid)->first();
-            if (!$user) {
-                continue; // guests / players without an account carry no career columns
-            }
-            $bat = $careerBat[$pid] ?? ['runs' => 0, 'balls' => 0];
-            $bowl = $careerBowl[$pid] ?? ['wickets' => 0, 'balls' => 0, 'runs' => 0];
-            $ballsBowled = (int) $bowl['balls'];
-            $user->update([
-                'career_matches'        => count($matchesOf[$pid] ?? []),
-                'career_runs'           => (int) $bat['runs'],
-                'career_balls'          => (int) $bat['balls'],
-                'career_wickets'        => (int) $bowl['wickets'],
-                'career_runs_conceded'  => (int) $bowl['runs'],
-                'career_overs_bowled'   => intdiv($ballsBowled, 6) . '.' . ($ballsBowled % 6),
-            ]);
-        }
-
-        // 3. Re-rank on the now-real career_runs.
-        PlayerStatsService::recalculateLeaderboardRankings();
-
-        return count($careerBat);
+        return count($ids);
     }
 
     /** The current real career batting line for one player id, or null if none yet. */
@@ -220,6 +85,16 @@ class CareerBattingService
      *
      * @return array<int, array{batting: array<string, array>, bowling: array<string, array>}>
      */
+    /**
+     * One match's replay, by innings — the per-match stats calculator's cricket source.
+     *
+     * @return array<int, array{batting: array<string, array>, bowling: array<string, array>, fielding: array<string, array>}>
+     */
+    public static function replayMatch(LiveMatch $match): array
+    {
+        return self::replayInnings($match);
+    }
+
     private static function replayInnings(LiveMatch $match): array
     {
         $idName = self::squadIdNameMap($match);
@@ -361,7 +236,7 @@ class CareerBattingService
                 if ($isLegal) {
                     $bowl[$bowlerId]['balls'] += 1;
                 }
-                if ($wicket) {
+                if ($wicket && CricketRules::bowlerCredited($p)) {
                     $bowl[$bowlerId]['wickets'] += 1;
                 }
             }
@@ -373,8 +248,10 @@ class CareerBattingService
             }
 
             if ($wicket) {
-                if ($strikerId !== '' && isset($bat[$strikerId])) {
-                    $bat[$strikerId]['out'] = true;
+                $nonStrikerOut = CricketRules::nonStrikerOut($p);
+                $outId = $nonStrikerOut ? $nonStrikerId : $strikerId;
+                if ($outId !== '' && isset($bat[$outId]) && CricketRules::countsAsWicket($p)) {
+                    $bat[$outId]['out'] = true;
                 }
                 // Who actually made the dismissal. Absent on every ball scored before
                 // the scorer asked the question, and on a bowled/LBW, which belong to
@@ -390,8 +267,13 @@ class CareerBattingService
                     };
                     $field[$fielderId][$key] += 1;
                 }
-                $strikerId = self::normalizeId($p['new_batsman_id'] ?? null);
-                $ensureBat($bat, $strikerId);
+                $incoming = self::normalizeId($p['new_batsman_id'] ?? null);
+                if ($nonStrikerOut) {
+                    $nonStrikerId = $incoming;
+                } else {
+                    $strikerId = $incoming;
+                }
+                $ensureBat($bat, $incoming);
             }
 
             if ($isLegal) {

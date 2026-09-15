@@ -40,14 +40,35 @@ class MatchEventRecorder
      */
     public function record(LiveMatch $match, array $attributes, ?User $by = null): MatchEvent
     {
-        $event = DB::transaction(function () use ($match, $attributes, $by): MatchEvent {
+        $clientId = isset($attributes['client_event_id']) ? trim((string) $attributes['client_event_id']) : '';
+        unset($attributes['client_event_id']);
+
+        // A retried tap (same client_event_id) returns the event it already created —
+        // including one since undone — instead of scoring it a second time.
+        if ($clientId !== '') {
+            $existing = MatchEvent::query()->withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)
+                ->where('live_match_id', $match->id)
+                ->where('client_event_id', $clientId)
+                ->first();
+            if ($existing !== null) {
+                return $existing;
+            }
+        }
+
+        $event = DB::transaction(function () use ($match, $attributes, $by, $clientId): MatchEvent {
             // Lock the match row so two scorers on two phones can't claim the same
             // sequence number.
             $locked = LiveMatch::query()->lockForUpdate()->find($match->id) ?? $match;
 
-            $next = (int) MatchEvent::query()
+            // Undone events keep their sequence (so a restore slots back where it was),
+            // which means the next number has to count them too.
+            $next = (int) MatchEvent::query()->withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)
                 ->where('live_match_id', $locked->id)
                 ->max('sequence') + 1;
+
+            if ($clientId !== '') {
+                $attributes['client_event_id'] = $clientId;
+            }
 
             $event = MatchEvent::query()->create(array_merge([
                 'live_match_id' => $locked->id,
@@ -90,14 +111,76 @@ class MatchEventRecorder
         $match->forceFill(['status' => 'Live'])->save();
     }
 
-    /** Remove an event (a mis-tap) and re-derive the score. */
-    public function undo(LiveMatch $match, MatchEvent $event): void
+    /**
+     * How close together two undos on one match must be for the second to be treated as a
+     * duplicate delivery of the first. A human correcting two mis-taps takes longer than
+     * this; a tap delivered twice does not.
+     */
+    public const UNDO_DEBOUNCE_SECONDS = 3;
+
+    /**
+     * Undo an event (a mis-tap) and re-derive the score.
+     *
+     * The event is hidden, never deleted: `undone_at` takes it out of every read, and
+     * {@see restore()} puts it back exactly where it was.
+     */
+    public function undo(LiveMatch $match, MatchEvent $event, ?User $by = null): void
     {
-        DB::transaction(function () use ($match, $event): void {
-            $event->delete();
+        DB::transaction(function () use ($match, $event, $by): void {
+            $event->forceFill(['undone_at' => now(), 'undone_by' => $by?->id])->save();
             $this->resync($match->fresh() ?? $match);
         });
+        \Illuminate\Support\Facades\Log::info('match_event.undone', [
+            'match_id' => $match->id, 'event_id' => $event->id, 'sequence' => $event->sequence,
+            'kind' => $event->kind, 'side' => $event->side, 'by' => $by?->id,
+        ]);
         \App\Events\MatchUpdated::dispatch($match->id);
+    }
+
+    /**
+     * Put an undone event back. It keeps its original sequence, so it returns to the exact
+     * place in the log it was taken from, and the score is replayed around it.
+     */
+    public function restore(LiveMatch $match, MatchEvent $event): MatchEvent
+    {
+        if ((int) $event->live_match_id !== (int) $match->id || ! $event->isUndone()) {
+            throw new \InvalidArgumentException('Only an undone event of this match can be restored.');
+        }
+
+        DB::transaction(function () use ($match, $event): void {
+            $event->forceFill(['undone_at' => null, 'undone_by' => null])->save();
+            $this->resync($match->fresh() ?? $match);
+        });
+        \Illuminate\Support\Facades\Log::info('match_event.restored', [
+            'match_id' => $match->id, 'event_id' => $event->id, 'sequence' => $event->sequence,
+        ]);
+        \App\Events\MatchUpdated::dispatch($match->id);
+
+        return $event->refresh();
+    }
+
+    /** Undone events of a match, newest undo first — what a scorer's "restore" list shows. */
+    public function undoneEvents(LiveMatch $match, int $limit = 20)
+    {
+        return MatchEvent::query()->withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)
+            ->where('live_match_id', $match->id)
+            ->whereNotNull('undone_at')
+            ->orderByDesc('undone_at')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Was there an undo on this match within the debounce window? An undo that doesn't name
+     * its event (by sequence) can't tell a second press from a second delivery of the first
+     * press, so it is refused while one is this recent.
+     */
+    public function recentlyUndone(LiveMatch $match): bool
+    {
+        return MatchEvent::query()->withoutGlobalScope(MatchEvent::ACTIVE_SCOPE)
+            ->where('live_match_id', $match->id)
+            ->where('undone_at', '>=', now()->subSeconds(self::UNDO_DEBOUNCE_SECONDS))
+            ->exists();
     }
 
     /**
@@ -108,7 +191,7 @@ class MatchEventRecorder
      * mis-tap on one team shouldn't reach across and delete the other team's goal
      * just because it happened to be typed last.
      */
-    public function undoLast(LiveMatch $match, ?string $side = null, ?int $sequence = null): ?MatchEvent
+    public function undoLast(LiveMatch $match, ?string $side = null, ?int $sequence = null, ?User $by = null): ?MatchEvent
     {
         $query = MatchEvent::query()
             ->where('live_match_id', $match->id)
@@ -133,7 +216,7 @@ class MatchEventRecorder
             return null;
         }
 
-        $this->undo($match, $last);
+        $this->undo($match, $last, $by);
 
         return $last;
     }

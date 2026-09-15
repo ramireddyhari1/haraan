@@ -38,6 +38,8 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/home', 'home');
     Route::get('/events', 'events');
     Route::get('/events/{id}', 'eventDetail');
+    // Sponsored-slot click-through: counted, then redirected to the advertiser.
+    Route::get('/go/ad/{id}', 'adClick')->whereNumber('id')->middleware('throttle:120,1')->name('site.ad.click');
     Route::get('/host/{slug}', 'hostProfile')->name('site.host');
     Route::middleware('auth')->post('/host/{slug}/follow', 'followHost')->name('site.host.follow');
     Route::get('/gamehub', 'gamehub')->name('site.gamehub');

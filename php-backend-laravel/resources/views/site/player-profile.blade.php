@@ -30,10 +30,17 @@
     $hasAnyRank = filled($player->rank_district) || filled($player->rank_state) || filled($player->rank_country);
 
     // Recent form scores
-    $recentStats = \App\Models\PlayerMatchStat::where('player_id', $player->player_id)
-        ->orderBy('id', 'desc')
+    // Last five finished cricket matches this player batted in — real rows, rebuilt from the
+    // ball log (the old table held invented runs and is cleared by the 2026-09-16 migration).
+    $recentStats = \App\Models\PlayerMatchStat::query()
+        ->join('live_matches', 'live_matches.id', '=', 'player_match_stats.match_id')
+        ->whereNotNull('live_matches.completed_at')
+        ->where('player_match_stats.player_id', $player->player_id)
+        ->where('player_match_stats.sport', 'cricket')
+        ->where('player_match_stats.balls', '>', 0)
+        ->orderByDesc('live_matches.completed_at')
         ->limit(5)
-        ->get();
+        ->get(['player_match_stats.runs', 'player_match_stats.balls']);
 
     // Calculate dynamic SVG performance chart coordinates (Oldest to Newest)
     $inningsRuns = [];

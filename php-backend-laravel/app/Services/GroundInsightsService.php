@@ -35,7 +35,7 @@ final class GroundInsightsService
     {
         $matches = LiveMatch::query()
             ->where('ground_id', $ground->id)
-            ->whereRaw('lower(status) = ?', ['completed'])
+            ->finished()
             ->get();
 
         $firstInningsTotals = [];

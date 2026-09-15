@@ -810,30 +810,99 @@ final class PublicWebController extends Controller
      * payload the app consumes — score + live crease + replayed innings cards +
      * commentary — via LiveMatchController::detailPayload().
      */
+    /**
+     * The match at {id}, if this visitor may see it — the same rule as the app's detail
+     * endpoint. A private match is a 404 to anyone who isn't its creator or in its squads,
+     * rather than a page anyone could open by counting ids.
+     */
+    private function visibleMatch(string $id): LiveMatch
+    {
+        $match = LiveMatch::query()->find((int) $id);
+        $viewer = auth()->user();
+        abort_if($match === null || ! $match->isVisibleTo($viewer instanceof User ? $viewer : null), 404);
+
+        return $match;
+    }
+
     private function matchDetailFor(string $id): array
     {
-        $match = LiveMatch::findOrFail($id);
+        $match = $this->visibleMatch($id);
         $viewer = auth()->user();
         return app(\App\Http\Controllers\Api\LiveMatchController::class)->detailPayload($match, $viewer);
     }
 
-    public function actionBoardMatchLive(string $id): View
+    private function isCricket(LiveMatch $match): bool
     {
+        return strtolower((string) ($match->sport ?: 'cricket')) === 'cricket';
+    }
+
+    /**
+     * Every sport that isn't cricket gets its own page — the app's per-sport detail screen —
+     * instead of cricket's overs, scorecard and last-ball hero with every number blank.
+     */
+    private function sportMatchView(LiveMatch $match, string $tab): View
+    {
+        $tabs = ['summary', 'timeline', 'players', 'insights'];
+        $tab = in_array($tab, $tabs, true) ? $tab : 'summary';
+        $viewer = auth()->user();
+
+        return view('site.sport-match', [
+            'title' => ($match->home_full ?: $match->home) . ' vs ' . ($match->away_full ?: $match->away),
+            'match' => $match,
+            'detail' => app(\App\Http\Controllers\Api\LiveMatchController::class)->detailPayload($match, $viewer instanceof User ? $viewer : null),
+            'players' => $tab === 'players' || $tab === 'summary'
+                ? app(\App\Services\Stats\MatchPlayerStatsService::class)->forMatch($match)
+                : [],
+            'insights' => $tab === 'insights' ? app(\App\Services\Insights\SportInsights::class)->for($match) : null,
+            'matchAd' => $this->matchAd($match),
+            'tab' => $tab,
+            'tabs' => $tabs,
+        ]);
+    }
+
+    /** The live-board sponsor slot on the web, counted as an impression when shown. */
+    private function matchAd(LiveMatch $match): ?Ad
+    {
+        return $this->usableAd('match_live');
+    }
+
+    public function actionBoardMatchLive(Request $request, string $id): View
+    {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return $this->sportMatchView($match, (string) $request->query('tab', 'summary'));
+        }
+
         return view('site.actionboard-match-live', ['title' => 'Live Match', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'live']);
     }
 
-    public function actionBoardMatchInfo(string $id): View
+    public function actionBoardMatchInfo(string $id): View|\Illuminate\Http\RedirectResponse
     {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'summary']);
+        }
+
         return view('site.actionboard-match-info', ['title' => 'Match Info', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'info']);
     }
 
-    public function actionBoardMatchCommentary(string $id): View
+    public function actionBoardMatchCommentary(string $id): View|\Illuminate\Http\RedirectResponse
     {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'timeline']);
+        }
+
         return view('site.actionboard-match-commentary', ['title' => 'Commentary', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'commentary']);
     }
 
-    public function actionBoardMatchScorecard(string $id): View
+    public function actionBoardMatchScorecard(string $id): View|\Illuminate\Http\RedirectResponse
     {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'players']);
+        }
+
         return view('site.actionboard-match-scorecard', ['title' => 'Match Scorecard', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'scorecard']);
     }
 
@@ -1091,14 +1160,29 @@ final class PublicWebController extends Controller
     /*  ActionBoard match JSON (polled by the live scoreboards)            */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * The match as the app's detail endpoint serves it. This used to return the raw row —
+     * any match, private ones included, with its share code — to anyone who asked.
+     */
     public function actionBoardMatchJson(string $id): JsonResponse
     {
-        return response()->json(LiveMatch::findOrFail($id));
+        return response()->json($this->matchDetailFor($id));
     }
 
+    /**
+     * Public matches only, newest first, and never the columns that unlock a private match
+     * or identify its players. The raw table dump that stood here leaked every join code.
+     */
     public function actionBoardMatchesJson(): JsonResponse
     {
-        return response()->json(LiveMatch::orderBy('created_at', 'desc')->get());
+        $matches = LiveMatch::query()
+            ->where('is_private', false)
+            ->orderByDesc('created_at')
+            ->limit(100)
+            ->get(['id', 'title', 'sport', 'home', 'away', 'home_full', 'away_full', 'home_score',
+                'away_score', 'score_text', 'status', 'venue', 'competition', 'created_at', 'completed_at']);
+
+        return response()->json($matches);
     }
 
     /* ------------------------------------------------------------------ */
@@ -1490,10 +1574,7 @@ final class PublicWebController extends Controller
     private function usableAd(string $placement): ?Ad
     {
         $ad = Ad::query()
-            ->where('placement', $placement)
-            ->where('is_active', true)
-            ->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))
-            ->where(fn ($q) => $q->whereNull('ends_at')->orWhere('ends_at', '>=', now()))
+            ->serving($placement)
             ->orderBy('sort_order')
             ->first();
 
@@ -1505,7 +1586,36 @@ final class PublicWebController extends Controller
         $hasImage = trim((string) $ad->image_url) !== '';
         $hasLink  = trim((string) $ad->link_url) !== '';
 
-        return ($hasImage || $hasLink) ? $ad : null;
+        if (! ($hasImage || $hasLink)) {
+            return null;
+        }
+
+        // The page render IS the impression on the web — one per session per 30 minutes.
+        app(\App\Services\AdTracker::class)->impression(
+            $ad, $placement, 'web', request()->hasSession() ? request()->session()->getId() : null, auth()->id(),
+        );
+
+        return $ad;
+    }
+
+    /**
+     * GET /go/ad/{id}?p=placement — a web ad click: count it, then send the viewer on to the
+     * advertiser. Only an http(s) destination on a serving ad is followed.
+     */
+    public function adClick(\Illuminate\Http\Request $request, string $id): \Illuminate\Http\RedirectResponse
+    {
+        $ad = Ad::query()->find((int) $id);
+        $target = $ad?->link_url;
+        if ($ad === null || $target === null || ! $ad->isServing()) {
+            return redirect('/events');
+        }
+
+        app(\App\Services\AdTracker::class)->click(
+            $ad, (string) $ad->placement, 'web',
+            $request->hasSession() ? $request->session()->getId() : null, auth()->id(),
+        );
+
+        return redirect()->away($target);
     }
 
     /**

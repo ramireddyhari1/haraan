@@ -17,7 +17,6 @@ data class EventDetail(
 	val category: String,
 	val imageUrl: String,
 	val description: String = "",
-	val bookedThisWeek: Int = 0,
 	val infoNotes: List<String> = emptyList(),
 	val organizer: String = "",
 	val organizerSubtitle: String = "",

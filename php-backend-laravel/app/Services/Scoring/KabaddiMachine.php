@@ -54,9 +54,19 @@ final class KabaddiMachine
 
     private int $size;
 
+    /**
+     * Version 2 rules (matches created from 2026-09-16, with the mat tracked):
+     *  - an EMPTY do-or-die raid is a failed do-or-die: the raider is out and the defence
+     *    scores one, exactly as if the raider had been tackled;
+     *  - the BONUS line is live only with six or more defenders on the mat;
+     *  - a bonus point is not a touch point, so it revives no one.
+     */
+    private bool $v2;
+
     /** @param array<string, mixed> $format */
-    public function __construct(array $format = [], private bool $trackMat = true)
+    public function __construct(array $format = [], private bool $trackMat = true, int $rulesVersion = 1)
     {
+        $this->v2 = $rulesVersion >= 2 && $trackMat;
         $this->size = max(1, (int) ($format['players'] ?? 7));
         $this->onMat = ['home' => $this->size, 'away' => $this->size];
         $blank = [
@@ -118,6 +128,10 @@ final class KabaddiMachine
         // An empty raid scores nothing but is still a raid: it moves the turn and the streak.
         if ($kind === 'raid') {
             $dod = $this->isDoOrDie($side);
+            if ($dod && $this->v2) {
+                // A do-or-die raid that scores nothing loses the raider.
+                return $this->tackle(self::other($side), true, '');
+            }
             $this->beginRaid($side, $dod);
             $this->stats[$side]['empty_raids']++;
             $this->emptyStreak[$side]++;
@@ -173,8 +187,13 @@ final class KabaddiMachine
         if ($this->trackMat) {
             $touches = min($touches, $this->onMat[$defender]);
         }
-        $points = $touches + ($bonus ? 1 : 0);
         $tags = [];
+        // The bonus line only counts against a defence of six or more.
+        if ($bonus && $this->v2 && $this->onMat[$defender] < 6) {
+            $bonus = false;
+            $tags[] = 'bonus_disallowed';
+        }
+        $points = $touches + ($bonus ? 1 : 0);
 
         if ($points > 0) {
             $this->stats[$raider]['successful_raids']++;
@@ -205,7 +224,8 @@ final class KabaddiMachine
 
         if ($this->trackMat) {
             $this->knockOut($defender, $touches);
-            $this->revive($raider, $points);
+            // Touch points revive teammates; under v2 a bonus point does not.
+            $this->revive($raider, $this->v2 ? $touches : $points);
             if ($this->onMat[$defender] === 0 && $touches > 0) {
                 $value += $this->allOut($defender);
                 $allOut = $defender;

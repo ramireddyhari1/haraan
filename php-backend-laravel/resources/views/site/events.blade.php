@@ -54,7 +54,8 @@
          to a bundled sample ad, which on the web would be inventing an advertiser. An
          empty slot is honest; a fake one isn't. --}}
     @if($eventsAd)
-        <a class="mad" @if($eventsAd->link_url) href="{{ $eventsAd->link_url }}" rel="sponsored noopener" @endif>
+        {{-- Through /go/ad so the click is counted before the viewer leaves for the advertiser. --}}
+        <a class="mad" @if($eventsAd->link_url) href="{{ route('site.ad.click', $eventsAd->id) }}" rel="sponsored noopener" @endif>
             @if($eventsAd->image_url)
                 <img class="mad__img" src="{{ $eventsAd->image_url }}" alt="" fetchpriority="high">
             @endif

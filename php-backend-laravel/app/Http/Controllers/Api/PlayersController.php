@@ -402,7 +402,7 @@ final class PlayersController extends Controller
         if ($pid !== '') {
             $rows = LiveMatch::query()
                 ->selectRaw('lower(sport) as sport, count(*) as played')
-                ->whereRaw('lower(status) = ?', ['completed'])
+                ->finished()
                 ->where(function ($q) use ($pid): void {
                     $q->where('home_squad', 'like', '%"' . $pid . '"%')
                       ->orWhere('away_squad', 'like', '%"' . $pid . '"%');
@@ -673,52 +673,146 @@ final class PlayersController extends Controller
     /** Every other sport: what its own scorer actually records, and nothing more. */
     private function otherSportCareer(User $user, string $sport, int $matches): array
     {
-        $label = ucfirst($sport);
-        $headline = [['label' => 'Matches', 'value' => (string) $matches]];
-        $groups = [];
+        $label = ucwords(str_replace('_', ' ', $sport));
+        $pid = (string) $user->player_id;
+        $career = $pid === '' ? null : \App\Models\PlayerSportCareer::query()
+            ->where('player_id', $pid)->where('sport', $sport)->first();
 
-        if ($sport === 'football') {
-            $tally = function (string $kind) use ($user): int {
-                return (int) MatchEvent::query()
-                    ->where('player_id', $user->id)
-                    ->where('kind', $kind)
-                    ->count();
-            };
-            // Own goals move the opposition's score; they are not this player's tally.
-            $goals = $tally(MatchEvent::GOAL);
-            $assists = $tally(MatchEvent::ASSIST);
-            $headline[] = ['label' => 'Goals', 'value' => (string) $goals];
-            $headline[] = ['label' => 'Assists', 'value' => (string) $assists];
-            $groups[] = [
-                'title' => 'Attacking',
-                'lead' => ['label' => 'Goals', 'value' => (string) $goals],
-                'visual' => ($goals + $assists) > 0 ? [
-                    'kind' => 'split',
-                    'title' => 'Goal involvements',
-                    'caption' => null,
-                    'segments' => [
-                        ['label' => 'Goals', 'value' => $goals],
-                        ['label' => 'Assists', 'value' => $assists],
+        // The rollup is the truth once a match in this sport has finished; before that the
+        // squad count is all there is.
+        $matches = max($matches, (int) ($career?->matches ?? 0));
+        $t = is_array($career?->totals) ? $career->totals : [];
+        $best = is_array($career?->bests) ? $career->bests : [];
+        $n = static fn (string $k): int => (int) ($t[$k] ?? 0);
+        $perMatch = fn (int $v): string => $matches > 0 ? self::num(round($v / $matches, 1)) : '-';
+
+        $headline = [['label' => 'Matches', 'value' => (string) $matches]];
+        if ($career !== null && ($career->wins + $career->losses + $career->draws) > 0) {
+            $headline[] = ['label' => 'Won', 'value' => (string) $career->wins];
+        }
+        $groups = [];
+        $split = static fn (string $title, array $segments): ?array => array_sum(array_column($segments, 'value')) > 0
+            ? ['kind' => 'split', 'title' => $title, 'caption' => null, 'segments' => $segments]
+            : null;
+
+        switch ($sport) {
+            case 'football':
+                $headline[] = ['label' => 'Goals', 'value' => (string) $n('goals')];
+                $headline[] = ['label' => 'Assists', 'value' => (string) $n('assists')];
+                $groups[] = [
+                    'title' => 'Attacking',
+                    'lead' => ['label' => 'Goals', 'value' => (string) $n('goals')],
+                    'visual' => $split('Goal involvements', [
+                        ['label' => 'Goals', 'value' => $n('goals')],
+                        ['label' => 'Assists', 'value' => $n('assists')],
+                    ]),
+                    'stats' => [
+                        ['label' => 'Assists', 'value' => (string) $n('assists')],
+                        ['label' => 'Involvements', 'value' => (string) ($n('goals') + $n('assists'))],
+                        ['label' => 'Per match', 'value' => $matches > 0 ? self::num(round(($n('goals') + $n('assists')) / $matches, 2)) : '-'],
+                        ['label' => 'Most in a match', 'value' => (string) ($best['goals'] ?? 0)],
                     ],
-                ] : null,
-                'stats' => [
-                    ['label' => 'Assists', 'value' => (string) $assists],
-                    ['label' => 'Involvements', 'value' => (string) ($goals + $assists)],
-                    [
-                        'label' => 'Per match',
-                        'value' => $matches > 0 ? self::num(round(($goals + $assists) / $matches, 2)) : '-',
+                ];
+                if ($n('yellow_cards') + $n('red_cards') > 0) {
+                    $groups[] = [
+                        'title' => 'Discipline',
+                        'lead' => ['label' => 'Yellow cards', 'value' => (string) $n('yellow_cards')],
+                        'visual' => null,
+                        'stats' => [['label' => 'Red cards', 'value' => (string) $n('red_cards')]],
+                    ];
+                }
+                break;
+
+            case 'basketball':
+                $headline[] = ['label' => 'Points', 'value' => (string) $n('points')];
+                $groups[] = [
+                    'title' => 'Scoring',
+                    'lead' => ['label' => 'Points per game', 'value' => $perMatch($n('points'))],
+                    'visual' => $split('Where the points came from', [
+                        ['label' => '2PT', 'value' => $n('two_pointers') * 2],
+                        ['label' => '3PT', 'value' => $n('three_pointers') * 3],
+                        ['label' => 'FT', 'value' => $n('free_throws')],
+                    ]),
+                    'stats' => [
+                        ['label' => 'Points', 'value' => (string) $n('points')],
+                        ['label' => 'Threes', 'value' => (string) $n('three_pointers')],
+                        ['label' => 'Free throws', 'value' => (string) $n('free_throws')],
+                        ['label' => 'Career high', 'value' => (string) ($best['points'] ?? 0)],
                     ],
-                ],
-            ];
+                ];
+                $groups[] = [
+                    'title' => 'All-round',
+                    'lead' => ['label' => 'Rebounds', 'value' => (string) $n('rebounds')],
+                    'visual' => null,
+                    'stats' => [
+                        ['label' => 'Assists', 'value' => (string) $n('assists')],
+                        ['label' => 'Steals', 'value' => (string) $n('steals')],
+                        ['label' => 'Blocks', 'value' => (string) $n('blocks')],
+                    ],
+                ];
+                break;
+
+            case 'kabaddi':
+                $headline[] = ['label' => 'Points', 'value' => (string) $n('points')];
+                $groups[] = [
+                    'title' => 'Raiding',
+                    'lead' => ['label' => 'Raid points', 'value' => (string) ($n('raid_points') + $n('bonus_points'))],
+                    'visual' => $split('Raid points', [
+                        ['label' => 'Touch', 'value' => $n('raid_points')],
+                        ['label' => 'Bonus', 'value' => $n('bonus_points')],
+                    ]),
+                    'stats' => [
+                        ['label' => 'Raids', 'value' => (string) $n('raids')],
+                        ['label' => 'Super raids', 'value' => (string) $n('super_raids')],
+                        ['label' => 'Best match', 'value' => (string) ($best['points'] ?? 0)],
+                    ],
+                ];
+                $groups[] = [
+                    'title' => 'Defence',
+                    'lead' => ['label' => 'Tackle points', 'value' => (string) $n('tackle_points')],
+                    'visual' => null,
+                    'stats' => [['label' => 'Super tackles', 'value' => (string) $n('super_tackles')]],
+                ];
+                break;
+
+            case 'tennis':
+                $headline[] = ['label' => 'Sets won', 'value' => (string) $n('sets_won')];
+                $held = $n('service_games') > 0 ? (int) round($n('service_games_held') * 100 / $n('service_games')) . '%' : '-';
+                $groups[] = [
+                    'title' => 'Match play',
+                    'lead' => ['label' => 'Games won', 'value' => (string) $n('games_won')],
+                    'visual' => null,
+                    'stats' => [
+                        ['label' => 'Aces', 'value' => (string) $n('aces')],
+                        ['label' => 'Double faults', 'value' => (string) $n('double_faults')],
+                        ['label' => 'Breaks', 'value' => (string) $n('breaks')],
+                        ['label' => 'Service holds', 'value' => $held],
+                    ],
+                ];
+                break;
+
+            default: // volleyball, badminton, table tennis
+                if ($n('points_won') + $n('games_won') > 0) {
+                    $noun = \App\Support\SportRules::setNoun($sport) === 'Game' ? 'Games' : 'Sets';
+                    $headline[] = ['label' => $noun . ' won', 'value' => (string) $n('games_won')];
+                    $groups[] = [
+                        'title' => 'Rallies',
+                        'lead' => ['label' => 'Points won', 'value' => (string) $n('points_won')],
+                        'visual' => null,
+                        'stats' => array_values(array_filter([
+                            ['label' => 'Aces', 'value' => (string) $n('aces')],
+                            $n('winners') > 0 ? ['label' => $sport === 'volleyball' ? 'Kills' : 'Winners', 'value' => (string) $n('winners')] : null,
+                            $n('blocks') > 0 ? ['label' => 'Blocks', 'value' => (string) $n('blocks')] : null,
+                        ])),
+                    ];
+                }
         }
 
-        // Volleyball, badminton, basketball, kabaddi and the racket sports all score
-        // points per SIDE. There is no per-player figure to withhold — there is none.
         $note = null;
         if ($groups === []) {
-            $note = $sport === 'football'
-                ? 'No goals or assists recorded in these matches yet.'
-                : 'This sport is scored per side, not per player, so matches are the only figure it keeps.';
+            $note = $matches === 0
+                ? 'No finished ' . strtolower($label) . ' matches yet.'
+                : 'No individual figures recorded in these matches — only results.';
         }
 
         return [
@@ -758,7 +852,7 @@ final class PlayersController extends Controller
         // replay, so it is always 0 for a footballer no matter how many games they play.
         $matches = $pid === '' ? 0 : LiveMatch::query()
             ->whereRaw('lower(sport) = ?', [$sport])
-            ->whereRaw('lower(status) = ?', ['completed'])
+            ->finished()
             ->where(function ($q) use ($pid): void {
                 $q->where('home_squad', 'like', '%"' . $pid . '"%')
                   ->orWhere('away_squad', 'like', '%"' . $pid . '"%');

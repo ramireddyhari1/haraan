@@ -749,7 +749,7 @@ class LiveMatchController extends Controller
                 case 'noball': $isLegal = false; $runsOffBat = (int) ($p['runs_off_bat'] ?? 0); $extras = 1; $label = 'nb'; $outcome = 'no ball' . ($runsOffBat > 0 ? ", $runsOffBat run(s)" : ''); break;
                 case 'bye':    $extras = (int) ($p['value'] ?? 1); $label = 'b'; $outcome = "$extras bye" . ($extras > 1 ? 's' : ''); break;
                 case 'legbye': $extras = (int) ($p['value'] ?? 1); $label = 'lb'; $outcome = "$extras leg bye" . ($extras > 1 ? 's' : ''); break;
-                case 'wicket': $wicket = true; $label = 'W'; $outcome = 'OUT! ' . $this->dismissalText($p, $bowler); break;
+                case 'wicket': $wicket = true; $label = 'W'; $this->matchForDismissals = $match; $outcome = 'OUT! ' . $this->dismissalText($p, $bowler); break;
                 default: continue 2;
             }
 
@@ -887,8 +887,13 @@ class LiveMatchController extends Controller
             }
             if ($wicket) {
                 $newId = $p['new_batsman_id'] ?? null;
-                $strikerId = $newId;
-                $striker = $this->resolvePlayerName($match, $newId);
+                if (\App\Support\CricketRules::nonStrikerOut($p)) {
+                    $nonStrikerId = $newId;
+                    $nonStriker = $this->resolvePlayerName($match, $newId);
+                } else {
+                    $strikerId = $newId;
+                    $striker = $this->resolvePlayerName($match, $newId);
+                }
                 // The incoming batter walks in — emit their "new batter" card at this over.
                 if ($striker !== '') {
                     $feed[] = $this->batterInLine($inningsNo, $overMark, $striker, $newId, $battingName, $careerCache, $photoCache);
@@ -1012,6 +1017,27 @@ class LiveMatchController extends Controller
     /**
      * Insights for one match: the derived figures, plus a written read when there is one.
      */
+    /**
+     * GET /api/live-matches/{id}/player-stats — every player's figures in this match, for any
+     * sport: computed from the live log while the match is on, read from storage once it has
+     * finished. Same visibility as the detail.
+     */
+    public function playerStats(Request $request, string $id): JsonResponse
+    {
+        $match = LiveMatch::query()->find($id);
+        $viewer = $request->attributes->get('auth_user');
+        if ($match === null || ! $match->isVisibleTo($viewer instanceof User ? $viewer : null)) {
+            return response()->json(['error' => 'Match not found'], 404);
+        }
+
+        return response()->json([
+            'matchId' => (string) $match->id,
+            'sport' => strtolower((string) ($match->sport ?: 'cricket')),
+            'finished' => $match->isFinished(),
+            'players' => app(\App\Services\Stats\MatchPlayerStatsService::class)->forMatch($match),
+        ]);
+    }
+
     public function insights(Request $request, string $id): JsonResponse
     {
         $match = LiveMatch::query()->find($id);
@@ -1126,6 +1152,7 @@ class LiveMatchController extends Controller
      */
     private function buildInningsCards(LiveMatch $match): array
     {
+        $this->matchForDismissals = $match;
         $actions = DB::table('match_actions')
             ->where('match_id', $match->id)
             ->orderBy('id', 'asc')
@@ -1276,7 +1303,7 @@ class LiveMatchController extends Controller
                 if ($isLegal) {
                     $cur['bowlers'][$bName]['balls'] += 1;
                 }
-                if ($wicket) {
+                if ($wicket && \App\Support\CricketRules::bowlerCredited($p)) {
                     $cur['bowlers'][$bName]['wickets'] += 1;
                 }
             }
@@ -1292,10 +1319,15 @@ class LiveMatchController extends Controller
             }
 
             if ($wicket) {
-                $cur['wickets'] += 1;
-                $outName = $cur['striker'];
+                $countsAsWicket = \App\Support\CricketRules::countsAsWicket($p);
+                if ($countsAsWicket) {
+                    $cur['wickets'] += 1;
+                }
+                $nonStrikerOut = \App\Support\CricketRules::nonStrikerOut($p);
+                $outName = $nonStrikerOut ? $cur['nonStriker'] : $cur['striker'];
                 if ($outName !== '' && isset($cur['batters'][$outName])) {
-                    $cur['batters'][$outName]['out'] = true;
+                    // Retired hurt is not out — the batter can come back and carries on.
+                    $cur['batters'][$outName]['out'] = $countsAsWicket;
                     $cur['batters'][$outName]['dismissal'] = $this->dismissalText($p, $bName);
                 }
                 $oversStr = intdiv($cur['legalBalls'], 6) . '.' . ($cur['legalBalls'] % 6);
@@ -1306,7 +1338,12 @@ class LiveMatchController extends Controller
                     'batter'   => $outName,
                 ];
                 $newName = $this->resolvePlayerName($match, $p['new_batsman_id'] ?? null);
-                $cur['striker'] = $newName;
+                // The new batter takes the end the dismissed one left.
+                if ($nonStrikerOut) {
+                    $cur['nonStriker'] = $newName;
+                } else {
+                    $cur['striker'] = $newName;
+                }
                 $ensureBatter($cur, $newName);
                 // A wicket starts a fresh partnership.
                 $cur['pRuns'] = 0;
@@ -1551,19 +1588,17 @@ class LiveMatchController extends Controller
     /** Short dismissal label, e.g. "b Siva". Falls back to a plain "out". */
     private function dismissalText(array $payload, string $bowler): string
     {
-        $how = strtolower((string) ($payload['dismissal'] ?? $payload['wicket_type'] ?? ''));
-        $b = $bowler !== '' ? $bowler : '';
-        return match (true) {
-            $how === 'bowled'                       => $b !== '' ? "b $b" : 'bowled',
-            $how === 'lbw'                          => 'lbw' . ($b !== '' ? " b $b" : ''),
-            // Fielder isn't captured, so credit the bowler: "c b {bowler}".
-            $how === 'caught'                       => $b !== '' ? "c b $b" : 'caught',
-            $how === 'runout' || $how === 'run out' || $how === 'run_out' => 'run out',
-            $how === 'stumped'                      => $b !== '' ? "st b $b" : 'stumped',
-            $b !== ''                               => "b $b",
-            default                                 => 'out',
-        };
+        // The fielder is named when the scorer said who took it (asked since Aug 2026).
+        $fielderId = $payload['fielder_id'] ?? null;
+        $fielder = empty($fielderId) ? '' : ($this->matchForDismissals !== null
+            ? $this->resolvePlayerName($this->matchForDismissals, $fielderId)
+            : '');
+
+        return \App\Support\CricketRules::dismissalText($payload, $bowler, $fielder);
     }
+
+    /** The match whose squads resolve a fielder's name inside dismissalText(). */
+    private ?LiveMatch $matchForDismissals = null;
 
     /** Make a stored logo path absolute so the app can load it directly. */
     private function absoluteLogo(?string $logo): string

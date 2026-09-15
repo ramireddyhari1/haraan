@@ -42,6 +42,44 @@ private fun JSONObject.optStringOrNull(key: String): String? =
     optString(key).takeIf { it.isNotBlank() && it != "null" }
 
 class ContentRepository {
+    companion object {
+        const val AD_IMPRESSION = "impression"
+        const val AD_CLICK = "click"
+    }
+
+    /**
+     * Report an ad impression or click. Fire-and-forget: a failed beacon costs a sponsor one
+     * count, never the viewer a broken screen. The install id lets the server de-duplicate
+     * repeats (it stores only a hash); a signed-in token adds the account when there is one.
+     */
+    suspend fun trackAd(
+        context: android.content.Context,
+        adId: String,
+        kind: String,
+        placement: String,
+        matchId: String? = null,
+    ) = withContext(Dispatchers.IO) {
+        if (adId.isBlank() || placement.isBlank()) return@withContext
+        runCatching {
+            val body = JSONObject().put("placement", placement)
+            matchId?.toLongOrNull()?.let { body.put("match_id", it) }
+            val connection = (URL("${ApiConfig.BASE_URL.trimEnd('/')}/api/ads/$adId/$kind").openConnection()
+                as java.net.HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 8000
+                readTimeout = 8000
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("X-Install-Id", InstallId.get(context))
+                TokenStore.getSignedInToken(context)?.let { setRequestProperty("Authorization", "Bearer $it") }
+            }
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            connection.responseCode
+            connection.disconnect()
+        }
+    }
+
     suspend fun getAds(placement: String): List<AdItem> = withContext(Dispatchers.IO) {
         val url = "${ApiConfig.BASE_URL}/api/ads?placement=$placement"
         val body = URL(url).readText()

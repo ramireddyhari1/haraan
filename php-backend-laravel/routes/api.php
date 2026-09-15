@@ -95,7 +95,9 @@ Route::post('/auth/firebase-phone', [\App\Http\Controllers\Api\FirebasePhoneAuth
 //  Users (admin-only)
 // -------------------------------------------------------------------------
 
-Route::middleware('auth.jwt')->prefix('users')->group(function (): void {
+// auth.admin is load-bearing: auth.jwt alone admits every signed-in member, and these
+// routes read and rewrite other people's accounts (including role and password).
+Route::middleware(['auth.jwt', 'auth.admin', 'throttle:60,1'])->prefix('users')->group(function (): void {
     Route::get('/', [UsersController::class, 'index']);
     Route::get('/partners', [UsersController::class, 'partners']);
     Route::post('/partners', [UsersController::class, 'createPartner']);
@@ -139,6 +141,11 @@ Route::prefix('venues')->controller(\App\Http\Controllers\Api\VenuesController::
 
 // Home feed content (ads + For You / Trending), managed in Filament admin.
 Route::get('/ads', [\App\Http\Controllers\Api\AppContentController::class, 'ads']);
+// Impression / click beacons — de-duplicated per viewer in AdTracker, throttled per IP here.
+Route::middleware(['auth.jwt.optional', 'throttle:240,1'])->group(function (): void {
+    Route::post('/ads/{id}/impression', [\App\Http\Controllers\Api\AppContentController::class, 'trackImpression'])->whereNumber('id');
+    Route::post('/ads/{id}/click', [\App\Http\Controllers\Api\AppContentController::class, 'trackClick'])->whereNumber('id');
+});
 Route::get('/home/feed', [\App\Http\Controllers\Api\AppContentController::class, 'feed']);
 // Admin-curated home composition (ordered typed blocks); anonymous-safe, viewer-resolved.
 Route::middleware('auth.jwt.optional')->get('/home/layout', [\App\Http\Controllers\Api\AppContentController::class, 'layout']);
@@ -229,6 +236,7 @@ Route::middleware('auth.jwt.optional')->group(function (): void {
     // AI-assisted match analysis. Optional auth like the detail it belongs to — the
     // figures are public, and the written read is about the match, not the reader.
     Route::get('/live-matches/{id}/insights', [LiveMatchController::class, 'insights'])->whereNumber('id');
+    Route::get('/live-matches/{id}/player-stats', [LiveMatchController::class, 'playerStats'])->whereNumber('id');
 
     // Live presence — the eye + count on the match detail header. Optional auth so guests
     // are counted too (keyed by the app's install id, never a raw IP). The code variant
@@ -377,11 +385,11 @@ Route::middleware('auth.jwt.optional')->get('posts/{id}/comments', [PlayersContr
 // the ranked-actions group on purpose: that group carries auth.jwt AND the
 // actionboard.profile gate, and a ground's record is not private to the people standing
 // on it — the Insights tab is readable by anyone watching the match, signed in or not.
-Route::get('matches/{id}/ground', [MatchesController::class, 'ground'])->whereNumber('id');
+Route::middleware('auth.jwt.optional')->get('matches/{id}/ground', [MatchesController::class, 'ground'])->whereNumber('id');
 
 // Cricket IQ: one player's innings in this match, read back to them. Public alongside the
 // rest of the Insights tab.
-Route::get('matches/{id}/iq', [MatchesController::class, 'iq'])->whereNumber('id');
+Route::middleware('auth.jwt.optional')->get('matches/{id}/iq', [MatchesController::class, 'iq'])->whereNumber('id');
 
 // A player's last five innings with bat and ball. Public: the Insights tab is readable
 // by anyone watching, and a player's recent scores are not private to them.
@@ -424,6 +432,8 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     // The client posts WHAT HAPPENED; the server derives the scoreline.
     Route::post('/{id}/events', [MatchesController::class, 'recordEvent']);
     Route::post('/{id}/events/undo', [MatchesController::class, 'undoEvent']);
+    Route::get('/{id}/events/undone', [MatchesController::class, 'undoneEvents'])->whereNumber('id');
+    Route::post('/{id}/events/{eventId}/restore', [MatchesController::class, 'restoreEvent'])->whereNumber('id')->whereNumber('eventId');
     // Match-stat tallies (shots, corners, fouls…) — inc/dec by one. Never scoring.
     Route::post('/{id}/stat', [MatchesController::class, 'adjustStat']);
     Route::post('/{id}/sport-state', [MatchesController::class, 'updateSportState']);
@@ -431,7 +441,9 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
 
 // Timeline read — signed in, but not creator-gated: anyone who can see the match
 // can see how it unfolded.
-Route::middleware('auth.jwt')->get('/matches/{id}/events', [MatchesController::class, 'events']);
+// Visibility-checked in the controller: a private match's event log is readable only by
+// its creator, a registered squad member, or someone holding the share code (?code=).
+Route::middleware('auth.jwt.optional')->get('/matches/{id}/events', [MatchesController::class, 'events'])->whereNumber('id');
 
 // -------------------------------------------------------------------------
 //  Leaderboards (public, read-only)
@@ -450,13 +462,21 @@ Route::prefix('leaderboards')->group(function (): void {
 Route::middleware('auth.jwt.optional')->get('/districts/summary', [DistrictsController::class, 'summary']);
 
 // -------------------------------------------------------------------------
-//  Payments (Razorpay Standard Checkout)
-//  Order creation fixes the amount server-side; verification confirms the
-//  signature. The KEY_SECRET never leaves the backend.
+//  Payments (Razorpay Standard Checkout) — LOCAL DEMO ONLY
+//  Real checkout never uses these: bookings, event tickets and desk registration
+//  create their Razorpay orders server-side from a priced booking (BookingsController,
+//  EventBookingController), so the amount can't be chosen by the client. These two
+//  accept a free-form amount from an unauthenticated caller and exist only for the
+//  local /pay demo page, so they are registered in the local environment and nowhere
+//  else — on production they 404, exactly like /pay.
 // -------------------------------------------------------------------------
 
-Route::post('/create-order', [RazorpayController::class, 'createOrder'])->middleware('throttle:payments');
-Route::post('/verify-payment', [RazorpayController::class, 'verifyPayment'])->middleware('throttle:payments');
+if (app()->environment('local')) {
+    Route::middleware('throttle:payments')->group(function (): void {
+        Route::post('/create-order', [RazorpayController::class, 'createOrder']);
+        Route::post('/verify-payment', [RazorpayController::class, 'verifyPayment']);
+    });
+}
 
 // -------------------------------------------------------------------------
 //  Bookings
@@ -565,16 +585,16 @@ Route::middleware(['auth.jwt', 'auth.partner'])
     ->group(function (): void {
         Route::get('/venues/{id}/standing-contracts/dashboard', 'dashboard')->whereNumber('id');
         Route::get('/venues/{id}/standing-contracts', 'index')->whereNumber('id');
-        Route::post('/venues/{id}/standing-contracts/check-conflicts', 'checkConflicts')->whereNumber('id');
-        Route::post('/venues/{id}/standing-contracts', 'store')->whereNumber('id');
+        Route::post('/venues/{id}/standing-contracts/check-conflicts', 'checkConflicts')->whereNumber('id')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts', 'store')->whereNumber('id')->middleware('partner.can:bookings');
         Route::get('/venues/{id}/standing-contracts/{contractId}', 'show')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/skip-date', 'skipDate')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/pause', 'pause')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/resume', 'resume')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/terminate', 'terminate')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/transfer-court', 'transferCourt')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/attendance', 'attendance')->whereNumber('id')->whereNumber('contractId');
-        Route::post('/venues/{id}/standing-contracts/{contractId}/payment', 'payment')->whereNumber('id')->whereNumber('contractId');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/skip-date', 'skipDate')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/pause', 'pause')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/resume', 'resume')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/terminate', 'terminate')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/transfer-court', 'transferCourt')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/attendance', 'attendance')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/standing-contracts/{contractId}/payment', 'payment')->whereNumber('id')->whereNumber('contractId')->middleware('partner.can:bookings');
     });
 
 Route::middleware(['auth.jwt', 'auth.partner'])
@@ -584,50 +604,50 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/venues/{id}/pricing/dashboard', 'dashboard')->whereNumber('id');
         Route::get('/venues/{id}/pricing/matrix', 'matrix')->whereNumber('id');
         Route::get('/venues/{id}/pricing/rules', 'rules')->whereNumber('id');
-        Route::post('/venues/{id}/pricing/rules', 'storeRule')->whereNumber('id');
-        Route::put('/venues/{id}/pricing/rules/{ruleId}', 'updateRule')->whereNumber('id')->whereNumber('ruleId');
-        Route::post('/venues/{id}/pricing/rules/{ruleId}/toggle', 'toggleRule')->whereNumber('id')->whereNumber('ruleId');
-        Route::delete('/venues/{id}/pricing/rules/{ruleId}', 'destroyRule')->whereNumber('id')->whereNumber('ruleId');
+        Route::post('/venues/{id}/pricing/rules', 'storeRule')->whereNumber('id')->middleware('partner.can:pricing');
+        Route::put('/venues/{id}/pricing/rules/{ruleId}', 'updateRule')->whereNumber('id')->whereNumber('ruleId')->middleware('partner.can:pricing');
+        Route::post('/venues/{id}/pricing/rules/{ruleId}/toggle', 'toggleRule')->whereNumber('id')->whereNumber('ruleId')->middleware('partner.can:pricing');
+        Route::delete('/venues/{id}/pricing/rules/{ruleId}', 'destroyRule')->whereNumber('id')->whereNumber('ruleId')->middleware('partner.can:pricing');
         Route::get('/venues/{id}/pricing/hierarchy', 'hierarchy')->whereNumber('id');
-        Route::post('/venues/{id}/pricing/hierarchy/split', 'splitCourt')->whereNumber('id');
-        Route::post('/venues/{id}/pricing/hierarchy/merge', 'mergeCourts')->whereNumber('id');
+        Route::post('/venues/{id}/pricing/hierarchy/split', 'splitCourt')->whereNumber('id')->middleware('partner.can:pricing');
+        Route::post('/venues/{id}/pricing/hierarchy/merge', 'mergeCourts')->whereNumber('id')->middleware('partner.can:pricing');
         Route::get('/venues/{id}/pricing/recommendations', 'recommendations')->whereNumber('id');
-        Route::post('/venues/{id}/pricing/recommendations/apply', 'applyRecommendation')->whereNumber('id');
+        Route::post('/venues/{id}/pricing/recommendations/apply', 'applyRecommendation')->whereNumber('id')->middleware('partner.can:pricing');
     });
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
     ->controller(\App\Http\Controllers\Api\WhatsAppDeskController::class)
     ->group(function (): void {
-        Route::get('/venues/{id}/whatsapp/dashboard', 'dashboard')->whereNumber('id');
-        Route::get('/venues/{id}/whatsapp/conversations', 'index')->whereNumber('id');
-        Route::get('/venues/{id}/whatsapp/conversations/{convId}', 'show')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/messages', 'sendMessage')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/extract-intent', 'extractIntent')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/hold-slot', 'holdSlot')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/release-hold', 'releaseHold')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/send-payment-link', 'sendPaymentLink')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/mark-paid', 'markPaid')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/notes', 'addNote')->whereNumber('id')->whereNumber('convId');
-        Route::post('/venues/{id}/whatsapp/conversations/{convId}/assign', 'assignStaff')->whereNumber('id')->whereNumber('convId');
-        Route::get('/venues/{id}/whatsapp/quick-replies', 'quickReplies')->whereNumber('id');
-        Route::get('/venues/{id}/whatsapp/availability', 'availability')->whereNumber('id');
+        Route::get('/venues/{id}/whatsapp/dashboard', 'dashboard')->whereNumber('id')->middleware('partner.can:bookings');
+        Route::get('/venues/{id}/whatsapp/conversations', 'index')->whereNumber('id')->middleware('partner.can:bookings');
+        Route::get('/venues/{id}/whatsapp/conversations/{convId}', 'show')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/messages', 'sendMessage')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/extract-intent', 'extractIntent')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/hold-slot', 'holdSlot')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/release-hold', 'releaseHold')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/send-payment-link', 'sendPaymentLink')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/mark-paid', 'markPaid')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/notes', 'addNote')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/assign', 'assignStaff')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::get('/venues/{id}/whatsapp/quick-replies', 'quickReplies')->whereNumber('id')->middleware('partner.can:bookings');
+        Route::get('/venues/{id}/whatsapp/availability', 'availability')->whereNumber('id')->middleware('partner.can:bookings');
     });
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
     ->controller(\App\Http\Controllers\Api\OwnerOperationsController::class)
     ->group(function (): void {
-        Route::get('/venues/{id}/operations/overview', 'overview')->whereNumber('id');
-        Route::get('/venues/{id}/operations/revenue', 'revenue')->whereNumber('id');
-        Route::get('/venues/{id}/operations/occupancy', 'occupancy')->whereNumber('id');
-        Route::get('/venues/{id}/operations/staff', 'staff')->whereNumber('id');
-        Route::get('/venues/{id}/operations/funnel', 'funnel')->whereNumber('id');
-        Route::get('/venues/{id}/operations/alerts', 'alerts')->whereNumber('id');
-        Route::post('/venues/{id}/operations/alerts/{alertId}/resolve', 'resolveAlert')->whereNumber('id')->whereNumber('alertId');
-        Route::get('/venues/{id}/operations/suggestions', 'suggestions')->whereNumber('id');
-        Route::post('/venues/{id}/operations/suggestions/{suggestionId}/apply', 'applySuggestion')->whereNumber('id')->whereNumber('suggestionId');
-        Route::post('/venues/{id}/operations/suggestions/{suggestionId}/dismiss', 'dismissSuggestion')->whereNumber('id')->whereNumber('suggestionId');
+        Route::get('/venues/{id}/operations/overview', 'overview')->whereNumber('id')->middleware('partner.can:reports');
+        Route::get('/venues/{id}/operations/revenue', 'revenue')->whereNumber('id')->middleware('partner.can:reports');
+        Route::get('/venues/{id}/operations/occupancy', 'occupancy')->whereNumber('id')->middleware('partner.can:reports');
+        Route::get('/venues/{id}/operations/staff', 'staff')->whereNumber('id')->middleware('partner.can:reports');
+        Route::get('/venues/{id}/operations/funnel', 'funnel')->whereNumber('id')->middleware('partner.can:reports');
+        Route::get('/venues/{id}/operations/alerts', 'alerts')->whereNumber('id')->middleware('partner.can:reports');
+        Route::post('/venues/{id}/operations/alerts/{alertId}/resolve', 'resolveAlert')->whereNumber('id')->whereNumber('alertId')->middleware('partner.can:reports');
+        Route::get('/venues/{id}/operations/suggestions', 'suggestions')->whereNumber('id')->middleware('partner.can:reports');
+        Route::post('/venues/{id}/operations/suggestions/{suggestionId}/apply', 'applySuggestion')->whereNumber('id')->whereNumber('suggestionId')->middleware('partner.can:reports');
+        Route::post('/venues/{id}/operations/suggestions/{suggestionId}/dismiss', 'dismissSuggestion')->whereNumber('id')->whereNumber('suggestionId')->middleware('partner.can:reports');
     });
 
 

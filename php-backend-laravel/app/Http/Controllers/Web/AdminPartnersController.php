@@ -39,7 +39,7 @@ final class AdminPartnersController extends Controller
                 'email' => $data['email'],
                 'partner_type' => $data['partner_type'] ?? null,
                 'status' => 'PENDING',
-            ], (string) $request->input('password', 'partner123'));
+            ], $request->filled('password') ? (string) $request->input('password') : null);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }

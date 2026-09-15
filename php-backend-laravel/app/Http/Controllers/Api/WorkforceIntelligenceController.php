@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Venue;
+use App\Support\WorkforceAccess;
 use App\Services\Hrms\LaborForecastingService;
 use App\Services\Hrms\RosterAutoSchedulerService;
 use App\Services\Hrms\StatutoryPayrollService;
@@ -34,6 +35,9 @@ final class WorkforceIntelligenceController extends Controller
         ]);
 
         $venue = Venue::findOrFail((int) $validated['venue_id']);
+        if (! WorkforceAccess::canManageVenue($request->user(), $venue)) {
+            return response()->json(['error' => 'You do not manage this venue.'], 403);
+        }
         $startDate = Carbon::parse($validated['start_date']);
         $endDate = Carbon::parse($validated['end_date']);
         $minStaff = (int) ($validated['min_staff_per_shift'] ?? 1);
@@ -60,6 +64,9 @@ final class WorkforceIntelligenceController extends Controller
         ]);
 
         $venue = Venue::findOrFail((int) $validated['venue_id']);
+        if (! WorkforceAccess::canManageVenue($request->user(), $venue)) {
+            return response()->json(['error' => 'You do not manage this venue.'], 403);
+        }
         $month = $validated['month'] ?? Carbon::now()->format('Y-m');
 
         $forecast = $this->forecastingService->forecastMonthly($venue, $month);
@@ -81,6 +88,9 @@ final class WorkforceIntelligenceController extends Controller
         ]);
 
         $venue = Venue::findOrFail((int) $validated['venue_id']);
+        if (! WorkforceAccess::canManageVenue($request->user(), $venue)) {
+            return response()->json(['error' => 'You do not manage this venue.'], 403);
+        }
         $batch = $this->payrollService->generateBatchForVenue($venue, $validated['month']);
 
         return response()->json([
@@ -100,6 +110,9 @@ final class WorkforceIntelligenceController extends Controller
         ]);
 
         $venue = Venue::findOrFail((int) $validated['venue_id']);
+        if (! WorkforceAccess::canManageVenue($request->user(), $venue)) {
+            return response()->json(['error' => 'You do not manage this venue.'], 403);
+        }
         $receipt = $this->payrollService->lockBatch($venue, $validated['month'], $request->user());
 
         return response()->json([
@@ -120,6 +133,9 @@ final class WorkforceIntelligenceController extends Controller
         ]);
 
         $venue = Venue::findOrFail((int) $validated['venue_id']);
+        if (! WorkforceAccess::canManageVenue($request->user(), $venue)) {
+            return response()->json(['error' => 'You do not manage this venue.'], 403);
+        }
         $manifest = $this->payrollService->generateComplianceExport($venue, $validated['month']);
 
         return response()->json($manifest);

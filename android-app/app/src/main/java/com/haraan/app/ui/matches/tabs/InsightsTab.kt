@@ -78,8 +78,9 @@ fun InsightsTab(matchId: String, state: MatchUiState, modifier: Modifier = Modif
 
     // Fetched once, not with the score: a ground's record does not change ball to ball,
     // and re-pulling a satellite tile every over would be a waste of the match's data.
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(matchId) {
-        ground = MatchRepository().fetchGround(matchId)
+        ground = MatchRepository().fetchGround(matchId, com.haraan.app.data.TokenStore.getSignedInToken(ctx))
     }
 
     // Re-fetched when the score moves, so a live match's insights follow the match rather
