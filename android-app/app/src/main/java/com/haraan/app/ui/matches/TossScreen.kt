@@ -415,7 +415,7 @@ private fun ColumnScope.SetupStage(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(14.dp))
-                .background(if (armed) TossGreen else TossText3.copy(alpha = 0.4f))
+                .background(if (armed) TossBlue else TossText3.copy(alpha = 0.4f))
                 .clickable(enabled = armed, onClick = onPlay)
                 .padding(vertical = 16.dp),
             contentAlignment = Alignment.Center,
@@ -783,12 +783,12 @@ private fun ColumnScope.LineupStage(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
-                    if (ready) Modifier.shadow(10.dp, RoundedCornerShape(16.dp), spotColor = TossGreen)
+                    if (ready) Modifier.shadow(10.dp, RoundedCornerShape(16.dp), spotColor = TossBlue)
                     else Modifier
                 )
                 .clip(RoundedCornerShape(16.dp))
                 .background(
-                    if (ready) Brush.horizontalGradient(listOf(Color(0xFF16A34A), Color(0xFF0E9F6E)))
+                    if (ready) Brush.horizontalGradient(listOf(TossBlue, HaraanColors.GameHubDeep))
                     else Brush.horizontalGradient(listOf(TossText3.copy(alpha = 0.4f), TossText3.copy(alpha = 0.4f)))
                 )
                 .clickable(enabled = ready) { onStart(striker, nonStriker, bowler) }

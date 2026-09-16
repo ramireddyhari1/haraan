@@ -318,7 +318,7 @@ private fun OrganiserCard(t: Tournament) {
             Text(t.organizerName, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Text("+91 ${t.organizerPhone.chunked(5).joinToString(" ")}", color = Text2, fontSize = 13.5.sp)
         }
-        // Green: a call is the thing landing, not a step forward in a flow.
+        // A call is an action, so it takes the app's action blue.
         Row(
             Modifier
                 .pressable(haptic = Feel.SELECT) {
@@ -329,14 +329,14 @@ private fun OrganiserCard(t: Tournament) {
                     }
                 }
                 .clip(RoundedCornerShape(12.dp))
-                .background(GreenTint)
-                .border(BorderStroke(1.dp, Green.copy(alpha = 0.35f)), RoundedCornerShape(12.dp))
+                .background(HaraanColors.AccentTint)
+                .border(BorderStroke(1.dp, Blue.copy(alpha = 0.35f)), RoundedCornerShape(12.dp))
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Call, null, tint = Green, modifier = Modifier.size(17.dp))
+            Icon(Icons.Filled.Call, null, tint = Blue, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Call", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("Call", color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

@@ -907,10 +907,10 @@ internal fun WizardFooter(
                 textAlign = TextAlign.Center,
             )
         }
-        // Blue carries the user forward through the steps; green commits the match at
-        // the end — a deliberate blue→green hand-off so the final action reads as "go".
+        // Every step, including the final "Create Match", is the one brand blue. The commit
+        // is marked by its words and its heavier haptic, not by a second colour.
         val isCommit = step == lastStep
-        val accent = if (isCommit) Green else Blue
+        val accent = Blue
 
         // The moment a step becomes completable is the most satisfying beat in a
         // wizard, and it used to pass unmarked: the fill snapped from 35% to solid.
@@ -1547,7 +1547,7 @@ private fun TurfBookingPicker(
                         .pressable { onSelect(if (sel) null else b.id) }
                         .clip(RoundedCornerShape(12.dp))
                         .background(Surface)
-                        .border(1.5.dp, if (sel) Green else Stroke, RoundedCornerShape(12.dp))
+                        .border(1.5.dp, if (sel) Blue else Stroke, RoundedCornerShape(12.dp))
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1560,7 +1560,7 @@ private fun TurfBookingPicker(
                         }
                     }
                     if (sel) {
-                        Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Green, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Blue, modifier = Modifier.size(20.dp))
                     }
                 }
             }
@@ -1931,7 +1931,7 @@ private fun PlayerResultRow(
             Text("Added", color = Text3, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         } else {
             Box(
-                Modifier.size(28.dp).clip(CircleShape).background(Green),
+                Modifier.size(28.dp).clip(CircleShape).background(Blue),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Default.Add, "Add ${player.name}", tint = Color.White, modifier = Modifier.size(16.dp))
@@ -2079,7 +2079,7 @@ private fun TeamBlock(
                             showGuest = false
                         }
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (canAddGuest) Green else Stroke),
+                        .background(if (canAddGuest) Blue else Stroke),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Add, "Add guest", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -2432,9 +2432,8 @@ private fun WhenCard(draft: CreateMatchDraft) {
         Text("When", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         // A segmented mode toggle — selection is a *progress* choice, so it reads blue
-        // (per the app's CTA rules: blue = progress, green = commit). Green stays
-        // reserved for the single "Create Match" commit button below, so the two don't
-        // compete. The selected side is a soft blue tint, not a solid fill.
+        // (all actions in the app are brand blue). The selected side is a soft blue tint,
+        // not a solid fill, so it never competes with the solid "Create Match" button below.
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             WhenChoice(
                 label = "Play now",
@@ -2920,7 +2919,7 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (B
             .pressable { onToggle(!checked) }
             .clip(RoundedCornerShape(14.dp))
             .background(Surface)
-            .border(1.dp, if (checked) Green else Stroke, RoundedCornerShape(14.dp))
+            .border(1.dp, if (checked) Blue else Stroke, RoundedCornerShape(14.dp))
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -2934,7 +2933,7 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (B
             Modifier
                 .size(24.dp)
                 .clip(RoundedCornerShape(7.dp))
-                .background(if (checked) Green else Color.Transparent)
+                .background(if (checked) Blue else Color.Transparent)
                 .border(BorderStroke(if (checked) 0.dp else 1.5.dp, Text3), RoundedCornerShape(7.dp)),
             contentAlignment = Alignment.Center,
         ) {

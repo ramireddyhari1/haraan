@@ -689,9 +689,9 @@ fun PlayerProfileSetupScreen(
             }
         }
 
-        // Footer CTA — blue while there's still progress to make, green to commit on the last step.
+        // Footer CTA — brand blue on every step, the last one included.
         val isLast = step == TOTAL_STEPS - 1
-        val ctaColor = if (isLast) Green else Blue
+        val ctaColor = Blue
         // Same footer rule as the create-match wizard: the white surface stays flush to
         // the screen edge, but the button is lifted above the system navigation (and the
         // keyboard on text-entry steps). Without this the CTA sat underneath the gesture

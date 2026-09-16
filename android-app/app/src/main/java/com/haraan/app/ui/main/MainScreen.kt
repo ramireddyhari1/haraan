@@ -8182,12 +8182,12 @@ private fun ScheduledMatchCard(
         Text("Private", color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.width(10.dp))
       }
-      // Start is a commit action → green (per the app's CTA colour rules).
+      // Start is an action, so it wears the app's one action colour.
       Row(
         modifier = Modifier
           .pressable(onClick = onStart)
           .clip(RoundedCornerShape(12.dp))
-          .background(green)
+          .background(blue)
           .padding(horizontal = 15.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
@@ -8294,7 +8294,6 @@ private fun JoinRequestCard(
   onDecline: () -> Unit,
 ) {
   val blue = HaraanColors.EventsBlue
-  val green = HaraanColors.Success
   Column(
     Modifier
       .fillMaxWidth()
@@ -8354,7 +8353,7 @@ private fun JoinRequestCard(
         contentAlignment = Alignment.Center,
       ) { Text("Decline", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HaraanColors.TextSecondary) }
       Row(
-        Modifier.weight(1f).pressable(onClick = onAccept).clip(RoundedCornerShape(13.dp)).background(green).padding(vertical = 12.dp),
+        Modifier.weight(1f).pressable(onClick = onAccept).clip(RoundedCornerShape(13.dp)).background(HaraanColors.EventsBlue).padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
       ) {
         Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(17.dp))
