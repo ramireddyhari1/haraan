@@ -1051,6 +1051,13 @@ class LiveMatchController extends Controller
             return response()->json(['error' => 'Match not found'], 404);
         }
 
+        // Advanced insights are a member plan feature, per sport. Checked AFTER visibility
+        // (a hidden match stays a 404, never a paywall that confirms it exists) and BEFORE
+        // anything is built — no replay, no Gemini call, no after-response AI job runs for a
+        // viewer who isn't entitled. Throws EntitlementDenied (403).
+        app(\App\Services\Membership\SportInsightsAccess::class)
+            ->authorizeMatch($viewer instanceof User ? $viewer : null, $match);
+
         // Every other sport reads its own event log through its own builder — goals and
         // assists, threes and free throws, raid and tackle points, set points saved.
         if (strtolower((string) ($match->sport ?: 'cricket')) !== 'cricket') {

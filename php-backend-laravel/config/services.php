@@ -150,6 +150,11 @@ return [
         // the API secret, and without it the webhook rejects everything — which
         // is the right failure, since it grants paid features.
         'webhook_secret' => env('RAZORPAY_WEBHOOK_SECRET'),
+
+        // Member (Free/Pro/Hero) subscriptions post to their own webhook URL with their own
+        // secret, so member billing can never be granted through the partner endpoint and a
+        // leaked partner secret can't forge a member plan. Fails closed when unset.
+        'member_webhook_secret' => env('RAZORPAY_MEMBER_WEBHOOK_SECRET'),
     ],
 
     // Anthropic Claude — powers the /partner support AI assistant (PartnerSupportAI).

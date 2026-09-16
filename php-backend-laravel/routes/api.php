@@ -140,7 +140,8 @@ Route::prefix('venues')->controller(\App\Http\Controllers\Api\VenuesController::
 });
 
 // Home feed content (ads + For You / Trending), managed in Filament admin.
-Route::get('/ads', [\App\Http\Controllers\Api\AppContentController::class, 'ads']);
+// Optional auth: a member whose plan includes ads.hidden gets an empty list.
+Route::middleware('auth.jwt.optional')->get('/ads', [\App\Http\Controllers\Api\AppContentController::class, 'ads']);
 // Impression / click beacons — de-duplicated per viewer in AdTracker, throttled per IP here.
 Route::middleware(['auth.jwt.optional', 'throttle:240,1'])->group(function (): void {
     Route::post('/ads/{id}/impression', [\App\Http\Controllers\Api\AppContentController::class, 'trackImpression'])->whereNumber('id');
@@ -650,6 +651,32 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::post('/venues/{id}/operations/suggestions/{suggestionId}/dismiss', 'dismissSuggestion')->whereNumber('id')->whereNumber('suggestionId')->middleware('partner.can:reports');
     });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Member plans (Free / Pro / Hero) — see docs/member-subscriptions-design.md.
+//  Separate from partner billing end to end: own tables, service, webhook and secret.
+// ─────────────────────────────────────────────────────────────────────────────
+Route::middleware('auth.jwt.optional')->get('/membership/plans', [\App\Http\Controllers\Api\MembershipController::class, 'plans']);
+
+Route::middleware('auth.jwt')->prefix('membership')->controller(\App\Http\Controllers\Api\MembershipController::class)->group(function (): void {
+    Route::get('/', 'show');
+    Route::get('/payments', 'payments');
+    Route::post('/abandon', 'abandon');
+    // Sports chosen for advanced insights (plans with a fixed number of sports).
+    Route::get('/insight-sports', 'insightSports');
+    Route::put('/insight-sports', 'saveInsightSports')->middleware('throttle:20,1');
+    Route::middleware('throttle:payments')->group(function (): void {
+        Route::post('/subscribe', 'subscribe');
+        Route::post('/verify', 'verify');
+        Route::post('/cancel', 'cancel');
+    });
+});
+
+// Member subscription webhook. Unauthenticated by necessity; the HMAC signature (member
+// secret, distinct from the partner webhook's) is the authentication and it fails closed.
+Route::post('/webhooks/razorpay/members', [\App\Http\Controllers\Api\MemberRazorpayWebhookController::class, 'handle'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.razorpay.members');
 
 // Razorpay billing webhook — subscription lifecycle and prepaid credit grants.
 // Unauthenticated by necessity; the HMAC signature check in the controller is

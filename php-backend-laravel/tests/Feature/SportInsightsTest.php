@@ -55,9 +55,21 @@ class SportInsightsTest extends TestCase
         $this->ev($m, ['kind' => MatchEvent::POINT, 'side' => $side, 'player_name' => $who, 'detail' => $detail ?: null]);
     }
 
+    /**
+     * Read as the match owner on a plan with every sport's advanced insights — these tests are
+     * about the figures, and the member gate in front of them has its own suite
+     * (Membership\MemberInsightSportsTest).
+     */
     private function insights(LiveMatch $m): array
     {
-        return $this->getJson("/api/live-matches/{$m->id}/insights")->assertOk()->json();
+        \App\Models\MemberSubscription::query()->firstOrCreate(
+            ['user_id' => $this->owner->id, 'provider' => \App\Models\MemberSubscription::PROVIDER_ADMIN],
+            ['plan_id' => \App\Models\MemberPlan::query()->where('code', 'hero')->value('id'), 'status' => \App\Models\MemberSubscription::STATUS_ACTIVE],
+        );
+        $token = \App\Support\JwtService::issueForUser($this->owner, (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')));
+
+        return $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->getJson("/api/live-matches/{$m->id}/insights")->assertOk()->json();
     }
 
     private function card(array $data, string $name): array

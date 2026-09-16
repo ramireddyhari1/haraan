@@ -114,7 +114,16 @@ final class PlayerStatsPipelineTest extends TestCase
         $m = $this->footballMatch($creator);
         app(MatchEventRecorder::class)->record($m, ['kind' => 'goal', 'side' => 'home', 'player_name' => 'Rahul', 'minute' => 5], $creator);
 
-        $json = $this->getJson("/api/live-matches/{$m->id}/insights")->assertOk()->json();
+        // Advanced insights are a member plan feature; read as a member whose plan has every sport.
+        \App\Models\MemberSubscription::create([
+            'user_id' => $creator->id,
+            'plan_id' => \App\Models\MemberPlan::query()->where('code', 'hero')->value('id'),
+            'provider' => \App\Models\MemberSubscription::PROVIDER_ADMIN,
+            'status' => \App\Models\MemberSubscription::STATUS_ACTIVE,
+        ]);
+        $json = $this->withHeader('Authorization', 'Bearer ' . $this->token($creator))
+            ->getJson("/api/live-matches/{$m->id}/insights")->assertOk()->json();
+        $this->flushHeaders();
         $rahul = collect($json['playerStats'])->firstWhere('playerId', 'HRNF1');
         self::assertSame(1, $rahul['stats']['goals']);
 

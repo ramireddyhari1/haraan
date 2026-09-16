@@ -25,7 +25,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Member entitlements memoise per request/job; scoped so a queue worker or a long
+        // test never serves one member's plan from a previous request.
+        $this->app->scoped(\App\Services\Membership\MemberEntitlements::class);
     }
 
     /**

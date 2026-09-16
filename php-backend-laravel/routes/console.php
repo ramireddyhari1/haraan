@@ -104,3 +104,16 @@ Schedule::command('messaging:enqueue-journeys')->hourly()->withoutOverlapping();
 // Every five minutes: fine-grained enough that a "2 hours before" reminder is
 // actually about two hours before, without hammering the box.
 Schedule::command('messaging:dispatch-journeys')->everyFiveMinutes()->withoutOverlapping();
+
+// Member plans (Free / Pro / Hero): abandon dead checkouts, re-read Razorpay for renewals a
+// webhook never reported, expire complimentary plans, and retry cancelling subscriptions an
+// upgrade replaced. Dry run with --dry-run.
+Artisan::command('membership:reconcile {--dry-run}', function (\App\Services\Membership\MemberSubscriptions $subscriptions) {
+    $dry = (bool) $this->option('dry-run');
+    $r = $subscriptions->reconcile($dry);
+    $this->info(($dry ? '[dry run] ' : '')
+        . "Abandoned {$r['abandoned']}, synced {$r['synced']} (failed {$r['sync_failed']}), "
+        . "grants expired {$r['grants_expired']}, replaced cancelled {$r['replaced_cancelled']}.");
+})->purpose('Reconcile member subscriptions with Razorpay');
+
+Schedule::command('membership:reconcile')->everyFifteenMinutes()->withoutOverlapping();

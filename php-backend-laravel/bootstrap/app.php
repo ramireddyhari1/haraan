@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'partner.can'      => \App\Http\Middleware\EnsurePartnerPermission::class,
             'erp.key'          => \App\Http\Middleware\EnsureErpPortalKey::class,
             'actionboard.profile' => \App\Http\Middleware\EnsureActionboardProfile::class,
+            'member.entitled'  => \App\Http\Middleware\EnsureMemberEntitled::class,
         ]);
 
         $middleware->redirectGuestsTo(fn () => route('site.login'));

@@ -116,6 +116,9 @@ final class SupportController extends Controller
                 'unread'      => $thread->user_unread_count,
                 'assigned_to' => $thread->assignee?->name,
                 'category'    => $thread->category?->label,
+                // The member's plan includes priority support — the app says so in the chat.
+                'priority'    => $thread->user !== null && app(\App\Services\Membership\MemberEntitlements::class)
+                    ->allows($thread->user, \App\Support\Membership\MemberFeature::SUPPORT_PRIORITY),
             ],
             'messages' => $messages,
         ];

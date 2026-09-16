@@ -845,6 +845,18 @@ final class PublicWebController extends Controller
         $tabs = ['summary', 'timeline', 'players', 'insights'];
         $tab = in_array($tab, $tabs, true) ? $tab : 'summary';
         $viewer = auth()->user();
+        $member = $viewer instanceof User ? $viewer : null;
+
+        // Advanced insights are a member plan feature per sport — same gate as the API, and
+        // decided before SportInsights is built so a locked tab costs nothing.
+        $insightsLock = null;
+        if ($tab === 'insights') {
+            try {
+                app(\App\Services\Membership\SportInsightsAccess::class)->authorizeMatch($member, $match);
+            } catch (\App\Services\Membership\EntitlementDenied $denied) {
+                $insightsLock = ['message' => $denied->getMessage(), 'code' => $denied->reason, 'signed_in' => $member !== null];
+            }
+        }
 
         return view('site.sport-match', [
             'title' => ($match->home_full ?: $match->home) . ' vs ' . ($match->away_full ?: $match->away),
@@ -853,7 +865,10 @@ final class PublicWebController extends Controller
             'players' => $tab === 'players' || $tab === 'summary'
                 ? app(\App\Services\Stats\MatchPlayerStatsService::class)->forMatch($match)
                 : [],
-            'insights' => $tab === 'insights' ? app(\App\Services\Insights\SportInsights::class)->for($match) : null,
+            'insights' => $tab === 'insights' && $insightsLock === null
+                ? app(\App\Services\Insights\SportInsights::class)->for($match)
+                : null,
+            'insightsLock' => $insightsLock,
             'matchAd' => $this->matchAd($match),
             'tab' => $tab,
             'tabs' => $tabs,

@@ -11,6 +11,8 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use App\Jobs\ReviewMatchClip;
 use App\Services\DeliveryReview;
+use App\Services\Membership\MemberEntitlements;
+use App\Support\Membership\MemberFeature;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -44,6 +46,15 @@ final class MatchDeviceController extends Controller
         if (! in_array($role, MatchDevice::ROLES, true)) {
             return response()->json(['error' => 'Unknown device role.'], 422);
         }
+
+        // Camera angles are a member plan limit: count the OTHER roles already paired or
+        // pairing on this match. Re-pairing a role that's already counted is always allowed.
+        $otherAngles = MatchDevice::where('match_id', $match->id)
+            ->where('status', '!=', MatchDevice::STATUS_REVOKED)
+            ->where('role', '!=', $role)
+            ->distinct()
+            ->count('role');
+        app(MemberEntitlements::class)->assertWithinLimit($user, MemberFeature::MATCHES_CAMERA_ANGLES, $otherAngles);
 
         // One live pairing per role: a scorer who taps twice wants the code they are
         // looking at to be the one that works, not a pile of valid codes.
@@ -337,7 +348,7 @@ final class MatchDeviceController extends Controller
      */
     public function reviewClip(Request $request, string $id, string $clipId): JsonResponse
     {
-        [$match, , $error] = $this->scorerContext($request, $id);
+        [$match, $user, $error] = $this->scorerContext($request, $id);
         if ($error !== null) {
             return $error;
         }
@@ -386,6 +397,11 @@ final class MatchDeviceController extends Controller
 
             return $this->reviewState($clip->id, DeliveryReview::STATUS_FAILED, [], 422);
         }
+
+        // A member plan quota. Consumed only here, where a NEW Vertex call is about to be
+        // bought — the cached and in-flight returns above are free. The job gives it back
+        // if the review fails. Throws EntitlementDenied (403, upgrade_required/limit_reached).
+        app(MemberEntitlements::class)->consume($user, MemberFeature::AI_DELIVERY_REVIEW);
 
         DB::table('match_device_clips')->where('id', $clip->id)->update([
             'review_status' => DeliveryReview::STATUS_PENDING,

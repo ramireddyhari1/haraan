@@ -73,7 +73,9 @@ final class SportMatchPageTest extends TestCase
 
         $this->get("{$base}?tab=timeline")->assertOk();
         $this->get("{$base}?tab=players")->assertOk()->assertSee('Webster');
-        $this->get("{$base}?tab=insights")->assertOk();
+        // A guest reaches the tab and is told insights are a member feature — the page still
+        // renders; the figures don't.
+        $this->get("{$base}?tab=insights")->assertOk()->assertSee('Sign in to see insights for this match.');
     }
 
     public function test_cricket_tab_urls_redirect_to_the_sport_page(): void

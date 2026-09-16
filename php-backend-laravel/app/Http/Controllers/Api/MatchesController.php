@@ -642,6 +642,13 @@ final class MatchesController extends Controller
             return response()->json(['error' => 'Match not found'], 404);
         }
 
+        // Cricket IQ is advanced insights for the match's sport. Authorised before the
+        // service is touched, so its after-response model call never runs for a viewer who
+        // isn't entitled. Throws EntitlementDenied (403).
+        $viewer = $request->attributes->get('auth_user');
+        app(\App\Services\Membership\SportInsightsAccess::class)
+            ->authorizeMatch($viewer instanceof \App\Models\User ? $viewer : null, $match);
+
         $service = app(\App\Services\PlayerInningsIQ::class);
         $facts = $service->forMatch($match, $request->query('player') ?: null);
         if ($facts === null) {

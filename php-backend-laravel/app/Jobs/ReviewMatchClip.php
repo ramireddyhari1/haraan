@@ -137,11 +137,28 @@ final class ReviewMatchClip implements ShouldQueue
 
     private function fail(string $reason, ?int $elapsedMs): void
     {
-        DB::table('match_device_clips')->where('id', $this->clipId)->update([
-            'review_status' => DeliveryReview::STATUS_FAILED,
-            'review_error' => mb_substr($reason, 0, 160),
-            'review_ms' => $elapsedMs,
-            'updated_at' => now(),
-        ]);
+        $updated = DB::table('match_device_clips')
+            ->where('id', $this->clipId)
+            ->where('review_status', '!=', DeliveryReview::STATUS_FAILED)
+            ->update([
+                'review_status' => DeliveryReview::STATUS_FAILED,
+                'review_error' => mb_substr($reason, 0, 160),
+                'review_ms' => $elapsedMs,
+                'updated_at' => now(),
+            ]);
+
+        // A review that produced nothing shouldn't count against the scorer's monthly
+        // allowance. Guarded by the status flip above so a double failure refunds once.
+        if ($updated > 0) {
+            $ownerId = DB::table('match_device_clips')
+                ->join('live_matches', 'live_matches.id', '=', 'match_device_clips.match_id')
+                ->where('match_device_clips.id', $this->clipId)
+                ->value('live_matches.user_id');
+            $owner = $ownerId === null ? null : \App\Models\User::find($ownerId);
+            if ($owner !== null) {
+                app(\App\Services\Membership\MemberEntitlements::class)
+                    ->release($owner, \App\Support\Membership\MemberFeature::AI_DELIVERY_REVIEW);
+            }
+        }
     }
 }

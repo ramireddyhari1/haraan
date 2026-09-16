@@ -23,7 +23,7 @@ class PlayerTournamentsTest extends TestCase
 
     private function player(string $username, array $overrides = []): User
     {
-        return User::create(array_merge([
+        $player = User::create(array_merge([
             'name' => ucfirst($username),
             'email' => $username . '@haraan.test',
             'password' => Hash::make('secret123'),
@@ -37,6 +37,19 @@ class PlayerTournamentsTest extends TestCase
             'primary_sport' => 'cricket',
             'trust_score' => 100,
         ], $overrides));
+
+        // These tests exercise format rules by creating several tournaments per host, which
+        // is past the Free plan's running-tournament limit. The limit itself is covered in
+        // Membership\MemberFeatureGatesTest; here it's lifted so it can't mask a format bug.
+        \App\Models\MemberEntitlementOverride::create([
+            'user_id' => $player->id,
+            'feature_key' => \App\Support\Membership\MemberFeature::TOURNAMENTS_ACTIVE_HOSTED,
+            'enabled' => true,
+            'limit_value' => null,
+            'reason' => 'test fixture',
+        ]);
+
+        return $player;
     }
 
     private function token(User $user): string

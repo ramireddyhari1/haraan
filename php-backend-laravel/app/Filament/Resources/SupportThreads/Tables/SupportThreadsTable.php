@@ -4,6 +4,8 @@ namespace App\Filament\Resources\SupportThreads\Tables;
 
 use App\Filament\Support\AvatarColumn;
 use App\Models\SupportThread;
+use App\Services\Membership\MemberEntitlements;
+use App\Support\Membership\MemberFeature;
 use Filament\Actions\Action;
 use Illuminate\Database\Eloquent\Builder;
 use Filament\Actions\EditAction;
@@ -31,6 +33,17 @@ class SupportThreadsTable
                     ->weight('bold')
                     ->description(fn ($record) => $record->subject ?: 'General support')
                     ->searchable(),
+                // Members whose plan includes priority support. Resolved by the member
+                // entitlement engine, so /control and the app can never disagree.
+                TextColumn::make('member_priority')
+                    ->label('Priority')
+                    ->state(fn (SupportThread $r): ?string => $r->user !== null
+                        && app(MemberEntitlements::class)->allows($r->user, MemberFeature::SUPPORT_PRIORITY)
+                            ? app(MemberEntitlements::class)->for($r->user)->plan->name
+                            : null)
+                    ->badge()
+                    ->color('warning')
+                    ->placeholder('—'),
                 TextColumn::make('category.label')
                     ->label('Topic')
                     ->badge()

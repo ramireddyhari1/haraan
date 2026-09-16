@@ -7,7 +7,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Tournament;
 use App\Models\User;
+use App\Services\Membership\MemberEntitlements;
 use App\Services\ReputationService;
+use App\Support\Membership\MemberFeature;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -151,6 +153,15 @@ final class TournamentsController extends Controller
                 'error' => 'You have created a lot of tournaments today. Try again tomorrow.',
             ], 429);
         }
+
+        // How many tournaments a member may run at once is a member plan limit. Checked after
+        // validation so a bad form still gets its field errors. "Running" means it hasn't
+        // finished: its end date is today or later. Throws EntitlementDenied (403).
+        $running = Tournament::query()
+            ->where('user_id', $user->id)
+            ->whereDate('end_date', '>=', Carbon::today())
+            ->count();
+        app(MemberEntitlements::class)->assertWithinLimit($user, MemberFeature::TOURNAMENTS_ACTIVE_HOSTED, $running);
 
         $format = $v['match_format'];
         $formatColumns = $sport === 'cricket'

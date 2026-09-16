@@ -18,7 +18,9 @@ use App\Models\PostLike;
 use App\Models\PostSave;
 use App\Models\User;
 use App\Services\CareerBattingService;
+use App\Services\Membership\MemberEntitlements;
 use App\Services\PlayerCareerAnalysis;
+use App\Support\Membership\MemberFeature;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -129,6 +131,11 @@ final class PlayersController extends Controller
             // Blue tick. Admin-granted in /control — the app only ever reads it, so a
             // profile can't award itself one.
             'is_verified'      => (bool) ($user->is_verified ?? false),
+            // Pro / Hero mark — the plan code when the owner's plan includes the badge,
+            // otherwise null. Resolved by the one entitlement engine, never by plan name here.
+            'member_badge'     => app(MemberEntitlements::class)->allows($user, MemberFeature::PROFILE_MEMBER_BADGE)
+                ? app(MemberEntitlements::class)->for($user)->plan->code
+                : null,
             'profile_complete' => $user->isActionboardProfileComplete(),
             // Account privacy (Instagram-style). Private accounts are hidden from the Home feed.
             'is_private'       => ! $user->privacy_public_profile,
@@ -581,6 +588,9 @@ final class PlayersController extends Controller
             // Three sentences about the figures above, written by a model that was
             // handed those figures and forbidden to produce any of its own.
             'analysis' => $this->careerAnalysis($user),
+            // True when the owner's plan doesn't include the AI read. The app shows its own
+            // player an invitation in the card's place; everyone else simply sees no card.
+            'analysis_locked' => ! app(MemberEntitlements::class)->allows($user, MemberFeature::AI_CAREER_READ),
             'headline' => [
                 ['label' => 'Matches', 'value' => (string) $matches],
                 ['label' => 'Runs', 'value' => (string) $runs],
@@ -652,6 +662,12 @@ final class PlayersController extends Controller
      */
     private function careerAnalysis(User $user): ?array
     {
+        // A member plan feature. Checked before any model call so a plan without it costs
+        // nothing — not even the after-response refresh.
+        if (! app(MemberEntitlements::class)->allows($user, MemberFeature::AI_CAREER_READ)) {
+            return null;
+        }
+
         $service = app(PlayerCareerAnalysis::class);
         // Schedule the write for after this response, then serve whatever is already
         // cached. The profile is never slower than the database because of this card.

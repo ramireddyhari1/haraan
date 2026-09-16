@@ -11,6 +11,8 @@ use App\Models\HomeBlock;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use App\Services\AdTracker;
+use App\Services\Membership\MemberEntitlements;
+use App\Support\Membership\MemberFeature;
 use Illuminate\Http\Request;
 
 final class AppContentController extends Controller
@@ -35,8 +37,15 @@ final class AppContentController extends Controller
     }
 
     /** GET /api/ads — active promo/ad cards, optionally filtered by ?placement= */
-    public function ads(): JsonResponse
+    public function ads(Request $request, MemberEntitlements $entitlements): JsonResponse
     {
+        // Ad-free is a member plan feature. The list is simply empty — the app already
+        // renders nothing for an empty placement, so no client needs to know why.
+        $viewer = $request->attributes->get('auth_user');
+        if ($entitlements->allows($viewer instanceof User ? $viewer : null, MemberFeature::ADS_HIDDEN)) {
+            return response()->json(['data' => []]);
+        }
+
         $ads = Ad::query()
             ->serving(request('placement') ? (string) request('placement') : null)
             ->orderBy('sort_order')

@@ -316,7 +316,13 @@
 
     @elseif($tab === 'insights')
         @php $in = $insights ?? []; $flow = $in['flow'] ?? []; @endphp
-        @if(($in['moments'] ?? 0) === 0)
+        @if(!empty($insightsLock))
+            <div class="smx-card smx-locked">
+                <div class="smx-eyebrow">Advanced insights</div>
+                <p class="smx-locked-line">{{ $insightsLock['signed_in'] ? $insightsLock['message'] : 'Sign in to see insights for this match.' }}</p>
+                <p class="smx-note">Choose your sports or change your plan from Account → Membership in the Haraan app.</p>
+            </div>
+        @elseif(($in['moments'] ?? 0) === 0)
             <div class="smx-empty">Insights appear once the match has scoring moments.</div>
         @else
             <div class="smx-card">
@@ -461,6 +467,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .smx-ad-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .smx-ad-label { font-size: 10px; color: var(--muted); font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
 .smx-ad-cta { font-size: 12px; font-weight: 800; color: #fff; background: var(--home); border-radius: 10px; padding: 8px 12px; white-space: nowrap; }
+.smx-locked-line { margin: 6px 0 4px; font-size: 15px; font-weight: 700; color: var(--ink, #0F172A); }
 .smx-empty { text-align: center; color: var(--muted); font-size: 13px; padding: 26px 12px; }
 .smx-note { font-size: 12px; color: var(--muted); margin: 0 4px; }
 .smx-muted { color: var(--muted); }
