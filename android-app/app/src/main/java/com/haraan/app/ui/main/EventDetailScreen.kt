@@ -253,7 +253,11 @@ fun EventDetailScreen(
         // 3. Floating Nav — collapses into a titled top bar on scroll
         EventFloatingNav(
             onBack = onBack,
+            eventId = event.id,
             title = event.title,
+            shareDetails = listOf(detail.fullDate.ifBlank { event.date }, detail.city)
+                .filter { it.isNotBlank() }
+                .joinToString(" · "),
             collapseProgress = collapseProgress
         )
 

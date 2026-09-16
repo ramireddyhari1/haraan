@@ -16,6 +16,18 @@ object ApiConfig {
     val BASE_URL: String = BuildConfig.API_BASE_URL.trimEnd('/')
 
     /**
+     * Origin for links a person will open outside the app (share sheets). A dev build
+     * talking to a laptop over `adb reverse` must never hand someone a 127.0.0.1 link,
+     * so any non-public backend falls back to the production site.
+     */
+    val PUBLIC_WEB_URL: String =
+        if (Regex("""^https?://(localhost|127\.|10\.|192\.168\.)""").containsMatchIn(BASE_URL)) {
+            "https://haraan.app"
+        } else {
+            BASE_URL
+        }
+
+    /**
      * Resolve a server-supplied media path against [BASE_URL].
      *
      * Uploads are stored root-relative ("/storage/avatars/x.jpg"), which Coil cannot

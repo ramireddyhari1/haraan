@@ -42,9 +42,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.EventSeat
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocalCafe
@@ -57,7 +55,6 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shower
 import androidx.compose.material.icons.filled.SportsBasketball
 import androidx.compose.material.icons.filled.SportsCricket
@@ -116,6 +113,10 @@ import com.haraan.app.data.ApiConfig
 import com.haraan.app.data.BookingRepository
 import com.haraan.app.data.BookingResult
 import com.haraan.app.data.FavoritesStore
+import com.haraan.app.ui.components.HeroActionButton
+import com.haraan.app.ui.components.HeroActionDefaults
+import com.haraan.app.ui.components.HeroActionIcons
+import com.haraan.app.ui.components.HeroToggleActionButton
 import com.haraan.app.data.LocationRepository
 import com.haraan.app.data.LocationState
 import com.haraan.app.data.TokenStore
@@ -556,33 +557,50 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
         }
       }
 
-      // ── Fixed overlays: back + share ─────────────────────────────────────────────
+      // ── Fixed overlays: back + save + share ──────────────────────────────────────
       Row(
         modifier = Modifier
           .fillMaxWidth()
           .statusBarsPadding()
-          .padding(12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+          .padding(horizontal = HeroActionDefaults.EdgePadding, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        CircleButton(Icons.Default.ArrowBack, "Back") { onBack() }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-          CircleButton(
-            if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-            if (isFavorite) "Remove from saved" else "Save venue",
-            tint = if (isFavorite) HaraanColors.LiveRed else Color.White
-          ) {
-            isFavorite = FavoritesStore.toggle(ctx, venue.id)
-            Toast.makeText(ctx, if (isFavorite) "Saved" else "Removed", Toast.LENGTH_SHORT).show()
-          }
-          CircleButton(Icons.Default.Share, "Share") {
-            runCatching {
-              val share = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, "Check out $name on Haraan — ${ApiConfig.BASE_URL}")
+        HeroActionButton(
+          icon = HeroActionIcons.Back,
+          contentDescription = "Back",
+          onClick = onBack,
+          iconSize = HeroActionDefaults.BackIconSize,
+        )
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(HeroActionDefaults.Spacing),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          HeroToggleActionButton(
+            checked = isFavorite,
+            onToggle = {
+              isFavorite = FavoritesStore.toggle(ctx, venue.id)
+              Toast.makeText(ctx, if (isFavorite) "Saved" else "Removed", Toast.LENGTH_SHORT).show()
+            },
+            iconOff = HeroActionIcons.HeartOutline,
+            iconOn = HeroActionIcons.HeartFilled,
+            activeColor = HaraanColors.LiveRed,
+            contentDescriptionOff = "Save venue",
+            contentDescriptionOn = "Remove from saved",
+          )
+          HeroActionButton(
+            icon = HeroActionIcons.Share,
+            contentDescription = "Share",
+            onClick = {
+              runCatching {
+                val share = Intent(Intent.ACTION_SEND).apply {
+                  type = "text/plain"
+                  putExtra(Intent.EXTRA_TEXT, "Check out $name on Haraan — ${ApiConfig.BASE_URL}")
+                }
+                ctx.startActivity(Intent.createChooser(share, "Share venue"))
               }
-              ctx.startActivity(Intent.createChooser(share, "Share venue"))
-            }
-          }
+            },
+          )
         }
       }
 
@@ -1434,25 +1452,6 @@ private fun ReviewRow(review: VenueReviewItem) {
       Spacer(Modifier.height(6.dp))
       Text(review.text, color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
     }
-  }
-}
-
-@Composable
-private fun CircleButton(
-  icon: androidx.compose.ui.graphics.vector.ImageVector,
-  cd: String,
-  tint: Color = Color.White,
-  onClick: () -> Unit
-) {
-  Box(
-    modifier = Modifier
-      .size(40.dp)
-      .clip(CircleShape)
-      .background(Color.Black.copy(alpha = 0.35f))
-      .clickable { onClick() },
-    contentAlignment = Alignment.Center
-  ) {
-    Icon(icon, cd, tint = tint, modifier = Modifier.size(20.dp))
   }
 }
 

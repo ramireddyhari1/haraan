@@ -1,71 +1,50 @@
 package com.haraan.app.ui.main.eventdetail
 
+import android.content.Intent
 import android.widget.Toast
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.haraan.app.ui.animations.pressScale
+import com.haraan.app.data.ApiConfig
+import com.haraan.app.data.FavoritesStore
+import com.haraan.app.ui.components.HeroActionButton
+import com.haraan.app.ui.components.HeroActionDefaults
+import com.haraan.app.ui.components.HeroActionIcons
+import com.haraan.app.ui.components.HeroToggleActionButton
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.HaraanTypography
-import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
  * Top navigation that starts as translucent circular buttons floating over the
  * hero, and collapses into a solid titled app bar as the poster scrolls away.
  * One source of truth for back / share / save — no second button set.
  *
+ * @param eventId server id; saves are keyed on it and numeric ids get a web link.
+ * @param shareDetails "when · where" line for the share message; blank is skipped.
  * @param collapseProgress 0 over the poster, 1 when fully collapsed.
  */
 @Composable
 fun EventFloatingNav(
     onBack: () -> Unit,
+    eventId: String,
     title: String,
+    shareDetails: String,
     collapseProgress: Float,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val haptics = LocalHapticFeedback.current
-    var isSaved by remember { mutableStateOf(false) }
-
-    // Single bounce on bookmark toggle — never loops
-    val saveScale = remember { Animatable(1f) }
-    LaunchedEffect(isSaved) {
-        if (isSaved) {
-            saveScale.snapTo(0.7f)
-            saveScale.animateTo(1f, tween(260))
-        }
-    }
+    var isSaved by remember(eventId) { mutableStateOf(FavoritesStore.isEventSaved(context, eventId)) }
 
     val p = collapseProgress
-    // Buttons fade from a dark glass disc (over image) to bare icons (over the bar).
-    val discColor = Color.Black.copy(alpha = 0.55f * (1f - p))
-    val iconTint = lerp(Color.White, HaraanColors.TextPrimary, p)
-    val discBorder = Color.White.copy(alpha = 0.12f * (1f - p))
 
     Surface(
         color = HaraanColors.Surface.copy(alpha = p),
@@ -96,93 +75,69 @@ fun EventFloatingNav(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = HeroActionDefaults.EdgePadding, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NavCircleButton(onClick = onBack, discColor = discColor, border = discBorder) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = iconTint,
-                        modifier = Modifier.size(20.dp)
+                HeroActionButton(
+                    icon = HeroActionIcons.Back,
+                    contentDescription = "Back",
+                    onClick = onBack,
+                    collapse = p,
+                    iconSize = HeroActionDefaults.BackIconSize
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(HeroActionDefaults.Spacing),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HeroActionButton(
+                        icon = HeroActionIcons.Share,
+                        contentDescription = "Share",
+                        onClick = { shareEvent(context, eventId, title, shareDetails) },
+                        collapse = p
                     )
-                }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NavCircleButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            Toast.makeText(context, "Link copied!", Toast.LENGTH_SHORT).show()
+                    HeroToggleActionButton(
+                        checked = isSaved,
+                        onToggle = {
+                            isSaved = FavoritesStore.toggleEvent(context, eventId)
+                            Toast.makeText(
+                                context,
+                                if (isSaved) "Saved" else "Removed",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         },
-                        discColor = discColor,
-                        border = discBorder
-                    ) {
-                        Icon(
-                            Icons.Default.Share,
-                            contentDescription = "Share",
-                            tint = iconTint,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    NavCircleButton(
-                        onClick = {
-                            isSaved = !isSaved
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        },
-                        discColor = discColor,
-                        border = discBorder,
-                        scaleOverride = saveScale.value
-                    ) {
-                        Icon(
-                            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = "Save",
-                            tint = if (isSaved) HaraanColors.EventsBlue else iconTint,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                        iconOff = HeroActionIcons.BookmarkOutline,
+                        iconOn = HeroActionIcons.BookmarkFilled,
+                        activeColor = HaraanColors.EventsBlue,
+                        contentDescriptionOff = "Save event",
+                        contentDescriptionOn = "Remove from saved",
+                        collapse = p
+                    )
                 }
             }
         }
     }
 }
 
-@Composable
-private fun NavCircleButton(
-    onClick: () -> Unit,
-    discColor: Color,
-    border: Color,
-    scaleOverride: Float = 1f,
-    content: @Composable () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-
-    Surface(
-        onClick = onClick,
-        interactionSource = interactionSource,
-        shape = CircleShape,
-        color = Color.Transparent,
-        modifier = Modifier
-            .size(40.dp)
-            .pressScale(interactionSource)
-            .graphicsLayer {
-                scaleX = scaleOverride
-                scaleY = scaleOverride
-            }
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxSize()
-                .background(discColor, CircleShape)
-                .then(
-                    if (border.alpha > 0.01f) {
-                        Modifier.border(BorderStroke(1.dp, border), CircleShape)
-                    } else Modifier
-                )
-        ) {
-            content()
-        }
+/**
+ * Opens the system share sheet (which carries its own Copy action) with the event's
+ * name, when/where, and its public page. Only numeric ids have a page on the site;
+ * anything else is shared as text rather than as a link that would 404.
+ */
+private fun shareEvent(context: android.content.Context, eventId: String, title: String, details: String) {
+    val link = eventId.toIntOrNull()?.let { "${ApiConfig.PUBLIC_WEB_URL}/events/$it" }
+    val text = buildString {
+        append(title)
+        if (details.isNotBlank()) append('\n').append(details)
+        append("\n\n").append(link ?: "Find it on Haraan.")
     }
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, title)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    runCatching { context.startActivity(Intent.createChooser(send, "Share event")) }
+        .onFailure { Toast.makeText(context, "No app available to share", Toast.LENGTH_SHORT).show() }
 }
