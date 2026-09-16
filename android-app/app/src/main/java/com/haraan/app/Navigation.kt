@@ -3,6 +3,7 @@ package com.haraan.app
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -21,7 +22,19 @@ import com.haraan.app.ui.matches.ScoringScreen
 
 @Composable
 fun MainNavigation() {
-  val backStack = rememberNavBackStack(Main)
+  val backStack = rememberNavBackStack(Main, InsightSportsPicker)
+
+  // Any screen can ask for the plans (account card, a locked feature, a refused gate).
+  LaunchedEffect(backStack) {
+    com.haraan.app.data.membership.MembershipNav.requests.collect {
+      if (backStack.lastOrNull() != Membership) backStack.add(Membership)
+    }
+  }
+  LaunchedEffect(backStack) {
+    com.haraan.app.data.membership.MembershipNav.sportRequests.collect {
+      if (backStack.lastOrNull() != InsightSportsPicker) backStack.add(InsightSportsPicker)
+    }
+  }
 
   NavDisplay(
     backStack = backStack,
@@ -105,6 +118,27 @@ fun MainNavigation() {
         }
         entry<PriceChart> { pc ->
           PriceChartScreen(venueId = pc.venueId, onBack = { backStack.removeLastOrNull() })
+        }
+        entry<Membership> {
+          com.haraan.app.ui.membership.MembershipScreen(
+            onClose = { backStack.removeLastOrNull() },
+            onSignIn = { backStack.add(MembershipSignIn) },
+          )
+        }
+        entry<InsightSportsPicker> {
+          com.haraan.app.ui.membership.InsightSportsScreen(onClose = { backStack.removeLastOrNull() })
+        }
+        entry<MembershipSignIn> {
+          val ctx = LocalContext.current
+          com.haraan.app.ui.LoginRoute(
+            onSkipClick = { backStack.removeLastOrNull() },
+            onLoginSuccess = { token ->
+              TokenStore.saveToken(ctx, token)
+              com.haraan.app.push.PushRegistrar.syncToken(ctx)
+              // Back to the plans, which reload as the signed-in member.
+              backStack.removeLastOrNull()
+            }
+          )
         }
       },
   )

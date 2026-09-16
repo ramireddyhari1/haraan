@@ -65,7 +65,7 @@ class MatchDetailsViewModel : ViewModel() {
         // Load sponsored ads for the Live tab separately — a failure here must never
         // block or error the match itself, so it just leaves the list empty.
         viewModelScope.launch {
-            _liveAds.value = runCatching { contentRepo.getAds("match_live") }.getOrDefault(emptyList())
+            _liveAds.value = runCatching { contentRepo.getAds("match_live", token) }.getOrDefault(emptyList())
         }
     }
 
@@ -260,6 +260,7 @@ class MatchDetailsViewModel : ViewModel() {
                 // non-blank, so every "has a photo?" check passed and the image loader
                 // was handed "null" as a URL. Left an empty ring on every card.
                 playerId = o.optName("playerId"),
+
                 photoUrl = o.optName("photo"),
                 milestoneKind = o.optString("milestoneKind"),
                 detail = o.optString("detail"),

@@ -46,6 +46,8 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.runtime.produceState
 import androidx.compose.material.icons.filled.SportsCricket
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.DeleteForever
@@ -119,41 +121,38 @@ private val Text1     = HaraanColors.TextPrimary
 private val Text2     = HaraanColors.TextSecondary
 private val Text3     = HaraanColors.TextMuted
 private val Stroke    = HaraanColors.BorderLight
-private val DangerBg  = HaraanColors.DangerTint
-private val Danger    = Color(0xFFD23F57)
-
-// The hero — the screen's ONE saturated moment. Navy → blue → green, exactly as the
-// brand reads. Nothing else on the page is allowed a full-bleed gradient; a second
-// one halves the impact of both.
-private val HeroGradient   = Brush.linearGradient(listOf(Navy, NavyMid, Color(0xFF0A3D2A)))
-private val AvatarGradient = Brush.linearGradient(listOf(Color(0xFF2563EB), Green))
+private val DangerBg  = Color(0xFFFEF2F2)
+private val Danger    = Color(0xFFDC2626)
 
 /**
- * The hero is a membership credential, not a banner, so it is printed like one:
- * a glow lifting the avatar off the navy, and guilloché arcs — the concentric
- * line-work of banknotes and passports — struck from a point past the
- * bottom-right corner so only their shoulders cross the card.
- *
- * Arc alpha stays under 0.06: the member ID sits on top of these, and monospaced
- * zeros are the first glyphs to go muddy against a moving line.
+ * Premium membership identity card surface.
+ * Clean white luminous canvas with subtle Haraan blue radial aura, delicate
+ * guilloché security arcs, and a refined border.
  */
-private fun Modifier.identityCardSurface(): Modifier = this
-    .clip(RoundedCornerShape(24.dp))
-    .background(HeroGradient)
+private fun Modifier.identityCardSurface(edge: Color = Stroke): Modifier = this
+    .clip(RoundedCornerShape(22.dp))
+    .background(
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFFFFFFF), Color(0xFFFAFCFF), Color(0xFFF4F7FB)),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+        )
+    )
+    .border(1.dp, edge, RoundedCornerShape(22.dp))
     .drawWithCache {
         val glow = Brush.radialGradient(
-            colors = listOf(Color(0xFF2563EB).copy(alpha = 0.30f), Color.Transparent),
-            center = Offset(size.width * 0.16f, size.height * 0.18f),
+            colors = listOf(Color(0xFF2563EB).copy(alpha = 0.05f), Color.Transparent),
+            center = Offset(size.width * 0.90f, size.height * 0.10f),
             radius = size.minDimension * 1.15f,
         )
-        val origin = Offset(size.width * 1.05f, size.height * 1.35f)
+        val origin = Offset(size.width * 1.08f, size.height * 1.32f)
         val arc = StrokeStyle(width = 1.dp.toPx())
         onDrawBehind {
             drawRect(glow)
             repeat(7) { i ->
                 drawCircle(
-                    color = Color.White.copy(alpha = 0.055f - i * 0.006f),
-                    radius = size.height * (0.55f + i * 0.28f),
+                    color = Color(0xFF2563EB).copy(alpha = 0.038f - i * 0.0045f),
+                    radius = size.height * (0.50f + i * 0.26f),
                     center = origin,
                     style = arc,
                 )
@@ -334,12 +333,13 @@ fun AccountProfileScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEFF2F7)).clickable(onClick = onClose),
+                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFF1F5F9)).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Default.Close, "Close", tint = Text1, modifier = Modifier.size(18.dp)) }
             Spacer(Modifier.width(12.dp))
             Text("Account", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF1F5F9)))
 
         when (val s = state) {
             is AccountState.Loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = BlueBright) }
@@ -444,12 +444,21 @@ private fun Content(
     val today = remember { todayIso() }
     val upcomingCount = bookings.filterNot { it.isCancelled() }.count { !it.isPast(today) }
 
+    // The member's plan, read once for the passport card and the Membership row. It loads on its
+    // own so a slow or failed call never holds up the account: until it answers (or if it never
+    // does) both render exactly as they do for a regular member.
+    val membership by produceState<com.haraan.app.data.membership.Membership?>(initialValue = null, account.playerId) {
+        val token = TokenStore.getSignedInToken(context) ?: return@produceState
+        value = runCatching { com.haraan.app.data.membership.MembershipRepository().membership(token) }.getOrNull()
+    }
+    val tier = com.haraan.app.ui.membership.MemberTier.identityOf(membership)
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
     ) {
         // ── Identity hero — the one moment that dominates the screen ──
-        item { IdentityHero(account, uploadingPhoto, onEditPhoto = editPhoto) }
+        item { IdentityHero(account, uploadingPhoto, onEditPhoto = editPhoto, tier = tier) }
 
         // ── The two lanes. This is the screen's whole proposition: one identity,
         // two things to do with it. Each lane owns its accent and its own number,
@@ -469,6 +478,7 @@ private fun Content(
                     accent = BlueBright,
                     tint = BlueTint,
                     label = "Tickets",
+                    subtitle = "Events & Passes",
                     value = when {
                         upcomingCount > 0 -> upcomingCount.toString()
                         bookings.isNotEmpty() -> bookings.size.toString()
@@ -477,18 +487,19 @@ private fun Content(
                     caption = when {
                         upcomingCount > 0 -> "upcoming"
                         bookings.isNotEmpty() -> "past bookings"
-                        else -> "Book your first event"
+                        else -> "Book first event"
                     },
                     onClick = onOpenBookings,
                 )
                 LaneCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.SportsCricket,
-                    accent = Green,
-                    tint = GreenTint,
+                    accent = Color(0xFF1E3A8A),
+                    tint = Color(0xFFEFF6FF),
                     label = "Play",
+                    subtitle = "Pulse & GameHub",
                     value = player?.careerMatches?.takeIf { it > 0 }?.toString(),
-                    caption = if (player != null && player.careerMatches > 0) "matches played" else "Join a local match",
+                    caption = if (player != null && player.careerMatches > 0) "matches played" else "Join a match",
                     onClick = onOpenPlayerProfile,
                 )
             }
@@ -500,13 +511,29 @@ private fun Content(
             item { Spacer(Modifier.height(12.dp)); StandingStrip(player) }
         }
 
-        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Account") }
+        item { Spacer(Modifier.height(GroupGap)); SectionTitle("Account Settings") }
         item {
             Spacer(Modifier.height(HeadingGap))
             SettingsCard {
-                SettingRow(Icons.Default.Shield, "Privacy", onClick = onOpenPrivacy)
+                MembershipRow(membership)
                 ThinDivider()
-                SettingRow(Icons.Default.SupportAgent, "Support", onClick = onOpenSupport)
+                SettingRow(
+                    icon = Icons.Default.Shield,
+                    title = "Privacy",
+                    subtitle = "Profile visibility & discovery",
+                    iconBg = Color(0xFFF8FAFC),
+                    iconTint = Color(0xFF334155),
+                    onClick = onOpenPrivacy,
+                )
+                ThinDivider()
+                SettingRow(
+                    icon = Icons.Default.SupportAgent,
+                    title = "Support",
+                    subtitle = "Concierge, FAQs & chat",
+                    iconBg = BlueTint,
+                    iconTint = BlueBright,
+                    onClick = onOpenSupport,
+                )
             }
         }
 
@@ -516,9 +543,21 @@ private fun Content(
         item {
             Spacer(Modifier.height(HeadingGap))
             SettingsCard {
-                SettingRow(Icons.AutoMirrored.Filled.Article, "Terms & Conditions") { onOpenLegal("terms") }
+                SettingRow(
+                    icon = Icons.AutoMirrored.Filled.Article,
+                    title = "Terms & Conditions",
+                    subtitle = "User agreement & policies",
+                    iconBg = Color(0xFFF8FAFC),
+                    iconTint = Color(0xFF64748B),
+                ) { onOpenLegal("terms") }
                 ThinDivider()
-                SettingRow(Icons.Default.PrivacyTip, "Privacy Policy") { onOpenLegal("privacy") }
+                SettingRow(
+                    icon = Icons.Default.PrivacyTip,
+                    title = "Privacy Policy",
+                    subtitle = "Data protection & standards",
+                    iconBg = Color(0xFFF8FAFC),
+                    iconTint = Color(0xFF64748B),
+                ) { onOpenLegal("privacy") }
             }
         }
 
@@ -526,7 +565,7 @@ private fun Content(
         // edge with a help link.
         item {
             Spacer(Modifier.height(GroupGap))
-            SettingsCard { SignOutRow(onSignOut) }
+            SignOutCard(account = account, onSignOut = onSignOut)
         }
 
         item {
@@ -543,30 +582,84 @@ private fun Content(
     }
 }
 
-// ─────────────────────────────────────────────── Identity hero (gradient) ───────
+// ─────────────────────────────────────────────── Identity hero (card) ───────
 @Composable
-private fun IdentityHero(a: AccountInfo, uploadingPhoto: Boolean, onEditPhoto: () -> Unit) {
+private fun IdentityHero(
+    a: AccountInfo,
+    uploadingPhoto: Boolean,
+    onEditPhoto: () -> Unit,
+    tier: com.haraan.app.ui.membership.MemberTier = com.haraan.app.ui.membership.MemberTier.REGULAR,
+) {
+    // Only a server-confirmed Pro or Hero badge changes this card; REGULAR keeps it exactly as is.
+    val tierStyle = com.haraan.app.ui.membership.MemberTierStyles.of(tier)
     Column(
         Modifier
             .fillMaxWidth()
-            .identityCardSurface()
-            .padding(20.dp),
+            .identityCardSurface(edge = tierStyle?.rim ?: Stroke)
+            .padding(18.dp),
     ) {
+        // Top credential header
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(BlueBright),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "HARAAN PASSPORT",
+                    color = BlueBright,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.4.sp,
+                )
+            }
+            if (tierStyle != null) {
+                com.haraan.app.ui.membership.MemberTierChip(
+                    tier,
+                    modifier = Modifier.clickable { com.haraan.app.data.membership.MembershipNav.open() },
+                )
+            } else Box(
+                Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(Color(0xFFEFF6FF))
+                    .border(1.dp, Color(0xFFDBEAFE), RoundedCornerShape(100.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    "OFFICIAL MEMBER",
+                    color = Color(0xFF1E3A8A),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // Avatar + Member details
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Tappable avatar — the one "edit" action on this screen: upload a photo.
             Box(contentAlignment = Alignment.BottomEnd) {
                 Box(
                     Modifier
-                        .size(68.dp)
+                        .size(66.dp)
                         .clip(CircleShape)
-                        .background(AvatarGradient)
-                        .border(2.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                        .background(Color(0xFFF8FAFC))
+                        .border(2.dp, tierStyle?.tint ?: Color(0xFFEFF6FF), CircleShape)
+                        .border(1.dp, tierStyle?.rim ?: Stroke, CircleShape)
                         .clickable(onClick = onEditPhoto),
                     contentAlignment = Alignment.Center,
                 ) {
                     val photo = avatarUrl(a.avatar)
                     when {
-                        uploadingPhoto -> CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                        uploadingPhoto -> CircularProgressIndicator(color = BlueBright, modifier = Modifier.size(22.dp))
                         photo != null -> AsyncImage(
                             model = photo,
                             contentDescription = "Profile photo",
@@ -581,51 +674,69 @@ private fun IdentityHero(a: AccountInfo, uploadingPhoto: Boolean, onEditPhoto: (
                         )
                     }
                 }
-                // Camera badge signals the avatar is editable.
+                // Camera edit badge with Haraan blue accent
                 Box(
                     Modifier
                         .size(24.dp)
                         .clip(CircleShape)
                         .background(BlueBright)
-                        .border(2.dp, Navy, CircleShape)
+                        .border(2.dp, Color.White, CircleShape)
                         .clickable(onClick = onEditPhoto),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Default.PhotoCamera, "Upload photo", tint = Color.White, modifier = Modifier.size(12.dp)) }
+                ) {
+                    Icon(
+                        Icons.Default.PhotoCamera,
+                        contentDescription = "Upload photo",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp),
+                    )
+                }
             }
-            Spacer(Modifier.width(16.dp))
+
+            Spacer(Modifier.width(14.dp))
+
             Column(Modifier.weight(1f)) {
-                Text(a.name.ifBlank { "Haraan user" }, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                a.email?.let {
-                    Spacer(Modifier.height(5.dp))
+                Text(
+                    a.name.ifBlank { "Haraan Member" },
+                    color = Text1,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                a.email?.takeIf { it.isNotBlank() }?.let { email ->
+                    Spacer(Modifier.height(3.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Email, null, tint = Color.White.copy(alpha = 0.65f), modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.Email, null, tint = Text3, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(5.dp))
                         Text(
-                            it, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            email,
+                            color = Text2,
+                            fontSize = 12.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
-                // Where you play and how long you've been here.
                 val since = memberSinceYear(a.memberSince)?.let { "Member since $it" }
                 val place = a.district?.takeIf { it.isNotBlank() }
                 val subtitle = listOfNotNull(place, since).joinToString(" · ")
                 if (subtitle.isNotBlank()) {
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        subtitle, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        subtitle,
+                        color = Text3,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
 
-        // The member ID is the one genuinely distinctive thing on this screen, so
-        // it gets its own band rather than an 11sp chip: labelled, monospaced, and
-        // tappable to copy — the way an airline treats a frequent-flyer number.
+        // Member ID Band
         a.playerId?.let { id ->
-            Spacer(Modifier.height(18.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
             Spacer(Modifier.height(14.dp))
             MemberIdBand(id)
         }
@@ -639,44 +750,57 @@ private fun MemberIdBand(id: String) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
             .clickable {
                 clipboard.setText(AnnotatedString(id))
                 Toast.makeText(context, "Member ID copied.", Toast.LENGTH_SHORT).show()
             }
-            .padding(vertical = 2.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 "MEMBER ID",
-                color = Color.White.copy(alpha = 0.55f),
-                fontSize = 9.5.sp,
+                color = Text3,
+                fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 id,
-                color = Color.White,
-                fontSize = 16.sp,
+                color = Text1,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.sp,
+                letterSpacing = 1.2.sp,
                 maxLines = 1,
                 softWrap = false,
             )
         }
-        Icon(Icons.Default.ContentCopy, "Copy member ID", tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(17.dp))
+        Box(
+            Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(BlueTint),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.ContentCopy,
+                contentDescription = "Copy member ID",
+                tint = BlueBright,
+                modifier = Modifier.size(15.dp),
+            )
+        }
     }
 }
 
 // ───────────────────────────────────────────────────────────── Lanes ────────────
 /**
- * One identity, two lanes. A lane either reports a number it has earned or invites
- * you in. A null [value] means there is nothing to count yet, and the caption is
- * promoted to the headline: an empty lane should read as a door, not as a zero
- * (or worse, a dash, which looks like a redaction).
+ * One identity, two ecosystem lanes. Quick action cards for Tickets (Events)
+ * and Play (Pulse/GameHub).
  */
 @Composable
 private fun RowScope.LaneCard(
@@ -685,6 +809,7 @@ private fun RowScope.LaneCard(
     accent: Color,
     tint: Color,
     label: String,
+    subtitle: String,
     value: String?,
     caption: String,
     onClick: () -> Unit,
@@ -696,28 +821,62 @@ private fun RowScope.LaneCard(
             .background(Surface)
             .border(1.dp, Stroke, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(15.dp),
     ) {
-        Box(
-            Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(tint),
-            contentAlignment = Alignment.Center,
-        ) { Icon(icon, null, tint = accent, modifier = Modifier.size(19.dp)) }
-        Spacer(Modifier.height(14.dp))
-        Text(label, color = Text2, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-        // Push the payload to the bottom so a counting lane and an inviting lane
-        // still share a baseline when they sit side by side.
-        Spacer(Modifier.weight(1f).height(6.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(tint),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = accent, modifier = Modifier.size(19.dp))
+            }
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFF8FAFC))
+                    .border(1.dp, Color(0xFFF1F5F9), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    null,
+                    tint = Text3,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(label, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(1.dp))
+        Text(subtitle, color = Text3, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+
+        Spacer(Modifier.weight(1f).height(10.dp))
+
         if (value != null) {
-            Text(value, color = Text1, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Spacer(Modifier.height(3.dp))
-            Text(caption, color = Text3, fontSize = 11.5.sp, maxLines = 2)
+            Text(value, color = Text1, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Text(caption, color = Text2, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    caption, color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    caption,
+                    color = accent,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = accent, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -1029,32 +1188,165 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun SignOutRow(onSignOut: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onSignOut).padding(horizontal = 16.dp, vertical = 15.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun SignOutCard(account: AccountInfo, onSignOut: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Surface)
+            .border(1.dp, Stroke, RoundedCornerShape(18.dp))
+            .clickable(onClick = onSignOut)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Icon(Icons.AutoMirrored.Filled.Logout, null, tint = Danger, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(14.dp))
-        Text("Sign out", color = Danger, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(Color(0xFFFEF2F2)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Logout,
+                    contentDescription = null,
+                    tint = Danger,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Sign out", color = Danger, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                val emailOrUser = account.email?.takeIf { it.isNotBlank() } ?: account.name.takeIf { it.isNotBlank() }
+                if (emailOrUser != null) {
+                    Spacer(Modifier.height(1.dp))
+                    Text(
+                        "Signed in as $emailOrUser",
+                        color = Text3,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Text3.copy(alpha = 0.5f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
 /**
- * Utility rows are deliberately quiet: grey icons, no accent. Colour on this screen
- * means "this is a lane" — spending it on Support too would flatten the hierarchy
- * back into an undifferentiated list.
+ * Premium setting row with icon squircle, title, optional subtitle, and chevron.
  */
 @Composable
-private fun SettingRow(icon: ImageVector, title: String, onClick: () -> Unit) {
+private fun SettingRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    iconBg: Color = Color(0xFFF8FAFC),
+    iconTint: Color = Text2,
+    onClick: () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = Text2, modifier = Modifier.size(20.dp))
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(iconBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(19.dp))
+        }
         Spacer(Modifier.width(14.dp))
-        Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(20.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            if (subtitle != null) {
+                Spacer(Modifier.height(1.dp))
+                Text(subtitle, color = Text2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(18.dp))
+    }
+}
+
+/**
+ * The member's plan, stated where they manage their account: the plan name, and the one line
+ * that matters about it (renews / ends / payment failed). Loads on its own so a slow or failed
+ * membership call never holds up the account screen — it simply reads "Membership" until then.
+ */
+@Composable
+private fun MembershipRow(membership: com.haraan.app.data.membership.Membership?) {
+    val m = membership
+    val failed = m?.attention == "payment_failed"
+    // A Pro or Hero plan shows its own mark in place of the generic icon, and its chip in the
+    // tier's colours. Everyone else, and a paused plan, keeps the regular row.
+    val tier = if (failed) com.haraan.app.ui.membership.MemberTier.REGULAR
+        else com.haraan.app.ui.membership.MemberTier.identityOf(m)
+    val tierStyle = com.haraan.app.ui.membership.MemberTierStyles.of(tier)
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { com.haraan.app.data.membership.MembershipNav.open() }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (tierStyle != null) {
+            com.haraan.app.ui.membership.MemberMark(tier, 38.dp)
+        } else Box(
+            Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(if (failed) DangerBg else BlueTint),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.WorkspacePremium,
+                null,
+                tint = if (failed) Danger else BlueBright,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Membership", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(1.dp))
+            Text(
+                if (m != null) com.haraan.app.ui.membership.MembershipFormat.statusLine(m) else "Manage plan & ecosystem perks",
+                color = if (failed) Danger else Text2,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (m != null) {
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(tierStyle?.tint ?: if (m.plan.rank > 0) BlueTint else Color(0xFFEFF2F7))
+                    .border(1.dp, tierStyle?.rim ?: if (m.plan.rank > 0) Color(0xFFDBEAFE) else Color(0xFFE2E8F0), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    m.plan.name,
+                    color = tierStyle?.accent ?: if (m.plan.rank > 0) BlueBright else Text2,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Text3, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1062,16 +1354,19 @@ private fun SettingRow(icon: ImageVector, title: String, onClick: () -> Unit) {
 /** Shared chrome for the account's child pages: a back arrow and a title. */
 @Composable
 private fun PageHeader(title: String, onClose: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEFF2F7)).clickable(onClick = onClose),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp)) }
-        Spacer(Modifier.width(12.dp))
-        Text(title, color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(Modifier.fillMaxWidth().background(Surface)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFF1F5F9)).clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp)) }
+            Spacer(Modifier.width(12.dp))
+            Text(title, color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF1F5F9)))
     }
 }
 
@@ -1497,8 +1792,8 @@ private fun ToggleRow(title: String, description: String, checked: Boolean, onCh
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = Green,
-                checkedBorderColor = Green,
+                checkedTrackColor = BlueBright,
+                checkedBorderColor = BlueBright,
             ),
         )
     }
@@ -1534,17 +1829,7 @@ private fun MyBookingsScreen(
     }
 
     Column(modifier.fillMaxSize().background(Bg)) {
-        Row(
-            Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEFF2F7)).clickable(onClick = onClose),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1, modifier = Modifier.size(18.dp)) }
-            Spacer(Modifier.width(12.dp))
-            Text("My bookings", color = Text1, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        }
+        PageHeader("My bookings", onClose)
 
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
             item {
@@ -1583,16 +1868,21 @@ private fun MyBookingsScreen(
 
 @Composable
 private fun ThinDivider() {
-    Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(1.dp).background(Stroke))
+    Box(Modifier.fillMaxWidth().padding(start = 68.dp).height(1.dp).background(Color(0xFFF1F5F9)))
 }
 
 // ─────────────────────────────────────────────────────────── Shared ─────────────
 @Composable
 private fun SectionTitle(title: String, trailing: String? = null) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = Text1, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         if (trailing != null) {
-            Text(trailing, color = Text3, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(trailing, color = Text3, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
     }
 }

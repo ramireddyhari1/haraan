@@ -220,6 +220,8 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
         orderId = data?.orderId.orEmpty(),
         paymentId = razorpayPaymentId ?: data?.paymentId.orEmpty(),
         signature = data?.signature.orEmpty(),
+        // Subscription checkouts (member plans) return this instead of an order id.
+        subscriptionId = data?.data?.optString("razorpay_subscription_id").orEmpty(),
       )
     )
   }

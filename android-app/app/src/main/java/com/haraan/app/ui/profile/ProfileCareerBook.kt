@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,7 +98,11 @@ private val Hairline = Color(0xFFEDF1F6)
 private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
 
 @Composable
-fun CareerBookSection(book: CareerBook) {
+fun CareerBookSection(
+    book: CareerBook,
+    /** The viewer is this player — only they are offered the plan that unlocks the AI read. */
+    showUpgrade: Boolean = false,
+) {
     // Survives the tab switch and a rotation: a player checking their bowling does
     // not expect to be put back on cricket batting for looking at Posts.
     var selected by rememberSaveable { mutableIntStateOf(0) }
@@ -135,6 +140,12 @@ fun CareerBookSection(book: CareerBook) {
         record.analysis?.let { analysis ->
             Spacer(Modifier.height(14.dp))
             Staggered(index = record.groups.size + 1, key = record.key) { CareerAnalysisCard(analysis) }
+        }
+        // Not on their plan: say so to the player themselves, once they have figures worth
+        // reading. Other viewers simply see no card, as before.
+        if (record.analysis == null && record.analysisLocked && showUpgrade && record.groups.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Staggered(index = record.groups.size + 1, key = record.key) { LockedCareerReadCard() }
         }
     }
 }
@@ -528,5 +539,26 @@ private fun Staggered(index: Int, key: Any, content: @Composable () -> Unit) {
             },
     ) {
         content()
+    }
+}
+
+/** The AI read's place, held for a player whose plan doesn't include it. One quiet link, no teaser text. */
+@Composable
+private fun LockedCareerReadCard() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Surface)
+            .border(1.dp, Hairline, RoundedCornerShape(20.dp))
+            .clickable { com.haraan.app.data.membership.MembershipNav.open() }
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("The read on your game", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Haraan AI reads your figures on Pro and Hero.", color = Text2, fontSize = 13.sp)
+        }
+        Text("See plans", color = Blue, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
     }
 }

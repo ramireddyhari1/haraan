@@ -80,9 +80,23 @@ class ContentRepository {
         }
     }
 
-    suspend fun getAds(placement: String): List<AdItem> = withContext(Dispatchers.IO) {
+    /**
+     * Ads for a placement. [token] identifies a signed-in member: when their plan includes
+     * ad-free browsing the server returns an empty list, so the placement renders nothing.
+     */
+    suspend fun getAds(placement: String, token: String? = null): List<AdItem> = withContext(Dispatchers.IO) {
         val url = "${ApiConfig.BASE_URL}/api/ads?placement=$placement"
-        val body = URL(url).readText()
+        val connection = (URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 10000
+            readTimeout = 10000
+            setRequestProperty("Accept", "application/json")
+            token?.takeIf { TokenStore.isSignedIn(it) }?.let { setRequestProperty("Authorization", "Bearer $it") }
+        }
+        val body = try {
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
         // Endpoint returns {"data":[...]}; tolerate a bare array too for forward/back compat.
         val arr = runCatching { JSONObject(body).optJSONArray("data") }.getOrNull()
             ?: runCatching { JSONArray(body) }.getOrNull()

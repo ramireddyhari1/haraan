@@ -77,3 +77,12 @@ data class VenueDetail(
 ) : NavKey
 
 @Serializable data class PriceChart(val venueId: String) : NavKey
+
+/** Member plans — Free / Pro / Hero. Reachable from anywhere via data.membership.MembershipNav. */
+@Serializable data object Membership : NavKey
+
+/** Sign-in wall in front of buying a plan; returns to [Membership] on success. */
+@Serializable data object MembershipSignIn : NavKey
+
+/** Advanced insights: choose sports (Pro) / see every sport unlocked (Hero). */
+@Serializable data object InsightSportsPicker : NavKey

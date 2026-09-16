@@ -156,7 +156,7 @@ fun parseSportInsights(o: JSONObject): SportInsights {
     )
 }
 
-private suspend fun fetchSportInsights(context: Context, matchId: String): SportInsights? = withContext(Dispatchers.IO) {
+private suspend fun fetchSportInsights(context: Context, matchId: String): Any? = withContext(Dispatchers.IO) {
     if (matchId.isBlank()) return@withContext null
     try {
         val token = com.haraan.app.data.TokenStore.getToken(context)
@@ -175,7 +175,9 @@ private suspend fun fetchSportInsights(context: Context, matchId: String): Sport
         val body = (if (code >= 400) connection.errorStream else connection.inputStream)
             ?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } }.orEmpty()
         connection.disconnect()
-        if (code !in 200..299) null else parseSportInsights(JSONObject(body))
+        // A plan refusal is its own state; any other failure is just "unavailable".
+        com.haraan.app.data.membership.InsightsLocks.from(code, body)
+            ?: if (code !in 200..299) null else parseSportInsights(JSONObject(body))
     } catch (_: Exception) {
         null
     }
@@ -186,6 +188,9 @@ sealed interface InsightsLoad {
     data object Loading : InsightsLoad
     data object Unavailable : InsightsLoad
     data class Ready(val data: SportInsights) : InsightsLoad
+
+    /** The member's plan doesn't cover this sport's advanced insights. */
+    data class Locked(val lock: com.haraan.app.data.membership.InsightsLock) : InsightsLoad
 }
 
 /**
@@ -204,7 +209,8 @@ fun rememberSportInsights(matchId: String, liveKey: Any?): InsightsLoad {
     LaunchedEffect(matchId, liveKey) {
         val fresh = fetchSportInsights(context, matchId)
         load = when {
-            fresh != null -> InsightsLoad.Ready(fresh)
+            fresh is com.haraan.app.data.membership.InsightsLock -> InsightsLoad.Locked(fresh)
+            fresh is SportInsights -> InsightsLoad.Ready(fresh)
             load is InsightsLoad.Ready -> load   // a dropped refetch never blanks a tab
             else -> InsightsLoad.Unavailable
         }

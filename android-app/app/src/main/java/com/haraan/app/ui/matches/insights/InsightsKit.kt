@@ -98,6 +98,7 @@ fun InsightsGate(
             "Insights unavailable",
             "Couldn't reach the match log. They'll load when you're back online.",
         )
+        is InsightsLoad.Locked -> com.haraan.app.ui.membership.InsightsLockedPanel(load.lock.message, load.lock.code)
         is InsightsLoad.Ready -> if (load.data.moments == 0 && load.data.players.isEmpty()) {
             InsightsEmpty(emptyTitle, emptyLine)
         } else {

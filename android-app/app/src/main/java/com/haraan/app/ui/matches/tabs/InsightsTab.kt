@@ -85,10 +85,25 @@ fun InsightsTab(matchId: String, state: MatchUiState, modifier: Modifier = Modif
 
     // Re-fetched when the score moves, so a live match's insights follow the match rather
     // than freezing at whatever the state was when the tab first opened.
+    var lock by remember(matchId) { mutableStateOf<com.haraan.app.data.membership.InsightsLock?>(null) }
     LaunchedEffect(matchId, state.score, state.overs) {
         loading = insights == null
-        insights = MatchRepository().fetchInsights(matchId)
+        when (val result = MatchRepository().fetchInsights(matchId, com.haraan.app.data.TokenStore.getSignedInToken(ctx))) {
+            is com.haraan.app.data.CricketInsightsResult.Ready -> { insights = result.data; lock = null }
+            is com.haraan.app.data.CricketInsightsResult.Locked -> { insights = null; lock = result.lock }
+            // A dropped refetch keeps what's on screen.
+            com.haraan.app.data.CricketInsightsResult.Unavailable -> Unit
+        }
         loading = false
+    }
+
+    // Not on the member's plan for cricket: the server's reason and the one way forward.
+    lock?.let { l ->
+        LazyColumn(modifier = modifier.fillMaxSize().background(CrexColors.Background)) {
+            item(key = "locked") { com.haraan.app.ui.membership.InsightsLockedPanel(l.message, l.code) }
+            ground?.let { known -> item(key = "ground") { Box(Modifier.padding(horizontal = 16.dp)) { GroundInsightsCard(known) } } }
+        }
+        return
     }
 
     val data = insights

@@ -183,6 +183,8 @@ data class SportRecord(
     val wagon: WagonWheel? = null,
     /** Null until a read has been written for the player's current figures. */
     val analysis: CareerAnalysis? = null,
+    /** The AI read isn't part of this player's plan (server decides; see member plans). */
+    val analysisLocked: Boolean = false,
 )
 
 /** [primary] is the player's own sport, and always the first entry in [sports]. */
@@ -234,6 +236,8 @@ data class PlayerProfile(
    * the app can set it, which is what keeps the badge worth anything.
    */
   val isVerified: Boolean = false,
+  /** `pro` / `hero` when the player's plan includes the member badge; null otherwise. */
+  val memberBadge: String? = null,
   val rankedXp: Int,
   val casualXp: Int,
   val trustScore: Int,
@@ -416,6 +420,7 @@ class ProfileRepository(
         note = s.optString("note").takeIf { it.isNotBlank() && it != "null" },
         wagon = parseWagon(s.optJSONObject("wagon")),
         analysis = parseAnalysis(s.optJSONObject("analysis")),
+        analysisLocked = s.optBoolean("analysis_locked", false),
       )
     }
     if (sports.isEmpty()) return null
@@ -550,6 +555,7 @@ class ProfileRepository(
       state = json.optString("state", null).cleanNull(),
       isOrganizer = json.optBoolean("is_organizer", false),
       isVerified = json.optBoolean("is_verified", false),
+      memberBadge = json.optString("member_badge", null).cleanNull(),
       rankedXp = json.optInt("ranked_xp", 0),
       casualXp = json.optInt("casual_xp", 0),
       trustScore = json.optInt("trust_score", 100),

@@ -1063,7 +1063,7 @@ private fun ProfileContent(
                     Spacer(Modifier.height(16.dp))
                     SectionTitle("Career")
                     Spacer(Modifier.height(12.dp))
-                    if (careerBook != null) CareerBookSection(careerBook) else StatRow(p)
+                    if (careerBook != null) CareerBookSection(careerBook, showUpgrade = isSelf || p.social?.isSelf == true) else StatRow(p)
                 }
                 if (played) item { Spacer(Modifier.height(20.dp)); SectionTitle("Experience"); Spacer(Modifier.height(12.dp)); XpCard(p) }
                 if (e.chips.isNotEmpty()) item { Spacer(Modifier.height(20.dp)); SectionTitle("Recognition"); Spacer(Modifier.height(12.dp)); ReputationChips(e.chips) }
@@ -2068,6 +2068,30 @@ private fun HeroCard(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
+                    p.memberBadge?.let { badge ->
+                        Spacer(Modifier.width(6.dp))
+                        // The server sets member_badge only while this player's plan includes it.
+                        // Pro and Hero wear their own mark; any other code keeps the plain label.
+                        val tier = com.haraan.app.ui.membership.MemberTier.fromBadge(badge)
+                        if (tier.isMember) {
+                            com.haraan.app.ui.membership.MemberTierChip(
+                                tier,
+                                compact = true,
+                                modifier = Modifier.padding(top = 3.dp),
+                            )
+                        } else Text(
+                            badge.uppercase(),
+                            color = BlueBright,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.6.sp,
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .border(1.dp, BlueBright.copy(alpha = 0.45f), RoundedCornerShape(5.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
                     if (p.isVerified) {
                         Spacer(Modifier.width(6.dp))
                         // Nudged down to sit on the first line's baseline rather than the

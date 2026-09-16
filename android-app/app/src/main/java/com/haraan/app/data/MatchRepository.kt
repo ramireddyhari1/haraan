@@ -1076,7 +1076,7 @@ class MatchRepository(
     return out
   }
 
-  suspend fun fetchInsights(matchId: String): MatchInsights? = withContext(Dispatchers.IO) {
+  suspend fun fetchInsights(matchId: String, token: String? = null): CricketInsightsResult = withContext(Dispatchers.IO) {
     try {
       val connection = (URL("${baseUrl.trimEnd('/')}/api/live-matches/$matchId/insights")
         .openConnection() as HttpURLConnection).apply {
@@ -1086,12 +1086,15 @@ class MatchRepository(
         // request, and that call has to reach a model and come back.
         readTimeout = 40000
         setRequestProperty("Accept", "application/json")
+        // Advanced insights are a member plan feature per sport — the server needs to know who's asking.
+        if (!token.isNullOrBlank() && token != "skipped_guest") setRequestProperty("Authorization", "Bearer $token")
       }
       val code = connection.responseCode
       val body = (if (code >= 400) connection.errorStream else connection.inputStream)
         ?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } }.orEmpty()
       connection.disconnect()
-      if (code !in 200..299) return@withContext null
+      com.haraan.app.data.membership.InsightsLocks.from(code, body)?.let { return@withContext CricketInsightsResult.Locked(it) }
+      if (code !in 200..299) return@withContext CricketInsightsResult.Unavailable
 
       val o = JSONObject(body)
       val innings = mutableListOf<InningsInsight>()
@@ -1199,13 +1202,13 @@ class MatchRepository(
         )
       }
 
-      MatchInsights(
+      CricketInsightsResult.Ready(MatchInsights(
         innings = innings,
         balls = o.optInt("balls"),
         analysis = o.optString("analysis").takeIf { it.isNotBlank() && it != "null" },
-      )
+      ))
     } catch (_: Exception) {
-      null
+      CricketInsightsResult.Unavailable
     }
   }
 
@@ -1382,4 +1385,11 @@ class MatchRepository(
   }
 
   private data class HttpResult(val code: Int, val body: String)
+}
+
+/** A cricket match's insights: the figures, a plan refusal from the server, or nothing to show. */
+sealed interface CricketInsightsResult {
+  data class Ready(val data: MatchInsights) : CricketInsightsResult
+  data class Locked(val lock: com.haraan.app.data.membership.InsightsLock) : CricketInsightsResult
+  data object Unavailable : CricketInsightsResult
 }

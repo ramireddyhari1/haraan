@@ -16,6 +16,8 @@ object PaymentBridge {
             val orderId: String,
             val paymentId: String,
             val signature: String,
+            /** Set when the checkout paid a subscription (member plans) rather than an order. */
+            val subscriptionId: String = "",
         ) : Outcome
 
         /** The buyer dismissed the sheet — the reservation should be released. */
