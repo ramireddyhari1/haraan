@@ -1,6 +1,9 @@
 package com.haraan.app.camera
 
 import android.content.Context
+import android.content.res.Configuration
+import android.os.Build
+import android.os.PowerManager
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -12,15 +15,23 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,7 +46,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,14 +66,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -72,8 +89,10 @@ import androidx.compose.foundation.Image
 import androidx.core.content.ContextCompat
 import com.haraan.app.R
 import com.haraan.app.theme.ArchivoDisplay
+import com.haraan.app.ui.Feel
 import com.haraan.app.data.CameraDeviceRepository
 import com.haraan.app.vision.OpenCvBallTracker
+import com.haraan.app.vision.TrackQuality
 import com.haraan.app.data.CameraSession
 import com.haraan.app.data.PairingPreview
 import kotlinx.coroutines.delay
@@ -180,7 +199,20 @@ private fun JoinPanel(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 26.dp),
+            .displayCutoutPadding()
+            /*
+             * Scrolls, because this screen is now reachable sideways.
+             *
+             * Everything below — the mark, the headline, the role card, the disclaimer and
+             * two buttons — needs more height than a phone has in landscape. Centred and
+             * unscrollable, the bottom of it simply did not exist: the join button was off
+             * the screen for anybody who scanned the QR with their phone already turned,
+             * which is the natural way to hold a phone you are about to film with.
+             *
+             * Centre arrangement still holds while it fits, which is the portrait case.
+             */
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 26.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -387,6 +419,24 @@ private fun CameraMode(
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    /*
+     * THE ONLY CHANNEL THIS SCREEN HAS.
+     *
+     * Every other screen in the app can rely on being looked at. This one cannot: the
+     * person holding it is watching a bowler run in, and a status line that changes
+     * silently changes for nobody. So each thing that happens on its own - a clip ending,
+     * an upload landing, a clip refused, the match going quiet - is also said in the hand.
+     */
+    val view = LocalView.current
+    /*
+     * WHICH WAY THE PHONE IS BEING HELD.
+     *
+     * From the configuration rather than BoxWithConstraints: this screen's state changes
+     * about thirty times a second while a ball is in the air, and every one of those
+     * writes would drag a subcomposition behind it. Orientation changes roughly never.
+     */
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var granted by remember { mutableStateOf(hasCameraPermission()) }
     var recording by remember { mutableStateOf(false) }
@@ -401,6 +451,9 @@ private fun CameraMode(
 
     val executor = remember { Executors.newSingleThreadExecutor() }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+    // Held only so its target rotation can be corrected on a turn — see below.
+    var analysisUseCase by remember { mutableStateOf<ImageAnalysis?>(null) }
+
 
     /*
      * THE VISION ENGINE.
@@ -411,6 +464,42 @@ private fun CameraMode(
      */
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val vision = remember { OpenCvBallTracker() }
+
+    /*
+     * HOW HOT THE PHONE IS.
+     *
+     * A phone doing all of this at once — screen pinned on in sunlight, 1080p encoder,
+     * continuous OpenCV — gets hot, and Android's answer is to quietly slow it down. What
+     * that looks like at a ground is a camera that filmed the first six overs and then
+     * started dropping frames, and nobody can tell that from a bad clip or a bad angle.
+     *
+     * So the app makes the choice itself, out loud, and makes it in the order the feature
+     * is worth: vision stops, filming continues. The clip is what a review is built on;
+     * the trail is a nice thing to watch while it is being filmed.
+     *
+     * MODERATE is the first level at which Android is actually throttling rather than
+     * merely warm, so it is the first level worth reacting to. Below API 29 there is
+     * nothing to listen to and this stays false — the same behaviour as before.
+     */
+    var thermalThrottled by remember { mutableStateOf(false) }
+    DisposableEffect(ctx) {
+        // minSdk here is 24, so most of the fleet this ships to has no thermal API at all.
+        // Those phones behave exactly as they did before: vision runs until the operator
+        // stops it. Nothing about this feature depends on the listener existing.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@DisposableEffect onDispose { }
+        val power = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            ?: return@DisposableEffect onDispose { }
+
+        val hot = { status: Int -> status >= PowerManager.THERMAL_STATUS_MODERATE }
+        // Whatever it is right now: a phone handed over already warm should not have to
+        // get hotter still before the app notices.
+        thermalThrottled = hot(power.currentThermalStatus)
+        val listener = PowerManager.OnThermalStatusChangedListener { status ->
+            thermalThrottled = hot(status)
+        }
+        power.addThermalStatusListener(analysisExecutor, listener)
+        onDispose { runCatching { power.removeThermalStatusListener(listener) } }
+    }
     // Only counted while a delivery is actually being recorded — the camera runs the whole
     // time somebody is holding the phone, and tracking the warm-up is noise.
     var trackedPoints by remember { mutableStateOf(0) }
@@ -419,9 +508,33 @@ private fun CameraMode(
     // into a blur and hides the jitter that tells you it is tracking the wrong thing.
     var ballTrail by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>>(emptyList()) }
     var latestBall by remember { mutableStateOf<com.haraan.app.vision.BallSighting?>(null) }
+
+    /*
+     * THE SAME JUDGEMENT AS THE TRAIL'S COLOUR, IN A WORD.
+     *
+     * Colour on its own is a signal some people cannot read and nobody can read well in
+     * direct sun on a cheap screen at arm's length — which is every condition this phone
+     * is held in. The tracker's own [TrackQuality] says the same thing about the track as
+     * a whole, so it is worth the four characters it costs on a line that is already there.
+     */
+    var trackQuality by remember { mutableStateOf(TrackQuality.UNCERTAIN) }
     // Off by default: it is an aiming aid, not decoration, and it is in the way once the
     // phone is set. Persisted for the session so it does not reappear every delivery.
     var showGuide by remember { mutableStateOf(true) }
+
+    /*
+     * THE SHAPE OF THE PICTURE THE ANALYSER IS SEEING, upright.
+     *
+     * Every overlay here is drawn from coordinates normalised inside the ANALYSIS frame,
+     * and until now they were painted across the whole viewfinder as though the two were
+     * the same rectangle. They are not: the preview is letterboxed into a view of whatever
+     * shape the phone happens to be, so a point at 0.9 across the analysis frame was landing
+     * somewhere else entirely on screen — worst at the edges, which is precisely where a
+     * ball is at release and where a crease corner is.
+     *
+     * Written from the analyser thread like the counters beside it, and read when drawing.
+     */
+    var uprightAspect by remember { mutableStateOf(0f) }
 
     /*
      * THE PITCH ITSELF, found rather than drawn.
@@ -452,6 +565,36 @@ private fun CameraMode(
     var tappedCorners by remember { mutableStateOf<List<com.haraan.app.vision.Point2>>(emptyList()) }
     var tapping by remember { mutableStateOf(false) }
 
+    /*
+     * ROTATION, now that the Activity survives one.
+     *
+     * A use case's target rotation is fixed at bind time. A turn of the phone used to tear
+     * this whole screen down and rebuild it, so the new orientation arrived with the new
+     * binding and nobody had to think about this. Keeping the session alive across a turn
+     * means nobody rebinds — and a recorder still aimed at the old rotation writes the
+     * delivery sideways into the clip the scorer opens.
+     *
+     * The analyser's rotation matters as much and shows less: ImageInfo.rotationDegrees is
+     * derived from it, and both engines now turn their frames by it. Left stale, it would
+     * put the pitch outline and the ball trail back a quarter turn out of the picture —
+     * precisely the failure the coordinate work removed.
+     *
+     * The located pitch goes with it. Those corners were found in the old orientation and
+     * describe nothing in this one; dropping them costs a second of re-detection and
+     * avoids drawing a confident outline somewhere there is no pitch. Corners set by hand
+     * go too, for the same reason and with more certainty — a person tapped them at a
+     * picture that is no longer on screen.
+     */
+    LaunchedEffect(configuration, videoCapture, analysisUseCase) {
+        val rotation = view.display?.rotation ?: return@LaunchedEffect
+        videoCapture?.targetRotation = rotation
+        analysisUseCase?.targetRotation = rotation
+        pitchDetector.reset()
+        pitchQuad = null
+        tappedCorners = emptyList()
+        tapping = false
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             vision.release()
@@ -461,13 +604,67 @@ private fun CameraMode(
     }
 
     val analyzer = remember {
+        /*
+         * ONE BUFFER, REUSED.
+         *
+         * The luma plane was copied into a brand new ByteArray on every single frame —
+         * a quarter of a megabyte, thirty times a second, most of it for frames neither
+         * engine was going to look at. That is a garbage collector running flat out for
+         * the length of a match inside a phone already holding a camera, an encoder and a
+         * Hough transform, and heat is the only thing it produces.
+         *
+         * Declared in here rather than beside the other state on purpose: it belongs to
+         * the analyzer, it is only ever touched on the single-threaded analysis executor,
+         * and a `remember` in the composable body would hand each recomposition a fresh
+         * one while the analyzer quietly kept the first.
+         */
+        var lumaScratch: ByteArray? = null
+
         ImageAnalysis.Analyzer { image ->
             try {
                 val plane = image.planes.getOrNull(0)
                 if (plane != null) {
+                    // A quarter turn swaps the picture's width and height. Both engines
+                    // report inside the upright frame, so that is the shape to draw into.
+                    // Free: read off the frame's metadata, not its pixels.
+                    val turn = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
+                    val sideways = turn == 90 || turn == 270
+                    val frameW = if (sideways) image.height else image.width
+                    val frameH = if (sideways) image.width else image.height
+                    if (frameH > 0) uprightAspect = frameW.toFloat() / frameH.toFloat()
+
+                    /*
+                     * IS THERE ANYTHING TO LOOK FOR?
+                     *
+                     * The camera runs from the moment somebody joins until they walk off
+                     * the ground — through the innings break, through a bowler's long
+                     * walk back, through an hour of nothing. The ball is in flight for
+                     * maybe a second of each delivery, and the pitch is found once.
+                     *
+                     * Every frame outside those windows used to be copied out of the
+                     * hardware buffer in full before the code got round to deciding it had
+                     * no use for it. Deciding first is most of the thermal saving on this
+                     * screen, and it costs nothing that was ever worth having.
+                     */
+                    val trackingNow = trackingLive
+                    val lookingForPitch = !trackingNow &&
+                        pitchQuad == null &&
+                        // Corners set by hand outrank a detected quad, so once there are
+                        // four of them the Hough transform is looking for an answer that
+                        // has already been given.
+                        tappedCorners.size < 4
+                    // Vision yields to heat. Filming is the product; this is bolted to the
+                    // side of it, and a phone that throttles its encoder mid-delivery has
+                    // lost the thing the operator is actually standing there to do.
+                    if (thermalThrottled || (!trackingNow && !lookingForPitch)) {
+                        return@Analyzer
+                    }
+
                     val buffer = plane.buffer
                     buffer.rewind()
-                    val bytes = ByteArray(buffer.remaining())
+                    val needed = buffer.remaining()
+                    val bytes = lumaScratch?.takeIf { it.size == needed }
+                        ?: ByteArray(needed).also { lumaScratch = it }
                     buffer.get(bytes)
 
                     /*
@@ -480,7 +677,7 @@ private fun CameraMode(
                      * re-finding a stationary rectangle mid-delivery would cost frames of
                      * the one thing there is only one chance to see.
                      */
-                    if (trackingLive) {
+                    if (trackingNow) {
                         // The camera's own monotonic clock, never the UI clock: ball
                         // motion timing has to come from when the sensor saw it.
                         val sighting = vision.onFrame(
@@ -488,17 +685,23 @@ private fun CameraMode(
                             width = image.width,
                             height = image.height,
                             rowStride = plane.rowStride,
+                            // The same turn the pitch detector is given. Without it the
+                            // trail was drawn in the sensor's frame and the corridor in the
+                            // viewer's, a quarter turn apart on every portrait phone.
+                            rotationDegrees = image.imageInfo.rotationDegrees,
                             timestampMs = image.imageInfo.timestamp / 1_000_000,
                         )
                         if (sighting != null) {
                             trackedPoints = vision.track().size
                             latestBall = sighting
                             ballTrail = vision.track().takeLast(CAMERA_TRAIL_POINTS)
+                            trackQuality = vision.quality()
                         }
-                    } else if (pitchQuad == null) {
-                        // Stops as soon as it succeeds. The phone is on a tripod; re-running
-                        // it every frame would burn battery to re-derive an answer that is
-                        // already correct, and let the guide twitch between readings.
+                    } else {
+                        // Stops as soon as it succeeds — see the gate above. The phone is on
+                        // a tripod; re-running this every frame would burn battery to
+                        // re-derive an answer that is already correct, and let the guide
+                        // twitch between readings.
                         pitchDetector.detect(
                             luma = bytes,
                             width = image.width,
@@ -542,6 +745,10 @@ private fun CameraMode(
             val beat = repo.heartbeat(session.sessionToken)
             if (beat == null) {
                 missed++
+                // Said in the hand on the way down, once. Losing the scorer is the one
+                // thing that happens on this screen with no gesture behind it, and the
+                // operator has no reason to be looking when it does.
+                if (live) view.performHapticFeedback(Feel.REMOVE)
                 live = false
                 if (missed >= MAX_MISSED_HEARTBEATS) {
                     onDropped()
@@ -551,6 +758,8 @@ private fun CameraMode(
                 delay(5_000)
                 continue
             }
+            // And once on the way back, distinct from the drop: a tick, not a rejection.
+            if (!live) view.performHapticFeedback(Feel.TICK)
             missed = 0
             live = true
             score = beat.score
@@ -565,13 +774,28 @@ private fun CameraMode(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
                     PreviewView(context).also { view ->
+                        /*
+                         * FIT, not the default FILL.
+                         *
+                         * FILL_CENTER crops whatever does not fit the view, so the picture
+                         * on screen was a centre crop of the picture the analyser measured
+                         * and the recorder saved. Three different rectangles, one set of
+                         * coordinates drawn across all of them. Letterboxing costs a band
+                         * of black and buys an overlay that lands where the ball is - and
+                         * it also stops the viewfinder from promising a wider shot than
+                         * the clip the scorer will actually receive.
+                         */
+                        view.scaleType = PreviewView.ScaleType.FIT_CENTER
                         bindCamera(
                             context,
                             view,
                             lifecycleOwner,
                             analysisExecutor,
                             analyzer,
-                        ) { capture -> videoCapture = capture }
+                        ) { capture, analysis ->
+                            videoCapture = capture
+                            analysisUseCase = analysis
+                        }
                     }
                 },
             )
@@ -620,8 +844,9 @@ private fun CameraMode(
              * which is the only reason to draw it at all.
              */
             Canvas(Modifier.fillMaxSize()) {
+                val frame = frameRect(size.width, size.height, uprightAspect)
                 fun px(point: com.haraan.app.vision.Point2) =
-                    Offset((point.x * size.width).toFloat(), (point.y * size.height).toFloat())
+                    frame.at(point.x.toFloat(), point.y.toFloat())
 
                 fun quadPath(points: List<Offset>) = Path().apply {
                     moveTo(points[0].x, points[0].y)
@@ -659,16 +884,21 @@ private fun CameraMode(
                 val guide = Color.White.copy(alpha = 0.34f)
                 val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
 
+                // Proportioned against the PICTURE, like everything else drawn over it:
+                // an aiming guide that overhangs the letterbox is telling somebody to put
+                // the stumps where the camera cannot see.
+                val frame = frameRect(size.width, size.height, uprightAspect)
+
                 // The pitch, narrowing with distance.
                 // Proportioned for a phone on a tripod behind the bowler's arm. The first
                 // pass ran the pitch from 40% to 86% of the height, which read as a tall
                 // funnel and put the near crease directly behind the record button - the
                 // one part of the screen a thumb is always covering.
-                val nearY = size.height * 0.74f
-                val farY = size.height * 0.36f
-                val nearHalf = size.width * 0.32f
-                val farHalf = size.width * 0.075f
-                val cx = size.width / 2f
+                val nearY = frame.top + frame.height * 0.74f
+                val farY = frame.top + frame.height * 0.36f
+                val nearHalf = frame.width * 0.32f
+                val farHalf = frame.width * 0.075f
+                val cx = frame.left + frame.width / 2f
 
                 drawPath(
                     Path().apply {
@@ -701,7 +931,7 @@ private fun CameraMode(
                 // Three stumps at the far crease — the thing to line the phone up on.
                 // Tall enough to aim at. The stumps are the thing being lined up, so they
                 // have to be the most legible part of the guide, not a detail.
-                val stumpH = size.height * 0.075f
+                val stumpH = frame.height * 0.075f
                 listOf(-1, 0, 1).forEach { i ->
                     val x = cx + i * (farHalf * 0.62f)
                     drawLine(
@@ -723,28 +953,64 @@ private fun CameraMode(
         // long afterwards. Observed points only — nothing here is interpolated.
         if (granted && (ballTrail.isNotEmpty() || latestBall != null)) {
             Canvas(Modifier.fillMaxSize()) {
-                if (ballTrail.size >= 2) {
-                    val path = Path()
-                    ballTrail.forEachIndexed { i, point ->
-                        val o = Offset(point.x * size.width, point.y * size.height)
-                        if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y)
-                    }
-                    drawPath(
-                        path,
-                        Color(0xFF6E9BF5).copy(alpha = 0.8f),
-                        style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
+                val frame = frameRect(size.width, size.height, uprightAspect)
+
+                /*
+                 * THE TRAIL, AGED.
+                 *
+                 * Thirty points in one flat colour and one flat width is a scatter plot;
+                 * the eye has to work out which end is the ball. Fading and thinning with
+                 * age makes the direction of travel the first thing read instead of
+                 * something to be deduced, which matters because the operator is glancing
+                 * at this between watching a bowler run in.
+                 *
+                 * Drawn segment by segment, since one Path cannot vary alpha along itself.
+                 *
+                 * STRAIGHT segments, deliberately - no smoothing, no spline. The jitter in
+                 * this line is the signal: a trail that shivers is a tracker following a
+                 * fielder's shirt, and a curve fitted through the points would tidy away
+                 * exactly the evidence this overlay exists to show. The same reason the
+                 * tracker itself interpolates nothing.
+                 *
+                 * AND COLOURED BY HOW WELL EACH POINT BEHAVED.
+                 *
+                 * Age says which end is the ball. Colour says whether to believe the line
+                 * at all — see [trackColour]. A tracker locked onto the ball draws in blue;
+                 * one picking round-ish bits of a moving fielder draws the same shape in
+                 * amber, and the difference is visible from the boundary without reading a
+                 * word. That is the one question this overlay exists to answer, and until
+                 * now it was answered by counting dots.
+                 */
+                fun age(i: Int) = i.toFloat() / (ballTrail.size - 1).coerceAtLeast(1)
+                fun faded(point: com.haraan.app.vision.BallSighting, age: Float) =
+                    trackColour(point.trackingConfidence)
+                        .copy(alpha = TRAIL_FADE_FROM + (TRAIL_FADE_TO - TRAIL_FADE_FROM) * age)
+
+                for (i in 1 until ballTrail.size) {
+                    // Each segment takes the colour of the point it arrives at: it draws
+                    // the step that reached there, so it is that step being judged.
+                    drawLine(
+                        faded(ballTrail[i], age(i)),
+                        frame.at(ballTrail[i - 1].x, ballTrail[i - 1].y),
+                        frame.at(ballTrail[i].x, ballTrail[i].y),
+                        strokeWidth = (1.2f + 1.6f * age(i)).dp.toPx(),
+                        cap = StrokeCap.Round,
                     )
                 }
-                ballTrail.forEach { point ->
+                ballTrail.forEachIndexed { i, point ->
                     drawCircle(
-                        Color(0xFF6E9BF5),
-                        radius = 3.dp.toPx(),
-                        center = Offset(point.x * size.width, point.y * size.height),
+                        faded(point, age(i)),
+                        radius = (1.6f + 1.9f * age(i)).dp.toPx(),
+                        center = frame.at(point.x, point.y),
                     )
                 }
                 latestBall?.let { point ->
-                    val o = Offset(point.x * size.width, point.y * size.height)
-                    drawCircle(Color(0xFF4ADE80), radius = 8.dp.toPx(), center = o)
+                    val o = frame.at(point.x, point.y)
+                    // On the same ramp as the rest, not a fixed green. A green head on an
+                    // amber trail reads as "found it" at the exact moment the tracker is
+                    // least sure, which is the wrong thing to say the loudest. The white
+                    // ring is what marks this as the newest point.
+                    drawCircle(trackColour(point.trackingConfidence), radius = 8.dp.toPx(), center = o)
                     drawCircle(
                         Color.White,
                         radius = 13.dp.toPx(),
@@ -759,26 +1025,43 @@ private fun CameraMode(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
+                    .pointerInput(uprightAspect) {
                         detectTapGestures { offset ->
-                            // Normalised, so the corners survive a rotation or a preview
-                            // resize - the homography is solved in this same 0..1 space.
+                            /*
+                             * Normalised against the PICTURE, not the view.
+                             *
+                             * The homography is solved in the analysis frame's 0..1 space,
+                             * so a corner has to be recorded there too. Dividing by the
+                             * view's size instead - which is what this did - handed the
+                             * solver four points from a different rectangle, and produced
+                             * a calibration that solves perfectly and reads every length
+                             * wrong. That is the worst kind of wrong: it looks fine.
+                             */
+                            val frame = frameRect(
+                                size.width.toFloat(),
+                                size.height.toFloat(),
+                                uprightAspect,
+                            )
+                            // A tap on a letterbox bar is not a tap on the pitch.
+                            if (!frame.contains(offset)) return@detectTapGestures
+                            val local = frame.normalise(offset)
                             val point = com.haraan.app.vision.Point2(
-                                (offset.x / size.width).toDouble(),
-                                (offset.y / size.height).toDouble(),
+                                local.x.toDouble(),
+                                local.y.toDouble(),
                             )
                             val next = tappedCorners + point
                             tappedCorners = next
+                            // Each corner lands, and the fourth one closes the shape. Told
+                            // by feel because the person doing this is looking at a pitch.
+                            view.performHapticFeedback(if (next.size >= 4) Feel.COMMIT else Feel.TICK)
                             if (next.size >= 4) tapping = false
                         }
                     },
             ) {
                 Canvas(Modifier.fillMaxSize()) {
+                    val frame = frameRect(size.width, size.height, uprightAspect)
                     tappedCorners.forEachIndexed { i, point ->
-                        val o = Offset(
-                            (point.x * size.width).toFloat(),
-                            (point.y * size.height).toFloat(),
-                        )
+                        val o = frame.at(point.x.toFloat(), point.y.toFloat())
                         drawCircle(Color(0xFFFACC15), radius = 7.dp.toPx(), center = o)
                         drawCircle(
                             Color.Black.copy(alpha = 0.6f),
@@ -790,10 +1073,7 @@ private fun CameraMode(
                             val previous = tappedCorners[i - 1]
                             drawLine(
                                 Color(0xFFFACC15).copy(alpha = 0.7f),
-                                Offset(
-                                    (previous.x * size.width).toFloat(),
-                                    (previous.y * size.height).toFloat(),
-                                ),
+                                frame.at(previous.x.toFloat(), previous.y.toFloat()),
                                 o,
                                 strokeWidth = 2.dp.toPx(),
                             )
@@ -807,7 +1087,14 @@ private fun CameraMode(
             Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
+                // In landscape the cutout is on a side rather than the top, and the status
+                // bar inset alone does not clear it.
+                .displayCutoutPadding()
                 .padding(16.dp)
+                // Held to a column's width. Unbounded, this panel stretched to whatever
+                // the longest line happened to be, which on a landscape screen is a
+                // half-metre banner of chrome laid across the pitch it is describing.
+                .widthIn(max = 330.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color.Black.copy(alpha = 0.55f))
                 .padding(horizontal = 14.dp, vertical = 11.dp),
@@ -883,120 +1170,267 @@ private fun CameraMode(
             )
         }
 
-        // The control, bottom: one target, thumb-sized, reachable without looking.
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 30.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                when {
-                    // The point count is the only honest signal of whether vision is
-                    // doing anything, and it belongs where the person filming can see it.
-                    recording && trackedPoints > 0 -> "Recording · $trackedPoints ball points"
-                    recording -> "Recording this delivery…"
-                    uploading -> "Sending to the scorer…"
-                    uploadError != null -> uploadError!!
-                    // Said out loud rather than left to a small coloured dot. Somebody
-                    // holding this phone at the boundary needs to know the difference
-                    // between "idle" and "the scorer has stopped hearing from me".
-                    !live -> "Reconnecting to the match…"
-                    trackedPoints > 0 -> "$clipsSent sent · $trackedPoints ball points"
-                    clipsSent > 0 -> "$clipsSent sent"
-                    else -> "Tap when the bowler runs in"
+        /*
+         * ARMING A DELIVERY.
+         *
+         * Lifted out of the button's modifier chain, where it used to live as eighty lines
+         * of lambda nested inside a `.then()`. Separating the control from what it does is
+         * what let the tap target grow to the whole disc without a line of this moving.
+         *
+         * An anonymous function rather than a lambda so the early return below reads as an
+         * early return.
+         */
+        val armDelivery: () -> Unit = fun() {
+            val capture = videoCapture ?: return
+            uploadError = null
+            // A fresh delivery: the previous track must not bleed into this one.
+            vision.reset()
+            trackedPoints = 0
+            ballTrail = emptyList()
+            latestBall = null
+            trackQuality = TrackQuality.UNCERTAIN
+            trackingLive = true
+            recording = true
+            activeRecording = startClip(
+                context = ctx,
+                capture = capture,
+                executor = executor,
+                onFinished = { file, durationMs ->
+                    recording = false
+                    trackingLive = false
+                    // The window closed. Nobody pressed stop, so this is the only way to
+                    // know it is shut and the next delivery can be armed.
+                    view.performHapticFeedback(Feel.TICK)
+                    // Checked here so a clip that cannot be accepted never crosses ground
+                    // Wi-Fi at all.
+                    if (file.length() > MAX_REVIEW_BYTES) {
+                        runCatching { file.delete() }
+                        view.performHapticFeedback(Feel.REMOVE)
+                        uploadError = "That clip is too large to send. Record a shorter delivery."
+                        return@startClip
+                    }
+                    uploading = true
+                    scope.launch {
+                        val ok = repo.uploadClip(
+                            session.sessionToken,
+                            file,
+                            durationMs,
+                            overs.takeIf { it.isNotBlank() },
+                        )
+                        if (ok) {
+                            clipsSent += 1
+                            // It is the scorer's now.
+                            view.performHapticFeedback(Feel.COMMIT)
+                        } else {
+                            // A refusal and a success must not feel alike: this is the one
+                            // moment the operator can still refilm the ball.
+                            view.performHapticFeedback(Feel.REMOVE)
+                            uploadError = "That clip didn't reach the scorer. Tap to film the next one."
+                        }
+                        // Either way. The phone is a camera, not a library: a clip that
+                        // landed belongs to the scorer, and one that did not is not worth
+                        // a cache full of dead deliveries.
+                        runCatching { file.delete() }
+                        uploading = false
+                    }
                 },
-                color = if (uploadError != null) Rec else Ink.copy(alpha = 0.85f),
-                fontSize = 13.5.sp,
             )
-            Spacer(Modifier.height(14.dp))
-            Box(
-                Modifier
-                    .size(84.dp)
-                    .clip(CircleShape)
-                    .background(if (recording) Rec else Color.White.copy(alpha = 0.9f))
-                    .border(4.dp, Color.White.copy(alpha = 0.55f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (recording || uploading) {
-                    CircularProgressIndicator(
-                        color = if (recording) Color.White else Accent,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(30.dp),
-                    )
-                } else {
-                    Box(
-                        Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Rec)
-                            .then(
-                                Modifier.clickableCapture(enabled = granted && videoCapture != null) {
-                                    val capture = videoCapture ?: return@clickableCapture
-                                    uploadError = null
-                                    // A fresh delivery: the previous track must not bleed
-                                    // into this one.
-                                    vision.reset()
-                                    trackedPoints = 0
-                                    ballTrail = emptyList()
-                                    latestBall = null
-                                    trackingLive = true
-                                    recording = true
-                                    activeRecording = startClip(
-                                        context = ctx,
-                                        capture = capture,
-                                        executor = executor,
-                                        onFinished = { file, durationMs ->
-                                            recording = false
-                                            trackingLive = false
-                                            // Checked here so a clip that cannot be
-                                            // accepted never crosses ground Wi-Fi at all.
-                                            if (file.length() > MAX_REVIEW_BYTES) {
-                                                runCatching { file.delete() }
-                                                uploadError =
-                                                    "That clip is too large to send. Record a shorter delivery."
-                                                return@startClip
-                                            }
-                                            uploading = true
-                                            scope.launch {
-                                                val ok = repo.uploadClip(
-                                                    session.sessionToken,
-                                                    file,
-                                                    durationMs,
-                                                    overs.takeIf { it.isNotBlank() },
-                                                )
-                                                if (ok) clipsSent += 1
-                                                // The phone is a camera, not a library:
-                                                // the clip lives on the server now.
-                                                runCatching { file.delete() }
-                                                uploading = false
-                                            }
-                                        },
-                                    )
-                                    // Ends itself at the review ceiling.
-                                    //
-                                    // Ten seconds is what the server accepts, and it buys
-                                    // the run-up, the release, the bounce, the shot and
-                                    // enough afterwards to see where the ball went -
-                                    // which is the context a review actually needs.
-                                    // Nobody at a ground is watching this screen to press
-                                    // stop, so the cap has to be the recorder's own.
-                                    //
-                                    // Slightly under the limit on purpose: the container
-                                    // rounds, and a clip that measures 10.02s server-side
-                                    // would be refused after the upload had already been
-                                    // paid for over ground Wi-Fi.
-                                    scope.launch {
-                                        delay(REVIEW_CLIP_MS)
-                                        activeRecording?.stop()
-                                        activeRecording = null
-                                    }
-                                },
-                            ),
-                    )
-                }
+            /*
+             * Ends itself at the review ceiling.
+             *
+             * Ten seconds is what the server accepts, and it buys the run-up, the release,
+             * the bounce, the shot and enough afterwards to see where the ball went -
+             * which is the context a review actually needs. Nobody at a ground is watching
+             * this screen to press stop, so the cap has to be the recorder's own.
+             *
+             * Slightly under the limit on purpose: the container rounds, and a clip that
+             * measures 10.02s server-side would be refused after the upload had already
+             * been paid for over ground Wi-Fi.
+             */
+            scope.launch {
+                delay(REVIEW_CLIP_MS)
+                activeRecording?.stop()
+                activeRecording = null
             }
+        }
+
+        /*
+         * THE CONTROL, on the short edge of whichever way the phone is being held.
+         *
+         * Portrait: along the bottom, under the thumb of a hand holding the phone up.
+         * Landscape: against the right edge, vertically centred - where the stock camera
+         * app puts a shutter, and where the right hand already is on a phone clamped to a
+         * tripod side-on. A bottom-centre button in landscape sits under the middle of a
+         * wide frame, which is both the hardest place on the screen to reach and directly
+         * over the pitch.
+         *
+         * Landscape is the orientation this feature is actually used in - a phone filming
+         * a cricket pitch from behind the bowler's arm is a phone on its side - and until
+         * now turning it produced a portrait layout stretched across a wide screen.
+         */
+        /*
+         * How the track is behaving, in one word, or in none.
+         *
+         * UNCERTAIN says nothing, because for most of a delivery it means "fewer than
+         * three points so far" rather than anything being wrong, and a screen that opens
+         * every capture by calling itself unreliable teaches the operator to ignore it.
+         * The two words that do appear describe the TRACK — its gaps and its wobble — and
+         * never whether the thing being tracked is the ball, which nothing here knows.
+         */
+        val trackWord = when (trackQuality) {
+            TrackQuality.RELIABLE -> " · steady"
+            TrackQuality.PARTIAL -> " · patchy"
+            TrackQuality.UNCERTAIN -> ""
+        }
+        val status = when {
+            // The point count is the only honest signal of whether vision is doing
+            // anything, and it belongs where the person filming can see it.
+            recording && trackedPoints > 0 -> "Recording · $trackedPoints ball points$trackWord"
+            recording -> "Recording this delivery…"
+            uploading -> "Sending to the scorer…"
+            uploadError != null -> uploadError!!
+            // Said out loud rather than left to a small coloured dot. Somebody holding
+            // this phone at the boundary needs to know the difference between "idle" and
+            // "the scorer has stopped hearing from me".
+            !live -> "Reconnecting to the match…"
+            // Said plainly, and said with what still works. A phone that has gone quiet
+            // about the ball while the operator can see it is filming invites the guess
+            // that the whole thing has broken.
+            thermalThrottled -> "Phone's hot · still filming, tracking paused"
+            trackedPoints > 0 -> "$clipsSent sent · $trackedPoints ball points$trackWord"
+            clipsSent > 0 -> "$clipsSent sent"
+            else -> "Tap when the bowler runs in"
+        }
+        ShutterControl(
+            modifier = Modifier
+                .align(if (landscape) Alignment.CenterEnd else Alignment.BottomCenter)
+                // The bars and the cutout move with the phone; asking for both lets the
+                // insets decide which edge they are on this time.
+                .navigationBarsPadding()
+                .displayCutoutPadding()
+                .padding(
+                    end = if (landscape) 26.dp else 0.dp,
+                    bottom = if (landscape) 0.dp else 30.dp,
+                ),
+            status = status,
+            isError = uploadError != null,
+            recording = recording,
+            uploading = uploading,
+            canFilm = granted && videoCapture != null && !recording && !uploading,
+            landscape = landscape,
+            onArm = armDelivery,
+        )
+    }
+}
+
+/**
+ * The status line and the shutter — everything on the filming screen that is not the
+ * picture, kept together because they are read together.
+ *
+ * Two arrangements of the same two things. Portrait stacks them along the bottom edge;
+ * landscape lays them along the right edge, status first, shutter outermost. In both the
+ * disc ends up on the short edge nearest the hand, and in neither does it sit over the
+ * middle of the pitch.
+ */
+@Composable
+private fun ShutterControl(
+    modifier: Modifier,
+    status: String,
+    isError: Boolean,
+    recording: Boolean,
+    uploading: Boolean,
+    canFilm: Boolean,
+    landscape: Boolean,
+    onArm: () -> Unit,
+) {
+    val view = LocalView.current
+
+    /*
+     * THE SHUTTER.
+     *
+     * The whole disc is the button. It used to be a 30dp square sitting inside an 84dp
+     * ring, so the thing that LOOKED like the target was some seven times the area of the
+     * thing that actually took a tap — on the one screen in the app built to be worked
+     * without looking at it. A thumb landing on the ring did nothing, silently, while a
+     * bowler ran in, and the operator had no way to tell that from a camera that had
+     * stopped responding.
+     *
+     * It also refuses a press while a clip is still being filmed or sent, instead of
+     * letting one land on a control that cannot act on it.
+     */
+    val shutter = remember { MutableInteractionSource() }
+    val shutterPressed by shutter.collectIsPressedAsState()
+    val shutterScale by animateFloatAsState(
+        targetValue = if (shutterPressed && canFilm) 0.93f else 1f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 900f),
+        label = "shutterScale",
+    )
+
+    val statusLine: @Composable () -> Unit = {
+        Text(
+            status,
+            color = if (isError) Rec else Ink.copy(alpha = 0.85f),
+            fontSize = 13.5.sp,
+            lineHeight = 19.sp,
+            // Bounded in landscape so a long refusal wraps instead of shouldering the
+            // shutter off the edge of the screen.
+            modifier = if (landscape) Modifier.widthIn(max = 230.dp) else Modifier,
+            textAlign = if (landscape) TextAlign.End else TextAlign.Center,
+        )
+    }
+
+    val disc: @Composable () -> Unit = {
+        Box(
+            Modifier
+                // First in the chain, so the disc itself dips rather than its contents
+                // shrinking inside a ring that stays where it was.
+                .graphicsLayer { scaleX = shutterScale; scaleY = shutterScale }
+                .size(84.dp)
+                .clip(CircleShape)
+                .background(if (recording) Rec else Color.White.copy(alpha = 0.9f))
+                .border(4.dp, Color.White.copy(alpha = 0.55f), CircleShape)
+                .clickable(
+                    interactionSource = shutter,
+                    indication = null,
+                    enabled = canFilm,
+                ) {
+                    // Filming started. The heaviest note this screen has, because it is
+                    // the only action on it that commits.
+                    view.performHapticFeedback(Feel.COMMIT)
+                    onArm()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (recording || uploading) {
+                CircularProgressIndicator(
+                    color = if (recording) Color.White else Accent,
+                    strokeWidth = 3.dp,
+                    modifier = Modifier.size(30.dp),
+                )
+            } else {
+                // Decoration now, not the target. Dimmed when the camera cannot film, so
+                // a disc that will not answer does not look like one that will.
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (canFilm) Rec else Rec.copy(alpha = 0.35f)),
+                )
+            }
+        }
+    }
+
+    if (landscape) {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            statusLine()
+            Spacer(Modifier.width(16.dp))
+            disc()
+        }
+    } else {
+        Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+            statusLine()
+            Spacer(Modifier.height(14.dp))
+            disc()
         }
     }
 }
@@ -1007,6 +1441,7 @@ private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) 
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale = remember { Animatable(1f) }
+    val view = LocalView.current
     LaunchedEffect(pressed) {
         scale.animateTo(if (pressed) 0.97f else 1f, tween(140, easing = FastOutSlowInEasing))
     }
@@ -1025,8 +1460,12 @@ private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) 
                 interactionSource = interaction,
                 indication = null,
                 enabled = enabled,
-                onClick = onClick,
-            )
+            ) {
+                // Joining a match is a commitment, and the only one made on this screen
+                // while the phone is still being looked at.
+                view.performHapticFeedback(Feel.COMMIT)
+                onClick()
+            }
             .padding(vertical = 18.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1070,18 +1509,34 @@ private val CORNER_PROMPTS = listOf(
     "Last one: the FAR corner on the left",
 )
 
-/** Taps with no ripple — this screen is mostly a viewfinder. */
+/**
+ * Taps with no ripple — this screen is mostly a viewfinder.
+ *
+ * No ripple used to mean no acknowledgement at all: a tap on a control here landed in
+ * total silence, on the one screen in the app where the finger is the only sense with any
+ * attention to spare. The haptic is now what the ripple would have been. Pass null for a
+ * control that fires its own, so nothing buzzes twice.
+ */
 @Composable
-private fun Modifier.clickableCapture(enabled: Boolean, onClick: () -> Unit): Modifier {
+private fun Modifier.clickableCapture(
+    enabled: Boolean,
+    haptic: Int? = Feel.SELECT,
+    onClick: () -> Unit,
+): Modifier {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    return this.then(
-        clickable(
-            interactionSource = interaction,
-            indication = null,
-            enabled = enabled,
-            onClick = onClick,
-        ),
-    )
+    val view = LocalView.current
+    // `this.then(clickable(…))` — which is what this was — resolves the bare `clickable`
+    // against the same implicit receiver and then appends the result to it, putting the
+    // whole incoming chain into the final modifier twice. Chaining directly is what it
+    // was always meant to say.
+    return this.clickable(
+        interactionSource = interaction,
+        indication = null,
+        enabled = enabled,
+    ) {
+        haptic?.let { view.performHapticFeedback(it) }
+        onClick()
+    }
 }
 
 // THE REVIEW CONTRACT, mirrored from the server.
@@ -1094,6 +1549,68 @@ private fun Modifier.clickableCapture(enabled: Boolean, onClick: () -> Unit): Mo
 /** Points kept on the live overlay. Enough to see a path, few enough to stay readable. */
 private const val CAMERA_TRAIL_POINTS = 30
 
+/**
+ * How well-behaved a sighting was, as a colour: amber for barely, blue for thoroughly.
+ *
+ * WHAT THIS IS NOT. [com.haraan.app.vision.BallSighting.trackingConfidence] goes out of
+ * its way not to call itself a confidence or a probability, because nothing in the tracker
+ * has ever been checked against a human's judgement of the same footage. It ranks
+ * candidates against each other: how round the thing was, and how well it continued the
+ * track. So this ramp is not "how likely is that the ball" and the screen never says it
+ * is. It is "how much did that behave like one", which is a smaller claim and an honest
+ * one — and, usefully, the exact claim an operator needs, because a tracker that has
+ * latched onto a fielder produces a trail of low-scoring points and always has.
+ *
+ * The ends of the ramp are the ends of the range the tracker can actually emit, not 0 and
+ * 1. A candidate below MIN_CIRCULARITY or off the trajectory is discarded rather than
+ * scored, so the lowest score that ever reaches this is around 0.3; spreading the ramp
+ * across the full unit interval would paint every real track the same mid-blue and the
+ * distinction would be invisible — which is the only thing it is for.
+ */
+internal fun trackColour(score: Float): Color {
+    val t = ((score - TRACK_SCORE_FLOOR) / (TRACK_SCORE_CEILING - TRACK_SCORE_FLOOR))
+        .coerceIn(0f, 1f)
+    return lerp(TrailWeak, TrailStrong, t)
+}
+
+/** Barely ball-like. Deliberately not the yellow the corner-tapping flow owns. */
+internal val TrailWeak = Color(0xFFF59E0B)
+
+/** Round, and continuing the track as a thrown ball would. */
+internal val TrailStrong = Color(0xFF6E9BF5)
+
+/*
+ * THE SPAN OF SCORES WORTH TELLING APART.
+ *
+ * A sighting scores circularity × 0.6 + continuity × 0.4. The filters upstream mean the
+ * lowest score that can ever reach this is around 0.27 — MIN_CIRCULARITY is 0.45, and a
+ * candidate whose continuity hits zero is thrown away rather than scored — and the
+ * arithmetic top is 1.0.
+ *
+ * Neither end of that arithmetic range is where the ramp ends, on purpose.
+ *
+ * The floor sits ABOVE the worst possible score so the bottom of the range saturates:
+ * everything between a just-accepted 0.27 and 0.38 is equally "barely ball-like", and
+ * grading within it would draw distinctions the numbers cannot support.
+ *
+ * The ceiling sits below 1.0 because a real ball in flight is motion-blurred into an oval
+ * and pays for it in circularity. Requiring a perfect score for full blue would mean a
+ * correctly tracked delivery never quite gets there, and a signal that never reaches its
+ * good end is a signal nobody learns to read.
+ */
+private const val TRACK_SCORE_FLOOR = 0.38f
+private const val TRACK_SCORE_CEILING = 0.78f
+
+/**
+ * How far the oldest end of the trail has faded, and how solid the newest end is.
+ *
+ * The floor is not zero on purpose: a point that has faded to nothing still occupies the
+ * count on the status line, and an overlay that claims thirty points while showing eight
+ * is lying about how much the tracker is actually holding on to.
+ */
+private const val TRAIL_FADE_FROM = 0.14f
+private const val TRAIL_FADE_TO = 0.85f
+
 /** Consecutive failed heartbeats before a camera is treated as genuinely gone. */
 private const val MAX_MISSED_HEARTBEATS = 3
 
@@ -1101,6 +1618,43 @@ private const val REVIEW_CLIP_MS = 9_500L
 
 /** Matches DeliveryReview::MAX_REVIEW_BYTES. */
 private const val MAX_REVIEW_BYTES = 50L * 1024 * 1024
+
+// ────────────────────────────────────────────── Picture space, not view space ─────
+
+/**
+ * Where the camera's picture actually sits inside this view.
+ *
+ * The preview is fitted, not filled, so on a tall phone showing a 16:9 frame there are
+ * black bars and the picture is SHORTER than the view it lives in. Every overlay here is
+ * normalised inside the picture, so every overlay has to be drawn into this rectangle —
+ * painting across the whole view instead stretches the pitch outline and the ball trail
+ * by the height of the bars, which is most visible at the top and bottom of the frame:
+ * the far crease and the near one.
+ *
+ * Falls back to the whole view until the first analysis frame has reported a shape, which
+ * is the old behaviour and is only ever on screen for a frame or two.
+ */
+internal fun frameRect(width: Float, height: Float, aspect: Float): Rect {
+    if (aspect <= 0f || width <= 0f || height <= 0f) return Rect(0f, 0f, width, height)
+    return if (width / height > aspect) {
+        // The view is wider than the picture: bars down the sides.
+        val fitted = height * aspect
+        val left = (width - fitted) / 2f
+        Rect(left, 0f, left + fitted, height)
+    } else {
+        // Taller: bars top and bottom. The usual case on a phone held upright.
+        val fitted = width / aspect
+        val top = (height - fitted) / 2f
+        Rect(0f, top, width, top + fitted)
+    }
+}
+
+/** A normalised point in the picture, placed on the screen. */
+internal fun Rect.at(x: Float, y: Float) = Offset(left + x * width, top + y * height)
+
+/** And back again: a point on the screen, in the picture's own 0..1 terms. */
+internal fun Rect.normalise(point: Offset) =
+    Offset((point.x - left) / width, (point.y - top) / height)
 
 // ─────────────────────────────────────────────────────── CameraX plumbing ─────
 
@@ -1110,12 +1664,58 @@ private fun bindCamera(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     analysisExecutor: java.util.concurrent.Executor,
     onFrame: ImageAnalysis.Analyzer,
-    onReady: (VideoCapture<Recorder>) -> Unit,
+    onReady: (VideoCapture<Recorder>, ImageAnalysis) -> Unit,
 ) {
     val future = ProcessCameraProvider.getInstance(context)
     future.addListener({
         val provider = future.get()
-        val preview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
+
+        /*
+         * ONE SHAPE FOR ALL THREE STREAMS.
+         *
+         * Left alone, CameraX picks a resolution per use case: preview commonly 16:9,
+         * analysis commonly 4:3, and the recorder whatever Quality.FHD is. That is three
+         * different framings of the same scene, and an overlay measured in one of them
+         * cannot be drawn correctly over another - which is why the trail drifted towards
+         * the edges even once the rotation was right.
+         *
+         * 16:9 because that is what FHD records. The analysis frame is now a scaled-down
+         * copy of the footage the scorer will watch, which is the only arrangement in
+         * which "the ball was here" means the same thing on both.
+         */
+        /*
+         * AND ONE SIZE EACH, ASKED FOR RATHER THAN ACCEPTED.
+         *
+         * Left to itself CameraX sizes the preview to the display, so a 1080p phone gets a
+         * 1080p preview stream — every frame of which is produced, converted and composited
+         * purely so somebody can check the aim. 720p is indistinguishable at arm's length
+         * on a viewfinder and is a third of the pixels.
+         *
+         * The analysis stream is sized smaller still, because the tracker's first act is to
+         * scale whatever it is handed down to 480px wide. Handing it 1080p means moving a
+         * megabyte out of the hardware buffer to throw away three quarters of it; handing
+         * it 640x360 asks the camera to do that scaling in silicon built for it.
+         *
+         * Neither touches the recording. The clip stays FHD, because that is the artefact
+         * a review is built on.
+         */
+        fun sizedFor(target: android.util.Size) = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    target,
+                    // Prefer the nearest size at or below the target, but take a larger one
+                    // over failing to bind: a bigger preview is a warm phone, no preview is
+                    // a camera nobody can aim.
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                ),
+            )
+            .build()
+
+        val preview = Preview.Builder()
+            .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
+            .build()
+            .also { it.setSurfaceProvider(view.surfaceProvider) }
 
         /*
          * ANALYSIS, alongside recording rather than after it.
@@ -1131,6 +1731,7 @@ private fun bindCamera(
          * it, and it yields.
          */
         val analysis = ImageAnalysis.Builder()
+            .setResolutionSelector(sizedFor(android.util.Size(640, 360)))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
@@ -1162,7 +1763,7 @@ private fun bindCamera(
                 videoCapture,
                 analysis,
             )
-            onReady(videoCapture)
+            onReady(videoCapture, analysis)
         }
     }, ContextCompat.getMainExecutor(context))
 }

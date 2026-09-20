@@ -127,7 +127,8 @@ class VisionDiagnosticsActivity : ComponentActivity() {
                         }
                     }
                 }
-                tracker.onFrame(frame, w, h, w, step * 33L)
+                // Rotation 0: a synthetic buffer is already the way up it claims to be.
+                tracker.onFrame(frame, w, h, w, 0, step * 33L)
                 sightings = tracker.track().size
             }
             val quality = tracker.quality()

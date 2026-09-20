@@ -48,6 +48,18 @@ class OpenCvBallTracker(
 
     private var previous: Mat? = null
     private var scratchLuma: Mat? = null
+    private var scratchPacked: ByteArray? = null
+
+    /**
+     * The rotation the previous frame was turned by.
+     *
+     * A frame difference is only meaningful between two pictures of the same thing in the
+     * same orientation. If the phone is turned mid-session the next frame arrives upright
+     * by a different quarter turn, and differencing it against the last one would light up
+     * the entire image — which the global-motion guard would then read as a camera shake
+     * and blame, rather than the orientation change it is.
+     */
+    private var previousRotation: Int? = null
 
     private val sightings = mutableListOf<BallSighting>()
     private var framesSeen = 0
@@ -67,14 +79,26 @@ class OpenCvBallTracker(
         width: Int,
         height: Int,
         rowStride: Int,
+        rotationDegrees: Int,
         timestampMs: Long,
     ): BallSighting? {
         if (!available || released || width <= 0 || height <= 0) return null
 
         val startedAt = System.currentTimeMillis()
         try {
-            val gray = toGray(luma, width, height, rowStride) ?: return null
+            val turn = ((rotationDegrees % 360) + 360) % 360
+            val gray = toGray(luma, width, height, rowStride, turn) ?: return null
             framesSeen++
+
+            // The phone was turned. Start the difference again from this frame rather than
+            // compare two orientations, and drop the track with it: a path that jumps a
+            // quarter turn mid-flight is not one ball.
+            if (previousRotation != null && previousRotation != turn) {
+                previous?.release()
+                previous = null
+                sightings.clear()
+            }
+            previousRotation = turn
 
             val prev = previous
             if (prev == null) {
@@ -104,23 +128,41 @@ class OpenCvBallTracker(
     }
 
     /**
-     * Luma bytes into a downscaled, blurred greyscale Mat.
+     * Luma bytes into a downscaled, blurred, UPRIGHT greyscale Mat.
      *
      * Row stride is honoured rather than assumed equal to width: on many devices the
      * camera pads each row, and ignoring that shears the image diagonally — which then
      * looks exactly like fast horizontal motion and produces a beautiful false track.
+     *
+     * The turn is applied last, on the smallest image, because rotating 480px costs a
+     * fraction of rotating a full sensor frame and the result is identical.
      */
-    private fun toGray(luma: ByteArray, width: Int, height: Int, rowStride: Int): Mat? {
+    private fun toGray(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        turn: Int,
+    ): Mat? {
         val packed = if (rowStride == width) {
             luma
         } else {
-            ByteArray(width * height).also { out ->
-                for (row in 0 until height) {
-                    val from = row * rowStride
-                    if (from + width > luma.size) return@also
-                    System.arraycopy(luma, from, out, row * width, width)
+            // Reused between frames like [scratchLuma] beside it: a delivery is thirty
+            // frames and a match is several hundred deliveries, and each of these was a
+            // fresh quarter-megabyte array.
+            val out = scratchPacked?.takeIf { it.size == width * height }
+                ?: ByteArray(width * height).also { scratchPacked = it }
+            for (row in 0 until height) {
+                val from = row * rowStride
+                if (from + width > luma.size) {
+                    // Short buffer. Into a fresh array the rest was zeroes; into a reused
+                    // one it is the previous frame, and differencing a frame against a
+                    // seam of itself is a guaranteed false candidate.
+                    return null
                 }
+                System.arraycopy(luma, from, out, row * width, width)
             }
+            out
         }
 
         val full = scratchLuma ?: Mat(height, width, CvType.CV_8UC1).also { scratchLuma = it }
@@ -135,7 +177,7 @@ class OpenCvBallTracker(
             // Already small enough; blur in place on a copy.
             val out = Mat()
             Imgproc.GaussianBlur(scratchLuma!!, out, Size(5.0, 5.0), 0.0)
-            return out
+            return upright(out, turn)
         }
 
         val small = Mat()
@@ -152,7 +194,21 @@ class OpenCvBallTracker(
         // survive the threshold as dozens of one-pixel "candidates".
         Imgproc.GaussianBlur(small, blurred, Size(5.0, 5.0), 0.0)
         small.release()
-        return blurred
+        return upright(blurred, turn)
+    }
+
+    /**
+     * The sensor's picture turned the way the viewer holds it. Consumes [source].
+     *
+     * Same convention as [OpenCvPitchDetector], deliberately: the two engines' outputs are
+     * drawn over one another on the camera screen, so they have to agree on which way up
+     * the world is.
+     */
+    private fun upright(source: Mat, turn: Int): Mat = when (turn) {
+        90 -> Mat().also { Core.rotate(source, it, Core.ROTATE_90_CLOCKWISE); source.release() }
+        180 -> Mat().also { Core.rotate(source, it, Core.ROTATE_180); source.release() }
+        270 -> Mat().also { Core.rotate(source, it, Core.ROTATE_90_COUNTERCLOCKWISE); source.release() }
+        else -> source
     }
 
     /** The frame difference, and the best ball-shaped thing in it. */
@@ -303,6 +359,7 @@ class OpenCvBallTracker(
     override fun reset() {
         previous?.release()
         previous = null
+        previousRotation = null
         sightings.clear()
         framesSeen = 0
         framesWithCandidate = 0
@@ -318,8 +375,10 @@ class OpenCvBallTracker(
         released = true
         previous?.release()
         previous = null
+        previousRotation = null
         scratchLuma?.release()
         scratchLuma = null
+        scratchPacked = null
     }
 
     companion object {

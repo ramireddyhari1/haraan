@@ -25,6 +25,9 @@ interface CricketVisionEngine {
      * @param width      luma width in pixels
      * @param height     luma height in pixels
      * @param rowStride  bytes per row, which is not always equal to width
+     * @param rotationDegrees how far the buffer must be turned clockwise to appear the way
+     *   the viewer sees it, straight from ImageInfo.rotationDegrees. Sightings come back in
+     *   the UPRIGHT frame, never the sensor's — see [BallSighting].
      * @param timestampMs milliseconds since the first frame of this session
      */
     fun onFrame(
@@ -32,6 +35,7 @@ interface CricketVisionEngine {
         width: Int,
         height: Int,
         rowStride: Int,
+        rotationDegrees: Int,
         timestampMs: Long,
     ): BallSighting?
 
@@ -54,9 +58,16 @@ interface CricketVisionEngine {
 /**
  * One measured ball position.
  *
- * [x] and [y] are normalised 0..1 within the analysis frame: x across, y down. They are
- * positions in a picture. They are not positions on a pitch, and nothing downstream may
- * treat them as such until a calibration step exists.
+ * [x] and [y] are normalised 0..1 within the UPRIGHT analysis frame — the picture the way
+ * the person holding the phone sees it — x across, y down. They are positions in a
+ * picture. They are not positions on a pitch, and nothing downstream may treat them as
+ * such until a calibration step exists.
+ *
+ * Upright, not sensor, is the whole contract here. Camera buffers arrive in the sensor's
+ * orientation, a quarter turn from the screen on a phone held upright, and these used to
+ * be normalised in that space while [PitchQuad] corners were already being reported in the
+ * viewer's. Two overlays drawn from two different frames of reference cannot both be
+ * right, and the one that was wrong was the one being drawn over a live pitch.
  */
 data class BallSighting(
     val timestampMs: Long,

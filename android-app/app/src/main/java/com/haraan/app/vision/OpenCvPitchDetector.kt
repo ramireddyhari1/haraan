@@ -79,6 +79,20 @@ class OpenCvPitchDetector(
     private val recent = ArrayDeque<PitchQuad>()
     private var released = false
 
+    /*
+     * SCRATCH, kept between frames.
+     *
+     * This runs on every frame until it finds a pitch, and on a ground with faded creases
+     * or a wet outfield that can be the whole time somebody is aiming — minutes, not the
+     * second it takes on a good square. Rebuilding the packed row buffer and the full-size
+     * Mat each time meant allocating and freeing several megabytes a second to hold an
+     * image the same size as the last one.
+     *
+     * Only ever touched from the analysis executor, a single thread.
+     */
+    private var scratchPacked: ByteArray? = null
+    private var scratchFull: Mat? = null
+
     /**
      * Look for the pitch in one frame.
      *
@@ -144,6 +158,9 @@ class OpenCvPitchDetector(
     fun release() {
         released = true
         recent.clear()
+        scratchFull?.release()
+        scratchFull = null
+        scratchPacked = null
     }
 
     /**
@@ -201,15 +218,40 @@ class OpenCvPitchDetector(
         creaseSegments = 0
         railSegments = 0
 
-        val packed = if (rowStride == width) luma else ByteArray(width * height).also { out ->
+        val packed = if (rowStride == width) {
+            luma
+        } else {
+            val out = scratchPacked?.takeIf { it.size == width * height }
+                ?: ByteArray(width * height).also { scratchPacked = it }
+            var complete = true
             for (row in 0 until height) {
                 val from = row * rowStride
-                if (from + width > luma.size) return@also
+                if (from + width > luma.size) {
+                    complete = false
+                    break
+                }
                 System.arraycopy(luma, from, out, row * width, width)
             }
+            /*
+             * A short buffer is now a refusal, where it used to be a partial copy.
+             *
+             * Into a freshly allocated array the unwritten rows were zeroes — a black band,
+             * harmless. Into a reused one they are whatever was there last frame, and a
+             * seam between this frame and a stale one is exactly the kind of long straight
+             * edge a Hough transform is looking for. Better to skip the frame.
+             */
+            if (!complete) {
+                lastRejection = "the camera handed over a short luma buffer"
+                return null
+            }
+            out
         }
 
-        val full = Mat(height, width, CvType.CV_8UC1)
+        val full = scratchFull?.takeIf { it.rows() == height && it.cols() == width }
+            ?: Mat(height, width, CvType.CV_8UC1).also {
+                scratchFull?.release()
+                scratchFull = it
+            }
         full.put(0, 0, packed)
 
         val scale = analysisWidth.toDouble() / width
@@ -219,7 +261,8 @@ class OpenCvPitchDetector(
         } else {
             full.copyTo(small)
         }
-        full.release()
+        // Not released: `full` is the scratch Mat now, and the next frame is the same size.
+        // It is freed in release() with everything else native this class holds.
 
         val upright = when (((rotationDegrees % 360) + 360) % 360) {
             90 -> Mat().also { Core.rotate(small, it, Core.ROTATE_90_CLOCKWISE); small.release() }

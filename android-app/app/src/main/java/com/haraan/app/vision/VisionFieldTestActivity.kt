@@ -145,6 +145,7 @@ private fun FieldTestScreen() {
                             width = image.width,
                             height = image.height,
                             rowStride = plane.rowStride,
+                            rotationDegrees = image.imageInfo.rotationDegrees,
                             timestampMs = image.imageInfo.timestamp / 1_000_000,
                         )
                         framesThisSecond++
