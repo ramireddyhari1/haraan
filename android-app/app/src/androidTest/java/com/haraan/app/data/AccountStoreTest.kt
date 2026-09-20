@@ -419,6 +419,7 @@ class AccountStoreTest {
     playerId = account.playerId,
     username = account.username,
     name = account.name,
+    bio = null,
     avatar = account.avatar,
     district = null,
     state = null,

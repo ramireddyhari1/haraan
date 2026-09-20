@@ -58,6 +58,11 @@ import com.haraan.app.data.PaymentBridge
 import com.haraan.app.data.TokenStore
 import com.razorpay.Checkout
 import org.json.JSONObject
+import com.haraan.app.ui.payment.HaraanPaySheet
+import com.haraan.app.ui.payment.HaraanPaymentProcessingView
+import com.haraan.app.ui.payment.HaraanPaymentStage
+import com.haraan.app.ui.payment.HaraanPaymentInstrument
+import com.haraan.app.ui.main.HaraanBookingConfirmationScreen
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.HaraanRadius
 import com.haraan.app.ui.theme.HaraanSpacing
@@ -73,7 +78,11 @@ import kotlinx.coroutines.launch
  * points to My Schedule where every pass lives.
  */
 @Composable
-fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
+fun OrderSummaryScreen(
+    order: OrderSummary,
+    onBack: () -> Unit,
+    onRequireSignIn: () -> Unit = {},
+) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -101,6 +110,31 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
     var booking by remember { mutableStateOf(false) }
     var pass by remember { mutableStateOf<BookingLite?>(null) }
     var confirmedCount by remember { mutableStateOf(0) } // >0 → multi-pass success screen
+    var showHaraanPaySheet by remember { mutableStateOf(false) }
+    var pendingPaymentReq by remember { mutableStateOf<BookingResult.PaymentRequired?>(null) }
+    var paymentStage by remember { mutableStateOf<HaraanPaymentStage?>(null) }
+    var lastPaymentId by remember { mutableStateOf("") }
+
+    // Turn a CONFIRMED order (free, or freshly paid) into the success UI.
+    val onConfirmed: (BookingResult.Success) -> Unit = { result ->
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (result.bookingCount > 1) {
+            confirmedCount = result.bookingCount
+        } else {
+            pass = BookingLite(
+                id = result.bookingId.toLong(),
+                status = result.status,
+                quantity = result.quantity,
+                totalAmount = result.totalAmount.toDoubleOrNull() ?: grandTotal,
+                type = "event",
+                eventTitle = order.title,
+                eventVenue = order.venue.ifBlank { null },
+                eventDate = order.date.ifBlank { null },
+                ticketCode = result.ticketCode,
+                imageUrl = order.imageUrl.ifBlank { null },
+            )
+        }
+    }
 
     // ── Personal information: who the ticket is for ──────────────────────
     // Prefilled from the account (server-computed `contact` — a WhatsApp signup's
@@ -285,12 +319,12 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                             if (booking) return@Surface
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                            // getSignedInToken — see the coupon check above. Navigation's
-                            // checkout wall should already have caught this; this is the
-                            // backstop if that wall is ever bypassed.
+                            // getSignedInToken — see the coupon check above. If guest, expired,
+                            // or unauthenticated, smoothly redirect to LoginGate.
                             val token = TokenStore.getSignedInToken(context)
                             if (token == null) {
-                                Toast.makeText(context, "Please sign in to book tickets.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "Please sign in to complete your booking.", Toast.LENGTH_SHORT).show()
+                                onRequireSignIn()
                                 return@Surface
                             }
                             if (order.eventId <= 0) {
@@ -302,27 +336,6 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                                 showContactErrors = true
                                 Toast.makeText(context, "Check your details before paying.", Toast.LENGTH_SHORT).show()
                                 return@Surface
-                            }
-
-                            // Turn a CONFIRMED order (free, or freshly paid) into the success UI.
-                            val onConfirmed: (BookingResult.Success) -> Unit = { result ->
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                if (result.bookingCount > 1) {
-                                    confirmedCount = result.bookingCount
-                                } else {
-                                    pass = BookingLite(
-                                        id = result.bookingId.toLong(),
-                                        status = result.status,
-                                        quantity = result.quantity,
-                                        totalAmount = result.totalAmount.toDoubleOrNull() ?: grandTotal,
-                                        type = "event",
-                                        eventTitle = order.title,
-                                        eventVenue = order.venue.ifBlank { null },
-                                        eventDate = order.date.ifBlank { null },
-                                        ticketCode = result.ticketCode,
-                                        imageUrl = order.imageUrl.ifBlank { null },
-                                    )
-                                }
                             }
 
                             booking = true
@@ -347,60 +360,19 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
                                         onConfirmed(result)
                                     }
                                     is BookingResult.PaymentRequired -> {
-                                        val activity = context as? Activity
-                                        if (activity == null) {
-                                            booking = false
-                                            Toast.makeText(context, "Couldn't open payment.", Toast.LENGTH_LONG).show()
-                                            return@launch
-                                        }
-                                        // Arm the one-shot handler, then open the Razorpay sheet.
-                                        // The result returns via MainActivity → PaymentBridge.
-                                        PaymentBridge.await { outcome ->
-                                            scope.launch {
-                                                when (outcome) {
-                                                    is PaymentBridge.Outcome.Success -> {
-                                                        val confirmRes = BookingRepository().confirmOrder(
-                                                            token = token,
-                                                            orderId = result.orderId,
-                                                            paymentId = outcome.paymentId,
-                                                            signature = outcome.signature,
-                                                        )
-                                                        booking = false
-                                                        when (confirmRes) {
-                                                            is BookingResult.Success -> onConfirmed(confirmRes)
-                                                            else -> Toast.makeText(
-                                                                context,
-                                                                (confirmRes as? BookingResult.Error)?.message
-                                                                    ?: "Payment could not be verified.",
-                                                                Toast.LENGTH_LONG,
-                                                            ).show()
-                                                        }
-                                                    }
-                                                    is PaymentBridge.Outcome.Cancelled -> {
-                                                        BookingRepository().releaseOrder(token, result.orderId)
-                                                        booking = false
-                                                        Toast.makeText(context, "Payment cancelled.", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    is PaymentBridge.Outcome.Failed -> {
-                                                        BookingRepository().releaseOrder(token, result.orderId)
-                                                        booking = false
-                                                        Toast.makeText(context, outcome.message, Toast.LENGTH_LONG).show()
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        openRazorpayCheckout(
-                                            activity = activity,
-                                            pr = result,
-                                            name = contactName.trim(),
-                                            email = contactEmail.trim(),
-                                            phone = contactPhone.trim(),
-                                            description = order.title,
-                                        )
+                                        booking = false
+                                        pendingPaymentReq = result
+                                        showHaraanPaySheet = true
                                     }
                                     is BookingResult.Error -> {
                                         booking = false
-                                        Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                                        if (result.isUnauthorized || result.message.contains("Unauthenticated", ignoreCase = true) || result.message.contains("token", ignoreCase = true)) {
+                                            TokenStore.clearToken(context)
+                                            Toast.makeText(context, "Session expired. Please sign in to proceed.", Toast.LENGTH_SHORT).show()
+                                            onRequireSignIn()
+                                        } else {
+                                            Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 }
                             }
@@ -435,19 +407,162 @@ fun OrderSummaryScreen(order: OrderSummary, onBack: () -> Unit) {
             }
         }
 
-        // ── Success: single order → the QR pass; multi-tier → confirmation ────
-        pass?.let { b ->
-            TicketPassScreen(booking = b, onClose = onBack)
+        // ── Proprietary Haraan Pay Bottom Sheet ───────────────────────────
+        if (showHaraanPaySheet && pendingPaymentReq != null) {
+            val pr = pendingPaymentReq!!
+            HaraanPaySheet(
+                title = order.title,
+                totalPaise = pr.amountPaise,
+                subtotal = subtotal,
+                fee = fee,
+                discount = discount,
+                couponCode = appliedCode,
+                prefillName = contactName.trim(),
+                prefillEmail = contactEmail.trim(),
+                prefillPhone = contactPhone.trim(),
+                onDismiss = {
+                    showHaraanPaySheet = false
+                },
+                onPayRequested = { instrument, vpa ->
+                    showHaraanPaySheet = false
+                    val activity = context as? Activity
+                    if (activity == null) {
+                        Toast.makeText(context, "Could not open payment window.", Toast.LENGTH_SHORT).show()
+                        return@HaraanPaySheet
+                    }
+                    val methodLabel = when (instrument) {
+                        HaraanPaymentInstrument.UPI -> "UPI"
+                        HaraanPaymentInstrument.UPI_VPA -> "UPI"
+                        HaraanPaymentInstrument.CARD -> "Card"
+                        HaraanPaymentInstrument.NETBANKING -> "Netbanking"
+                    }
+                    paymentStage = HaraanPaymentStage.Authorizing(methodLabel)
+
+                    PaymentBridge.await { outcome ->
+                        scope.launch {
+                            val token = TokenStore.getSignedInToken(context).orEmpty()
+                            when (outcome) {
+                                is PaymentBridge.Outcome.Success -> {
+                                    paymentStage = HaraanPaymentStage.Verifying
+                                    val confirmRes = BookingRepository().confirmOrder(
+                                        token = token,
+                                        orderId = pr.orderId,
+                                        paymentId = outcome.paymentId,
+                                        signature = outcome.signature,
+                                    )
+                                    when (confirmRes) {
+                                        is BookingResult.Success -> {
+                                            lastPaymentId = outcome.paymentId
+                                            paymentStage = HaraanPaymentStage.Success("Payment verified by bank & Haraan Vault!")
+                                            onConfirmed(confirmRes)
+                                        }
+                                        else -> {
+                                            paymentStage = HaraanPaymentStage.NetworkRecovery("Network dropped. Let's verify payment with bank.")
+                                        }
+                                    }
+                                }
+                                is PaymentBridge.Outcome.Cancelled -> {
+                                    BookingRepository().releaseOrder(token, pr.orderId)
+                                    paymentStage = null
+                                    Toast.makeText(context, "Payment cancelled — your reservation is released.", Toast.LENGTH_SHORT).show()
+                                }
+                                is PaymentBridge.Outcome.Failed -> {
+                                    paymentStage = HaraanPaymentStage.Failed(outcome.message, canRetry = true)
+                                }
+                            }
+                        }
+                    }
+
+                    openRazorpayCheckout(
+                        activity = activity,
+                        pr = pr,
+                        name = contactName.trim(),
+                        email = contactEmail.trim(),
+                        phone = contactPhone.trim(),
+                        description = order.title,
+                        instrument = instrument,
+                        vpa = vpa,
+                    )
+                }
+            )
         }
-        if (confirmedCount > 0) {
-            OrderConfirmedOverlay(passCount = confirmedCount, onDone = onBack)
+
+        // ── Proprietary Haraan Payment Processing & Recovery Stage ─────────
+        paymentStage?.let { stage ->
+            val pr = pendingPaymentReq
+            val token = TokenStore.getSignedInToken(context).orEmpty()
+            HaraanPaymentProcessingView(
+                stage = stage,
+                onRetry = {
+                    paymentStage = null
+                    showHaraanPaySheet = true
+                },
+                onCheckStatus = {
+                    if (pr != null) {
+                        scope.launch {
+                            val statusRes = BookingRepository().checkOrderStatus(token, pr.orderId)
+                            if (statusRes is BookingResult.Success) {
+                                paymentStage = HaraanPaymentStage.Success("Payment confirmed from gateway!")
+                                onConfirmed(statusRes)
+                            } else {
+                                Toast.makeText(context, (statusRes as? BookingResult.Error)?.message ?: "Still verifying...", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
+                onSuccessComplete = {
+                    paymentStage = null
+                },
+                onDismissFailed = {
+                    paymentStage = null
+                    if (pr != null) {
+                        scope.launch { BookingRepository().releaseOrder(token, pr.orderId) }
+                    }
+                }
+            )
+        }
+
+        // ── Success: Polished Haraan Booking Confirmation Hub ──────────────
+        pass?.let { b ->
+            HaraanBookingConfirmationScreen(
+                booking = b,
+                paymentId = lastPaymentId,
+                passCount = maxOf(1, confirmedCount),
+                onDone = onBack,
+            )
+        }
+        if (confirmedCount > 0 && pass == null) {
+            val syntheticBooking = BookingLite(
+                id = 0L,
+                status = "CONFIRMED",
+                quantity = totalTickets,
+                totalAmount = grandTotal,
+                type = "event",
+                eventTitle = order.title,
+                eventVenue = order.venue.ifBlank { null },
+                eventDate = order.date.ifBlank { null },
+                ticketCode = null,
+                imageUrl = order.imageUrl.ifBlank { null },
+            )
+            HaraanBookingConfirmationScreen(
+                booking = syntheticBooking,
+                paymentId = lastPaymentId,
+                passCount = confirmedCount,
+                onDone = onBack,
+            )
         }
     }
 }
 
 /**
- * Open the Razorpay Standard Checkout sheet for a reserved order. The result is delivered to
- * the host Activity (MainActivity implements the listener) and routed back via [PaymentBridge].
+ * Open Razorpay Standard Checkout for an order the backend has already reserved.
+ *
+ * Only two things travel from our sheet: the theme, and `prefill` — which the SDK's `PayloadHelper`
+ * really does read, so `method` lands the buyer straight on the right tab and `vpa` arrives typed
+ * in. Everything that decides the money (`order_id`, `amount`, `currency`, the key) comes from the
+ * server's reservation and is passed through untouched; the webhook reconciles against that order.
+ *
+ * Card numbers, CVVs and UPI PINs are entered on Razorpay's screen and never reach Haraan.
  */
 internal fun openRazorpayCheckout(
     activity: Activity,
@@ -456,6 +571,8 @@ internal fun openRazorpayCheckout(
     email: String,
     phone: String,
     description: String,
+    instrument: HaraanPaymentInstrument = HaraanPaymentInstrument.UPI,
+    vpa: String? = null,
 ) {
     val checkout = Checkout()
     checkout.setKeyID(pr.razorpayKey)
@@ -470,8 +587,27 @@ internal fun openRazorpayCheckout(
             if (name.isNotBlank()) put("name", name)
             if (email.isNotBlank()) put("email", email)
             if (phone.isNotBlank()) put("contact", phone)
+            when (instrument) {
+                HaraanPaymentInstrument.UPI, HaraanPaymentInstrument.UPI_VPA -> {
+                    put("method", "upi")
+                    if (!vpa.isNullOrBlank()) put("vpa", vpa)
+                }
+                HaraanPaymentInstrument.CARD -> put("method", "card")
+                HaraanPaymentInstrument.NETBANKING -> put("method", "netbanking")
+            }
         })
-        put("theme", JSONObject().apply { put("color", "#2563EB") })
+        // Razorpay's own sheet, wearing Haraan's light identity so the handoff does not
+        // feel like leaving the app. `color` tints its controls; `backdrop_color` is the scrim.
+        put("theme", JSONObject().apply {
+            put("color", "#2563EB")
+            put("backdrop_color", "#0F172A")
+            put("hide_topbar", false)
+        })
+        put("modal", JSONObject().apply {
+            put("confirm_close", true)
+            put("animation", true)
+        })
+        put("send_sms_hash", true)
     }
 
     checkout.open(activity, options)
@@ -609,8 +745,13 @@ private fun PersonalInfoCard(
             keyboardType = KeyboardType.Email,
         )
         ContactField(
-            label = "Phone", value = phone, onValueChange = onPhone,
-            placeholder = "10-digit mobile number", isError = phoneError,
+            label = "Phone",
+            value = phone,
+            onValueChange = { input ->
+                onPhone(input.filter { it.isDigit() || it == '+' || it == ' ' || it == '-' })
+            },
+            placeholder = "10-digit mobile number",
+            isError = phoneError,
             errorText = "That phone number doesn’t look right.",
             keyboardType = KeyboardType.Phone,
         )

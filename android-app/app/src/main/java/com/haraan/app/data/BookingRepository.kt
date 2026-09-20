@@ -35,7 +35,10 @@ sealed interface BookingResult {
     val bookingId: Int,
   ) : BookingResult
 
-  data class Error(val message: String) : BookingResult
+  data class Error(
+    val message: String,
+    val isUnauthorized: Boolean = false,
+  ) : BookingResult
 }
 
 /**
@@ -198,7 +201,10 @@ class BookingRepository(
           )
         }
       } else {
-        BookingResult.Error(parseErrorMessage(body, "Booking failed (Status code: $code)"))
+        BookingResult.Error(
+          message = parseErrorMessage(body, "Booking failed (Status code: $code)"),
+          isUnauthorized = (code == 401 || code == 403),
+        )
       }
     } catch (e: Exception) {
       BookingResult.Error(e.message ?: "Failed to connect to server. Please check your network connection.")
@@ -250,7 +256,10 @@ class BookingRepository(
           bookingCount = data.optJSONArray("bookings")?.length() ?: 1,
         )
       } else {
-        BookingResult.Error(parseErrorMessage(body, "Payment could not be verified."))
+        BookingResult.Error(
+          message = parseErrorMessage(body, "Payment verification failed (Status code: $code)"),
+          isUnauthorized = (code == 401 || code == 403),
+        )
       }
     } catch (e: Exception) {
       BookingResult.Error(e.message ?: "Couldn't reach the server to confirm your payment.")
@@ -278,6 +287,62 @@ class BookingRepository(
       connection.disconnect()
     }
     Unit
+  }
+
+  /**
+   * Reconcile payment status for a reserved order (POST /api/bookings/status).
+   * Used when network drops or client needs authoritative status from the server.
+   */
+  suspend fun checkOrderStatus(
+    token: String,
+    orderId: String,
+  ): BookingResult = withContext(Dispatchers.IO) {
+    try {
+      val jsonBody = JSONObject().apply {
+        put("razorpayOrderId", orderId)
+      }
+
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/status").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      connection.outputStream.use { it.write(jsonBody.toString().toByteArray(Charsets.UTF_8)) }
+
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+
+      if (code in 200..299) {
+        val json = JSONObject(body)
+        val status = json.optString("status", "PENDING")
+        if (status.equals("CONFIRMED", ignoreCase = true)) {
+          val data = json.optJSONObject("data") ?: JSONObject()
+          BookingResult.Success(
+            bookingId = data.optInt("id"),
+            quantity = data.optInt("quantity"),
+            totalAmount = data.optString("totalAmount", "0.00"),
+            status = "CONFIRMED",
+            message = json.optString("message", "Booking confirmed."),
+            ticketCode = data.optString("ticketCode").takeIf { it.isNotBlank() },
+            bookingCount = data.optJSONArray("bookings")?.length() ?: 1,
+          )
+        } else {
+          BookingResult.Error(json.optString("message", "Payment is still being processed by the bank."))
+        }
+      } else {
+        BookingResult.Error(
+          message = parseErrorMessage(body, "Unable to verify payment status."),
+          isUnauthorized = (code == 401 || code == 403),
+        )
+      }
+    } catch (e: Exception) {
+      BookingResult.Error(e.message ?: "Could not connect to server to check status.")
+    }
   }
 
   /** Result of a coupon-code check (POST /api/bookings/validate-coupon). */
