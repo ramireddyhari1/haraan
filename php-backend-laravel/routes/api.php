@@ -2,20 +2,55 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\AccountController;
+use App\Http\Controllers\Api\AppContentController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ConfigController;
-use App\Http\Controllers\Api\EmailAuthController;
-use App\Http\Controllers\Api\WhatsAppAuthController;
 use App\Http\Controllers\Api\BookingsController;
+use App\Http\Controllers\Api\ConfigController;
+use App\Http\Controllers\Api\DirectMessageController;
 use App\Http\Controllers\Api\DistrictsController;
+use App\Http\Controllers\Api\EmailAuthController;
 use App\Http\Controllers\Api\EventsController;
+use App\Http\Controllers\Api\FirebasePhoneAuthController;
+use App\Http\Controllers\Api\GoogleAuthController;
+use App\Http\Controllers\Api\HostController;
+use App\Http\Controllers\Api\I18nController;
 use App\Http\Controllers\Api\LeaderboardsController;
+use App\Http\Controllers\Api\LegalController;
 use App\Http\Controllers\Api\LiveMatchController;
+use App\Http\Controllers\Api\MatchDeviceController;
 use App\Http\Controllers\Api\MatchesController;
+use App\Http\Controllers\Api\MatchJoinController;
+use App\Http\Controllers\Api\MemberRazorpayWebhookController;
+use App\Http\Controllers\Api\MembershipController;
+use App\Http\Controllers\Api\MetaWebhookController;
+use App\Http\Controllers\Api\Msg91WebhookController;
+use App\Http\Controllers\Api\NotificationsController;
+use App\Http\Controllers\Api\OwnerOperationsController;
+use App\Http\Controllers\Api\PartnerController;
+use App\Http\Controllers\Api\PhoneOtpController;
 use App\Http\Controllers\Api\PlayersController;
+use App\Http\Controllers\Api\PricingMatrixController;
+use App\Http\Controllers\Api\PrivacyController;
 use App\Http\Controllers\Api\RazorpayController;
+use App\Http\Controllers\Api\RazorpayWebhookController;
+use App\Http\Controllers\Api\RewardsController;
+use App\Http\Controllers\Api\SectionThemeController;
+use App\Http\Controllers\Api\ShiftController;
+use App\Http\Controllers\Api\StandingContractController;
+use App\Http\Controllers\Api\SupportController;
+use App\Http\Controllers\Api\TournamentsController;
+use App\Http\Controllers\Api\TranslationController;
 use App\Http\Controllers\Api\UsersController;
+use App\Http\Controllers\Api\VenuesController;
+use App\Http\Controllers\Api\WhatsAppAuthController;
+use App\Http\Controllers\Api\WhatsAppDeskController;
+use App\Http\Controllers\Api\WorkforceIntelligenceController;
+use App\Http\Controllers\Api\WorkforceSyncController;
+use App\Models\Ad;
+use App\Services\Hrms\WorkforceHealthService;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -651,14 +686,32 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::post('/venues/{id}/operations/suggestions/{suggestionId}/dismiss', 'dismissSuggestion')->whereNumber('id')->whereNumber('suggestionId')->middleware('partner.can:reports');
     });
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Member plans (Free / Pro / Hero) — see docs/member-subscriptions-design.md.
 //  Separate from partner billing end to end: own tables, service, webhook and secret.
 // ─────────────────────────────────────────────────────────────────────────────
-Route::middleware('auth.jwt.optional')->get('/membership/plans', [\App\Http\Controllers\Api\MembershipController::class, 'plans']);
+// Post-match rewards (docs/post-match-rewards-design.md). Every grant route is scoped to the
+// caller — another player's reward id is a 404. Bonus XP here never touches competitive XP.
+Route::middleware(['auth.jwt', 'throttle:60,1'])->group(function (): void {
+    Route::get('/matches/{id}/rewards', [RewardsController::class, 'forMatch'])->whereNumber('id');
+    Route::post('/matches/{id}/rewards/seen', [RewardsController::class, 'seen'])->whereNumber('id');
+    Route::prefix('rewards')->controller(RewardsController::class)->group(function (): void {
+        Route::get('/', 'index');
+        Route::get('/summary', 'summary');
+        Route::get('/ad-sessions/{nonce}', 'adStatus')->where('nonce', '[A-Za-z0-9]{20,64}');
+        Route::get('/{id}', 'show')->whereNumber('id');
+        Route::post('/{id}/claim', 'claim')->whereNumber('id')->middleware('throttle:20,1');
+        Route::post('/{id}/ad-session', 'startAd')->whereNumber('id')->middleware('throttle:20,1');
+    });
+});
 
-Route::middleware('auth.jwt')->prefix('membership')->controller(\App\Http\Controllers\Api\MembershipController::class)->group(function (): void {
+// AdMob rewarded-ad server-side verification. Unauthenticated by necessity: Google calls it.
+// Trusted only through Google's ECDSA signature (see AdMobVerifier) — no shared secret.
+Route::middleware('throttle:120,1')->get('/webhooks/admob/rewarded', [RewardsController::class, 'admobCallback']);
+
+Route::middleware('auth.jwt.optional')->get('/membership/plans', [MembershipController::class, 'plans']);
+
+Route::middleware('auth.jwt')->prefix('membership')->controller(MembershipController::class)->group(function (): void {
     Route::get('/', 'show');
     Route::get('/payments', 'payments');
     Route::post('/abandon', 'abandon');

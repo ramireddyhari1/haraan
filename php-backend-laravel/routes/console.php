@@ -1,8 +1,11 @@
 <?php
 
+use App\Models\User;
 use App\Services\BookingService;
 use App\Services\MatchVerificationService;
 use App\Services\MessageJourneys;
+use App\Services\Rewards\BadgeService;
+use App\Services\Rewards\RewardMaintenance;
 use App\Services\WaitlistService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -117,3 +120,34 @@ Artisan::command('membership:reconcile {--dry-run}', function (\App\Services\Mem
 })->purpose('Reconcile member subscriptions with Razorpay');
 
 Schedule::command('membership:reconcile')->everyFifteenMinutes()->withoutOverlapping();
+
+// Post-match rewards housekeeping: expire rewards past their date (reserved sponsor codes go
+// back to their pool), remind players before a reward expires, expire unverified ad sessions.
+Artisan::command('rewards:maintain', function (RewardMaintenance $maintenance) {
+    $r = $maintenance->run();
+    $this->info("Expired {$r['expired']} reward(s), {$r['coupons_expired']} unused coupon(s); "
+        ."warned about {$r['warned']}; expired {$r['sessions_expired']} ad session(s).");
+})->purpose('Expire, remind and tidy post-match rewards');
+
+Schedule::command('rewards:maintain')->everyFifteenMinutes()->withoutOverlapping();
+
+// Record every badge players have already earned, without celebrating any of them. Run once at
+// deploy (before the first match finishes) so launch day doesn't announce old badges.
+Artisan::command('rewards:backfill-badges {--dry-run}', function (BadgeService $badges) {
+    $dry = (bool) $this->option('dry-run');
+    $users = 0;
+    $unlocked = 0;
+    User::query()->whereNotNull('player_id')->where('player_id', '!=', '')
+        ->orderBy('id')->chunkById(200, function ($chunk) use ($badges, $dry, &$users, &$unlocked): void {
+            foreach ($chunk as $user) {
+                $users++;
+                if ($dry) {
+                    continue;
+                }
+                $unlocked += count($badges->sync($user, null, false));
+                User::query()->whereKey($user->id)->whereNull('rewards_baselined_at')
+                    ->update(['rewards_baselined_at' => now()]);
+            }
+        });
+    $this->info(($dry ? '[dry run] ' : '')."Players: {$users}; badges recorded: {$unlocked}.");
+})->purpose('Record already-earned badges without celebrating them');

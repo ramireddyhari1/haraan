@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Events\MatchUpdated;
 use App\Models\LiveMatch;
 use App\Services\Stats\LeaderboardRankService;
+use App\Services\Rewards\RewardEngine;
 use App\Services\Stats\MatchPlayerStatsService;
 use App\Services\Stats\PlayerCareerService;
 use Illuminate\Support\Facades\Log;
@@ -102,6 +103,10 @@ final class MatchCompletion
             // Auto-verify Haraan turf matches; otherwise open the captain window.
             $this->step('verification', $matchId, fn () => VenueVerificationService::onMatchCompleted($match->fresh() ?? $match));
         }
+
+        // Post-match rewards for every registered player — idempotent, so a re-run after a
+        // late correction grants nothing twice. Last, so badges see the refreshed careers.
+        $this->step('rewards', $matchId, fn () => app(RewardEngine::class)->onCompleted($match->fresh() ?? $match));
     }
 
     /**
@@ -132,6 +137,13 @@ final class MatchCompletion
             $players = \App\Models\PlayerMatchStat::query()->where('match_id', $id)
                 ->whereNotNull('player_id')->pluck('player_id')->all();
             \App\Models\PlayerMatchStat::query()->where('match_id', $id)->delete();
+            // Unclaimed rewards from the undone finish go; the match grants again when it re-finishes.
+            try {
+                app(RewardEngine::class)->onReopened($id);
+            } catch (Throwable $e) {
+                Log::error('match completion: rewards reopen failed', ['match_id' => $id, 'error' => $e->getMessage()]);
+                report($e);
+            }
             if (app(PlayerCareerService::class)->refresh($players)) {
                 app(LeaderboardRankService::class)->recalculate();
             }

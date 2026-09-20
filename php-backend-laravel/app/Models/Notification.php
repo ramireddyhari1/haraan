@@ -68,6 +68,8 @@ class Notification extends Model
         'sent_at',
         'pushed_at',
         'created_by',
+        // 'composer' = written by the team in /control; 'rewards' = a player's own reward notice.
+        'source',
     ];
 
     protected function casts(): array

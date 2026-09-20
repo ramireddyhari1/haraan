@@ -4,18 +4,22 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
+use App\Services\Rewards\RewardLedger;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 final class Coupon extends Model
 {
+    use AuditsAdminChanges;
     use HasFactory;
 
     protected $fillable = [
         'event_id', 'venue_id', 'scope', 'code', 'type', 'discount', 'max_discount', 'min_order', 'min_tickets',
         'max_uses', 'per_customer_limit', 'uses', 'active', 'expires_at', 'multi_event',
         'eligibility', 'phone_numbers', 'restrict_dates', 'valid_dates', 'restrict_times', 'valid_times',
+        'owner_user_id', 'source', 'reward_grant_id',
     ];
 
     protected $casts = [
@@ -36,6 +40,8 @@ final class Coupon extends Model
         'valid_dates'        => 'array',
         'restrict_times'     => 'boolean',
         'valid_times'        => 'array',
+        'owner_user_id' => 'integer',
+        'reward_grant_id' => 'integer',
     ];
 
     /** True once the coupon has an expiry that is now in the past. */
@@ -133,6 +139,30 @@ final class Coupon extends Model
         }
 
         return self::query()->whereRaw('lower(code) = ?', [strtolower($code)])->first();
+    }
+
+    /**
+     * An owned coupon (a post-match reward) works for its owner's account only. Everyone else
+     * gets the same "isn't valid" answer as a code that doesn't exist, so owned codes can't be
+     * probed. Unowned coupons (every coupon a host or admin creates) are unaffected.
+     */
+    public function usableBy(?User $user): bool
+    {
+        return $this->owner_user_id === null
+            || ($user !== null && (int) $this->owner_user_id === (int) $user->id);
+    }
+
+    /**
+     * Count one confirmed use. A reward coupon's grant moves to "used" the same moment, so the
+     * player's reward list says so.
+     */
+    public function recordUse(): void
+    {
+        $this->increment('uses');
+
+        if ($this->reward_grant_id !== null) {
+            app(RewardLedger::class)->markRedeemedForCoupon((int) $this->id);
+        }
     }
 
     /** True when this coupon is active, not expired, and hasn't exhausted its usage cap. */

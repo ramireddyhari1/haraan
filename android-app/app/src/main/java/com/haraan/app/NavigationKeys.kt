@@ -86,3 +86,6 @@ data class VenueDetail(
 
 /** Advanced insights: choose sports (Pro) / see every sport unlocked (Hero). */
 @Serializable data object InsightSportsPicker : NavKey
+
+/** A player's post-match rewards for one match. Reachable from anywhere via data.rewards.RewardsNav. */
+@Serializable data class MatchRewardsKey(val matchId: String) : NavKey

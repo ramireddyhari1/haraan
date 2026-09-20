@@ -6,8 +6,10 @@ namespace App\Services;
 
 use App\Models\LiveMatch;
 use App\Models\User;
+use App\Services\Rewards\RewardEngine;
 use App\Support\ActionboardXp;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Haraan ActionBoard verification state machine.
@@ -44,7 +46,7 @@ final class MatchVerificationService
 
         $match->update([
             'verification_status'   => 'pending',
-            'verification_deadline' => Carbon::now()->addHours(ActionboardXp::VERIFICATION_WINDOW_HOURS),
+            'verification_deadline' => Carbon::now()->addHours(ActionboardXp::verificationWindowHours()),
         ]);
     }
 
@@ -119,6 +121,15 @@ final class MatchVerificationService
         // Award XP for this settlement (idempotent — replaces prior rows).
         PlayerXpLedgerService::award($match);
 
+        // Post-match rewards: locked money-value rewards unlock once the result is trusted
+        // enough. Separate from competitive XP, and never allowed to break a settlement.
+        try {
+            app(RewardEngine::class)->onSettled($match);
+        } catch (\Throwable $e) {
+            Log::error('rewards: settlement hook failed', ['match_id' => $match->id, 'error' => $e->getMessage()]);
+            report($e);
+        }
+
         return $match;
     }
 
@@ -156,7 +167,7 @@ final class MatchVerificationService
             return false;
         }
 
-        $min = ActionboardXp::RANKED_MIN_PLAYERS_PER_SIDE;
+        $min = ActionboardXp::rankedMinPlayersPerSide();
 
         return $match->distinctRegisteredPlayers('home') >= $min
             && $match->distinctRegisteredPlayers('away') >= $min;
