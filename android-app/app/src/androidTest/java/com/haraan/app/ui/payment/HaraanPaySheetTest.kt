@@ -93,7 +93,7 @@ class HaraanPaySheetTest {
         compose.waitForIdle()
 
         // We cannot open PhonePe ourselves, so the sheet must say who will.
-        compose.onNode(hasText("choose PhonePe there", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("confirm in PhonePe", substring = true)).assertIsDisplayed()
     }
 
     @Test
