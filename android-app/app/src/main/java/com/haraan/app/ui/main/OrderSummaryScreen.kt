@@ -435,6 +435,7 @@ fun OrderSummaryScreen(
                         HaraanPaymentInstrument.UPI_VPA -> "UPI"
                         HaraanPaymentInstrument.CARD -> "Card"
                         HaraanPaymentInstrument.NETBANKING -> "Netbanking"
+                        HaraanPaymentInstrument.RAZORPAY -> "Razorpay"
                     }
                     paymentStage = HaraanPaymentStage.Authorizing(methodLabel)
 
@@ -594,6 +595,9 @@ internal fun openRazorpayCheckout(
                 }
                 HaraanPaymentInstrument.CARD -> put("method", "card")
                 HaraanPaymentInstrument.NETBANKING -> put("method", "netbanking")
+                // Nothing prefilled on purpose: this is the buyer asking for Razorpay's full
+                // menu, including the UPI intent handoff our own sheet cannot perform.
+                HaraanPaymentInstrument.RAZORPAY -> Unit
             }
         })
         // Razorpay's own sheet, wearing Haraan's light identity so the handoff does not

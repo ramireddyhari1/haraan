@@ -7,6 +7,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
@@ -17,6 +18,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.AccountBalance
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.QrCode
@@ -39,9 +42,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
@@ -60,59 +65,24 @@ import com.haraan.app.ui.pressable
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.HaraanTypography
 
-/**
- * A UPI app that is actually installed on this device.
- *
- * [icon] is the app's own launcher icon, read from PackageManager — not a bundled asset, so it
- * always matches the build of the app the buyer really has.
- */
-data class UpiAppTarget(
-    val name: String,
-    val packageName: String,
-    val icon: Drawable?,
-)
-
 enum class HaraanPaymentInstrument {
-    /** Any UPI payment — Razorpay's own sheet does the app handoff. */
+    /** UPI. Razorpay's sheet opens on its UPI tab, where the app handoff happens. */
     UPI,
 
-    /** UPI, but with a VPA the buyer typed, prefilled into Razorpay's sheet. */
+    /** UPI with a VPA the buyer typed, prefilled into Razorpay's sheet via `prefill.vpa`. */
     UPI_VPA,
     CARD,
     NETBANKING,
-}
 
-/**
- * The UPI apps installed on this device, read from PackageManager.
- *
- * Resolves `upi://pay` rather than matching a hardcoded package list, so a bank app or a newcomer
- * we have never heard of shows up too. Requires the `<queries>` element in AndroidManifest.xml —
- * without it this silently returns empty on Android 11+.
- *
- * This is used for *reassurance only*: see [HaraanPaySheet] for why we cannot route to a chosen app
- * ourselves.
- */
-fun detectInstalledUpiApps(context: Context): List<UpiAppTarget> {
-    return try {
-        val pm = context.packageManager
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("upi://pay"))
-        pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-            .asSequence()
-            .map { it.activityInfo.applicationInfo }
-            .distinctBy { it.packageName }
-            .filter { it.packageName != context.packageName }
-            .map { info ->
-                UpiAppTarget(
-                    name = pm.getApplicationLabel(info).toString(),
-                    packageName = info.packageName,
-                    icon = runCatching { pm.getApplicationIcon(info) }.getOrNull(),
-                )
-            }
-            .sortedBy { it.name.lowercase() }
-            .toList()
-    } catch (_: Exception) {
-        emptyList()
-    }
+    /**
+     * Razorpay's full sheet, with nothing prefilled.
+     *
+     * This is the route for a buyer who wants to tap Google Pay and *be taken there*: Razorpay's
+     * own screen performs real UPI intent handoff, plus wallets and EMI that we do not list. We
+     * cannot do that handoff from our sheet (see [StandardCheckoutUpi]), so rather than fake it we
+     * offer the door that genuinely opens.
+     */
+    RAZORPAY,
 }
 
 /**
@@ -154,13 +124,15 @@ fun HaraanPaySheet(
     prefillPhone: String,
     onDismiss: () -> Unit,
     onPayRequested: (instrument: HaraanPaymentInstrument, vpa: String?) -> Unit,
+    capability: HaraanPayUpiCapability = StandardCheckoutUpi,
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val installedUpiApps = remember(context) { detectInstalledUpiApps(context) }
+    val installedUpiApps = remember(context, capability) { capability.installedApps(context) }
     var selected by remember { mutableStateOf(HaraanPaymentInstrument.UPI) }
+    var chosenApp by remember { mutableStateOf(installedUpiApps.firstOrNull()) }
     var vpaInput by remember { mutableStateOf("") }
     var vpaExpanded by remember { mutableStateOf(false) }
     var showBreakdown by remember { mutableStateOf(false) }
@@ -221,13 +193,13 @@ fun HaraanPaySheet(
 
             Spacer(Modifier.height(12.dp))
 
-            // ── UPI ──────────────────────────────────────────────────────────
+            // UPI — apps first, UPI ID demoted to the slow path underneath.
             InstrumentCard(
                 title = "UPI",
                 subtitle = if (installedUpiApps.isEmpty()) {
                     "Pay from any UPI app or bank account"
                 } else {
-                    upiSubtitle(installedUpiApps)
+                    "Pay from an app on this phone"
                 },
                 icon = Icons.Outlined.QrCode,
                 isSelected = selected == HaraanPaymentInstrument.UPI ||
@@ -243,11 +215,37 @@ fun HaraanPaySheet(
             ) {
                 Column(Modifier.padding(top = 14.dp)) {
                     if (installedUpiApps.isNotEmpty()) {
-                        InstalledUpiApps(installedUpiApps)
-                        Spacer(Modifier.height(12.dp))
+                        UpiAppPicker(
+                            apps = installedUpiApps,
+                            chosen = chosenApp,
+                            onChoose = {
+                                chosenApp = it
+                                selected = HaraanPaymentInstrument.UPI
+                                focusManager.clearFocus()
+                            },
+                        )
+
+                        // What actually happens next, in plain words. The SDK we ship cannot open
+                        // a named app itself, so the sheet must not imply that it will — see
+                        // [StandardCheckoutUpi]. Buyers who want a real handoff have "More ways
+                        // to pay" below, which is Razorpay's own sheet.
+                        if (!capability.supportsDirectAppHandoff) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                text = chosenApp?.let {
+                                    "Razorpay's secure screen opens next — choose ${it.name} there."
+                                } ?: "Razorpay's secure screen opens next.",
+                                color = HaraanColors.TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                            )
+                        }
+
+                        Spacer(Modifier.height(14.dp))
+                        HorizontalDivider(color = HaraanColors.Hairline)
                     }
 
-                    // Optional VPA — genuinely prefilled into Razorpay via `prefill.vpa`.
+                    // Secondary and collapsed: typing a VPA is the slow path, not the headline.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -259,7 +257,7 @@ fun HaraanPaySheet(
                                     selected = HaraanPaymentInstrument.UPI
                                 }
                             }
-                            .padding(vertical = 6.dp),
+                            .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -324,6 +322,18 @@ fun HaraanPaySheet(
                 icon = Icons.Outlined.AccountBalance,
                 isSelected = selected == HaraanPaymentInstrument.NETBANKING,
                 onSelect = { selected = HaraanPaymentInstrument.NETBANKING },
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // The one route that really does open a UPI app for you: Razorpay's own sheet performs
+            // the intent handoff we cannot, and carries wallets and EMI we do not list.
+            InstrumentCard(
+                title = "More ways to pay",
+                subtitle = "Razorpay's screen \u2014 opens your UPI app directly, plus wallets and EMI",
+                icon = Icons.Outlined.AccountBalanceWallet,
+                isSelected = selected == HaraanPaymentInstrument.RAZORPAY,
+                onSelect = { selected = HaraanPaymentInstrument.RAZORPAY },
             )
 
             Spacer(Modifier.height(22.dp))
@@ -570,44 +580,85 @@ private fun AmountCard(
  * route to a chosen one, and a tile that looks selectable but changes nothing is a lie.
  */
 @Composable
-private fun InstalledUpiApps(apps: List<UpiAppTarget>) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            apps.take(5).forEach { app ->
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(HaraanColors.Field)
-                        .border(1.dp, HaraanColors.Hairline, RoundedCornerShape(11.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
+private fun UpiAppPicker(
+    apps: List<UpiAppTarget>,
+    chosen: UpiAppTarget?,
+    onChoose: (UpiAppTarget) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        apps.forEach { app ->
+            val isChosen = chosen?.packageName == app.packageName
+
+            // One spring drives lift and tint together, so selection reads as a single
+            // movement rather than two properties changing at slightly different times.
+            val lift by animateFloatAsState(
+                targetValue = if (isChosen) 1f else 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+                label = "upiAppLift",
+            )
+
+            Column(
+                modifier = Modifier
+                    .width(78.dp)
+                    .scale(1f + 0.03f * lift)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        lerp(HaraanColors.Surface, HaraanColors.AccentTint, lift),
+                    )
+                    .border(
+                        width = (1f + 0.6f * lift).dp,
+                        color = lerp(HaraanColors.BorderLight, HaraanColors.EventsBlue, lift),
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                    .pressable(haptic = Feel.SELECT) { onChoose(app) }
+                    .padding(vertical = 12.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // getApplicationIcon can come back null on a restricted or half-installed
+                // profile. Falling back to a monogram keeps the tile the same height, so the
+                // row does not collapse into ragged dead space when one app misbehaves.
+                if (app.icon != null) {
                     AsyncImage(
                         model = app.icon,
                         contentDescription = app.name,
-                        modifier = Modifier.size(26.dp),
+                        modifier = Modifier.size(34.dp),
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(HaraanColors.Field),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = app.name.take(1).uppercase(),
+                            color = HaraanColors.TextSecondary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
-            }
-            if (apps.size > 5) {
+                Spacer(Modifier.height(7.dp))
                 Text(
-                    text = "+${apps.size - 5}",
-                    color = HaraanColors.TextMuted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    text = app.name,
+                    color = if (isChosen) HaraanColors.TextPrimary else HaraanColors.TextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = if (isChosen) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "Pick the one you want on the next screen.",
-            color = HaraanColors.TextSecondary,
-            fontSize = 12.sp,
-        )
     }
 }
 

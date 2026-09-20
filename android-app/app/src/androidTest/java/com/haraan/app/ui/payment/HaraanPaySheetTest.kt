@@ -3,6 +3,8 @@ package com.haraan.app.ui.payment
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -30,7 +32,18 @@ class HaraanPaySheetTest {
     private var vpa: String? = null
     private var payCount = 0
 
-    private fun showSheet() {
+    /** A device with these UPI apps, whatever the emulator actually has. */
+    private class FakeUpi(
+        private val apps: List<UpiAppTarget>,
+        override val supportsDirectAppHandoff: Boolean = false,
+    ) : HaraanPayUpiCapability {
+        override fun installedApps(context: android.content.Context) = apps
+    }
+
+    private val gpay = UpiAppTarget("Google Pay", "com.google.android.apps.nbu.paisa.user", null)
+    private val phonepe = UpiAppTarget("PhonePe", "com.phonepe.app", null)
+
+    private fun showSheet(capability: HaraanPayUpiCapability = FakeUpi(emptyList())) {
         compose.setContent {
             HaraanPaySheet(
                 title = "Gaurav Gupta Live",
@@ -48,6 +61,7 @@ class HaraanPaySheetTest {
                     vpa = v
                     payCount++
                 },
+                capability = capability,
             )
         }
     }
@@ -59,6 +73,52 @@ class HaraanPaySheetTest {
         compose.onNodeWithText("UPI").assertIsDisplayed()
         // Straight from paise, with no stray decimals on a whole-rupee amount.
         compose.onNode(hasText("Pay ₹383")).assertIsDisplayed()
+    }
+
+    @Test
+    fun installedUpiAppsAreTheHeadlineAndUpiIdIsNot() {
+        showSheet(FakeUpi(listOf(gpay, phonepe)))
+
+        compose.onNodeWithText("Google Pay").assertIsDisplayed()
+        compose.onNodeWithText("PhonePe").assertIsDisplayed()
+        // The VPA field stays collapsed behind its disclosure until asked for.
+        compose.onAllNodesWithText("name@bank").assertCountEquals(0)
+    }
+
+    @Test
+    fun choosingAnAppSaysWhereItWillActuallyBeConfirmed() {
+        showSheet(FakeUpi(listOf(gpay, phonepe)))
+
+        compose.onNodeWithText("PhonePe").performClick()
+        compose.waitForIdle()
+
+        // We cannot open PhonePe ourselves, so the sheet must say who will.
+        compose.onNode(hasText("choose PhonePe there", substring = true)).assertIsDisplayed()
+    }
+
+    @Test
+    fun choosingAnAppStillPaysAsPlainUpi() {
+        showSheet(FakeUpi(listOf(gpay, phonepe)))
+
+        compose.onNodeWithText("PhonePe").performClick()
+        compose.onNode(hasText("Pay ₹383")).performClick()
+        compose.waitForIdle()
+
+        // The package name is deliberately NOT sent: the SDK has nowhere to put it.
+        assertEquals(HaraanPaymentInstrument.UPI, instrument)
+        assertNull(vpa)
+    }
+
+    @Test
+    fun theRazorpayRouteSendsNothingPrefilled() {
+        showSheet(FakeUpi(listOf(gpay)))
+
+        compose.onNodeWithText("More ways to pay").performClick()
+        compose.onNode(hasText("Pay ₹383")).performClick()
+        compose.waitForIdle()
+
+        assertEquals(HaraanPaymentInstrument.RAZORPAY, instrument)
+        assertNull(vpa)
     }
 
     @Test
