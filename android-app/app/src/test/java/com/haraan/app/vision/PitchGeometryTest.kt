@@ -92,14 +92,61 @@ class PitchGeometryTest {
         val nearMetres = toPitch.map(nearCentre)
         val farMetres = toPitch.map(farCentre)
 
-        // The near crease is 1.22 m in front of the striker's stumps, so y is negative.
-        assertClose(-PitchGeometry.POPPING_CREASE_AHEAD_M, nearMetres.y, 1e-6)
+        // The camera is behind the bowler, so the crease nearest it is the BOWLER'S, 18.90 m
+        // from the striker's stumps. This used to assert -1.22 — the striker's crease, on
+        // the wrong side of the striker's stumps, at the wrong end of the pitch.
+        assertClose(PitchGeometry.BOWLER_POPPING_CREASE_M, nearMetres.y, 1e-6)
         assertClose(0.0, nearMetres.x, 1e-6)
 
-        // The far crease is the full calibration length away.
+        // And the far one is the striker's, 1.22 m in front of the batter.
+        assertClose(PitchGeometry.STRIKER_POPPING_CREASE_M, farMetres.y, 1e-6)
+    }
+
+    /**
+     * Lengths read from the batter's end of the pitch, not the bowler's.
+     *
+     * The single most consequential thing in this file. Filmed from behind the bowler, the
+     * ball travels UP the frame and DOWN in y: a full ball lands near the top of the
+     * picture and close to zero metres. Get this backwards — as these constants did — and
+     * every number still looks plausible while naming the opposite delivery, a yorker
+     * reported as a long hop at 17 m.
+     */
+    @Test
+    fun a_fuller_ball_reads_as_a_smaller_length() {
+        val toPitch = PitchQuad(cameraQuad(), QuadSource.DETECTED, 0.9f).toPitch()!!
+
+        // Further up the frame is further from the camera, which is nearer the batter.
+        val nearerTheBowler = toPitch.map(Point2(0.5, 0.70)).y
+        val middle = toPitch.map(Point2(0.5, 0.55)).y
+        val nearerTheBatter = toPitch.map(Point2(0.5, 0.40)).y
+
+        assertTrue("$middle should be less than $nearerTheBowler", middle < nearerTheBowler)
+        assertTrue("$nearerTheBatter should be less than $middle", nearerTheBatter < middle)
+
+        // And everything in frame is somewhere between the two sets of stumps.
+        listOf(nearerTheBowler, middle, nearerTheBatter).forEach {
+            assertTrue("$it is off the pitch entirely", it > 0.0 && it < PitchGeometry.STUMPS_TO_STUMPS_M)
+        }
+    }
+
+    /**
+     * The other end is a supported setup, not a mistake, and it must not silently report
+     * the same picture as the same lengths.
+     */
+    @Test
+    fun the_striker_end_reads_the_same_picture_from_the_other_direction() {
+        val fromBowler = PitchQuad(cameraQuad(), QuadSource.TAPPED, 1f, CameraEnd.BOWLER)
+        val fromStriker = PitchQuad(cameraQuad(), QuadSource.TAPPED, 1f, CameraEnd.STRIKER)
+
+        val middle = Point2(0.5, 0.55)
+        val asBowlerEnd = fromBowler.toPitch()!!.map(middle)
+        val asStrikerEnd = fromStriker.toPitch()!!.map(middle)
+
+        // Same spot on the grass, measured from opposite ends: the two lengths must add up
+        // to the distance between the creases plus the two crease offsets — the full pitch.
         assertClose(
-            PitchGeometry.CALIBRATION_LENGTH_M - PitchGeometry.POPPING_CREASE_AHEAD_M,
-            farMetres.y,
+            PitchGeometry.STUMPS_TO_STUMPS_M,
+            asBowlerEnd.y + asStrikerEnd.y,
             1e-6,
         )
     }
@@ -113,8 +160,11 @@ class PitchGeometryTest {
         val b = toPitch.map(Point2(0.5, 0.60)).y
         val c = toPitch.map(Point2(0.5, 0.50)).y
 
-        val nearStep = b - a
-        val farStep = c - b
+        // Signed, because lengths now count down the pitch away from the camera: moving up
+        // the frame moves towards the batter and towards zero. It is the ground each step
+        // covers that grows, so compare the sizes rather than the values.
+        val nearStep = abs(b - a)
+        val farStep = abs(c - b)
 
         // The same ten pixels covers more ground further away. If these came out equal the
         // map would be an affine stretch and every length beyond the crease would be wrong.

@@ -104,6 +104,26 @@ enum class TrackQuality {
 }
 
 /**
+ * The formal lifecycle states of the ball tracking engine.
+ */
+enum class TrackingState {
+    /** No ball candidate currently established or locked. */
+    LOST,
+
+    /** Seed candidate detected; accumulating velocity and direction consistency over consecutive frames. */
+    TENTATIVE,
+
+    /** Ballistic flight trajectory verified and locked; emitting high-confidence sightings. */
+    CONFIRMED,
+
+    /** Sighting momentarily occluded or lost; coasting along predicted flight path. */
+    TEMPORARILY_LOST,
+
+    /** Re-acquired candidate within predicted trajectory gate during coasting. */
+    REACQUIRE,
+}
+
+/**
  * What the detector threw away and why.
  *
  * The rejection counts matter more than the acceptance count when tuning against real
@@ -119,4 +139,8 @@ data class VisionDiagnostics(
     val rejectedTrajectory: Int,
     val averageProcessingMs: Double,
     val maxProcessingMs: Long,
+    val rejectedStationary: Int = 0,
+    val rejectedCluster: Int = 0,
+    val trackingState: String = "LOST",
 )
+

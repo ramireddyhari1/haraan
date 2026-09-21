@@ -29,8 +29,10 @@ class PitchOverlayTest {
     private fun band(quad: PitchQuad): List<Point2> {
         val toImage = quad.toImage()!!
         val half = PitchGeometry.RETURN_CREASE_HALF_WIDTH_M * 0.35
-        val near = -PitchGeometry.POPPING_CREASE_AHEAD_M
-        val far = PitchGeometry.CALIBRATION_LENGTH_M + near
+        // Taken from the quad's own calibration rather than re-derived from the crease
+        // offset, so the corridor cannot drift away from the corners it is drawn inside.
+        val near = quad.calibration[0].y
+        val far = quad.calibration[2].y
 
         return listOf(
             Point2(-half, near),

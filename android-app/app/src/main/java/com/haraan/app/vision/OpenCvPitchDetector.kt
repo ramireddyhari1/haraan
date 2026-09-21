@@ -51,7 +51,49 @@ data class PitchDetectorReport(
     val averageProcessingMs: Double,
     /** Where the last frame gave up, in plain words. Null once a quad is being returned. */
     val lastRejection: String?,
+    /**
+     * Which threshold the last frame was binarised with, "otsu" or "adaptive".
+     *
+     * Worth reporting because the two behave very differently on the same ground: a
+     * screen showing "adaptive" is telling you there was something dark in frame that
+     * Otsu could not see past, which is a fact about where the phone is standing rather
+     * than about the pitch.
+     */
+    val thresholdMode: String = "otsu",
 )
+
+/**
+ * Whether the binarise stage kept the bright minority, or swallowed the picture.
+ *
+ * A separate object rather than a constant inside the detector because this is the hinge
+ * of the whole preprocessing fix: it decides which chain the frame goes down, it is pure
+ * arithmetic, and a decision that changes what the detector can see should be provable
+ * without a device.
+ */
+object PitchThreshold {
+
+    /**
+     * Above this share of white, Otsu has kept the majority of the frame and has therefore
+     * failed at the one job it was added for.
+     *
+     * A crease-isolating threshold keeps a thin bright minority — paint, whites, the odd
+     * highlight. The wide club shot where it failed measured 62-70%. This is a GUARD, not a
+     * tuning knob: move it only with a clip in hand that proves the move, which is what the
+     * replay harness is for.
+     */
+    const val MAX_WHITE_FRACTION = 0.35
+
+    /** Neighbourhood the fallback judges each pixel against. Odd, and wider than a crease. */
+    const val ADAPTIVE_BLOCK = 31
+
+    /** Negative, so a pixel must be BRIGHTER than its surroundings to survive. */
+    const val ADAPTIVE_C = -8.0
+
+    fun otsuSaturated(whitePixels: Int, totalPixels: Int): Boolean {
+        if (totalPixels <= 0) return false
+        return whitePixels.toDouble() / totalPixels > MAX_WHITE_FRACTION
+    }
+}
 
 class OpenCvPitchDetector(
     private val analysisWidth: Int = 480,
@@ -64,6 +106,16 @@ class OpenCvPitchDetector(
     private var railSegments = 0
     private var totalProcessingMs = 0L
     private var lastRejection: String? = "nothing analysed yet"
+    private var thresholdMode: String = "otsu"
+
+    /**
+     * The crease-angled segments the last analysed frame offered, normalised.
+     *
+     * Published because stumps stand on a crease, and the stump detector has no way of its
+     * own to tell three bars on the pitch from three bars in front of it. Cleared at the
+     * top of every frame so a stale set can never vouch for a new one.
+     */
+    private var lastCreases: List<CreaseSegment> = emptyList()
 
     fun report() = PitchDetectorReport(
         framesSeen = framesSeen,
@@ -73,6 +125,7 @@ class OpenCvPitchDetector(
         agreeingFrames = recent.size,
         averageProcessingMs = if (framesSeen == 0) 0.0 else totalProcessingMs.toDouble() / framesSeen,
         lastRejection = lastRejection,
+        thresholdMode = thresholdMode,
     )
 
     /** Recent accepted quads, for the stability check. A tripod does not move. */
@@ -150,8 +203,12 @@ class OpenCvPitchDetector(
         }
     }
 
+    /** What the last frame saw at a crease's angle. Evidence, not creases. */
+    fun creases(): List<CreaseSegment> = lastCreases
+
     fun reset() {
         recent.clear()
+        lastCreases = emptyList()
         lastRejection = "reset"
     }
 
@@ -217,6 +274,7 @@ class OpenCvPitchDetector(
         houghSegments = 0
         creaseSegments = 0
         railSegments = 0
+        lastCreases = emptyList()
 
         val packed = if (rowStride == width) {
             luma
@@ -277,16 +335,52 @@ class OpenCvPitchDetector(
         val blurred = Mat()
         Imgproc.GaussianBlur(upright, blurred, Size(5.0, 5.0), 0.0)
 
-        // Creases are BRIGHT. Isolating the bright end before edge detection throws away
-        // most of the outfield's texture, which otherwise generates hundreds of Hough
-        // lines that have nothing to do with anything.
-        val bright = Mat()
-        Imgproc.threshold(blurred, bright, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+        /*
+         * Creases are BRIGHT. Isolating the bright end before edge detection throws away
+         * most of the outfield's texture, which otherwise generates hundreds of Hough
+         * lines that have nothing to do with anything.
+         *
+         * BUT OTSU ONLY DOES THAT WHEN THE PICTURE IS MOSTLY PITCH.
+         *
+         * Otsu splits a histogram at its widest gap. On a tight view from behind the
+         * bowler's arm that gap is between grass and crease paint, which is exactly the
+         * split this stage wants. On a wider view with dark trees or a sightscreen in
+         * frame, the widest gap is between the TREES and everything else — so the
+         * threshold lands far below the paint, and grass, creases, stumps and pads all
+         * saturate into one white shape. Measured on real club footage: a threshold of
+         * 84-88 turning 62-70% of the frame white, leaving the treeline as the only edge
+         * and zero down-pitch segments for the rail test to find. The detector then
+         * reported "only 0 straight edges in frame" on a picture full of straight edges,
+         * and no amount of Hough tuning could recover it — the information was already
+         * gone.
+         *
+         * So the threshold is CHECKED rather than trusted. A stage whose job is to keep
+         * the bright minority has failed if it keeps the majority, and that is measurable
+         * on the spot. When Otsu behaves, this is byte for byte what it always did; when
+         * it saturates, an adaptive threshold takes over, which judges each pixel against
+         * its own neighbourhood and so cannot be fooled by a dark third of the frame.
+         */
+        val binary = Mat()
+        Imgproc.threshold(blurred, binary, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+
+        val saturated = PitchThreshold.otsuSaturated(Core.countNonZero(binary), binary.rows() * binary.cols())
+        if (saturated) {
+            Imgproc.adaptiveThreshold(
+                blurred,
+                binary,
+                255.0,
+                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
+                Imgproc.THRESH_BINARY,
+                PitchThreshold.ADAPTIVE_BLOCK,
+                PitchThreshold.ADAPTIVE_C,
+            )
+        }
+        thresholdMode = if (saturated) "adaptive" else "otsu"
         blurred.release()
 
         val edges = Mat()
-        Imgproc.Canny(bright, edges, 50.0, 150.0)
-        bright.release()
+        Imgproc.Canny(binary, edges, 50.0, 150.0)
+        binary.release()
 
         val lines = Mat()
         Imgproc.HoughLinesP(
@@ -326,6 +420,16 @@ class OpenCvPitchDetector(
         }
         lines.release()
         creaseSegments = creases.size
+        // Published in normalised coordinates so an engine analysing at a different
+        // resolution can use them.
+        lastCreases = creases.map {
+            CreaseSegment(
+                (it.x1 / w).toFloat(),
+                (it.y1 / h).toFloat(),
+                (it.x2 / w).toFloat(),
+                (it.y2 / h).toFloat(),
+            )
+        }
         railSegments = rails.size
 
         if (creases.size < 2 || rails.size < 2) {

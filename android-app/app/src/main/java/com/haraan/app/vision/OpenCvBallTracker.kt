@@ -6,11 +6,15 @@ import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
+import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
+import org.opencv.core.Rect
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -18,20 +22,19 @@ import kotlin.math.sqrt
  *
  * THE PREMISE. Between two frames thirty milliseconds apart, almost nothing on a cricket
  * field changes except the ball. Bowler and batter move slowly and largely; the ball moves
- * fast and small. So the ball is the brightest SMALL disturbance in a frame difference,
- * and that is what this looks for — no training data, no model, no assumption about the
- * ball being red or white, because motion is colour-blind.
+ * fast and small. The tracker isolates motion disturbances in a frame difference, filters
+ * out large human body clusters, and requires multi-frame temporal ballistic consistency
+ * before confirming and emitting a track.
  *
- * THE PIPELINE, deliberately conservative at every step:
+ * THE PIPELINE:
  *
  *     luma → downscale → blur → frame difference → threshold → morphology
- *          → contours → size filter → shape filter → trajectory filter → candidate
+ *          → contours → body cluster exclusion → size filter → shape filter
+ *          → multi-candidate hypothesis evaluation → state machine → candidate
  *
- * WHAT IT CANNOT DO. It does not know what a cricket ball is. It knows what "a small round
- * thing that moved" is, which a bird, a glove, or a flapping sightscreen also satisfies.
- * Every filter below exists to discard a frame rather than emit a point it cannot stand
- * behind, because a missing point only shortens the track while a wrong point draws a
- * confident line through somewhere the ball never was.
+ * STATE MACHINE:
+ *     LOST → TENTATIVE (accumulating speed & direction) → CONFIRMED (ballistic flight)
+ *          → TEMPORARILY_LOST (coasting along extrapolated path) → REACQUIRE / LOST
  *
  * Nothing here interpolates and nothing smooths. Every coordinate returned was measured.
  */
@@ -68,9 +71,17 @@ class OpenCvBallTracker(
     private var rejectedSize = 0
     private var rejectedShape = 0
     private var rejectedTrajectory = 0
+    private var rejectedStationary = 0
+    private var rejectedCluster = 0
     private var totalProcessingMs = 0L
     private var maxProcessingMs = 0L
     private var released = false
+
+    // Tracking state model
+    private var trackingState: TrackingState = TrackingState.LOST
+    private val tentativeTracks = mutableListOf<TrackHypothesis>()
+    private var confirmedTrack: TrackHypothesis? = null
+    private var missedConfirmedFrames = 0
 
     val available: Boolean = ensureLoaded()
 
@@ -96,6 +107,7 @@ class OpenCvBallTracker(
             if (previousRotation != null && previousRotation != turn) {
                 previous?.release()
                 previous = null
+                resetTrackingState()
                 sightings.clear()
             }
             previousRotation = turn
@@ -112,13 +124,15 @@ class OpenCvBallTracker(
 
             if (sighting != null) {
                 framesWithCandidate++
-                sightings.add(sighting)
+                if (sightings.isEmpty() || sightings.last().timestampMs != sighting.timestampMs) {
+                    sightings.add(sighting)
+                }
             }
             return sighting
         } catch (t: Throwable) {
             // A vision failure must never take the recording down with it. The camera is
             // the product; this is an analysis layer bolted to the side of it.
-            Log.w(TAG, "frame analysis failed", t)
+            runCatching { Log.w(TAG, "frame analysis failed", t) }
             return null
         } finally {
             val elapsed = System.currentTimeMillis() - startedAt
@@ -211,7 +225,7 @@ class OpenCvBallTracker(
         else -> source
     }
 
-    /** The frame difference, and the best ball-shaped thing in it. */
+    /** The frame difference, contour extraction, and state-machine track association. */
     private fun detect(prev: Mat, cur: Mat, timestampMs: Long): BallSighting? {
         if (prev.size() != cur.size()) return null
 
@@ -231,6 +245,7 @@ class OpenCvBallTracker(
             // smooth, convincing, entirely fictional path.
             mask.release()
             rejectedGlobalMotion++
+            handleMissOnGlobalMotion()
             return null
         }
 
@@ -241,10 +256,24 @@ class OpenCvBallTracker(
         val contours = ArrayList<MatOfPoint>()
         Imgproc.findContours(mask, contours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
         mask.release()
-        if (contours.isEmpty()) return null
+        if (contours.isEmpty()) {
+            handleMissOnNoCandidate()
+            return null
+        }
 
-        var best: BallSighting? = null
-        var bestScore = 0f
+        // 1. Identify large body clusters (human bodies, torso/legs)
+        val bodyBoxes = ArrayList<Rect>()
+        for (contour in contours) {
+            val area = Imgproc.contourArea(contour)
+            if (area >= BODY_CLUSTER_MIN_AREA) {
+                bodyBoxes.add(Imgproc.boundingRect(contour))
+            }
+        }
+
+        // 2. Extract valid ball candidate contours
+        val candidates = ArrayList<Candidate>()
+        val imgCols = cur.cols().toDouble()
+        val imgRows = cur.rows().toDouble()
 
         for (contour in contours) {
             val area = Imgproc.contourArea(contour)
@@ -254,10 +283,26 @@ class OpenCvBallTracker(
                 continue
             }
 
-            // Circularity: 4*pi*area / perimeter^2 is 1.0 for a perfect circle. A ball is
-            // round; an arm, a bat and a shadow edge are not. This is the single most
-            // useful filter for keeping people out of the track.
-            val perimeter = Imgproc.arcLength(org.opencv.core.MatOfPoint2f(*contour.toArray()), true)
+            val bRect = Imgproc.boundingRect(contour)
+
+            // Reject candidates deeply embedded inside a large moving body cluster (e.g. torso/shoulder)
+            var inBody = false
+            for (bb in bodyBoxes) {
+                if (bRect.x >= bb.x + 4 && (bRect.x + bRect.width) <= (bb.x + bb.width - 4) &&
+                    bRect.y >= bb.y + 4 && (bRect.y + bRect.height) <= (bb.y + bb.height - 4)
+                ) {
+                    inBody = true
+                    break
+                }
+            }
+            if (inBody) {
+                rejectedCluster++
+                contour.release()
+                continue
+            }
+
+            // Circularity: 4*pi*area / perimeter^2.
+            val perimeter = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
             if (perimeter <= 0.0) {
                 contour.release()
                 continue
@@ -269,59 +314,365 @@ class OpenCvBallTracker(
                 continue
             }
 
+            // Aspect ratio: fast motion elongates the ball slightly, but should not exceed 3.2:1
+            val aspect = max(
+                bRect.width.toDouble() / max(1, bRect.height),
+                bRect.height.toDouble() / max(1, bRect.width),
+            )
+            if (aspect > MAX_ASPECT_RATIO) {
+                rejectedShape++
+                contour.release()
+                continue
+            }
+
             val moments = Imgproc.moments(contour)
             if (moments.m00 == 0.0) {
                 contour.release()
                 continue
             }
-            val centre = Point(moments.m10 / moments.m00, moments.m01 / moments.m00)
-            val x = (centre.x / cur.cols()).toFloat().coerceIn(0f, 1f)
-            val y = (centre.y / cur.rows()).toFloat().coerceIn(0f, 1f)
+            val cx = (moments.m10 / moments.m00 / imgCols).toFloat().coerceIn(0f, 1f)
+            val cy = (moments.m01 / moments.m00 / imgRows).toFloat().coerceIn(0f, 1f)
 
-            // Roundness and continuity, combined. A candidate that continues the existing
-            // track outranks a rounder one that teleports.
-            val continuity = continuityScore(x, y, timestampMs)
-            val score = (circularity.toFloat() * 0.6f) + (continuity * 0.4f)
-
-            if (score > bestScore) {
-                bestScore = score
-                best = BallSighting(
-                    timestampMs = timestampMs,
-                    x = x,
-                    y = y,
-                    trackingConfidence = score.coerceIn(0f, 1f),
-                    areaPx = area.toInt(),
-                )
+            // Ignore extreme image boundaries (decoding/scaling edge artifacts)
+            if (cx < 0.025f || cx > 0.975f || cy < 0.025f || cy > 0.975f) {
+                contour.release()
+                continue
             }
+
+            candidates.add(
+                Candidate(
+                    x = cx,
+                    y = cy,
+                    area = area,
+                    circularity = circularity,
+                    aspect = aspect,
+                    timestampMs = timestampMs,
+                ),
+            )
             contour.release()
         }
 
-        // A candidate that cannot be the same object as the last one is not this ball.
-        if (best != null && continuityScore(best.x, best.y, timestampMs) <= 0f) {
-            rejectedTrajectory++
+        if (candidates.isEmpty()) {
+            handleMissOnNoCandidate()
             return null
         }
-        return best
+
+        // 3. Multi-candidate association & state-machine update
+        return updateTracking(candidates, timestampMs)
     }
 
     /**
-     * How well a candidate continues the track.
-     *
-     * 1.0 with no history — the first sighting cannot contradict anything. Otherwise it
-     * falls off with distance from where the ball plausibly is by now, and hits zero for a
-     * jump no ball could make between adjacent frames.
+     * Updates active tracks and state machine against current frame candidates.
      */
-    private fun continuityScore(x: Float, y: Float, timestampMs: Long): Float {
-        val last = sightings.lastOrNull() ?: return 1f
-        val gapMs = (timestampMs - last.timestampMs).coerceAtLeast(1)
-        if (gapMs > TRACK_GAP_LIMIT_MS) return 1f // A new flight, not a continuation.
+    private fun updateTracking(candidates: List<Candidate>, timestampMs: Long): BallSighting? {
+        val usedCandidates = HashSet<Int>()
+        var emittedSighting: BallSighting? = null
 
-        val dx = x - last.x
-        val dy = y - last.y
-        val distance = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-        val allowed = MAX_STEP_PER_FRAME * (gapMs / 33f).coerceAtLeast(1f)
+        // Step 1: Update confirmed track if active
+        val confirmed = confirmedTrack
+        if (confirmed != null) {
+            val dt = (timestampMs - confirmed.lastPoint.timestampMs).coerceAtLeast(1)
+            if (dt > MAX_COAST_GAP_MS) {
+                confirmedTrack = null
+                trackingState = TrackingState.LOST
+            } else {
+                val predX = confirmed.lastPoint.x + confirmed.velocityX * dt
+                val predY = confirmed.lastPoint.y + confirmed.velocityY * dt
+                val gate = (GATE_RADIUS_BASE * (dt / 33f)).coerceIn(0.04f, 0.12f)
 
-        return if (distance > allowed) 0f else (1f - (distance / allowed)).coerceIn(0f, 1f)
+                var bestIdx: Int? = null
+                var bestScore = -1f
+                var bestVx = 0f
+                var bestVy = 0f
+
+                for ((idx, cand) in candidates.withIndex()) {
+                    val dx = cand.x - confirmed.lastPoint.x
+                    val dy = cand.y - confirmed.lastPoint.y
+                    val dist = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                    val speed = dist / dt.toFloat()
+
+                    // Minimum speed: must not be stationary / lingering body part
+                    if (speed < MIN_FLIGHT_SPEED_PER_MS) {
+                        rejectedStationary++
+                        continue
+                    }
+                    if (speed > MAX_FLIGHT_SPEED_PER_MS) {
+                        rejectedTrajectory++
+                        continue
+                    }
+
+                    // Distance from extrapolated trajectory position
+                    val pdx = cand.x - predX
+                    val pdy = cand.y - predY
+                    val distPred = sqrt((pdx * pdx + pdy * pdy).toDouble()).toFloat()
+                    if (distPred > gate) {
+                        rejectedTrajectory++
+                        continue
+                    }
+
+                    // Area stability check
+                    val areaRatio = max(cand.area, confirmed.lastPoint.area) /
+                        max(1.0, min(cand.area, confirmed.lastPoint.area))
+                    if (areaRatio > 3.2) {
+                        rejectedSize++
+                        continue
+                    }
+
+                    val candVx = dx / dt.toFloat()
+                    val candVy = dy / dt.toFloat()
+                    val candNorm = sqrt((candVx * candVx + candVy * candVy).toDouble()).toFloat()
+                    val trackNorm = sqrt((confirmed.velocityX * confirmed.velocityX + confirmed.velocityY * confirmed.velocityY).toDouble()).toFloat()
+
+                    var cosSim = if (candNorm > 0f && trackNorm > 0f) {
+                        (confirmed.velocityX * candVx + confirmed.velocityY * candVy) / (candNorm * trackNorm)
+                    } else {
+                        1f
+                    }
+
+                    // Pitch bounce detection: lateral vx aligned, vertical vy inverted
+                    var isBounce = false
+                    if (cosSim < 0.20f) {
+                        if ((confirmed.velocityX * candVx) > 0f && (confirmed.velocityY * candVy) < 0f) {
+                            isBounce = true
+                            cosSim = 0.70f
+                        }
+                    }
+
+                    if (cosSim < 0.30f && !isBounce) {
+                        rejectedTrajectory++
+                        continue
+                    }
+
+                    val spatialScore = (1f - (distPred / gate)).coerceIn(0f, 1f)
+                    val motionScore = cosSim.coerceIn(0f, 1f)
+                    val score = (cand.circularity.toFloat() * 0.3f) + (spatialScore * 0.4f) + (motionScore * 0.3f)
+
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestIdx = idx
+                        bestVx = candVx
+                        bestVy = candVy
+                    }
+                }
+
+                if (bestIdx != null) {
+                    usedCandidates.add(bestIdx)
+                    val cand = candidates[bestIdx]
+                    confirmed.points.add(cand)
+
+                    // If we were coasting (TEMPORARILY_LOST), reacquire
+                    if (missedConfirmedFrames > 0) {
+                        trackingState = TrackingState.REACQUIRE
+                    }
+                    missedConfirmedFrames = 0
+                    trackingState = TrackingState.CONFIRMED
+
+                    // Smooth velocity update (alpha filter)
+                    val alpha = 0.75f
+                    confirmed.velocityX = alpha * bestVx + (1f - alpha) * confirmed.velocityX
+                    confirmed.velocityY = alpha * bestVy + (1f - alpha) * confirmed.velocityY
+
+                    emittedSighting = BallSighting(
+                        timestampMs = timestampMs,
+                        x = cand.x,
+                        y = cand.y,
+                        trackingConfidence = bestScore.coerceIn(0f, 1f),
+                        areaPx = cand.area.toInt(),
+                    )
+                } else {
+                    missedConfirmedFrames++
+                    if (missedConfirmedFrames <= MAX_COAST_FRAMES) {
+                        trackingState = TrackingState.TEMPORARILY_LOST
+                    } else {
+                        confirmedTrack = null
+                        trackingState = TrackingState.LOST
+                    }
+                }
+            }
+        }
+
+        // Step 2: Update tentative tracks (must be strictly consecutive frames)
+        val nextTentative = mutableListOf<TrackHypothesis>()
+        var promotedTrack: TrackHypothesis? = null
+
+        for (tentative in tentativeTracks) {
+            val dt = timestampMs - tentative.lastPoint.timestampMs
+            if (dt > MAX_TENTATIVE_GAP_MS) {
+                // Tentative tracks cannot coast across gaps; must be strictly consecutive
+                continue
+            }
+
+            var bestIdx: Int? = null
+            var bestScore = -1f
+            var bestVx = 0f
+            var bestVy = 0f
+
+            for ((idx, cand) in candidates.withIndex()) {
+                if (idx in usedCandidates) continue
+
+                val dx = cand.x - tentative.lastPoint.x
+                val dy = cand.y - tentative.lastPoint.y
+                val dist = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                val speed = dist / dt.toFloat()
+
+                if (speed < MIN_FLIGHT_SPEED_PER_MS || speed > MAX_FLIGHT_SPEED_PER_MS) {
+                    continue
+                }
+
+                val areaRatio = max(cand.area, tentative.lastPoint.area) /
+                    max(1.0, min(cand.area, tentative.lastPoint.area))
+                if (areaRatio > 2.5) continue
+
+                val candVx = dx / dt.toFloat()
+                val candVy = dy / dt.toFloat()
+
+                // Check vector consistency if tentative track has >= 2 points
+                var dirScore = 1f
+                if (tentative.points.size >= 2) {
+                    val p0 = tentative.points[tentative.points.size - 2]
+                    val p1 = tentative.points.last()
+                    val pDt = p1.timestampMs - p0.timestampMs
+                    if (pDt > 0) {
+                        val pVx = (p1.x - p0.x) / pDt.toFloat()
+                        val pVy = (p1.y - p0.y) / pDt.toFloat()
+
+                        // Horizontal motion direction sign consistency
+                        if (abs(pVx * pDt) > 0.006f && abs(candVx * dt) > 0.006f) {
+                            if ((pVx * candVx) < 0f) {
+                                // Reversing horizontal direction is human limb oscillation, not cricket ball
+                                continue
+                            }
+                        }
+
+                        val pNorm = sqrt((pVx * pVx + pVy * pVy).toDouble()).toFloat()
+                        val cNorm = sqrt((candVx * candVx + candVy * candVy).toDouble()).toFloat()
+                        if (pNorm > 0f && cNorm > 0f) {
+                            val cosSim = (pVx * candVx + pVy * candVy) / (pNorm * cNorm)
+                            if (cosSim < 0.60f) continue
+                            dirScore = cosSim.coerceIn(0f, 1f)
+                        }
+
+                        // Colinearity / straightness check: reject circular limb swings
+                        val lineLen = sqrt(((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)).toDouble()).toFloat()
+                        if (lineLen > 0.012f) {
+                            val perpDev = abs((p1.y - p0.y) * cand.x - (p1.x - p0.x) * cand.y + p1.x * p0.y - p1.y * p0.x) / lineLen
+                            if (perpDev > 0.025f) {
+                                rejectedTrajectory++
+                                continue
+                            }
+                        }
+                    }
+                }
+
+                val score = (cand.circularity.toFloat() * 0.4f) + (dirScore * 0.4f) +
+                    min(1f, speed / 0.002f) * 0.2f
+                if (score > bestScore) {
+                    bestScore = score
+                    bestIdx = idx
+                    bestVx = candVx
+                    bestVy = candVy
+                }
+            }
+
+            if (bestIdx != null) {
+                usedCandidates.add(bestIdx)
+                val cand = candidates[bestIdx]
+                tentative.points.add(cand)
+                tentative.velocityX = bestVx
+                tentative.velocityY = bestVy
+                nextTentative.add(tentative)
+
+                // Check promotion criteria: >= 3 points with net displacement >= 0.035
+                if (tentative.points.size >= MIN_POINTS_FOR_CONFIRMATION) {
+                    val totDx = tentative.points.last().x - tentative.points.first().x
+                    val totDy = tentative.points.last().y - tentative.points.first().y
+                    val totDist = sqrt((totDx * totDx + totDy * totDy).toDouble()).toFloat()
+                    if (totDist >= MIN_CONFIRMATION_DISPLACEMENT) {
+                        if (promotedTrack == null || tentative.points.size > promotedTrack.points.size) {
+                            promotedTrack = tentative
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 3: Promote qualified tentative track
+        if (promotedTrack != null) {
+            if (confirmedTrack == null || missedConfirmedFrames > 0) {
+                confirmedTrack = promotedTrack
+                missedConfirmedFrames = 0
+                trackingState = TrackingState.CONFIRMED
+
+                // Start a fresh flight trail for this confirmed delivery
+                sightings.clear()
+                for (p in promotedTrack.points) {
+                    val s = BallSighting(
+                        timestampMs = p.timestampMs,
+                        x = p.x,
+                        y = p.y,
+                        trackingConfidence = 0.90f,
+                        areaPx = p.area.toInt(),
+                    )
+                    sightings.add(s)
+                }
+                emittedSighting = sightings.last()
+                nextTentative.remove(promotedTrack)
+            }
+        }
+
+        // Step 4: Seed new tentative tracks from unused high-circularity candidates
+        val unusedCands = candidates.indices
+            .filter { it !in usedCandidates && candidates[it].circularity >= SEED_MIN_CIRCULARITY }
+            .map { candidates[it] }
+            .sortedByDescending { it.circularity }
+
+        for (cand in unusedCands.take(2)) {
+            if (nextTentative.size < MAX_TENTATIVE_TRACKS) {
+                nextTentative.add(TrackHypothesis(cand))
+            }
+        }
+
+        tentativeTracks.clear()
+        tentativeTracks.addAll(nextTentative)
+
+        if (confirmedTrack == null) {
+            trackingState = if (tentativeTracks.isNotEmpty()) TrackingState.TENTATIVE else TrackingState.LOST
+        }
+
+        return emittedSighting
+    }
+
+    private fun handleMissOnGlobalMotion() {
+        if (confirmedTrack != null) {
+            missedConfirmedFrames++
+            if (missedConfirmedFrames <= MAX_COAST_FRAMES) {
+                trackingState = TrackingState.TEMPORARILY_LOST
+            } else {
+                confirmedTrack = null
+                trackingState = TrackingState.LOST
+            }
+        }
+        tentativeTracks.clear()
+    }
+
+    private fun handleMissOnNoCandidate() {
+        if (confirmedTrack != null) {
+            missedConfirmedFrames++
+            if (missedConfirmedFrames <= MAX_COAST_FRAMES) {
+                trackingState = TrackingState.TEMPORARILY_LOST
+            } else {
+                confirmedTrack = null
+                trackingState = TrackingState.LOST
+            }
+        }
+        tentativeTracks.clear()
+    }
+
+    private fun resetTrackingState() {
+        trackingState = TrackingState.LOST
+        tentativeTracks.clear()
+        confirmedTrack = null
+        missedConfirmedFrames = 0
     }
 
     override fun track(): List<BallSighting> = sightings.toList()
@@ -354,6 +705,9 @@ class OpenCvBallTracker(
         rejectedTrajectory = rejectedTrajectory,
         averageProcessingMs = if (framesSeen == 0) 0.0 else totalProcessingMs.toDouble() / framesSeen,
         maxProcessingMs = maxProcessingMs,
+        rejectedStationary = rejectedStationary,
+        rejectedCluster = rejectedCluster,
+        trackingState = trackingState.name,
     )
 
     override fun reset() {
@@ -361,12 +715,15 @@ class OpenCvBallTracker(
         previous = null
         previousRotation = null
         sightings.clear()
+        resetTrackingState()
         framesSeen = 0
         framesWithCandidate = 0
         rejectedGlobalMotion = 0
         rejectedSize = 0
         rejectedShape = 0
         rejectedTrajectory = 0
+        rejectedStationary = 0
+        rejectedCluster = 0
         totalProcessingMs = 0
         maxProcessingMs = 0
     }
@@ -379,6 +736,24 @@ class OpenCvBallTracker(
         scratchLuma?.release()
         scratchLuma = null
         scratchPacked = null
+        resetTrackingState()
+    }
+
+    private data class Candidate(
+        val x: Float,
+        val y: Float,
+        val area: Double,
+        val circularity: Double,
+        val aspect: Double,
+        val timestampMs: Long,
+    )
+
+    private class TrackHypothesis(seed: Candidate) {
+        val points = mutableListOf(seed)
+        var velocityX = 0f
+        var velocityY = 0f
+
+        val lastPoint: Candidate get() = points.last()
     }
 
     companion object {
@@ -397,15 +772,15 @@ class OpenCvBallTracker(
             synchronized(this) {
                 loaded?.let { return it }
                 val ok = runCatching { OpenCVLoader.initLocal() }.getOrDefault(false)
-                if (!ok) Log.w(TAG, "OpenCV native library unavailable; vision disabled")
+                if (!ok) runCatching { Log.w(TAG, "OpenCV native library unavailable; vision disabled") }
                 loaded = ok
                 return ok
             }
         }
 
         /** Below this a candidate is sensor noise; above it, it is a person or a shadow. */
-        const val MIN_AREA_PX = 4.0
-        const val MAX_AREA_PX = 400.0
+        const val MIN_AREA_PX = 14.0
+        const val MAX_AREA_PX = 180.0
 
         /** 1.0 is a perfect circle. Motion blur stretches a ball, so this cannot be strict. */
         const val MIN_CIRCULARITY = 0.45
@@ -420,5 +795,19 @@ class OpenCvBallTracker(
         const val TRACK_GAP_LIMIT_MS = 400L
 
         const val MIN_POINTS_FOR_TRACK = 3
+
+        // Ballistic flight constraints
+        const val MIN_FLIGHT_SPEED_PER_MS = 0.00050f
+        const val MAX_FLIGHT_SPEED_PER_MS = 0.00650f
+        const val BODY_CLUSTER_MIN_AREA = 700.0
+        const val MAX_ASPECT_RATIO = 3.2
+        const val GATE_RADIUS_BASE = 0.05f
+        const val MAX_COAST_FRAMES = 2
+        const val MAX_COAST_GAP_MS = 160L
+        const val MAX_TENTATIVE_GAP_MS = 55L
+        const val MIN_POINTS_FOR_CONFIRMATION = 3
+        const val MIN_CONFIRMATION_DISPLACEMENT = 0.045f
+        const val SEED_MIN_CIRCULARITY = 0.70
+        const val MAX_TENTATIVE_TRACKS = 5
     }
 }

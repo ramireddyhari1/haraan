@@ -158,7 +158,7 @@ private fun FieldTestScreen() {
                         if (sighting != null) {
                             latest = sighting
                             lostReason = null
-                            trail = tracker.track().takeLast(TRAIL_LENGTH)
+                            trail = tracker.track().takeLast(VISION_TRAIL_LENGTH)
                         } else if (latest != null) {
                             // Named from the counter that moved, so a tester can tell a
                             // ball hidden behind the batter from one the size filter ate.
@@ -216,38 +216,9 @@ private fun FieldTestScreen() {
             )
 
             // THE OVERLAY. Observed points only — nothing here is interpolated or
-            // projected, so a gap in the trail is a real gap in the evidence.
-            Canvas(Modifier.fillMaxSize()) {
-                if (trail.size >= 2) {
-                    val path = Path()
-                    trail.forEachIndexed { i, p ->
-                        val o = Offset(p.x * size.width, p.y * size.height)
-                        if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y)
-                    }
-                    drawPath(
-                        path,
-                        Color(0xFF6E9BF5).copy(alpha = 0.75f),
-                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
-                    )
-                }
-                trail.forEach { p ->
-                    drawCircle(
-                        Color(0xFF6E9BF5),
-                        radius = 3.dp.toPx(),
-                        center = Offset(p.x * size.width, p.y * size.height),
-                    )
-                }
-                latest?.let { p ->
-                    val o = Offset(p.x * size.width, p.y * size.height)
-                    drawCircle(Color(0xFF4ADE80), radius = 9.dp.toPx(), center = o)
-                    drawCircle(
-                        Color.White,
-                        radius = 14.dp.toPx(),
-                        center = o,
-                        style = Stroke(width = 1.5.dp.toPx()),
-                    )
-                }
-            }
+            // projected, so a gap in the trail is a real gap in the evidence. Shared with
+            // the replay harness so both draw an identical picture of the same track.
+            BallTrackOverlay(trail = trail, latest = latest, modifier = Modifier.fillMaxSize())
 
             VisionHud(
                 deliveryNumber = deliveryNumber,
@@ -373,31 +344,31 @@ private fun VisionHud(
         )
         Spacer(Modifier.height(10.dp))
 
-        HudRow("Tracking", quality.name, colourFor(quality))
-        HudRow(
+        VisionHudRow("Tracking", quality.name, colourFor(quality))
+        VisionHudRow(
             "Confidence",
             latest?.let { "${(it.trackingConfidence * 100).toInt()}%" } ?: "—",
             Color.White,
         )
-        HudRow("Analysis FPS", "%.1f".format(analysisFps), Color.White)
-        HudRow("Processing", "%.0f ms".format(diagnostics.averageProcessingMs), Color.White)
-        HudRow("Max", "${diagnostics.maxProcessingMs} ms", Color.White.copy(alpha = 0.7f))
-        HudRow("Points", "$pointCount", Color.White)
+        VisionHudRow("Analysis FPS", "%.1f".format(analysisFps), Color.White)
+        VisionHudRow("Processing", "%.0f ms".format(diagnostics.averageProcessingMs), Color.White)
+        VisionHudRow("Max", "${diagnostics.maxProcessingMs} ms", Color.White.copy(alpha = 0.7f))
+        VisionHudRow("Points", "$pointCount", Color.White)
 
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
         Spacer(Modifier.height(8.dp))
 
-        HudRow("Frames", "${diagnostics.framesSeen}", Color.White.copy(alpha = 0.75f))
-        HudRow("Candidates", "${diagnostics.framesWithCandidate}", Color.White.copy(alpha = 0.75f))
-        HudRow("Rej · motion", "${diagnostics.rejectedGlobalMotion}", Color(0xFFF5A623))
-        HudRow("Rej · size", "${diagnostics.rejectedSize}", Color(0xFFF5A623))
-        HudRow("Rej · shape", "${diagnostics.rejectedShape}", Color(0xFFF5A623))
-        HudRow("Rej · path", "${diagnostics.rejectedTrajectory}", Color(0xFFF5A623))
+        VisionHudRow("Frames", "${diagnostics.framesSeen}", Color.White.copy(alpha = 0.75f))
+        VisionHudRow("Candidates", "${diagnostics.framesWithCandidate}", Color.White.copy(alpha = 0.75f))
+        VisionHudRow("Rej · motion", "${diagnostics.rejectedGlobalMotion}", Color(0xFFF5A623))
+        VisionHudRow("Rej · size", "${diagnostics.rejectedSize}", Color(0xFFF5A623))
+        VisionHudRow("Rej · shape", "${diagnostics.rejectedShape}", Color(0xFFF5A623))
+        VisionHudRow("Rej · path", "${diagnostics.rejectedTrajectory}", Color(0xFFF5A623))
 
         if (recordedCount > 0) {
             Spacer(Modifier.height(8.dp))
-            HudRow("Recorded", "$recordedCount", Color(0xFF4ADE80))
+            VisionHudRow("Recorded", "$recordedCount", Color(0xFF4ADE80))
         }
 
         // Shown only while filming, because "ball lost" between deliveries is not news.
@@ -406,19 +377,6 @@ private fun VisionHud(
             Text("BALL LOST", color = Color(0xFFF97066), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
             Text(lostReason, color = Color(0xFFF97066).copy(alpha = 0.8f), fontSize = 11.sp)
         }
-    }
-}
-
-@Composable
-private fun HudRow(label: String, value: String, colour: Color) {
-    Row(Modifier.width(200.dp).padding(vertical = 2.dp)) {
-        Text(
-            label,
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.weight(1f),
-        )
-        Text(value, color = colour, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
     }
 }
 
@@ -456,33 +414,3 @@ private fun ControlButton(label: String, onClick: () -> Unit) {
         Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
-
-private fun colourFor(quality: TrackQuality) = when (quality) {
-    TrackQuality.RELIABLE -> Color(0xFF4ADE80)
-    TrackQuality.PARTIAL -> Color(0xFFF5A623)
-    TrackQuality.UNCERTAIN -> Color(0xFFF97066)
-}
-
-/**
- * Which filter most likely swallowed the ball, from what moved since the last frame.
- *
- * A guess, and labelled as one — the detector rejects candidates without recording which
- * one was the ball, because it does not know. But "size rejections jumped just as the
- * track died" is the kind of hint that turns an afternoon of filming into a threshold
- * change, which is the entire reason these counters exist.
- */
-private fun dominantRejection(now: VisionDiagnostics, before: VisionDiagnostics): String {
-    val deltas = listOf(
-        "Occlusion or no candidate" to
-            (now.framesSeen - before.framesSeen) -
-            (now.framesWithCandidate - before.framesWithCandidate),
-        "Rejected: camera motion" to (now.rejectedGlobalMotion - before.rejectedGlobalMotion),
-        "Rejected: size" to (now.rejectedSize - before.rejectedSize),
-        "Rejected: shape" to (now.rejectedShape - before.rejectedShape),
-        "Rejected: trajectory" to (now.rejectedTrajectory - before.rejectedTrajectory),
-    )
-    val worst = deltas.maxByOrNull { it.second }
-    return if (worst == null || worst.second <= 0) "Unknown" else worst.first
-}
-
-private const val TRAIL_LENGTH = 40
