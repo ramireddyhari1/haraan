@@ -2,6 +2,7 @@ package com.haraan.partner.daybookings.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +16,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +43,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.platform.LocalView
+import com.haraan.partner.ui.Haptics
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -83,6 +90,11 @@ fun DayBookingsScreen(
     canBookings: Boolean = true,
     onPricing: () -> Unit = {},
     onAnalytics: () -> Unit = {},
+    /**
+     * Drawn inside the console's own Scaffold (the Bookings tab), which has already
+     * taken the status bar. Claiming it again left a blank band above this header.
+     */
+    embedded: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -105,8 +117,12 @@ fun DayBookingsScreen(
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // The buzz lands with the outcome, before the snackbar: the desk is usually
+    // looking at the customer, and showSnackbar suspends until it is dismissed.
+    val view = LocalView.current
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let {
+            Haptics.reject(view)
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
         }
@@ -114,6 +130,7 @@ fun DayBookingsScreen(
 
     LaunchedEffect(state.successSnackbarMessage) {
         state.successSnackbarMessage?.let {
+            if (state.successIsMoney) Haptics.money(view) else Haptics.confirm(view)
             snackbarHostState.showSnackbar(it)
             viewModel.clearSuccessMessage()
         }
@@ -123,12 +140,18 @@ fun DayBookingsScreen(
         viewModel.updateVenue(venueId, venueName)
     }
 
+    // Shared by the court header and every time row, so the courts scroll
+    // sideways as one sheet.
+    val gridScroll = rememberScrollState()
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = PageBackground,
+        contentWindowInsets = if (embedded) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                windowInsets = if (embedded) WindowInsets(0, 0, 0, 0) else TopAppBarDefaults.windowInsets,
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -204,12 +227,17 @@ fun DayBookingsScreen(
             }
         }
     ) { padding ->
-        Column(
+        // One scrolling page. The calendar, stats, search and filters used to be
+        // pinned above the grid, which left the courts a sliver of the screen;
+        // now they scroll away and the court names stick to the top.
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
+                .padding(padding),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
         ) {
+          item(key = "desk-head") {
+          Column {
             Spacer(Modifier.height(10.dp))
 
             // Offline Sync Banner
@@ -239,6 +267,11 @@ fun DayBookingsScreen(
                 canManage = canBookings,
                 onReopenDay = { viewModel.toggleDayClosed(false) },
                 onCloseDay = { viewModel.toggleDayClosed(true) },
+                // The owed line opens the list of who owes it.
+                onShowDue = {
+                    viewModel.setViewMode(ViewMode.LIST)
+                    viewModel.updateStatusFilter(StatusFilter.UNPAID)
+                },
             )
 
             Spacer(Modifier.height(10.dp))
@@ -248,27 +281,9 @@ fun DayBookingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
-                    value = state.filter.searchQuery,
-                    onValueChange = { viewModel.updateSearchQuery(it) },
-                    placeholder = { Text("Search by name, phone, ticket ID...", fontSize = 12.sp) },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = MutedGray, modifier = Modifier.size(16.dp)) },
-                    trailingIcon = {
-                        if (state.filter.searchQuery.isNotBlank()) {
-                            IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Clear", tint = MutedGray, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedBorderColor = PrimaryBlue,
-                        unfocusedBorderColor = CardBorder,
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                DeskSearchField(
+                    query = state.filter.searchQuery,
+                    onQuery = { viewModel.updateSearchQuery(it) },
                 )
             }
 
@@ -301,22 +316,27 @@ fun DayBookingsScreen(
             }
 
             Spacer(Modifier.height(10.dp))
+          }
+          }
 
             // Main Content Area: Grid vs List View
             if (state.isLoading && state.grid == null && state.bookings.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = PrimaryBlue)
+                item(key = "desk-loading") {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(220.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = PrimaryBlue)
+                    }
                 }
             } else {
                 when (state.viewMode) {
                     ViewMode.GRID -> {
                         state.grid?.let { grid ->
-                            DayBookingsGrid(
+                            dayBookingsGridItems(
                                 grid = grid,
                                 canBook = canBookings && !state.stats.isBlocked,
+                                scrollState = gridScroll,
                                 onCellClick = { slotId, slotTime, courtId, courtName, price ->
                                     viewModel.openWalkInModal(slotId, slotTime, courtId, courtName, price)
                                 },
@@ -346,13 +366,15 @@ fun DayBookingsScreen(
                                     )
                                 },
                             )
-                        } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No schedule available for this day", color = MutedGray)
+                        } ?: item(key = "desk-no-grid") {
+                            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 44.dp), contentAlignment = Alignment.Center) {
+                                Text("No schedule available for this day", color = MutedGray)
+                            }
                         }
                     }
 
                     ViewMode.LIST -> {
-                        DayBookingsList(
+                        dayBookingsListItems(
                             bookings = state.filteredBookings,
                             onBookingClick = { viewModel.openBookingDetails(it) },
                             onQuickCheckIn = { viewModel.checkInBooking(it.ticketCode) },
@@ -385,5 +407,66 @@ fun DayBookingsScreen(
             onCheckIn = { code -> viewModel.checkInBooking(code) },
             onCancel = { id -> viewModel.cancelBooking(id) },
         )
+    }
+}
+
+/**
+ * The desk's search box.
+ *
+ * It was an OutlinedTextField forced to 46dp. Material's field needs 56dp for its
+ * own padding, so the placeholder's lower half was sliced off. This one is a
+ * BasicTextField in a 48dp pill, so the text is centred by layout, not by the
+ * framework's padding guesses: soft fill, a hairline that turns blue on focus,
+ * and a clear button only once there's something to clear.
+ */
+@Composable
+private fun DeskSearchField(query: String, onQuery: (String) -> Unit) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (focused) Color.White else Color(0xFFF4F6FA))
+            .border(
+                if (focused) 1.5.dp else 1.dp,
+                if (focused) PrimaryBlue else Color(0xFFE6EAF0),
+                RoundedCornerShape(14.dp),
+            )
+            .padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Search, contentDescription = null,
+            tint = if (focused) PrimaryBlue else MutedGray,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text(
+                    "Search name, phone or ticket",
+                    fontSize = 14.sp, color = MutedGray, maxLines = 1,
+                )
+            }
+            androidx.compose.foundation.text.BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                interactionSource = interaction,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = InkDark, fontWeight = FontWeight.Medium),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(PrimaryBlue),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQuery("") }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.Clear, contentDescription = "Clear search", tint = MutedGray, modifier = Modifier.size(18.dp))
+            }
+        } else {
+            Spacer(Modifier.width(8.dp))
+        }
     }
 }

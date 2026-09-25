@@ -402,7 +402,10 @@ class DayBookingsRepositoryImpl(
         val paid = this.amountPaid
         val due = (total - paid).coerceAtLeast(0.0)
         val statusUpper = (this.status ?: "CONFIRMED").uppercase()
-        val cancelled = statusUpper in listOf("CANCELLED", "REFUNDED", "FAILED")
+        // EXPIRED is an online checkout whose payment hold ran out: never paid, slot
+        // back on sale. Without it here, abandoned checkouts showed as money due and
+        // "to chase" on a day the grid correctly showed as empty.
+        val cancelled = statusUpper in listOf("CANCELLED", "REFUNDED", "FAILED", "EXPIRED")
 
         return DayBookingItem(
             id = this.id,

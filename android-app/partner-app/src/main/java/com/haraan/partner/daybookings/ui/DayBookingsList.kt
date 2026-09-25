@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.haraan.partner.ui.components.pressableTile
 import androidx.compose.ui.unit.sp
 import com.haraan.partner.daybookings.model.DayBookingItem
 
@@ -95,6 +97,36 @@ fun DayBookingsList(
     }
 }
 
+/** The list view's cards, emitted into the screen's own list (see dayBookingsGridItems). */
+fun LazyListScope.dayBookingsListItems(
+    bookings: List<DayBookingItem>,
+    onBookingClick: (DayBookingItem) -> Unit,
+    onQuickCheckIn: (DayBookingItem) -> Unit,
+) {
+    if (bookings.isEmpty()) {
+        item(key = "list-empty") {
+            Column(
+                Modifier.fillMaxWidth().padding(vertical = 44.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("No bookings matching criteria", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = InkDark)
+                Spacer(Modifier.height(4.dp))
+                Text("Try adjusting your search or filters", fontSize = 12.sp, color = MutedGray)
+            }
+        }
+        return
+    }
+    items(bookings, key = { "booking-${it.id}" }) { booking ->
+        Box(Modifier.padding(bottom = 10.dp)) {
+            BookingCard(
+                booking = booking,
+                onClick = { onBookingClick(booking) },
+                onCheckIn = { onQuickCheckIn(booking) },
+            )
+        }
+    }
+}
+
 @Composable
 private fun BookingCard(
     booking: DayBookingItem,
@@ -107,11 +139,11 @@ private fun BookingCard(
 
     Column(
         modifier = Modifier
+            .pressableTile(cornerRadius = 16.dp, pressedScale = 0.975f, onClick = onClick)
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White)
             .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
             .padding(14.dp),
     ) {
         Row(

@@ -279,7 +279,16 @@ data class VenueMatches(val confirmed: List<VenueMatch>, val nearby: List<VenueM
 }
 
 /** Result of a scan-and-check-in. */
-data class CheckInResult(val status: String, val message: String)
+data class CheckInResult(
+    val status: String,
+    val message: String,
+    /** Who the ticket is for, so the gate can greet them by name. Null when unknown. */
+    val guest: String? = null,
+    /** People on the ticket; the gate lets this many through. */
+    val quantity: Int = 0,
+    /** The slot or session the ticket is for, as the server labels it. */
+    val slotLabel: String? = null,
+)
 
 data class StatItem(val label: String, val value: String)
 
@@ -363,6 +372,23 @@ data class DaySlot(
     val bookings: List<DayBooking>,
     val courts: List<CourtCell> = emptyList(),
 )
+
+/**
+ * Minutes after midnight at which a slot starts, read off however the server
+ * spells it: "7:00 AM", "07:00", "7 AM", "18:00 - 19:00", "7:00 AM – 8:00 AM".
+ * Only the first time in the string counts. Unreadable sorts last.
+ */
+internal fun slotStartMinutes(raw: String?): Int {
+    val m = Regex("""(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?""").find(raw ?: return Int.MAX_VALUE)
+        ?: return Int.MAX_VALUE
+    var hour = m.groupValues[1].toIntOrNull() ?: return Int.MAX_VALUE
+    val minute = m.groupValues[2].toIntOrNull() ?: 0
+    when (m.groupValues[3].lowercase()) {
+        "am" -> if (hour == 12) hour = 0
+        "pm" -> if (hour != 12) hour += 12
+    }
+    return if (hour in 0..23 && minute in 0..59) hour * 60 + minute else Int.MAX_VALUE
+}
 
 data class DayGrid(
     val date: String,
@@ -543,7 +569,12 @@ data class Analytics(
 )
 
 /** Raised for any non-2xx response, carrying a user-facing message. */
-class ApiException(val code: Int, message: String) : Exception(message)
+class ApiException(
+    val code: Int,
+    message: String,
+    /** The raw error body, for the few callers whose error responses carry data. */
+    val body: String? = null,
+) : Exception(message)
 
 /**
  * Thin HttpURLConnection client for the partner endpoints. Mirrors the consumer
@@ -886,7 +917,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             date = o.optString("date"),
             venueName = o.optJSONObject("venue")?.optStringOrNull("name") ?: "Venue",
             isBlocked = o.optBoolean("is_blocked", false),
-            slots = slots,
+            // The server lists slots in the admin's manual sort_order, so a 7 AM slot
+            // added last sat under 11 AM. The desk reads the day top to bottom, so
+            // order it by the clock; a time we can't read keeps its place at the end.
+            slots = slots.sortedBy { slotStartMinutes(it.time ?: it.label) },
             courts = courts,
         )
     }
@@ -1382,7 +1416,14 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     /** POST /api/partner/check-in — resolve + mark arrived by scanned code. */
     suspend fun checkIn(token: String, code: String): CheckInResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("code", code)
-        val body = post("/api/partner/check-in", payload.toString(), token)
+        // A cancelled or refunded ticket comes back as 409 with the booking in the
+        // body. It used to surface as "Something went wrong (HTTP 409)", which told
+        // the gate nothing; it is an answer about the ticket, so read it as one.
+        val body = try {
+            post("/api/partner/check-in", payload.toString(), token)
+        } catch (e: ApiException) {
+            if (e.code == 409 && e.body != null) e.body else throw e
+        }
         val o = JSONObject(body)
         val status = o.optString("status", "ok")
         val message = when (status) {
@@ -1391,7 +1432,14 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             "invalid" -> "Ticket is cancelled/invalid"
             else -> "Done"
         }
-        CheckInResult(status, message)
+        val booking = o.optJSONObject("booking")
+        CheckInResult(
+            status = status,
+            message = message,
+            guest = booking?.optString("customer")?.trim()?.takeIf { it.isNotEmpty() && it != "null" },
+            quantity = booking?.optInt("quantity", 0) ?: 0,
+            slotLabel = booking?.optString("slot_label")?.trim()?.takeIf { it.isNotEmpty() && it != "null" },
+        )
     }
 
     // ---- HTTP plumbing --------------------------------------------------
@@ -1419,7 +1467,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val body = stream?.let { BufferedReader(InputStreamReader(it)).use(BufferedReader::readText) } ?: ""
-            if (code !in 200..299) throw ApiException(code, parseError(body, code))
+            if (code !in 200..299) throw ApiException(code, parseError(body, code), body)
             return body
         } finally {
             conn.disconnect()

@@ -12,6 +12,7 @@ use App\Services\WhatsAppService;
 use App\Support\JwtService;
 use App\Support\MessageContext;
 use App\Support\PhoneNumber;
+use App\Support\PartnerLookup;
 use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -173,11 +174,18 @@ final class PhoneOtpController extends Controller
 
         $phone = (string) $payload['phone'];
 
-        $isNew = ! User::query()->where('phone', $phone)->exists();
+        // Find the account however its number was stored. Admin-entered numbers sit
+        // in the table as bare 10 digits, "91…" or "0…", and an exact match on the
+        // verified +91 number missed them — so a partner signing in by phone was
+        // handed a brand-new empty member account, and the partner app then refused
+        // it with "Partner access required". PartnerLookup is the one matcher every
+        // phone sign-in shares, and it prefers the PARTNER row when digits are shared.
+        $existing = PartnerLookup::byPhone($phone);
+        $isNew = $existing === null;
 
-        $user = User::query()->firstOrCreate(
-            ['phone' => $phone],
+        $user = $existing ?? User::query()->create(
             [
+                'phone' => $phone,
                 'name' => trim((string) ($validated['name'] ?? '')) ?: 'Member',
                 // users.email is NOT NULL and a phone sign-up has no address, so
                 // synthesize a unique placeholder from the (unique) E.164 number.

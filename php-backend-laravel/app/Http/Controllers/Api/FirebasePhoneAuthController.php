@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Support\PartnerLookup;
 use App\Services\FirebasePhoneVerifier;
 use App\Support\JwtService;
 use Illuminate\Http\JsonResponse;
@@ -48,11 +49,14 @@ final class FirebasePhoneAuthController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        $isNew = ! User::query()->where('phone', $phone)->exists();
+        // Same matcher as the WhatsApp path: an account stored as "98765 43210" or
+        // "9876543210" is still this number, and must not be duplicated.
+        $existing = PartnerLookup::byPhone($phone);
+        $isNew = $existing === null;
 
-        $user = User::query()->firstOrCreate(
-            ['phone' => $phone],
+        $user = $existing ?? User::query()->create(
             [
+                'phone' => $phone,
                 'name' => trim((string) ($data['name'] ?? '')) ?: 'Member',
                 // users.email is NOT NULL; phone sign-ups have no address, so synthesize a
                 // unique placeholder from the (unique) E.164 number — same convention the

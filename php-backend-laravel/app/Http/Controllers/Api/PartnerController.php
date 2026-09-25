@@ -537,11 +537,21 @@ class PartnerController extends Controller
         ];
     }
 
-    /** Cancelled, refunded and failed rows are not part of any day's numbers. */
+    /**
+     * Cancelled, refunded, failed and expired rows are not part of any day's numbers.
+     *
+     * `expired` is an online checkout whose payment hold ran out: the player never
+     * paid and the slot went back on sale. Leaving it out of this list counted two
+     * abandoned checkouts (₹640 + ₹55.90) as ₹696 "to collect" on a day with nothing
+     * booked, and sent the desk chasing money nobody owed.
+     */
     private function isDead(Booking $b): bool
     {
-        return in_array(strtolower((string) $b->status), ['cancelled', 'refunded', 'failed'], true);
+        return in_array(strtolower((string) $b->status), self::DEAD_STATUSES, true);
     }
+
+    /** Booking statuses that carry no money and hold no slot. */
+    private const DEAD_STATUSES = ['cancelled', 'refunded', 'failed', 'expired'];
 
     /**
      * A slot's start as a real moment.
@@ -844,7 +854,7 @@ class PartnerController extends Controller
             return response()->json(['error' => 'This venue is not assigned to you'], 403);
         }
 
-        if (in_array(strtolower((string) $booking->status), ['cancelled', 'refunded', 'failed'], true)) {
+        if (in_array(strtolower((string) $booking->status), self::DEAD_STATUSES, true)) {
             return response()->json(['status' => 'invalid', 'booking' => $this->bookingSummary($booking)], 409);
         }
 

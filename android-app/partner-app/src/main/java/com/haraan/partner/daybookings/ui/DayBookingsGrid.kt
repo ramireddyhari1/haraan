@@ -1,6 +1,9 @@
 package com.haraan.partner.daybookings.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -15,9 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -35,10 +36,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.TextStyle
 import com.haraan.partner.DayBooking
 import com.haraan.partner.DayGrid
 import com.haraan.partner.DaySlot
 import com.haraan.partner.daybookings.model.DayBookingItem
+import com.haraan.partner.ui.components.pressableTile
 
 private val PrimaryBlue = Color(0xFF1D4ED8)
 private val InkDark = Color(0xFF0B1220)
@@ -47,31 +51,61 @@ private val GreenColor = Color(0xFF16A34A)
 private val AmberColor = Color(0xFFB45309)
 private val CardBorder = Color(0xFFE5E7EB)
 
-@Composable
-fun DayBookingsGrid(
+/** Column widths and the one cell height, shared by the header and every row. */
+private val GridCellWidth = 132.dp
+private val GridCellHeight = 84.dp
+private val GridTimeColWidth = 72.dp
+
+/**
+ * The court grid, emitted as rows of the screen's own list.
+ *
+ * It used to be a card holding its own LazyColumn under a fixed stack of calendar,
+ * stats, search and filters, so on a phone the courts got whatever sliver was
+ * left. Now every time row is an item of the page: the header stack scrolls away
+ * and the court names stick to the top. [scrollState] is shared by the header and
+ * every row, so the courts scroll sideways as one sheet.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+fun LazyListScope.dayBookingsGridItems(
     grid: DayGrid,
     canBook: Boolean,
+    scrollState: ScrollState,
     onCellClick: (slotId: Long, slotTime: String, courtId: Long, courtName: String, price: Double) -> Unit,
     onBookingClick: (DayBooking) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
-    val cellWidth = 120.dp
-    val timeColWidth = 72.dp
+    stickyHeader(key = "grid-head") { GridHeader(grid, scrollState) }
+    if (grid.slots.isEmpty()) {
+        item(key = "grid-empty") {
+            Box(
+                Modifier.fillMaxWidth().background(Color.White).padding(vertical = 36.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text("No time slots on this day", fontSize = 13.sp, color = MutedGray) }
+        }
+    }
+    items(grid.slots, key = { "slot-${it.slotId}" }) { slot ->
+        GridSlotRow(slot, grid, canBook, scrollState, onCellClick, onBookingClick)
+    }
+    item(key = "grid-foot") {
+        Box(
+            Modifier.fillMaxWidth().height(14.dp)
+                .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+                .background(Color.White)
+                .border(1.dp, CardBorder, RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)),
+        )
+    }
+}
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White)
-            .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
-    ) {
+@Composable
+private fun GridHeader(grid: DayGrid, scrollState: ScrollState) {
+    val cellWidth = GridCellWidth
+    val timeColWidth = GridTimeColWidth
         // Sticky Header: Court Columns
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 .background(Color(0xFFF8FAFC))
-                .border(1.dp, CardBorder)
+                .border(1.dp, CardBorder, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 .padding(vertical = 10.dp)
         ) {
             // Time Column Header
@@ -121,14 +155,24 @@ fun DayBookingsGrid(
             }
         }
 
-        // Body: Time Slot Rows with Court Cells
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(grid.slots, key = { it.slotId }) { slot ->
+}
+
+@Composable
+private fun GridSlotRow(
+    slot: DaySlot,
+    grid: DayGrid,
+    canBook: Boolean,
+    scrollState: ScrollState,
+    onCellClick: (slotId: Long, slotTime: String, courtId: Long, courtName: String, price: Double) -> Unit,
+    onBookingClick: (DayBooking) -> Unit,
+) {
+    val cellWidth = GridCellWidth
+    val cellHeight = GridCellHeight
+    val timeColWidth = GridTimeColWidth
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .background(Color.White)
                         .border(1.dp, Color(0xFFF1F5F9))
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -167,12 +211,12 @@ fun DayBookingsGrid(
 
                                 Column(
                                     modifier = Modifier
+                                        .pressableTile(cornerRadius = 10.dp) { onBookingClick(primaryBooking) }
                                         .width(cellWidth)
-                                        .height(68.dp)
+                                        .height(cellHeight)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(if (isWalkIn) Color(0xFFF0F9FF) else Color(0xFFEFF6FF))
                                         .border(1.dp, if (isWalkIn) Color(0xFFBAE6FD) else Color(0xFFBFDBFE), RoundedCornerShape(10.dp))
-                                        .clickable { onBookingClick(primaryBooking) }
                                         .padding(6.dp),
                                     verticalArrangement = Arrangement.SpaceBetween,
                                 ) {
@@ -218,7 +262,7 @@ fun DayBookingsGrid(
                                 Column(
                                     modifier = Modifier
                                         .width(cellWidth)
-                                        .height(68.dp)
+                                        .height(cellHeight)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(Color(0xFFFEF3C7))
                                         .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(10.dp))
@@ -236,7 +280,7 @@ fun DayBookingsGrid(
                                 Box(
                                     modifier = Modifier
                                         .width(cellWidth)
-                                        .height(68.dp)
+                                        .height(cellHeight)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(Color(0xFFF1F5F9))
                                         .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp)),
@@ -246,43 +290,77 @@ fun DayBookingsGrid(
                                 }
                             } else {
                                 // Available Cell -> Click to add Walk-in!
-                                Column(
-                                    modifier = Modifier
-                                        .width(cellWidth)
-                                        .height(68.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(0xFFF0FDF4))
-                                        .border(1.dp, Color(0xFFBBF7D0), RoundedCornerShape(10.dp))
-                                        .clickable(enabled = canBook) {
-                                            onCellClick(slot.slotId, slot.time ?: slot.label, court.id, court.name, price)
-                                        }
-                                        .padding(6.dp),
-                                    verticalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        Text("AVAILABLE", fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, color = GreenColor)
-                                        if (cell?.isPeak == true) {
-                                            Text("PEAK", fontSize = 7.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED))
-                                        }
-                                    }
-                                    Text(
-                                        "₹" + price.toInt(),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = GreenColor,
-                                    )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Add, contentDescription = null, tint = GreenColor, modifier = Modifier.size(10.dp))
-                                        Text("Walk-in", fontSize = 8.5.sp, fontWeight = FontWeight.Medium, color = GreenColor)
-                                    }
-                                }
+                                AvailableCell(
+                                    price = price,
+                                    peak = cell?.isPeak == true,
+                                    canBook = canBook,
+                                    width = cellWidth,
+                                    height = cellHeight,
+                                ) { onCellClick(slot.slotId, slot.time ?: slot.label, court.id, court.name, price) }
                             }
                         }
                     }
                 }
+}
+
+/**
+ * An open court at an open time: the cell the desk taps most.
+ *
+ * It said AVAILABLE in 8sp caps, ₹ in 13sp and "+ Walk-in" in 8.5sp, and at real
+ * font sizes that last line was clipped to a lone "+". The price is what the
+ * desk reads to the customer, so it leads at 20sp. The status is a small dot and
+ * word, and the action is a real round "+" in the corner, in the app's one action
+ * blue (green here only means open), big enough to be a target, not a hint.
+ */
+@Composable
+private fun AvailableCell(
+    price: Double,
+    peak: Boolean,
+    canBook: Boolean,
+    width: Dp,
+    height: Dp,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .pressableTile(cornerRadius = 12.dp, enabled = canBook, onClick = onClick)
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFFF2FBF5))
+            .border(1.dp, Color(0xFFC7EBD3), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+    ) {
+        Column(Modifier.align(Alignment.TopStart)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(GreenColor))
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    if (peak) "Open · Peak" else "Open",
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    color = if (peak) Color(0xFFB45309) else Color(0xFF15803D),
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "₹" + price.toInt(),
+                fontSize = 20.sp, lineHeight = 22.sp,
+                fontWeight = FontWeight.ExtraBold, color = InkDark,
+                letterSpacing = (-0.3).sp,
+                style = TextStyle(fontFeatureSettings = "tnum"),
+                maxLines = 1,
+            )
+        }
+        if (canBook) {
+            Box(
+                Modifier.align(Alignment.BottomEnd)
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(PrimaryBlue),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Add walk-in", tint = Color.White, modifier = Modifier.size(16.dp))
             }
         }
     }

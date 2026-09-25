@@ -461,6 +461,26 @@ class VenueBookingUserToPartnerTest extends TestCase
         $this->assertFalse($cell['is_booked']);
     }
 
+    /**
+     * An abandoned checkout is not money owed.
+     *
+     * On prod two expired holds (₹640 + ₹55.90) showed as "₹696 to collect, 2 to
+     * chase" on a day the grid showed as empty, because only cancelled, refunded
+     * and failed rows were treated as dead.
+     */
+    public function test_an_expired_checkout_is_not_counted_as_money_due(): void
+    {
+        $this->book()->assertCreated();
+        Booking::query()->latest('id')->first()->update(['status' => 'EXPIRED']);
+
+        $data = $this->as($this->owner)->getJson('/api/partner/today')->assertOk()->json('data');
+
+        $this->assertEqualsWithDelta(0.0, (float) $data['money']['expected'], 0.01);
+        $this->assertEqualsWithDelta(0.0, (float) $data['money']['due'], 0.01);
+        $this->assertSame(0, (int) $data['chase']['count']);
+        $this->assertSame([], $data['next']);
+    }
+
     public function test_a_desk_walk_in_blocks_the_same_court_in_the_app(): void
     {
         $this->as($this->owner)->postJson("/api/partner/venues/{$this->venue->id}/bookings", [

@@ -148,6 +148,48 @@ class ApiPhoneOtpLoginTest extends TestCase
         $this->assertSame(1, User::query()->where('phone', self::PHONE_E164)->count());
     }
 
+    public function test_verify_finds_a_partner_whose_number_was_stored_without_the_country_code(): void
+    {
+        // How /control stores a number an admin typed: bare ten digits. The exact
+        // match on +91… missed it, minted an empty member account, and the partner
+        // app then answered the partner with "Partner access required".
+        $partner = User::factory()->create([
+            'phone' => '9876543210',
+            'role' => 'PARTNER',
+            'partner_type' => 'venue',
+        ]);
+
+        $token = $this->seedSession();
+
+        $this->postJson('/api/auth/phone-otp/verify', ['token' => $token, 'code' => '654321'])
+            ->assertOk()
+            ->assertJsonPath('newUser', false)
+            ->assertJsonPath('user.id', $partner->id);
+
+        $this->assertSame(1, User::query()->count());
+    }
+
+    public function test_verify_prefers_the_partner_when_a_stray_member_shares_the_number(): void
+    {
+        // Exactly the state the old bug left on prod: the partner row stored bare,
+        // plus the empty +91 member row the bug created beside it.
+        $partner = User::factory()->create([
+            'phone' => '9876543210',
+            'role' => 'PARTNER',
+            'partner_type' => 'venue',
+        ]);
+        User::factory()->create([
+            'phone' => self::PHONE_E164,
+            'email' => self::PHONE_E164.'@phone.haraan.local',
+        ]);
+
+        $token = $this->seedSession();
+
+        $this->postJson('/api/auth/phone-otp/verify', ['token' => $token, 'code' => '654321'])
+            ->assertOk()
+            ->assertJsonPath('user.id', $partner->id);
+    }
+
     public function test_verify_rejects_a_wrong_code_and_burns_the_session_after_five_tries(): void
     {
         $token = $this->seedSession();

@@ -46,6 +46,11 @@ data class DayBookingsUiState(
     val isSubmittingWalkIn: Boolean = false,
     val errorMessage: String? = null,
     val successSnackbarMessage: String? = null,
+    /**
+     * True when the success above is money taken (a walk-in booked), so the screen
+     * plays the firm money buzz instead of the plain confirm.
+     */
+    val successIsMoney: Boolean = false,
 )
 
 class DayBookingsViewModel(
@@ -281,6 +286,7 @@ class DayBookingsViewModel(
                             walkInTarget = null,
                             isSubmittingWalkIn = false,
                             successSnackbarMessage = "Walk-in booked successfully for $name",
+                            successIsMoney = true,
                         )
                     }
                     loadData(forceRefresh = true)
@@ -336,6 +342,12 @@ class DayBookingsViewModel(
             val result = repository.checkInTicket(token, ticketCode, state.venueId, state.selectedDate)
             result.fold(
                 onSuccess = { res ->
+                    // A cancelled ticket is an answer, not a transport failure, so it
+                    // arrives here — but it is still a "no" at the desk.
+                    if (res.status == "invalid") {
+                        _uiState.update { it.copy(errorMessage = res.message) }
+                        return@fold
+                    }
                     _uiState.update {
                         it.copy(
                             selectedBookingForDetails = null,
@@ -392,7 +404,7 @@ class DayBookingsViewModel(
     }
 
     fun clearSuccessMessage() {
-        _uiState.update { it.copy(successSnackbarMessage = null) }
+        _uiState.update { it.copy(successSnackbarMessage = null, successIsMoney = false) }
     }
 
     private fun checkPendingActions() {
