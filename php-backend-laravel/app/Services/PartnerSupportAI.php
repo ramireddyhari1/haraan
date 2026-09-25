@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\AiGate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -99,6 +100,15 @@ TXT;
             }
         }
         $messages[] = ['role' => 'user', 'content' => mb_substr($question, 0, 2000)];
+
+        // /control → Platform rules → AI: off or over budget → hand off to a person.
+        if (! AiGate::attempt(AiGate::PARTNER_SUPPORT)) {
+            return [
+                'ok' => false,
+                'handoff' => true,
+                'text' => 'The AI assistant isn’t available right now — send your question to the Haraan team in the chat below and a real person will help you out.',
+            ];
+        }
 
         try {
             $res = Http::withHeaders([

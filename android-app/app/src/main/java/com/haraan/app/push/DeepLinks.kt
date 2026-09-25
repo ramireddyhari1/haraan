@@ -17,6 +17,12 @@ sealed interface DeepLinkTarget {
 
     /** The GameHub (matches) tab. */
     data object GameHub : DeepLinkTarget
+
+    /** Open the ActionBoard's create-match wizard: `haraan://actionboard/create`. */
+    data object CreateMatch : DeepLinkTarget
+
+    /** A player's post-match rewards: `haraan://rewards/match/{id}`. */
+    data class MatchRewards(val matchId: String) : DeepLinkTarget
 }
 
 /** Parses a `deep_link` payload into a [DeepLinkTarget]. HTTP(S) URLs are handled */
@@ -26,6 +32,9 @@ object DeepLinks {
         val link = raw?.trim()?.lowercase() ?: return null
         if (link.isEmpty()) return null
 
+        REWARDS_MATCH.matchEntire(link)?.let { return DeepLinkTarget.MatchRewards(it.groupValues[1]) }
+        if (link.removePrefix("haraan://").trim('/') == "actionboard/create") return DeepLinkTarget.CreateMatch
+
         // Normalise "haraan://events", "/events", "events" to a bare keyword.
         val key = link
             .removePrefix("haraan://")
@@ -34,12 +43,14 @@ object DeepLinks {
             .substringBefore('?')
 
         return when (key) {
-            "notifications", "inbox", "bell" -> DeepLinkTarget.Inbox
+            "notifications", "inbox", "bell", "rewards" -> DeepLinkTarget.Inbox
             "events", "home", "" -> DeepLinkTarget.Events
             "gamehub", "matches", "play" -> DeepLinkTarget.GameHub
             else -> null
         }
     }
+
+    private val REWARDS_MATCH = Regex("^(?:haraan://)?/?rewards/match/(\\d+)/?$")
 
     /** True when the payload is a web URL MainActivity should open in a browser. */
     fun isWebUrl(raw: String?): Boolean {

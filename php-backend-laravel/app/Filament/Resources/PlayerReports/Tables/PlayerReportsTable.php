@@ -5,8 +5,10 @@ namespace App\Filament\Resources\PlayerReports\Tables;
 use App\Filament\Support\AvatarColumn;
 use App\Models\PlayerReport;
 use Filament\Actions\Action;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,8 +18,6 @@ class PlayerReportsTable
     public static function configure(Table $table): Table
     {
         return $table
-            // Every row renders both people; without this the queue is a guaranteed N+1.
-            ->modifyQueryUsing(fn (Builder $q): Builder => $q->with(['reporter', 'reported', 'reviewer']))
             // Oldest OPEN first: a queue sorted newest-first quietly buries the reports
             // that have been waiting longest, which is the opposite of a queue's job.
             ->defaultSort('created_at', 'asc')
@@ -51,11 +51,12 @@ class PlayerReportsTable
                     ->description(fn (PlayerReport $r): string => (string) ($r->reporter?->player_id ?: '—'))
                     ->searchable(),
                 // The number that turns one complaint into a pattern.
-                TextColumn::make('reported_id')
+                TextColumn::make('total_on_player')
                     ->label('Total on player')
                     ->badge()
-                    ->color(fn ($state): string => PlayerReport::where('reported_id', $state)->count() > 1 ? 'danger' : 'gray')
-                    ->formatStateUsing(fn ($state): string => (string) PlayerReport::where('reported_id', $state)->count()),
+                    ->sortable()
+                    ->color(fn ($state): string => ((int) $state) > 1 ? 'danger' : 'gray')
+                    ->formatStateUsing(fn ($state): string => (string) ((int) $state)),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
@@ -74,6 +75,14 @@ class PlayerReportsTable
                     ->toggleable(),
             ])
             ->filters([
+                Filter::make('reported_id')
+                    ->form([
+                        TextInput::make('value')->label('Reported user ID')->numeric(),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->where('reported_id', $data['value'])
+                        : $query),
+
                 SelectFilter::make('status')
                     ->options([
                         'open' => 'Open',

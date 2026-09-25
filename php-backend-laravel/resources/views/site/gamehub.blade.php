@@ -192,7 +192,7 @@
                     </span>
                     <span class="mhub__arena-body">
                         <strong class="mhub__arena-title">{{ $venue->title }}</strong>
-                        <span class="mhub__arena-sub">{{ $venue->tagline ?: $venue->location }}</span>
+                        <span class="mhub__arena-sub">{{ $venue->tagline ?: $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif</span>
                         <span class="mhub__arena-foot">
                             <span class="mhub__price">₹{{ number_format($venue->price) }}<i>/hr</i></span>
                             @include('site.partials.hub-sports', ['sports' => $venue->sports, 'glyphKey' => $hubGlyphKey, 'icons' => $hubIcons])
@@ -228,7 +228,7 @@
                                 <strong>{{ $venue->title }}</strong>
                                 <span class="mhub__vcard-loc">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                                    {{ $venue->location }}
+                                    {{ $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif
                                 </span>
                             </span>
                             @if($venue->reviews > 0)
@@ -408,7 +408,7 @@
                             <img src="{{ $venue->image }}" alt="{{ $venue->title }}" />
                             <div class="event-card__thumb-overlay">
                                 <div class="event-card__thumb-text">
-                                    <div class="event-card__thumb-venue">{{ $venue->location }}</div>
+                                    <div class="event-card__thumb-venue">{{ $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif</div>
                                     <h3 class="event-card__thumb-title">{{ $venue->title }}</h3>
                                 </div>
                             </div>

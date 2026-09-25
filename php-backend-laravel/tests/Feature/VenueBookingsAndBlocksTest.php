@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Venue;
 use App\Models\VenueBlock;
 use App\Models\VenueCourt;
+use App\Models\VenueSlot;
 use App\Services\BookingLedger;
 use App\Services\BookingService;
 use Filament\Facades\Filament;
@@ -50,11 +51,16 @@ class VenueBookingsAndBlocksTest extends TestCase
         $this->venue = Venue::create([
             'name' => 'Sportz Arena', 'location' => 'Gachibowli', 'price' => 1400,
             'is_active' => true, 'is_bookable' => true, 'partner_id' => $this->owner->id,
+            'city' => 'Hyderabad', 'images' => ['venues/test.jpg'], 'status' => 'published',
         ]);
 
         $this->court = VenueCourt::create([
             'venue_id' => $this->venue->id, 'name' => 'Turf A', 'price' => 1400, 'is_active' => true,
         ]);
+
+        // A live venue needs at least one time slot (Venue::readinessErrors); these tests
+        // book by time window, so the slot only has to exist.
+        VenueSlot::create(['venue_id' => $this->venue->id, 'day' => 'Every day', 'time' => '6:00 AM', 'is_available' => true]);
 
         Filament::setCurrentPanel(Filament::getPanel('partner'));
         $this->actingAs($this->owner);

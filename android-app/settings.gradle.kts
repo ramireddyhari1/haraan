@@ -31,3 +31,4 @@ plugins {
 
 rootProject.name = "Thanna"
 include(":app")
+include(":partner-app")

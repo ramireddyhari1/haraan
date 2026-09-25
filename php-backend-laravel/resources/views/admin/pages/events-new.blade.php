@@ -31,7 +31,7 @@
 					result.innerHTML = '<div class="placeholder">Event created successfully.</div>';
 					setTimeout(()=> location.href = '{{ route('admin.events') }}', 800);
 				} else {
-					result.innerHTML = '<div class="placeholder">Error: ' + (obj.body.message || JSON.stringify(obj.body)) + '</div>';
+					result.innerHTML = '<div class="placeholder">Error: ' + esc(obj.body.message || JSON.stringify(obj.body)) + '</div>';
 				}
 			}).catch(err => {
 				result.innerHTML = '<div class="placeholder">Request failed</div>';

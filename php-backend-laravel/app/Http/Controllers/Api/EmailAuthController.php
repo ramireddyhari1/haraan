@@ -9,6 +9,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\EmailOtpService;
 use App\Support\JwtService;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +24,7 @@ use Illuminate\Support\Str;
  */
 final class EmailAuthController extends Controller
 {
-    private const OTP_TTL_SECONDS = 300;
+    // Code lifetime and wrong-try limit: /control → Platform rules → Sign-in codes.
 
     public function __construct(private readonly EmailOtpService $emailService)
     {
@@ -55,10 +56,10 @@ final class EmailAuthController extends Controller
             'otp' => $this->hashOtp($otp),
             'is_new' => $isNew,
             'otp_verified' => false,
-        ], self::OTP_TTL_SECONDS);
+        ], PlatformRules::int('otp.ttl_seconds'));
 
         $subject = "{$otp} is your Haraan verification code";
-        $text = "Your Haraan login code is: {$otp}\n\nThis code will expire in 5 minutes.\n\nIf you didn't request this, you can ignore this email.";
+        $text = "Your Haraan login code is: {$otp}\n\nThis code will expire in {$this->ttlLabel()}.\n\nIf you didn't request this, you can ignore this email.";
         $html = $this->otpHtml($otp);
         $sent = $this->emailService->send($email, $subject, $text, $html);
 
@@ -74,7 +75,7 @@ final class EmailAuthController extends Controller
         return response()->json([
             'message' => 'A login code has been sent to your email.',
             'verificationToken' => $verificationToken,
-            'expiresIn' => self::OTP_TTL_SECONDS,
+            'expiresIn' => PlatformRules::int('otp.ttl_seconds'),
             'email' => $email,
             'newUser' => $isNew,
         ]);
@@ -115,7 +116,7 @@ final class EmailAuthController extends Controller
         // Brand-new email → the code is verified, but we still need name + date of birth.
         // Keep the session alive (now marked verified) so completeProfile() can finish sign-up.
         $payload['otp_verified'] = true;
-        Cache::put($this->cacheKey($validated['verification_token']), $payload, self::OTP_TTL_SECONDS);
+        Cache::put($this->cacheKey($validated['verification_token']), $payload, PlatformRules::int('otp.ttl_seconds'));
 
         return response()->json([
             'message' => 'Email verified — tell us a bit about you.',
@@ -213,10 +214,11 @@ final class EmailAuthController extends Controller
 
         // Space the digits so the code is easy to read and copy: "4 2 8 5 8 8".
         $spacedOtp = trim(chunk_split($otp, 1, ' '));
+        $ttl = $this->ttlLabel();
 
         return <<<HTML
         <!-- preheader: shown as the grey preview text, then hidden -->
-        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">Your Haraan login code is {$otp} — expires in 5 minutes.</div>
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">Your Haraan login code is {$otp} — expires in {$ttl}.</div>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1F5F9;margin:0;padding:0">
           <tr>
             <td align="center" style="padding:32px 16px">
@@ -234,7 +236,7 @@ final class EmailAuthController extends Controller
                 <tr>
                   <td style="padding:24px 32px 8px;font-family:Arial,Helvetica,sans-serif">
                     <h1 style="margin:0 0 6px;font-size:20px;font-weight:700;color:{$ink}">Your login code</h1>
-                    <p style="margin:0;font-size:14px;line-height:22px;color:{$muted}">Use this code to sign in to Haraan. It expires in 5 minutes.</p>
+                    <p style="margin:0;font-size:14px;line-height:22px;color:{$muted}">Use this code to sign in to Haraan. It expires in {$ttl}.</p>
                   </td>
                 </tr>
                 <!-- code chip -->
@@ -261,5 +263,13 @@ final class EmailAuthController extends Controller
           </tr>
         </table>
         HTML;
+    }
+
+    /** "5 minutes" — the live code lifetime from /control, in words. */
+    private function ttlLabel(): string
+    {
+        $minutes = max(1, intdiv(PlatformRules::int('otp.ttl_seconds') + 59, 60));
+
+        return $minutes === 1 ? '1 minute' : "{$minutes} minutes";
     }
 }

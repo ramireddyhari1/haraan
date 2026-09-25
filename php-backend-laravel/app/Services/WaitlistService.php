@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\WaitlistEntry;
+use App\Support\PlatformRules;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -28,6 +29,17 @@ class WaitlistService
 
     /** How many people are offered a freed slot at once. */
     public const OFFERS_PER_SLOT = 3;
+
+    /** /control → Platform rules → Waitlist. The constants above are the defaults. */
+    public static function offerWindowMinutes(): int
+    {
+        return PlatformRules::int('waitlist.offer_window_minutes');
+    }
+
+    public static function offersPerSlot(): int
+    {
+        return PlatformRules::int('waitlist.offers_per_slot');
+    }
 
     /**
      * Everyone still waiting who would take this court-hour, oldest request first.
@@ -85,8 +97,9 @@ class WaitlistService
      *
      * @return Collection<int, WaitlistEntry>  the entries that were offered
      */
-    public function offerFreedSlot(Booking $booking, int $limit = self::OFFERS_PER_SLOT): Collection
+    public function offerFreedSlot(Booking $booking, ?int $limit = null): Collection
     {
+        $limit ??= self::offersPerSlot();
         $matches = $this->matchesFor($booking)->take($limit);
 
         if ($matches->isEmpty()) {
@@ -98,7 +111,7 @@ class WaitlistService
                 $entry->forceFill([
                     'status' => WaitlistEntry::STATUS_OFFERED,
                     'offered_at' => now(),
-                    'offer_expires_at' => now()->addMinutes(self::OFFER_WINDOW_MINUTES),
+                    'offer_expires_at' => now()->addMinutes(self::offerWindowMinutes()),
                     'freed_by_booking_id' => $booking->id,
                 ])->save();
             });

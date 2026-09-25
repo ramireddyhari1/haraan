@@ -43,6 +43,20 @@ final class EnsureJwtAuthenticated
             return new JsonResponse(['error' => 'Invalid or expired token'], 401);
         }
 
+        // A suspended account must stop working NOW, not when its token happens to
+        // expire. Checked on every request rather than only at sign-in, because the
+        // token outlives the decision to suspend by up to seven days.
+        //
+        // 403, not 401: 401 tells the app "your session ended, sign in again", and it
+        // would loop straight back to a login that is also refused. 403 with an explicit
+        // code lets the client say why.
+        if (! $user->isAccountActive()) {
+            return new JsonResponse([
+                'error' => 'account_suspended',
+                'message' => 'This account has been suspended. Contact support if you think this is a mistake.',
+            ], 403);
+        }
+
         // Bridge JWT auth user with standard Laravel auth guard context
         Auth::setUser($user);
         $request->attributes->set('auth_user', $user);

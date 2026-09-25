@@ -17,7 +17,7 @@ async function loadPayouts(q=''){
 	rows.forEach(p=>{
 		const tr = document.createElement('tr');
 		const bookingTitle = p.booking && p.booking.event ? p.booking.event.title : (p.booking? p.booking.id : '—');
-		tr.innerHTML = `<td>${p.id}</td><td>${bookingTitle}</td><td>${p.amount}</td><td>${p.status}</td><td>${p.status!=='PAID'?`<button onclick="process(${p.id})">Process</button>`:''}</td>`;
+		tr.innerHTML = `<td>${esc(p.id)}</td><td>${esc(bookingTitle)}</td><td>${esc(p.amount)}</td><td>${esc(p.status)}</td><td>${p.status!=='PAID'?`<button onclick="process(${Number(p.id)})">Process</button>`:''}</td>`;
 		body.appendChild(tr);
 	});
 }

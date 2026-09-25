@@ -69,6 +69,26 @@ class LiveMatchesTable
                         ->orderBy('district')
                         ->pluck('district', 'district')
                         ->all()),
+                SelectFilter::make('user_id')
+                    ->label('Player / Host')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload()
+                    ->query(function (\Illuminate\Database\Eloquent\Builder $query, array $data): \Illuminate\Database\Eloquent\Builder {
+                        if (! filled($data['value'] ?? null)) {
+                            return $query;
+                        }
+                        $userId = (int) $data['value'];
+                        $user = \App\Models\User::find($userId);
+                        $playerId = $user?->player_id;
+
+                        return $query->where(function (\Illuminate\Database\Eloquent\Builder $q) use ($userId, $playerId): void {
+                            $q->where('user_id', $userId);
+                            if ($playerId) {
+                                $q->orWhereIn('id', \Illuminate\Support\Facades\DB::table('player_match_stats')->where('player_id', $playerId)->select('match_id'));
+                            }
+                        });
+                    }),
             ])
             ->recordActions([
                 // Admin-only reach control. Promote a district match to FEATURED

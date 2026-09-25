@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
 use Database\Factories\UserFactory;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
@@ -38,6 +40,16 @@ use Spatie\Permission\Traits\HasRoles;
  */
 class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, HasAvatar
 {
+    use AuditsAdminChanges;
+
+    /** Only changes to these fields are audit-logged (see AuditsAdminChanges). */
+    // `password` is watched deliberately. The value itself is never written — it is in
+    // $hidden, so AuditsAdminChanges records it as [redacted] — but the FACT that an
+    // operator reset someone's credentials has to leave a trace. Before this, an admin
+    // could set any user's password through the shared edit form and, because that was
+    // the only changed field, the audit trail recorded nothing at all.
+    protected array $auditedAttributes = ['email', 'phone', 'password', 'role', 'status', 'partner_type', 'capabilities', 'staff_permissions', 'parent_partner_id', 'organization_id', 'is_verified', 'is_organizer', 'trust_score', 'token_version'];
+
     /** @use HasFactory<UserFactory> */
     use HasFactory;
     use Notifiable;
@@ -80,6 +92,47 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     }
 
     /**
+     * Account states that deny access. `deleted` is what {@see \App\Services\AccountEraser}
+     * leaves behind — the row survives so the bookings still reconcile, but nobody may
+     * sign in as it again.
+     */
+    private const BLOCKED_STATUSES = ['SUSPENDED', 'BANNED', 'BLOCKED', 'DELETED'];
+
+    /**
+     * Whether this account may authenticate at all — API, website or console.
+     *
+     * Status casing is mixed in the database (ACTIVE / active / SUSPENDED), which is why
+     * this compares upper-cased rather than matching a literal. A null or empty status is
+     * treated as ACTIVE: the column was added after the first accounts existed, and an
+     * unset status has never meant "suspended".
+     *
+     * Suspension used to be decorative — it changed a badge colour in /control and nothing
+     * else. The JWT middleware never looked at it, so a suspended member kept full API
+     * access for the remaining life of their 7-day token and could mint a fresh one by
+     * signing in again. Every gate now routes through here.
+     */
+    public function setRoleAttribute(?string $value): void
+    {
+        $this->attributes['role'] = $value !== null && trim($value) !== ''
+            ? strtoupper(trim($value))
+            : 'USER';
+    }
+
+    public function setStatusAttribute(?string $value): void
+    {
+        $this->attributes['status'] = $value !== null && trim($value) !== ''
+            ? strtoupper(trim($value))
+            : 'ACTIVE';
+    }
+
+    public function isAccountActive(): bool
+    {
+        $status = strtoupper(trim((string) $this->status));
+
+        return $status === '' || ! in_array($status, self::BLOCKED_STATUSES, true);
+    }
+
+    /**
      * The console this partner signs in to — see {@see \App\Support\PartnerLane},
      * which owns the lane list, the type→lane map and each lane's vocabulary.
      *
@@ -119,6 +172,14 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
      */
     public function canAccessPanel(Panel $panel): bool
     {
+        // Applies to every panel, checked first. The partner and employee branches below
+        // used to carry their own suspension checks while /control carried none, so a
+        // suspended ADMIN or OPS account kept full access to the control panel — the one
+        // console where suspending someone matters most.
+        if (! $this->isAccountActive()) {
+            return false;
+        }
+
         if ($panel->getId() === 'partner') {
             // Admins belong in /control only — they are barred from the partner
             // console even if their account also happens to carry a PARTNER role,
@@ -127,20 +188,14 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
                 return false;
             }
 
-            // A suspended desk person keeps their login but is locked out until an
-            // owner reactivates them (owners themselves are never auto-suspended here).
-            if ($this->isDeskStaff() && strtoupper((string) $this->status) === 'SUSPENDED') {
-                return false;
-            }
+            // NB: suspension is handled by the isAccountActive() check at the top and now
+            // applies to partner OWNERS too, not just desk staff as it did before.
 
             return $this->hasRoleEither(['PARTNER']);
         }
 
         if ($panel->getId() === 'employee') {
-            if (strtoupper((string) $this->status) === 'SUSPENDED') {
-                return false;
-            }
-
+            // Suspension handled by isAccountActive() at the top.
             return $this->employeeProfile()->exists() || $this->hasRoleEither(['EMPLOYEE', 'WORKER']) || $this->isDeskStaff();
         }
 
@@ -515,6 +570,11 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         // which is the whole point of a verification badge.
         'is_verified',
         'verified_at',
+        'lifetime_spend',
+        'bookings_count',
+        'matches_played_count',
+        'last_kpi_calculated_at',
+        'last_seen_at',
     ];
 
     /**
@@ -670,6 +730,21 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             if ($user->isDirty('is_verified')) {
                 $user->verified_at = $user->is_verified ? now() : null;
             }
+
+            // Two changes must end every session the account already holds:
+            //
+            //  - a password reset, or the old credentials keep a session alive;
+            //  - a suspension, or the member's 7-day JWT keeps working regardless.
+            //
+            // Done here, in the same write, rather than by calling JwtService::revokeAllFor()
+            // — which saves — so this cannot recurse. Doing it on the model instead of in
+            // each controller covers the Filament forms, tinker and any future writer;
+            // the API controllers revoke explicitly too, which is harmless (the version
+            // simply moves twice).
+            $suspendedNow = $user->isDirty('status') && ! $user->isAccountActive();
+            if ($user->exists && ($user->isDirty('password') || $suspendedNow)) {
+                $user->token_version = (int) ($user->token_version ?? 0) + 1;
+            }
         });
     }
 
@@ -699,6 +774,10 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'privacy_discoverable'   => 'boolean',
             'app_authentication_secret' => 'encrypted',
             'app_authentication_recovery_codes' => 'encrypted:array',
+            'lifetime_spend'         => 'float',
+            'bookings_count'         => 'integer',
+            'matches_played_count'   => 'integer',
+            'last_kpi_calculated_at' => 'datetime',
         ];
     }
 
@@ -727,6 +806,39 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'activity_date' => $now->toDateString(),
             'created_at' => $now,
         ]);
+    }
+
+    /**
+     * Recalculate and persist denormalized KPI aggregates on the user model.
+     * Computes lifetime paid spend, total bookings count, and played match stats,
+     * updating timestamps and busting relevant widget caches.
+     */
+    public function recalculateKpiMetrics(): self
+    {
+        $paidStatuses = ['confirmed', 'paid', 'completed', 'checked_in'];
+
+        $lifetimeSpend = (float) $this->bookings()
+            ->whereIn(\Illuminate\Support\Facades\DB::raw('lower(status)'), $paidStatuses)
+            ->sum('total_amount');
+
+        $bookingsCount = (int) $this->bookings()->count();
+
+        $matchesPlayed = (int) $this->playerMatchStats()
+            ->where('played', true)
+            ->count();
+
+        $this->lifetime_spend = $lifetimeSpend;
+        $this->bookings_count = $bookingsCount;
+        $this->matches_played_count = $matchesPlayed;
+        $this->last_kpi_calculated_at = now();
+
+        $this->saveQuietly();
+
+        // Invalidate per-user cached widgets
+        \Illuminate\Support\Facades\Cache::forget("user:{$this->id}:spend_chart");
+        \Illuminate\Support\Facades\Cache::forget("user:{$this->id}:overview_kpis");
+
+        return $this;
     }
 
     // -------------------------------------------------------------------------
@@ -780,6 +892,90 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);
+    }
+
+    /** Booking payments across all bookings placed by this user. */
+    public function bookingPayments(): HasManyThrough
+    {
+        return $this->hasManyThrough(BookingPayment::class, Booking::class);
+    }
+
+    /** Member subscriptions held by this user. */
+    public function memberSubscriptions(): HasMany
+    {
+        return $this->hasMany(MemberSubscription::class);
+    }
+
+    /** Membership payment charges for this user. */
+    public function memberPayments(): HasMany
+    {
+        return $this->hasMany(MemberPayment::class);
+    }
+
+    /** Support conversations initiated by this user. */
+    public function supportThreads(): HasMany
+    {
+        return $this->hasMany(SupportThread::class);
+    }
+
+    /** Reward grants and bonus XP awarded to this user. */
+    public function rewardGrants(): HasMany
+    {
+        return $this->hasMany(RewardGrant::class);
+    }
+
+    /** Matches hosted/created by this user. */
+    public function liveMatches(): HasMany
+    {
+        return $this->hasMany(LiveMatch::class, 'user_id');
+    }
+
+    /** Match figure cards / player stats for this user across all sports. */
+    public function playerMatchStats(): HasMany
+    {
+        return $this->hasMany(PlayerMatchStat::class, 'user_id');
+    }
+
+    /** Audit entries recording administrative actions targeting this user. */
+    public function adminActionsReceived(): HasMany
+    {
+        return $this->hasMany(AdminAction::class, 'subject_id')->where('subject_type', 'User');
+    }
+
+    /** Push notification device tokens registered for this user. */
+    public function deviceTokens(): HasMany
+    {
+        return $this->hasMany(DeviceToken::class);
+    }
+
+    /** Internal administrative notes left on this user account. */
+    public function userNotes(): HasMany
+    {
+        return $this->hasMany(UserNote::class);
+    }
+
+    /** Moderation complaints filed by other players about this user. */
+    public function receivedPlayerReports(): HasMany
+    {
+        return $this->hasMany(PlayerReport::class, 'reported_id');
+    }
+
+    /** Moderation complaints this user has filed about other players. */
+    public function filedPlayerReports(): HasMany
+    {
+        return $this->hasMany(PlayerReport::class, 'reporter_id');
+    }
+
+    /** Other players who have blocked this account. */
+    public function blockedByOthers(): HasMany
+    {
+        return $this->hasMany(PlayerBlock::class, 'blocked_id');
+    }
+
+    /** ActionBoard reputation penalties and events for this player. */
+    public function reputationEvents(): HasMany
+    {
+        return $this->hasMany(ReputationEvent::class, 'player_id', 'player_id');
     }
 
     /** Organization units this user belongs to (pivot: designation, is_primary). */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
 use App\Models\Concerns\BroadcastsContentChanges;
 use App\Models\Concerns\TargetsOrganizations;
 use Illuminate\Database\Eloquent\Model;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 final class FeatureFlag extends Model
 {
+    use AuditsAdminChanges;
     use BroadcastsContentChanges;
     use TargetsOrganizations;
 

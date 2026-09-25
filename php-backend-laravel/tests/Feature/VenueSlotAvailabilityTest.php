@@ -49,6 +49,7 @@ class VenueSlotAvailabilityTest extends TestCase
         $this->venue = Venue::create([
             'name' => 'Sportz Arena', 'location' => 'Gachibowli', 'price' => 1400,
             'is_active' => true, 'is_bookable' => true, 'partner_id' => $this->owner->id,
+            'city' => 'Hyderabad', 'images' => ['venues/test.jpg'], 'status' => 'published',
         ]);
 
         $this->courtA = VenueCourt::create([
@@ -182,14 +183,13 @@ class VenueSlotAvailabilityTest extends TestCase
         $this->assertSame('closed', $this->slotState(today()->addDays(2)->toDateString())['state']);
     }
 
-    public function test_a_venue_without_courts_books_by_slot(): void
+    public function test_a_venue_without_courts_is_not_live_to_customers(): void
     {
+        // Venue::readinessErrors() needs at least one active court, so removing the last
+        // one takes the venue off the customer app rather than selling bare slots.
         $this->courtA->delete();
-        $this->book(['venue_court_id' => null]);
 
-        $state = $this->slotState();
-        $this->assertSame('booked', $state['state']);
-        $this->assertSame(1, $state['courts_total']);
+        $this->getJson('/api/venues/' . $this->venue->id . '/availability')->assertNotFound();
     }
 
     public function test_open_means_checkout_accepts_and_booked_means_it_refuses(): void

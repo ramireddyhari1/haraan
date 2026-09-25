@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
 use App\Services\Membership\MemberEntitlements;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +19,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 final class MemberPlanEntitlement extends Model
 {
+    use AuditsAdminChanges;
+
     protected $fillable = ['plan_id', 'feature_key', 'enabled', 'limit_value'];
 
     protected $casts = [

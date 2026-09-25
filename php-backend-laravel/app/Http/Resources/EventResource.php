@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Models\User;
+use App\Services\Membership\MemberBookingPerks;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -36,6 +38,10 @@ final class EventResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $viewer = $request->attributes->get('auth_user');
+        $earlyHours = app(MemberBookingPerks::class)
+            ->earlyAccessHours($viewer instanceof User ? $viewer : null);
+
         return [
             'id'             => $this->id,
             'title'          => $this->title,
@@ -160,8 +166,11 @@ final class EventResource extends JsonResource
                     'capacity'    => $t->capacity,
                     'sold'        => $t->sold,
                     'remaining'   => $t->remaining(),
-                    // On sale = inside its sales window AND its release phase has opened.
-                    'onSale'      => $t->isOnSale() && $this->resource->phaseReleased((int) $t->release_phase),
+                    // On sale = inside its sales window (opened sooner by the viewer's
+                    // early-access perk) AND its release phase has opened.
+                    'onSale' => $t->isOnSale($earlyHours) && $this->resource->phaseReleased((int) $t->release_phase),
+                    // True when only the viewer's membership has opened this tier yet.
+                    'earlyAccess' => $t->openEarlyFor($earlyHours) && $this->resource->phaseReleased((int) $t->release_phase),
                     'releasePhase' => (int) $t->release_phase,
                     // Bulk-booking bounds the app/web quantity stepper should honour.
                     'bulkBooking' => (bool) $t->bulk_booking,

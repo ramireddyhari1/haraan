@@ -321,6 +321,12 @@ fun MatchDetailsScreen(
         )
     }
 
+    // Post-match rewards: every registered player in the squads can reach theirs from here.
+    val rewardsState = uiState
+    if (rewardsState is MatchScreenState.Success && !footballScoring && !sportScoring) {
+        com.haraan.app.ui.rewards.MatchRewardsEntry(matchId = matchId, finished = !rewardsState.data.isLive)
+    }
+
     // The rally / points scorer, hosted the same way football's is. It posts events and
     // re-reads the board the server derives — it never sends a score.
     val boardState = uiState
@@ -352,7 +358,10 @@ fun MatchDetailsScreen(
             },
             onFinish = {
                 val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
-                tok != null && matchRepo.completeMatch(tok, matchId)
+                val finished = tok != null && matchRepo.completeMatch(tok, matchId)
+                // The scorer's own post-match moment; everyone else in the squads gets a push.
+                if (finished) com.haraan.app.data.rewards.RewardsNav.open(matchId)
+                finished
             },
             onDone = {
                 sportScoring = false
@@ -422,7 +431,9 @@ fun MatchDetailsScreen(
             },
             finishMatch = {
                 val tok = com.haraan.app.data.TokenStore.getSignedInToken(loadContext)
-                if (tok != null) matchRepo.completeMatch(tok, matchId)
+                if (tok != null && matchRepo.completeMatch(tok, matchId)) {
+                    com.haraan.app.data.rewards.RewardsNav.open(matchId)
+                }
             },
             onDone = {
                 footballScoring = false

@@ -12,6 +12,7 @@ use App\Services\WhatsAppService;
 use App\Support\JwtService;
 use App\Support\MessageContext;
 use App\Support\PhoneNumber;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -56,10 +57,7 @@ use Illuminate\Support\Str;
  */
 final class PhoneOtpController extends Controller
 {
-    private const TTL_SECONDS = 300;
-
-    /** Wrong-code attempts allowed before the session is burned. */
-    private const MAX_ATTEMPTS = 5;
+    // Code lifetime and wrong-try limit: /control → Platform rules → Sign-in codes.
 
     public function __construct(
         private readonly WhatsAppService $whatsapp,
@@ -123,12 +121,12 @@ final class PhoneOtpController extends Controller
             // on every login.
             'otp' => $this->hash($otp),
             'attempts' => 0,
-        ], self::TTL_SECONDS);
+        ], PlatformRules::int('otp.ttl_seconds'));
 
         return response()->json([
             'channel' => 'whatsapp',
             'token' => $token,
-            'expires_in' => self::TTL_SECONDS,
+            'expires_in' => PlatformRules::int('otp.ttl_seconds'),
         ]);
     }
 
@@ -158,13 +156,13 @@ final class PhoneOtpController extends Controller
 
             // Burn the session rather than let a 6-digit code be walked. The
             // throttle limits rate; this limits total guesses against one code.
-            if ($payload['attempts'] >= self::MAX_ATTEMPTS) {
+            if ($payload['attempts'] >= PlatformRules::int('otp.max_attempts')) {
                 Cache::forget($key);
 
                 return response()->json(['error' => 'Too many incorrect codes. Please request a new one.'], 429);
             }
 
-            Cache::put($key, $payload, self::TTL_SECONDS);
+            Cache::put($key, $payload, PlatformRules::int('otp.ttl_seconds'));
 
             return response()->json(['error' => 'That code is not right. Please check and try again.'], 422);
         }

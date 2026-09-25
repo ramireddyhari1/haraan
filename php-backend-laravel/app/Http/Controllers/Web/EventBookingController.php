@@ -7,13 +7,16 @@ namespace App\Http\Controllers\Web;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\Event;
+use App\Models\User;
 use App\Services\BookingNotifier;
 use App\Services\BookingService;
+use App\Services\Membership\MemberBookingPerks;
 use App\Services\RazorpayGateway;
 use App\Support\ContactPrefill;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -70,15 +73,15 @@ final class EventBookingController extends Controller
         // back to the account: the web form always shows these fields, so an empty
         // one is a user error to report, not a silent substitution.
         $contact = $request->validate([
-            'contact.name'  => ['required', 'string', 'max:120'],
+            'contact.name' => ['required', 'string', 'max:120'],
             'contact.email' => ['required', 'email', 'max:255'],
             'contact.phone' => ['required', 'string', 'max:32', 'regex:/^[0-9 +()\-]{7,20}$/'],
         ], [
-            'contact.name.required'  => 'Enter the name for this ticket.',
+            'contact.name.required' => 'Enter the name for this ticket.',
             'contact.email.required' => 'Enter an email — your ticket goes here.',
-            'contact.email.email'    => 'That email address doesn’t look right.',
+            'contact.email.email' => 'That email address doesn’t look right.',
             'contact.phone.required' => 'Enter a phone number.',
-            'contact.phone.regex'    => 'That phone number doesn’t look right.',
+            'contact.phone.regex' => 'That phone number doesn’t look right.',
         ])['contact'];
 
         $coupon = trim((string) $request->input('couponCode', ''));
@@ -103,7 +106,7 @@ final class EventBookingController extends Controller
         // their own details twice. Never overwrite details they already set.
         $this->backfillAccount($request->user(), $contact);
 
-        $grand      = $this->grandTotal($order);
+        $grand = $this->grandTotal($order);
         $grandPaise = (int) round($grand * 100);
 
         // Free order — no payment step, confirm the reservation straight away.
@@ -120,7 +123,7 @@ final class EventBookingController extends Controller
         // Paid order — create the Razorpay order and show the payment page. If the gateway is
         // unreachable, release the hold so the seats aren't stuck and send the buyer back.
         try {
-            $rzp = $this->razorpay->createOrder($grandPaise, 'evt_' . $event->id . '_' . $order->first()->id);
+            $rzp = $this->razorpay->createOrder($grandPaise, 'evt_'.$event->id.'_'.$order->first()->id);
         } catch (RuntimeException $e) {
             $this->bookings->releaseReservation($order->pluck('id')->all());
 
@@ -130,16 +133,16 @@ final class EventBookingController extends Controller
         $this->bookings->attachOrderId($order, (string) $rzp['id']);
 
         return view('site.event-pay', [
-            'title'       => 'Complete payment',
-            'event'       => $event,
+            'title' => 'Complete payment',
+            'event' => $event,
             'amountLabel' => number_format($grand, 2),
-            'razorKey'    => $this->razorpay->publicKey(),
-            'orderId'     => $rzp['id'],
-            'amount'      => $rzp['amount'],
-            'currency'    => $rzp['currency'],
-            'contact'     => $contact,
-            'passUrl'     => route('site.booking.pass', ['id' => $order->first()->id]),
-            'eventUrl'    => "/events/{$event->id}",
+            'razorKey' => $this->razorpay->publicKey(),
+            'orderId' => $rzp['id'],
+            'amount' => $rzp['amount'],
+            'currency' => $rzp['currency'],
+            'contact' => $contact,
+            'passUrl' => route('site.booking.pass', ['id' => $order->first()->id]),
+            'eventUrl' => "/events/{$event->id}",
         ]);
     }
 
@@ -155,29 +158,32 @@ final class EventBookingController extends Controller
     {
         $event = $this->publishedEvent($id);
         $lines = $this->linesFrom($request, $event);
-        $code  = trim((string) $request->input('couponCode', ''));
+        $code = trim((string) $request->input('couponCode', ''));
 
         if ($lines === [] || $code === '') {
             return response()->json(['applied' => false, 'message' => 'Enter a coupon code.']);
         }
 
-        $priced   = $this->priceLines($event, $lines);
-        $tickets  = array_sum(array_column($lines, 'quantity'));
-        $resolved = $this->bookings->resolveCoupon($request->user(), $event->id, $code, $priced['subtotal'], $priced['fee'], $tickets);
+        $priced = $this->priceLines($event, $lines);
+        $tickets = array_sum(array_column($lines, 'quantity'));
+        $resolved = $this->bookings->resolveCoupon($request->user(), $event->id, $code, $priced['subtotal'], $priced['chargesBeforeDiscount'], $tickets);
 
         if ($resolved['coupon'] === null) {
             return response()->json(['applied' => false, 'message' => $resolved['message']]);
         }
 
-        $discount = $resolved['discount'];
+        // Re-price with the discount: tax is on the discounted subtotal, so it moves too.
+        $charges = $event->orderCharges($priced['subtotal'], $resolved['discount']);
+        $discount = $charges['discount'];
 
         return response()->json([
-            'applied'       => true,
-            'code'          => $resolved['coupon']->code,
-            'message'       => $resolved['message'],
-            'discount'      => $discount,
+            'applied' => true,
+            'code' => $resolved['coupon']->code,
+            'message' => $resolved['message'],
+            'discount' => $discount,
             'discountLabel' => number_format($discount, 2),
-            'totalLabel'    => number_format(max(0, round($priced['total'] - $discount, 2)), 2),
+            'totalLabel' => number_format($charges['total'], 2),
+            'taxLabel' => number_format($charges['tax'], 2),
         ]);
     }
 
@@ -188,9 +194,9 @@ final class EventBookingController extends Controller
     public function confirmWeb(Request $request, string $id): JsonResponse
     {
         $data = $request->validate([
-            'razorpay_order_id'   => ['required', 'string'],
+            'razorpay_order_id' => ['required', 'string'],
             'razorpay_payment_id' => ['required', 'string'],
-            'razorpay_signature'  => ['required', 'string'],
+            'razorpay_signature' => ['required', 'string'],
         ]);
 
         if (! $this->razorpay->verifySignature($data['razorpay_order_id'], $data['razorpay_payment_id'], $data['razorpay_signature'])) {
@@ -210,7 +216,7 @@ final class EventBookingController extends Controller
         BookingNotifier::dispatch($order->first());
 
         return response()->json([
-            'ok'       => true,
+            'ok' => true,
             'redirect' => route('site.booking.pass', ['id' => $order->first()->id]),
         ]);
     }
@@ -228,14 +234,10 @@ final class EventBookingController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    /** Grand total charged for an order: ticket subtotal + convenience fee − discount. */
-    private function grandTotal(\Illuminate\Support\Collection $order): float
+    /** Grand total charged for an order — the one definition, on Booking. */
+    private function grandTotal(Collection $order): float
     {
-        $subtotal = round((float) $order->sum('total_amount'), 2);
-        $fee      = round((float) $order->sum('convenience_fee'), 2);
-        $discount = round((float) $order->sum('discount'), 2);
-
-        return round($subtotal + $fee - $discount, 2);
+        return Booking::orderGrandTotal($order);
     }
 
     /**
@@ -301,10 +303,10 @@ final class EventBookingController extends Controller
             ->get();
 
         return view('site.booking-pass', [
-            'title'   => 'Your ticket',
+            'title' => 'Your ticket',
             'booking' => $booking,
-            'group'   => $group,
-            'event'   => $booking->event,
+            'group' => $group,
+            'event' => $booking->event,
         ]);
     }
 
@@ -322,7 +324,7 @@ final class EventBookingController extends Controller
      *
      * @param  array{name: string, email: string, phone: string}  $contact
      */
-    private function backfillAccount(\App\Models\User $user, array $contact): void
+    private function backfillAccount(User $user, array $contact): void
     {
         if (blank($user->name)) {
             $user->fill(['name' => $contact['name']])->save();
@@ -360,14 +362,17 @@ final class EventBookingController extends Controller
             return [];
         }
 
-        $validTierIds = $event->saleableTicketTypes()->pluck('id')->all();
+        $early = app(MemberBookingPerks::class)->earlyAccessHours($request->user());
+        $validTierIds = $event->saleableTicketTypes($early)->pluck('id')->all();
         // Key 0 is the flat event price, and only ever valid when the event has no
         // tiers at all — not merely when none are currently buyable.
-        $hasTiers     = $event->ticketTypes->isNotEmpty();
-        $lines        = [];
+        $hasTiers = $event->ticketTypes->isNotEmpty();
+        $lines = [];
 
         foreach ($qty as $key => $value) {
-            $quantity = min(10, max(0, (int) $value));
+            // No silent clamp to a small number: BookingService enforces the per-type and
+            // per-order limits from /control and says which one was hit. 1000 is a sanity cap.
+            $quantity = min(1000, max(0, (int) $value));
             if ($quantity === 0) {
                 continue;
             }
@@ -391,7 +396,7 @@ final class EventBookingController extends Controller
      */
     private function priceLines(Event $event, array $lines): array
     {
-        $tiers  = $event->ticketTypes->keyBy('id');
+        $tiers = $event->ticketTypes->keyBy('id');
         $priced = [];
         $subtotal = 0.0;
 
@@ -403,23 +408,25 @@ final class EventBookingController extends Controller
 
             $priced[] = [
                 'ticketTypeId' => $line['ticketTypeId'],
-                'name'         => $tier?->name ?? 'Standard',
-                'quantity'     => $line['quantity'],
-                'unit'         => $unit,
-                'amount'       => $amount,
+                'name' => $tier?->name ?? 'Standard',
+                'quantity' => $line['quantity'],
+                'unit' => $unit,
+                'amount' => $amount,
             ];
         }
 
         $subtotal = round($subtotal, 2);
-        $feeLines = $event->feeLinesFor($subtotal);
-        $fee      = $event->feesTotalFor($subtotal);
+        $charges = $event->orderCharges($subtotal);
 
         return [
-            'lines'    => $priced,
+            'lines' => $priced,
             'subtotal' => $subtotal,
-            'fee'      => $fee,
-            'feeLines' => $feeLines,
-            'total'    => round($subtotal + $fee, 2),
+            'fee' => $charges['fees'],
+            'feeLines' => $charges['fee_lines'],
+            // Every line on the bill (host fees, platform/gateway fee, tax) — what's charged.
+            'chargeLines' => $charges['lines'],
+            'chargesBeforeDiscount' => $charges['charges_before_discount'],
+            'total' => $charges['total'],
         ];
     }
 }

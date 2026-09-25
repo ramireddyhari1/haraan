@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\UserAdminResource;
+use App\Models\AdminAction;
 use App\Models\User;
 use App\Support\JwtService;
 use App\Support\PartnerAccountResolver;
@@ -44,20 +46,38 @@ final class UsersController extends Controller
 
         $query = User::query()->orderByDesc('created_at');
         if (isset($data['role'])) {
-            $query->whereRaw('upper(role) = ?', [strtoupper($data['role'])]);
+            $query->where('role', strtoupper($data['role']));
         }
 
-        return response()->json(['data' => $query->paginate((int) ($data['limit'] ?? 20))]);
+        $paginator = $query->paginate((int) ($data['limit'] ?? 20));
+        $paginator->getCollection()->transform(function (User $u) use ($request) {
+            return (new UserAdminResource($u))->toArray($request);
+        });
+
+        return response()->json(['data' => $paginator]);
     }
 
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         $user = User::query()->find($id);
         if ($user === null) {
             return response()->json(['error' => 'User not found'], 404);
         }
 
-        return response()->json(['data' => $user]);
+        $actor = $request->user();
+        $canViewPii = $actor !== null && (
+            $actor->isSuperAdmin()
+            || (method_exists($actor, 'can') && $actor->can('users.pii.view'))
+        );
+
+        if ($canViewPii && (int) $actor->id !== (int) $user->id) {
+            AdminAction::log('user.pii_viewed', [
+                'user_id' => $user->id,
+                'viewed_fields' => ['phone', 'email', 'date_of_birth'],
+            ], $user);
+        }
+
+        return response()->json(['data' => new UserAdminResource($user)]);
     }
 
     public function update(Request $request, string $id): JsonResponse
@@ -93,7 +113,7 @@ final class UsersController extends Controller
             JwtService::revokeAllFor($user);
         }
 
-        return response()->json(['message' => 'User updated', 'data' => $user]);
+        return response()->json(['message' => 'User updated', 'data' => new UserAdminResource($user)]);
     }
 
     public function updateRole(Request $request, string $id): JsonResponse
@@ -119,10 +139,22 @@ final class UsersController extends Controller
             return response()->json(['error' => 'Only an administrator can grant or remove admin roles.'], 403);
         }
 
+        $previous = strtoupper((string) $user->role);
         $user->role = $role;
         $user->save();
 
-        return response()->json(['message' => 'Role updated', 'data' => $user]);
+        // A role is baked into the JWT payload, so a live token keeps asserting the OLD
+        // role until it expires. Revoking forces a fresh sign-in at the new privilege
+        // level — which matters most in the direction that removes access.
+        JwtService::revokeAllFor($user);
+
+        // JWT guard, so AuditsAdminChanges does not fire — log the escalation explicitly.
+        AdminAction::log('user.role_changed', [
+            'from' => $previous,
+            'to' => $role,
+        ], $user);
+
+        return response()->json(['message' => 'Role updated', 'data' => new UserAdminResource($user)]);
     }
 
     public function updateStatus(Request $request, string $id): JsonResponse
@@ -144,16 +176,34 @@ final class UsersController extends Controller
             return $refusal;
         }
 
+        $previous = strtoupper(trim((string) $user->status));
         $user->status = strtoupper($data['status']);
         $user->save();
 
-        return response()->json(['message' => 'Status updated', 'data' => $user]);
+        // Suspending someone has to end the sessions they already hold. Their JWT is
+        // stateless with a 7-day life, so without this the suspension would not take
+        // effect until the token happened to expire.
+        if (! $user->isAccountActive()) {
+            JwtService::revokeAllFor($user);
+        }
+
+        // This controller authenticates with a JWT, so AuditsAdminChanges (which only
+        // fires for the `web` guard) never sees it. Status changes made through the API
+        // were invisible in the audit log; log them explicitly.
+        AdminAction::log('user.status_changed', [
+            'from' => $previous,
+            'to' => $user->status,
+        ], $user);
+
+        return response()->json(['message' => 'Status updated', 'data' => new UserAdminResource($user)]);
     }
 
-    public function partners(): JsonResponse
+    public function partners(Request $request): JsonResponse
     {
-        $partners = User::query()->whereRaw('upper(role) = ?', ['PARTNER'])->orderByDesc('created_at')->get();
-        return response()->json(['data' => $partners]);
+        $partners = User::query()->where('role', 'PARTNER')->orderByDesc('created_at')->get();
+        return response()->json([
+            'data' => $partners->map(fn (User $p) => (new UserAdminResource($p))->toArray($request)),
+        ]);
     }
 
     /**
@@ -191,7 +241,7 @@ final class UsersController extends Controller
         return response()->json([
             'message' => $upgraded ? 'Existing member upgraded to a partner' : 'Partner created',
             'upgraded' => $upgraded,
-            'data' => $partner,
+            'data' => new UserAdminResource($partner),
         ], $upgraded ? 200 : 201);
     }
 

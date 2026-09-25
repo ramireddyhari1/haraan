@@ -15,7 +15,26 @@ import java.time.format.DateTimeFormatter
 object MembershipFormat {
 
     const val MONTH = "month"
+    const val QUARTER = "quarter"
+    const val HALF_YEAR = "half_year"
     const val YEAR = "year"
+
+    /** Every term the server can sell, shortest first — the order the selector shows them. */
+    val TERMS = listOf(MONTH, QUARTER, HALF_YEAR, YEAR)
+
+    fun termLabel(interval: String): String = when (interval) {
+        QUARTER -> "3 months"
+        HALF_YEAR -> "6 months"
+        YEAR -> "Yearly"
+        else -> "Monthly"
+    }
+
+    private fun monthsIn(interval: String): Int = when (interval) {
+        QUARTER -> 3
+        HALF_YEAR -> 6
+        YEAR -> 12
+        else -> 1
+    }
 
     private val dateFormat = DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH)
 
@@ -34,7 +53,12 @@ object MembershipFormat {
         return sign + "₹" + grouped + if (fraction == 0L) "" else "." + fraction.toString().padStart(2, '0')
     }
 
-    fun perInterval(interval: String?): String = if (interval == YEAR) "/year" else "/month"
+    fun perInterval(interval: String?): String = when (interval) {
+        QUARTER -> "/3 months"
+        HALF_YEAR -> "/6 months"
+        YEAR -> "/year"
+        else -> "/month"
+    }
 
     fun priceLabel(price: PlanPrice): String = rupees(price.amountPaise) + perInterval(price.interval)
 
@@ -48,17 +72,23 @@ object MembershipFormat {
     fun priceFor(plan: CataloguePlan, interval: String): PlanPrice? = plan.prices.firstOrNull { it.interval == interval }
 
     /**
-     * Whole-percent saving of a yearly price over twelve monthly ones, computed from the real
-     * prices — null when there isn't one to claim.
+     * Whole-percent saving of [interval] over paying monthly for the same span, computed from the
+     * real prices. Across plans it's the smallest saving, so the label never over-promises; null
+     * when there isn't one to claim.
      */
-    fun yearlySaving(plans: List<CataloguePlan>): Int? = plans.mapNotNull { plan ->
-        val monthly = priceFor(plan, MONTH)?.amountPaise ?: return@mapNotNull null
-        val yearly = priceFor(plan, YEAR)?.amountPaise ?: return@mapNotNull null
-        val full = monthly * 12
-        if (full <= 0 || yearly >= full) null else (((full - yearly) * 100) / full).toInt()
-    }.minOrNull()?.takeIf { it > 0 }
+    fun saving(plans: List<CataloguePlan>, interval: String): Int? {
+        if (interval == MONTH) return null
+        return plans.mapNotNull { plan ->
+            val monthly = priceFor(plan, MONTH)?.amountPaise ?: return@mapNotNull null
+            val longer = priceFor(plan, interval)?.amountPaise ?: return@mapNotNull null
+            val full = monthly * monthsIn(interval)
+            if (full <= 0 || longer >= full) null else (((full - longer) * 100) / full).toInt()
+        }.minOrNull()?.takeIf { it > 0 }
+    }
 
-    fun hasYearly(plans: List<CataloguePlan>): Boolean = plans.any { plan -> plan.prices.any { it.interval == YEAR } }
+    /** The terms at least one plan is on sale at, shortest first. */
+    fun terms(plans: List<CataloguePlan>): List<String> =
+        TERMS.filter { term -> plans.any { plan -> plan.prices.any { it.interval == term } } }
 
     /** One sentence on where the member stands. */
     fun statusLine(m: Membership, zone: ZoneId = ZoneId.systemDefault()): String {
@@ -162,7 +192,12 @@ object MembershipFormat {
 
     /** The one line of terms under the price — what happens when they tap, and when. */
     fun commitTerms(buy: Cta.Buy, membership: Membership?, zone: ZoneId = ZoneId.systemDefault()): String = when (buy.kind) {
-        Cta.Kind.NEW -> (if (buy.price.interval == YEAR) "Renews yearly" else "Renews monthly") + " · Cancel anytime"
+        Cta.Kind.NEW -> when (buy.price.interval) {
+            QUARTER -> "Renews every 3 months"
+            HALF_YEAR -> "Renews every 6 months"
+            YEAR -> "Renews yearly"
+            else -> "Renews monthly"
+        } + " · Cancel anytime"
         Cta.Kind.UPGRADE -> "Starts today · Current plan stops renewing"
         Cta.Kind.DOWNGRADE, Cta.Kind.SWITCH_INTERVAL ->
             date(membership?.subscription?.endsAt ?: membership?.subscription?.renewsAt, zone)

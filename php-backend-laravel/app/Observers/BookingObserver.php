@@ -21,8 +21,17 @@ class BookingObserver
     {
     }
 
+    public function created(Booking $booking): void
+    {
+        $booking->user?->recalculateKpiMetrics();
+    }
+
     public function updated(Booking $booking): void
     {
+        if ($booking->wasChanged(['status', 'total_amount', 'user_id'])) {
+            $booking->user?->recalculateKpiMetrics();
+        }
+
         if (! $this->justCancelled($booking)) {
             return;
         }
@@ -34,6 +43,11 @@ class BookingObserver
         }
 
         $this->waitlist->offerFreedSlot($booking);
+    }
+
+    public function deleted(Booking $booking): void
+    {
+        $booking->user?->recalculateKpiMetrics();
     }
 
     /**

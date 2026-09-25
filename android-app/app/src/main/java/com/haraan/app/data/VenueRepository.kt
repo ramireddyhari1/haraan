@@ -9,6 +9,9 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** How far ahead a customer may book a venue: [days] for everyone, plus [priorityDays] from their plan. */
+data class BookingWindow(val days: Int, val priorityDays: Int, val lastDate: java.time.LocalDate)
+
 data class VenueApiItem(
     val id: String,
     val name: String,
@@ -135,6 +138,11 @@ data class VenueDetailData(
     // total charged.
     val convenienceFeeType: String = "none",
     val convenienceFeeValue: Double = 0.0,
+    // Pulse tax, set platform-wide in /control → Platform rules → Fees. Same shape as the fee,
+    // but taken on (subtotal − discount) and only on online bookings. Read via [taxOn].
+    val taxType: String = "none",
+    val taxValue: Double = 0.0,
+    val taxLabel: String = "GST",
 ) {
     /** The fee this venue adds to a [subtotal], rounded to whole rupees like the summary. */
     fun convenienceFeeOn(subtotal: Int): Int {
@@ -142,6 +150,17 @@ data class VenueDetailData(
         return when (convenienceFeeType.lowercase()) {
             "flat" -> kotlin.math.round(convenienceFeeValue).toInt()
             "percent" -> kotlin.math.round(subtotal * convenienceFeeValue / 100.0).toInt()
+            else -> 0
+        }
+    }
+
+    /** Pulse tax on [subtotal] after [discount] — mirrors Venue::taxFor() on the server. */
+    fun taxOn(subtotal: Int, discount: Int = 0): Int {
+        val base = subtotal - discount
+        if (subtotal <= 0 || base <= 0 || taxValue <= 0.0) return 0
+        return when (taxType.lowercase()) {
+            "flat" -> kotlin.math.round(taxValue).toInt()
+            "percent" -> kotlin.math.round(base * taxValue / 100.0).toInt()
             else -> 0
         }
     }
@@ -213,10 +232,13 @@ class VenueRepository {
      * fails, so callers can tell "unknown" apart from "known and empty" and fall back to the
      * template flags instead of painting every slot booked.
      */
-    suspend fun getSlotAvailability(venueId: String, date: java.time.LocalDate): Map<Int, SlotAvailability>? =
+    suspend fun getSlotAvailability(venueId: String, date: java.time.LocalDate, token: String? = null): Map<Int, SlotAvailability>? =
         withContext(Dispatchers.IO) {
             runCatching {
-                val body = ConditionalHttp.getText("${ApiConfig.BASE_URL}/api/venues/$venueId/availability?date=$date")
+                val body = ConditionalHttp.getText(
+                    "${ApiConfig.BASE_URL}/api/venues/$venueId/availability?date=$date",
+                    token?.takeIf { TokenStore.isSignedIn(it) },
+                )
                     ?: return@runCatching null
                 val arr = JSONObject(body).optJSONObject("data")?.optJSONArray("slots")
                     ?: return@runCatching null
@@ -236,6 +258,27 @@ class VenueRepository {
                 }
             }.getOrNull()
         }
+
+    /**
+     * How far ahead this viewer may book the venue — the venue's window plus any priority days
+     * their plan adds — read from today's availability. Null when it can't be read, so the date
+     * picker simply keeps its old "today onwards" rule.
+     */
+    suspend fun getBookingWindow(venueId: String, token: String?): BookingWindow? = withContext(Dispatchers.IO) {
+        runCatching {
+            val today = java.time.LocalDate.now()
+            val body = ConditionalHttp.getText(
+                "${ApiConfig.BASE_URL}/api/venues/$venueId/availability?date=$today",
+                token?.takeIf { TokenStore.isSignedIn(it) },
+            ) ?: return@runCatching null
+            val w = JSONObject(body).optJSONObject("data")?.optJSONObject("booking_window") ?: return@runCatching null
+            BookingWindow(
+                days = w.optInt("days"),
+                priorityDays = w.optInt("priority_days"),
+                lastDate = java.time.LocalDate.parse(w.optString("last_date")),
+            )
+        }.getOrNull()
+    }
 
     /** Full venue detail (GET /api/venues/{id}); null on network/parse failure. */
     suspend fun getVenueDetail(id: String): VenueDetailData? = withContext(Dispatchers.IO) {
@@ -323,6 +366,9 @@ class VenueRepository {
             // Absent on older servers, which is the "none" case anyway.
             convenienceFeeType = s("convenience_fee_type").ifBlank { "none" },
             convenienceFeeValue = d.optDouble("convenience_fee_value", 0.0).let { if (it.isNaN()) 0.0 else it },
+            taxType = s("tax_type").ifBlank { "none" },
+            taxValue = d.optDouble("tax_value", 0.0).let { if (it.isNaN()) 0.0 else it },
+            taxLabel = s("tax_label").ifBlank { "GST" },
         )
     }
 

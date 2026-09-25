@@ -84,6 +84,8 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-o-banknotes'),
                 NavigationGroup::make('Marketing')
                     ->icon('heroicon-o-megaphone'),
+                NavigationGroup::make('Rewards')
+                    ->icon('heroicon-o-gift'),
                 NavigationGroup::make('App Content')
                     ->icon('heroicon-o-rectangle-stack'),
                 NavigationGroup::make('Support & Moderation')

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Membership;
 
+use App\Exceptions\PaymentsPaused;
+use App\Models\MemberPlanPrice;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -40,9 +42,12 @@ class MemberRazorpayClient
      */
     public function createPlan(string $name, string $interval, int $amountPaise, string $currency, array $notes = []): string
     {
+        // 3- and 6-month plans are Razorpay "monthly" plans billed every 3 or 6 periods.
+        $term = MemberPlanPrice::razorpayTerm($interval);
+
         $response = $this->send('post', '/plans', [
-            'period' => $interval === 'year' ? 'yearly' : 'monthly',
-            'interval' => 1,
+            'period' => $term['period'],
+            'interval' => $term['every'],
             'item' => [
                 'name' => mb_substr($name, 0, 100),
                 'amount' => $amountPaise,
@@ -65,6 +70,9 @@ class MemberRazorpayClient
      */
     public function createSubscription(string $planId, int $totalCount, ?int $startAt, int $expireBy, array $notes): array
     {
+        // /control → Operations → Stop taking payments.
+        PaymentsPaused::guard();
+
         $body = [
             'plan_id' => $planId,
             'total_count' => $totalCount,

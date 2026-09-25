@@ -37,6 +37,10 @@ android {
         // Google Maps key for the event-detail venue map preview (Static Maps + Geocoding).
         // Blank hides the map card gracefully.
         buildConfigField("String", "GOOGLE_MAPS_API_KEY", "\"${project.findProperty("GOOGLE_MAPS_API_KEY") ?: ""}\"")
+        // AdMob app ID for opted-in rewarded videos (post-match rewards). Google requires it in
+        // the manifest, so it can't come from /control; the ad UNIT is server-configured. Defaults
+        // to Google's public TEST app ID — set ADMOB_APP_ID in gradle.properties for release.
+        manifestPlaceholders["admobAppId"] = project.findProperty("ADMOB_APP_ID") ?: "ca-app-pub-3940256099942544~3347511713"
     }
 
     signingConfigs {
@@ -164,6 +168,9 @@ dependencies {
    */
   implementation("org.opencv:opencv:4.12.0")
 
+  // ML Kit Pose Detection (fast real-time on-device skeleton tracking)
+  implementation("com.google.mlkit:pose-detection:18.0.0-beta3")
+
   // CameraX — a paired phone acting as a match camera records short clips around a
   // delivery. video + view only; no image analysis pipeline is pulled in, because
   // nothing on-device is analysing frames.
@@ -217,6 +224,12 @@ dependencies {
   implementation(libs.androidx.datastore.preferences)
   // Animated campaign decorations (lights, garlands) uploaded as Lottie .json from /control.
   implementation(libs.lottie.compose)
+  // Rewarded videos a player CHOOSES to watch to unlock a post-match reward. Verified by
+  // Google's server-side callback, never by the app. Initialised lazily on the first tap —
+  // never at launch, and never for members whose plan has no ads.
+  implementation("com.google.android.gms:play-services-ads:24.4.0")
+  // Consent (UMP) before the first ad request.
+  implementation("com.google.android.ump:user-messaging-platform:3.2.0")
 
   // Firebase — BoM keeps product versions aligned; add products without pinning versions.
   // Cloud Messaging (FCM) powers push notifications (see the notifications inbox work).

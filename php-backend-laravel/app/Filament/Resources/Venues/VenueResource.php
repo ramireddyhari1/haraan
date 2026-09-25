@@ -5,7 +5,10 @@ namespace App\Filament\Resources\Venues;
 use App\Filament\Resources\Venues\Pages\CreateVenue;
 use App\Filament\Resources\Venues\Pages\EditVenue;
 use App\Filament\Resources\Venues\Pages\ListVenues;
+use App\Filament\Resources\Venues\Pages\VenueAnalytics;
+use App\Filament\Resources\Venues\Pages\ViewVenue;
 use App\Filament\Resources\Venues\Schemas\VenueForm;
+use App\Filament\Resources\Venues\Schemas\VenueInfolist;
 use App\Filament\Resources\Venues\Tables\VenuesTable;
 use App\Filament\Concerns\ScopesToOrganization;
 use App\Models\Venue;
@@ -101,17 +104,39 @@ class VenueResource extends Resource
         return VenueForm::configure($schema);
     }
 
+    /** Venue 360 — anyone who can see the list can read a venue; mutations stay gated above. */
+    public static function canView(\Illuminate\Database\Eloquent\Model $record): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function infolist(Schema $schema): Schema
+    {
+        return VenueInfolist::configure($schema);
+    }
+
     public static function table(Table $table): Table
     {
         return VenuesTable::configure($table);
     }
 
+    /**
+     * Ordered the way the 360 page reads: what is on sale, then when, then what
+     * it earned, then what was played on it, then who said what about it, then
+     * the paper trail.
+     */
     public static function getRelations(): array
     {
         return [
             \App\Filament\Resources\Venues\RelationManagers\CourtsRelationManager::class,
+            \App\Filament\Resources\Venues\RelationManagers\PricingRulesRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\SlotsRelationManager::class,
+            \App\Filament\Resources\Venues\RelationManagers\BlocksRelationManager::class,
+            \App\Filament\Resources\Venues\RelationManagers\BlockedDatesRelationManager::class,
+            \App\Filament\Resources\Venues\RelationManagers\VenueBookingsRelationManager::class,
+            \App\Filament\Resources\Venues\RelationManagers\VenueMatchesRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\ReviewsRelationManager::class,
+            \App\Filament\Resources\Venues\RelationManagers\VenueAuditRelationManager::class,
         ];
     }
 
@@ -120,6 +145,9 @@ class VenueResource extends Resource
         return [
             'index' => ListVenues::route('/'),
             'create' => CreateVenue::route('/create'),
+            'view' => ViewVenue::route('/{record}'),
+            // Was written months ago and never routed, so nothing could reach it.
+            'analytics' => VenueAnalytics::route('/{record}/analytics'),
             'edit' => EditVenue::route('/{record}/edit'),
         ];
     }

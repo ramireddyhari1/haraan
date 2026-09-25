@@ -28,7 +28,7 @@ async function loadPermissions(){
 function renderPermissionCheckboxes(role){
     return allPermissions.map(p => {
         const checked = (role.permissions||[]).some(rp=>rp.name===p.name) ? 'checked' : '';
-        return `<label style="margin-right:8px"><input type="checkbox" data-perm="${p.name}" ${checked}/> ${p.name}</label>`;
+        return `<label style="margin-right:8px"><input type="checkbox" data-perm="${esc(p.name)}" ${checked}/> ${esc(p.name)}</label>`;
     }).join('');
 }
 
@@ -41,7 +41,7 @@ async function loadRoles(){
     rows.forEach(r => {
         const tr = document.createElement('tr');
         const permsHtml = renderPermissionCheckboxes(r);
-        tr.innerHTML = `<td>${r.name}</td><td>${permsHtml}</td><td><button class="btn" data-role-id="${r.id}">Save</button></td>`;
+        tr.innerHTML = `<td>${esc(r.name)}</td><td>${permsHtml}</td><td><button class="btn" data-role-id="${esc(r.id)}">Save</button></td>`;
         body.appendChild(tr);
     });
     // attach save handlers

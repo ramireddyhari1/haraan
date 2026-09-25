@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@700;800;900&display=swap');
 /* Mobile-specific comprehensive overrides — mobile-first responsive design */
 
 .topbar .mobile-menu-toggle { display: none; }
@@ -136,81 +137,78 @@
     body { font-size: 15px; }
 
     /* --- HEADER / TOPBAR --- */
+    /* --- HEADER / TOPBAR --- */
     .topbar {
-        padding: 8px 0 4px;
+        padding: 10px 0 8px;
         position: sticky;
         top: 0;
         z-index: 100;
-        background: var(--surface);
-        border-bottom: 1px solid var(--border);
+        background: #ffffff;
+        border-bottom: 1px solid #e2e8f0;
         transition: box-shadow 180ms ease, border-color 180ms ease;
     }
-    /* Flat at the top, gains a subtle elevation once the page scrolls.
-       Toggled by JS (.is-scrolled) so it feels anchored, not floating. */
+    /* Subtle elevation on scroll */
     .topbar.is-scrolled {
-        border-bottom-color: transparent;
-        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+        border-bottom-color: rgba(226, 232, 240, 0.8);
+        box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
     }
     .topbar__inner {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: 1fr;
         grid-template-rows: auto auto auto;
         grid-template-areas:
-            "greet greet"
-            "search search"
-            "buttons buttons";
+            "greet"
+            "search"
+            "buttons";
         align-items: center;
-        row-gap: 8px;
-        column-gap: 10px;
-        /* No horizontal padding of its own — the .container's 16px already matches
-           the app's 16dp header inset. The extra 12px here pushed the content to
-           28px and squeezed the name column ~20px narrower than on device. */
-        padding: 6px 0 2px;
+        row-gap: 9px;
+        padding: 2px 0 2px;
     }
 
     /* --- APP-MATCHED GREETING HEADER ---------------------------------------
-       Mirrors the Android GreetingHeader (MainScreen.kt): 44px avatar with a
-       ring, "Hey <first name>!" over a tappable location line, utility icons
-       right. Values below track the app's tokens — ink #0F172A, sub #64748B,
-       border #E2E8F0 — so the two headers read as one product. */
+       Refined 42px avatar with crisp border ring, personalized greeting with tight
+       letterspacing, sleek location trigger, and harmonized 36px icon buttons. */
     .app-greet {
         grid-area: greet;
-        /* The grid sets justify-items:start, which would shrink-wrap this row and
-           strand the icons mid-header — stretch it so they sit at the far edge. */
         justify-self: stretch;
         width: 100%;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 11px;
         min-width: 0;
     }
 
-    /* The old pill and the account icon are replaced by the lockup above. */
+    /* The old desktop pill and account actions are hidden on mobile */
     .topbar .location-pill,
     .topbar__actions { display: none; }
 
     .app-greet__avatar {
         position: relative;
-        width: 44px;
-        height: 44px;
+        width: 42px;
+        height: 42px;
         flex-shrink: 0;
         border-radius: 50%;
-        background: #E2E8F0;
-        border: 1.5px solid #E2E8F0;
+        background: #f1f5f9;
+        border: 2px solid #ffffff;
+        box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08), 0 2px 5px rgba(15, 23, 42, 0.06);
         display: flex;
         align-items: center;
         justify-content: center;
         overflow: hidden;
         text-decoration: none;
+        transition: transform 0.15s ease;
+    }
+    .app-greet__avatar:active {
+        transform: scale(0.96);
     }
     .app-greet__initial {
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 700;
-        color: #0F172A;
+        color: #0f172a;
         line-height: 1;
     }
-    /* Guest / named-less fallback: neutral user glyph in the same ink as the letter. */
-    .app-greet__initial-glyph { color: #0F172A; }
+    /* Guest / named-less fallback */
+    .app-greet__initial-glyph { color: #475569; }
     .app-greet__photo {
         position: absolute;
         inset: 0;
@@ -225,13 +223,15 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
+        justify-content: center;
         gap: 2px;
     }
     .app-greet__hey {
-        font-size: 17px;
-        font-weight: 700;
-        line-height: 1.2;
-        color: #0F172A;
+        font-size: 16.5px;
+        font-weight: 750;
+        letter-spacing: -0.025em;
+        line-height: 1.25;
+        color: #0f172a;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -241,66 +241,72 @@
         align-items: center;
         align-self: flex-start;
         max-width: 100%;
-        gap: 2px;
-        border-radius: 6px;
-        color: #64748B;
+        gap: 3.5px;
+        color: #64748b;
         text-decoration: none;
+        transition: color 0.15s ease;
+    }
+    .app-greet__loc:active {
+        color: #0f172a;
+    }
+    .app-greet__pin {
+        color: #64748b;
+        flex-shrink: 0;
     }
     .app-greet__loc-text {
-        font-size: 13px;
-        font-weight: 600;
+        font-size: 12.5px;
+        font-weight: 500;
         line-height: 1.2;
-        max-width: 180px;
+        max-width: 160px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .app-greet__chevron { flex-shrink: 0; }
+    .app-greet__chevron {
+        color: #94a3b8;
+        flex-shrink: 0;
+    }
 
+    /* Harmonized Utility Icons */
     .app-greet__icons {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         flex-shrink: 0;
     }
-    /* 40px circular tap target around a 24px glyph — the app sizes these for
-       the accessibility minimum rather than leaving a bare 24px hit box. */
     .app-greet__icon {
         position: relative;
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: #f8fafc;
+        border: 1px solid rgba(226, 232, 240, 0.85);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: rgba(15, 23, 42, 0.85);
+        color: #334155;
         text-decoration: none;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
-    .app-greet__icon:active { background: rgba(15, 23, 42, 0.06); }
-
-    /* Unread dot: the app's 8dp LiveRed pip, ringed in the header background so
-       it separates from the glyph. Only rendered when a real count is non-zero. */
+    .app-greet__icon:active {
+        background: #f1f5f9;
+        border-color: #cbd5e1;
+        transform: scale(0.96);
+    }
     .app-greet__dot {
         position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 8px;
-        height: 8px;
+        top: 5px;
+        right: 5px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
-        background: #D32F2F;
-        box-shadow: 0 0 0 1.5px var(--surface, #fff);
+        background: #ef4444;
+        box-shadow: 0 0 0 2px #ffffff;
     }
 
-    /* Brand (Haraan logo): hidden on mobile — the app header shows only the
-       location pill (left) and the profile icon (right). */
-    .brand {
-        display: none;
-    }
-    .brand__mark {
-        width: 34px;
-        height: 34px;
-        flex-shrink: 0;
-    }
+    /* Brand (Haraan logo): hidden on mobile */
+    .brand { display: none; }
+    .brand__mark { width: 34px; height: 34px; flex-shrink: 0; }
     .brand__logo { display: none; }
     .brand__mark--text {
         display: inline-flex;
@@ -317,103 +323,104 @@
     }
     .brand__text { display: none; }
 
-    /* Search bar: the app's 44dp white field — 20dp corners, #E2E8F0 hairline,
-       soft ambient shadow (MainScreen.kt). */
+    /* Redesigned Search Bar: modern 12px squircle, soft recessed tone, crisp 1px border */
     .topbar__search {
         grid-area: search;
         display: flex;
         align-items: center;
-        gap: 10px;
-        min-height: 44px;
-        background: #ffffff;
-        border-radius: 20px;
-        padding: 0 14px;
-        border: 1px solid #E2E8F0;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+        gap: 9px;
+        min-height: 42px;
+        background: #f8fafc;
+        border-radius: 12px;
+        padding: 0 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.02);
         width: 100%;
         max-width: none;
         z-index: 8;
-        margin-top: 2px;
+        margin-top: 0;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .topbar__search:focus-within {
-        border-color: #CBD5E1;
-        box-shadow: 0 6px 18px rgba(0,0,0,0.06);
-        background: #fff;
+        background: #ffffff;
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
     }
-    /* Matches site.css's `.topbar__search .search-icon` specificity — a bare
-       `.search-icon` here loses to it and the glyph stays 28px. */
     .topbar__search .search-icon {
         display: flex;
         align-items: center;
-        color: #9aa3b2;
-        width: 20px;
-        height: 20px;
+        color: #64748b;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
         justify-content: center;
     }
     .topbar__search-input { 
-        font-size: 15px;
-        padding: 0 6px;
+        font-size: 14px;
+        font-weight: 400;
+        padding: 0 2px;
         flex: 1;
         border: none;
         background: transparent;
         outline: none;
-        color: #222;
+        color: #0f172a;
+        letter-spacing: -0.01em;
     }
     .topbar__search-input::placeholder {
-        color: #8a8f98; /* WCAG AA on white */
+        color: #94a3b8;
         font-size: 14px;
+        font-weight: 400;
     }
 
-    /* Action buttons: full width, row 3 */
+    /* Sophisticated Segmented Control (Events / Pulse) */
     .topbar .mobile-action-buttons {
         grid-area: buttons;
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 6px;
-        margin-top: 4px;
+        gap: 3px;
+        margin-top: 0;
         width: 100%;
+        background: #f1f5f9;
+        padding: 3px;
+        border-radius: 10px;
+        border: 1px solid rgba(226, 232, 240, 0.8);
+        height: 40px;
+        align-items: stretch;
     }
     .mobile-action-btn {
-        padding: 12px 18px;
-        min-height: 48px;
-        border-radius: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 12px;
+        min-height: unset;
+        height: 100%;
+        border-radius: 7px;
         border: none;
-        font-weight: 600;
-        font-size: 15px;
+        font-size: 13.5px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
         cursor: pointer;
         text-transform: none;
         text-decoration: none;
-        display: inline-block;
         text-align: center;
-        transition: all 200ms ease;
-        letter-spacing: 0;
-    }
-    /* Button container style to appear like a switch */
-    .topbar .mobile-action-buttons {
-        background: #f4f6f7;
-        padding: 4px;
-        border-radius: 28px;
-        align-items: center;
-    }
-
-    .mobile-action-btn--events,
-    .mobile-action-btn--gamehub {
+        color: #64748b;
         background: transparent;
-        color: #333;
-        border: none;
+        transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
+        -webkit-tap-highlight-color: transparent;
+    }
+    .mobile-action-btn:active {
+        color: #0f172a;
     }
 
-    /* Active states (switch thumb colors) */
-    .mobile-action-btn.is-active.mobile-action-btn--events {
-        background: #2563EB; /* Mumbai Indians blue */
-        color: #fff;
-        box-shadow: 0 2px 6px rgba(0,87,184,0.18);
-    }
+    /* Active Segment: clean elevated tactile white slab with subtle shadow */
+    .mobile-action-btn.is-active,
+    .mobile-action-btn.is-active.mobile-action-btn--events,
     .mobile-action-btn.is-active.mobile-action-btn--gamehub {
-        background: #2563EB; /* green */
-        color: #fff;
-        box-shadow: 0 2px 6px rgba(37,99,235,0.18);
+        background: #ffffff;
+        color: #0f172a;
+        font-weight: 600;
+        border: 0.5px solid rgba(15, 23, 42, 0.04);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
     }
 
     /* Hide desktop nav & hamburger */
@@ -1469,12 +1476,13 @@
     }
     .mtrend__img {
         position: relative; display: block;
-        height: 160px; border-radius: 24px; overflow: hidden;
-        background: #000;                   /* the Card's containerColor */
-        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.22);
+        height: 160px; border-radius: 20px; overflow: hidden;
+        background: #0f172a;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08);
         -webkit-mask-image: -webkit-radial-gradient(white, black);
         mask-image: radial-gradient(white, black);
         isolation: isolate;
+        z-index: 2;
     }
     .mtrend__img img {
         position: absolute; inset: 0;
@@ -1484,50 +1492,50 @@
     /* Brush.verticalGradient(Transparent → Black 85%) from 80px down. */
     .mtrend__grad {
         position: absolute; inset: 0;
-        background: linear-gradient(to bottom, rgba(0,0,0,0) 45%, rgba(0,0,0,0.88) 100%);
+        background: linear-gradient(to bottom, rgba(0,0,0,0) 40%, rgba(15, 23, 42, 0.88) 100%);
     }
     .mtrend__title {
         position: absolute; z-index: 2;
-        left: 42px; right: 8px; bottom: 12px;   /* clears rank glyph completely */
-        font-size: 12px; font-weight: 700; line-height: 15px; color: #fff;
+        left: 12px; right: 12px; bottom: 12px;
+        font-size: 13px; font-weight: 700; line-height: 1.25; color: #ffffff;
+        letter-spacing: -0.01em;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
         overflow: hidden;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
     }
-    /* Handcrafted Android-grade 3D outlined gradient rank (MainScreen.kt TrendingRowSection) */
+    /* Option 1: Netflix-grade Architectural Cut Rank Numerals */
     .mtrend__rank {
         position: absolute;
-        left: -20px;
-        bottom: -12px;
-        z-index: 5;
-        font-family: 'Poppins', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-        font-size: 88px;
-        font-weight: 900;
-        line-height: 1;
-        letter-spacing: -0.04em;
+        left: -22px;
+        bottom: -2px;
+        z-index: 1;
+        font-family: 'Bebas Neue', 'Oswald', sans-serif;
+        font-size: 104px;
+        font-weight: 700;
+        line-height: 0.82;
+        letter-spacing: -0.02em;
         pointer-events: none;
         user-select: none;
         -webkit-user-select: none;
-        color: #102A4C;
-        -webkit-text-stroke: 5px #102A4C;
-        filter: drop-shadow(0 8px 16px rgba(15, 23, 42, 0.35));
+        color: #ffffff;
+        -webkit-text-stroke: 2px #0f172a;
+        filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.15));
     }
     .mtrend__rank::after {
         content: attr(data-rank);
         position: absolute;
         left: 0;
         top: 0;
-        background: linear-gradient(180deg, #1D4ED8 0%, #3B82F6 45%, #FFFFFF 85%);
+        background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 65%, #cbd5e1 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         -webkit-text-stroke: 0 transparent;
         z-index: 2;
     }
     .mtrend__rank[data-rank="10"] {
-        font-size: 76px;
-        letter-spacing: -0.06em;
-        bottom: -8px;
-        left: -22px;
+        font-size: 88px;
+        letter-spacing: -0.04em;
+        left: -26px;
     }
 
     /* --- Categories — left-aligned cards (mirrors HaraanCategoryCard) --- */
@@ -1739,17 +1747,23 @@
     .mhub__hero .app-greet { grid-area: auto; margin-bottom: 16px; }
     .app-greet--dark .app-greet__hey { color: #FFFFFF; }
     .app-greet--dark .app-greet__loc { color: rgba(255, 255, 255, 0.85); }
+    .app-greet--dark .app-greet__pin { color: rgba(255, 255, 255, 0.85); }
+    .app-greet--dark .app-greet__chevron { color: rgba(255, 255, 255, 0.65); }
     .app-greet--dark .app-greet__initial { color: #FFFFFF; }
     .app-greet--dark .app-greet__initial-glyph { color: #FFFFFF; }
     .app-greet--dark .app-greet__avatar {
         background: rgba(255, 255, 255, 0.14);
-        border-color: rgba(255, 255, 255, 0.35);
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
     }
-    .app-greet--dark .app-greet__icon { color: rgba(255, 255, 255, 0.92); }
-    .app-greet--dark .app-greet__icon:active { background: rgba(255, 255, 255, 0.12); }
-    /* The unread pip is ringed in the band's own green so it reads as a pip and
-       not a red smudge (the app rings it in GameHubDeep on dark). */
-    .app-greet--dark .app-greet__dot { box-shadow: 0 0 0 1.5px #1E3A8A; }
+    .app-greet--dark .app-greet__icon {
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: rgba(255, 255, 255, 0.95);
+    }
+    .app-greet--dark .app-greet__icon:active { background: rgba(255, 255, 255, 0.22); }
+    /* The unread pip is ringed in the band's own hue */
+    .app-greet--dark .app-greet__dot { box-shadow: 0 0 0 2px #1E3A8A; }
 
     /* GameHubSegmentedSwitch: 44px track, 22px radius, 3px inset, white active pill
        with GameHubDeep text. Two links, since the web's lanes are two pages. */

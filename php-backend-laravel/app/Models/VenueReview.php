@@ -26,6 +26,20 @@ final class VenueReview extends Model
         'is_active' => 'boolean',
     ];
 
+    /** Keep the venue's rating / counts in step with its real reviews (Venue::refreshRating()). */
+    protected static function booted(): void
+    {
+        $refresh = static function (VenueReview $review): void {
+            $ids = array_filter([$review->venue_id, $review->getOriginal('venue_id')]);
+            foreach (array_unique($ids) as $id) {
+                Venue::query()->find($id)?->refreshRating();
+            }
+        };
+
+        static::saved($refresh);
+        static::deleted($refresh);
+    }
+
     public function venue(): BelongsTo
     {
         return $this->belongsTo(Venue::class);

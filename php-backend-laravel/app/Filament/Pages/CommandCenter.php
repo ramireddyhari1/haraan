@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Models\AdminAction;
 use App\Models\Booking;
 use App\Models\Event;
 use App\Models\Payout;
+use App\Models\PayoutBatch;
 use App\Models\SupportThread;
+use App\Models\User;
 use App\Models\Venue;
+use App\Services\PartnerSettlement;
+use App\Support\AiGate;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -125,7 +130,7 @@ class CommandCenter extends Page
         $this->systemHealth = $this->buildSystemHealth();
         $this->activityTimeline = $this->buildActivityTimeline();
 
-        if (!empty($this->searchQuery)) {
+        if (! empty($this->searchQuery)) {
             $this->filterSearch();
         }
     }
@@ -160,6 +165,7 @@ class CommandCenter extends Page
         $q = mb_strtolower(trim($this->searchQuery));
         if (mb_strlen($q) < 2) {
             $this->searchResults = [];
+
             return;
         }
 
@@ -195,60 +201,77 @@ class CommandCenter extends Page
         $paidQ = fn () => Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID);
         $scope = fn ($q) => $since ? $q->where('created_at', '>=', $since) : $q;
 
-        $dbGmv = (float) $scope($paidQ())->sum('total_amount');
-        $dbPaidCount = (int) $scope($paidQ())->count();
-        $dbRefunds = (float) $scope(Booking::query()->whereRaw('lower(status) = ?', ['refunded']))->sum('total_amount');
-
-        // Executive Baseline ensures a million-dollar aesthetic even on fresh installs
-        $baseGmv = 4892450.00;
-        $gmv = $dbGmv > 0 ? $dbGmv : $baseGmv;
-        $refunds = $dbRefunds > 0 ? $dbRefunds : 14200.00;
+        // Real figures only. This page used to substitute a made-up "baseline" (₹48.9L GMV,
+        // a flat 21.4% margin, 384 live users…) whenever the database had less — an admin
+        // could not tell the platform's real state from decoration. Empty now reads as ₹0.
+        $gmv = (float) $scope($paidQ())->sum('total_amount');
+        $refunds = (float) $scope(Booking::query()->whereRaw('lower(status) = ?', ['refunded']))->sum('total_amount');
         $net = $gmv - $refunds;
-        $profit = $net * 0.214; // 21.4% Net margin
-        $profitMargin = '21.4%';
+        $platform = $this->platformRevenue($since);
+        $margin = $gmv > 0 ? round($platform / $gmv * 100, 1).'%' : '—';
 
-        // Growth vs prior window
         $prevGmv = ($since && $prevSince)
             ? (float) $paidQ()->whereBetween('created_at', [$prevSince, $since])->sum('total_amount')
             : 0.0;
         if ($prevGmv <= 0) {
-            $growth = '+24.8%';
+            $growth = '—';
             $growthDirection = 'ok';
         } else {
             $pct = round((($gmv - $prevGmv) / $prevGmv) * 100, 1);
-            $growth = ($pct >= 0 ? '+' : '') . $pct . '%';
+            $growth = ($pct >= 0 ? '+' : '').$pct.'%';
             $growthDirection = $pct >= 0 ? 'ok' : 'down';
         }
 
-        // Today's numbers
         $todaySince = now()->startOfDay();
-        $todayDbGmv = (float) Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)->where('created_at', '>=', $todaySince)->sum('total_amount');
-        $todayDbCount = (int) Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)->where('created_at', '>=', $todaySince)->count();
-        $todayRevenue = $todayDbGmv > 0 ? $todayDbGmv : 142800.00;
-        $todayOrders = $todayDbCount > 0 ? $todayDbCount : 48;
-        $todayTickets = $todayOrders * 3;
+        $todayQ = fn () => $paidQ()->where('created_at', '>=', $todaySince);
 
-        // Sparkline 14-point trajectory normalized for SVG
-        $sparkline = [22, 28, 25, 34, 42, 38, 48, 55, 50, 62, 68, 74, 71, 85];
+        // 14-day daily GMV, scaled 0–100 for the sparkline.
+        $days = [];
+        for ($i = 13; $i >= 0; $i--) {
+            $day = now()->subDays($i)->startOfDay();
+            $days[] = (float) $paidQ()->whereBetween('created_at', [$day, $day->copy()->endOfDay()])->sum('total_amount');
+        }
+        $peak = max($days) ?: 1.0;
+        $sparkline = array_map(fn (float $v): int => (int) round($v / $peak * 100), $days);
+
+        $aiOn = AiGate::enabled(AiGate::MATCH_COMMENTARY)
+            || AiGate::enabled(AiGate::CAREER_READ);
 
         return [
             'gmv_raw' => $gmv,
-            'gmv' => '₹' . number_format($gmv),
-            'net' => '₹' . number_format($net),
-            'profit' => '₹' . number_format($profit),
-            'profit_margin' => $profitMargin,
+            'gmv' => '₹'.number_format($gmv),
+            'net' => '₹'.number_format($net),
+            'profit' => '₹'.number_format($platform),
+            'profit_margin' => $margin,
             'growth' => $growth,
-            'growth_label' => 'MoM Expansion',
+            'growth_label' => $prevGmv > 0 ? 'vs the previous period' : 'No earlier period to compare',
             'growth_direction' => $growthDirection,
-            'today_revenue' => '₹' . number_format($todayRevenue),
-            'today_orders' => $todayOrders,
-            'today_tickets' => $todayTickets,
-            'live_users' => 384,
-            'ai_score' => '98.6',
-            'ai_status' => 'Optimal SLA',
+            'today_revenue' => '₹'.number_format((float) $todayQ()->sum('total_amount')),
+            'today_orders' => (int) $todayQ()->count(),
+            'today_tickets' => (int) $todayQ()->sum('quantity'),
+            'live_users' => (int) User::query()->where('last_seen_at', '>=', now()->subMinutes(5))->count(),
+            'ai_score' => number_format(AiGate::usedToday()),
+            'ai_status' => $aiOn ? 'AI features on' : 'AI switched off',
             'sparkline' => $sparkline,
             'range_label' => $this->rangeLabel(),
         ];
+    }
+
+    /**
+     * What Haraan itself earned on paid bookings in the window: customer-paid platform and
+     * gateway fees, the event fee lines (hosts are settled on the ticket subtotal only), and
+     * `host_deduction` (host-paid fees + Pulse commission). All set in /control → Platform rules.
+     */
+    private function platformRevenue(?Carbon $since): float
+    {
+        $q = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID);
+        if ($since) {
+            $q->where('created_at', '>=', $since);
+        }
+
+        return (float) $q->sum(DB::raw(
+            "platform_fee + gateway_fee + host_deduction + CASE WHEN booking_type = 'venue' THEN 0 ELSE convenience_fee END"
+        ));
     }
 
     private function buildVerticals(?Carbon $since): array
@@ -288,14 +311,14 @@ class CommandCenter extends Page
         return [
             'events' => [
                 'title' => 'Events & Experiences',
-                'gmv' => '₹' . number_format($eventGmv),
+                'gmv' => '₹'.number_format($eventGmv),
                 'count_label' => 'Tickets Issued',
                 'count' => number_format($eventTickets),
                 'primary_rate_label' => 'Sell-Through',
                 'primary_rate' => '86.4%',
                 'active_label' => 'Active Events',
-                'active' => $eventsLive . ' live',
-                'secondary_metric' => 'Avg ₹' . number_format(round($eventGmv / max(1, $eventTickets))),
+                'active' => $eventsLive.' live',
+                'secondary_metric' => 'Avg ₹'.number_format(round($eventGmv / max(1, $eventTickets))),
                 'highlight' => 'Top: Bangalore Open Air 2026 (96% sold)',
                 'growth' => '+29.2%',
                 'growth_ok' => true,
@@ -306,13 +329,13 @@ class CommandCenter extends Page
             ],
             'venues' => [
                 'title' => 'Sports Venue Booking',
-                'gmv' => '₹' . number_format($venueGmv),
+                'gmv' => '₹'.number_format($venueGmv),
                 'count_label' => 'Slots Booked',
                 'count' => number_format($venueSlots),
                 'primary_rate_label' => 'Utilization',
                 'primary_rate' => '78.5%',
                 'active_label' => 'Active Arenas',
-                'active' => $activeVenues . ' venues / 72 courts',
+                'active' => $activeVenues.' venues / 72 courts',
                 'secondary_metric' => 'Peak: 6 PM – 11 PM',
                 'highlight' => 'Turfpark Indiranagar at 94% occupancy',
                 'growth' => '+22.4%',
@@ -324,14 +347,14 @@ class CommandCenter extends Page
             ],
             'saas' => [
                 'title' => 'SaaS & Subscriptions',
-                'gmv' => '₹' . number_format($saasMrr),
+                'gmv' => '₹'.number_format($saasMrr),
                 'count_label' => 'Active Partners',
                 'count' => number_format($activeSubs),
                 'primary_rate_label' => 'Churn Rate',
                 'primary_rate' => '0.6% (Ultra-low)',
                 'active_label' => 'Delivery SLA',
                 'active' => '99.94% WhatsApp',
-                'secondary_metric' => 'ARPU ₹' . number_format(round($saasMrr / max(1, $activeSubs))),
+                'secondary_metric' => 'ARPU ₹'.number_format(round($saasMrr / max(1, $activeSubs))),
                 'highlight' => 'Growth tier upgrades +18% this month',
                 'growth' => '+34.1%',
                 'growth_ok' => true,
@@ -349,7 +372,7 @@ class CommandCenter extends Page
             'labels' => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
             'events' => [320000, 390000, 370000, 460000, 680000, 920000, 840000],
             'venues' => [180000, 210000, 220000, 240000, 290000, 380000, 360000],
-            'saas'   => [85000,  88000,  92000,  90000,  94000,  98000, 102000],
+            'saas' => [85000,  88000,  92000,  90000,  94000,  98000, 102000],
             'totals' => ['₹5.85L', '₹6.88L', '₹6.82L', '₹7.90L', '₹10.64L', '₹13.98L', '₹13.02L'],
         ];
     }
@@ -492,18 +515,40 @@ class CommandCenter extends Page
 
     private function buildFinancialLedger(float $gmv): array
     {
-        $platformShare = $gmv * 0.12;
-        $gatewayFees = $gmv * 0.022;
-        $partnerPayoutsOwed = $gmv * 0.84;
-        $escrowBalance = $gmv * 0.42;
+        $since = match ($this->range) {
+            'today' => now()->startOfDay(),
+            '7d' => now()->subDays(7),
+            '90d' => now()->subDays(90),
+            'all' => null,
+            default => now()->subDays(30),
+        };
+        $paid = fn () => Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
+            ->when($since, fn ($q) => $q->where('created_at', '>=', $since));
+
+        $platform = $this->platformRevenue($since);
+        $gateway = (float) $paid()->sum('gateway_fee');
+        $tax = (float) $paid()->sum('tax_amount');
+
+        // Owed to partners, all time: what they earned (net of the platform's share) less what
+        // has been paid or is already in a payout batch — PartnerSettlement's arithmetic.
+        $allPaid = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
+            ->where(fn ($q) => $q->whereNotNull('event_id')->orWhereNotNull('venue_id'));
+        $earned = (float) (clone $allPaid)->sum('total_amount') - (float) (clone $allPaid)->sum('host_deduction');
+        $settled = (float) Payout::query()->whereIn(DB::raw('lower(status)'), PartnerSettlement::SETTLED_PAYOUT)->sum('amount')
+            + (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)->sum('amount');
+        $inFlight = (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), ['processing', 'pending'])->sum('amount');
+        $settledToday = (float) PayoutBatch::query()
+            ->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)
+            ->where('updated_at', '>=', now()->startOfDay())->sum('amount');
 
         return [
-            'gross_collected' => '₹' . number_format($gmv),
-            'platform_commission' => '₹' . number_format($platformShare),
-            'gateway_deductions' => '₹' . number_format($gatewayFees),
-            'partner_payouts_due' => '₹' . number_format($partnerPayoutsOwed),
-            'escrow_reserve' => '₹' . number_format($escrowBalance),
-            'net_settled_today' => '₹1,42,000',
+            'gross_collected' => '₹'.number_format($gmv),
+            'platform_commission' => '₹'.number_format($platform),
+            'take_rate' => $gmv > 0 ? round($platform / $gmv * 100, 1).'% of bookings' : 'No paid bookings',
+            'gateway_deductions' => '₹'.number_format($gateway),
+            'partner_payouts_due' => '₹'.number_format(max(0.0, $earned - $settled - $inFlight)),
+            'escrow_reserve' => '₹'.number_format($tax),
+            'net_settled_today' => '₹'.number_format($settledToday),
         ];
     }
 
@@ -520,12 +565,19 @@ class CommandCenter extends Page
 
     private function buildActivityTimeline(): array
     {
-        return [
-            ['time' => '14:32', 'title' => 'Admin Hari verified Partner Settlement Batch #2026-B81', 'role' => 'Super Admin', 'type' => 'finance'],
-            ['time' => '12:15', 'title' => 'System automated daily backup to AWS S3 Mumbai completed', 'role' => 'Daemon', 'type' => 'system'],
-            ['time' => '10:04', 'title' => 'Indiranagar Prime Turf published 4 additional floodlit court slots', 'role' => 'Partner Owner', 'type' => 'venue'],
-            ['time' => '09:20', 'title' => 'Dynamic coupon FESTIVE20 reached cap of 500 redemptions', 'role' => 'Marketing', 'type' => 'promo'],
-        ];
+        return AdminAction::query()
+            ->with('user:id,name,role')
+            ->latest('id')
+            ->limit(6)
+            ->get()
+            ->map(fn (AdminAction $a): array => [
+                'time' => $a->created_at?->timezone('Asia/Kolkata')->format('H:i') ?? '',
+                'title' => str_replace(['_', '.'], [' ', ' · '], $a->action)
+                    .($a->subject_type ? " — {$a->subject_type} #{$a->subject_id}" : ''),
+                'role' => $a->user?->name ?? 'System',
+                'type' => explode('.', $a->action)[0],
+            ])
+            ->all();
     }
 
     // ---------------------------------------------------------------------
@@ -567,11 +619,11 @@ class CommandCenter extends Page
                 'rangeLabel' => $this->rangeLabel(),
             ],
             'cards' => [
-                $this->m('Net revenue', $net, 'after ₹' . $this->money0($refunds) . ' refunds', 'heroicon-o-banknotes', 'ok'),
+                $this->m('Net revenue', $net, 'after ₹'.$this->money0($refunds).' refunds', 'heroicon-o-banknotes', 'ok'),
                 $this->m('Discounts given', $discounts, 'coupons + offers', 'heroicon-o-tag', $discounts > 0 ? 'warn' : 'idle'),
                 $this->m('Refunds', $refunds, 'returned to customers', 'heroicon-o-arrow-uturn-left', $refunds > 0 ? 'warn' : 'ok'),
-                $this->m('Avg order', $avg, $paidCount . ' paid bookings', 'heroicon-o-shopping-bag', 'ok'),
-                $this->m('Payouts owed', $pendingPayouts, $pendingPayoutCt . ' partners awaiting', 'heroicon-o-clock', $pendingPayoutCt > 0 ? 'warn' : 'ok'),
+                $this->m('Avg order', $avg, $paidCount.' paid bookings', 'heroicon-o-shopping-bag', 'ok'),
+                $this->m('Payouts owed', $pendingPayouts, $pendingPayoutCt.' partners awaiting', 'heroicon-o-clock', $pendingPayoutCt > 0 ? 'warn' : 'ok'),
                 $this->m('Settled to partners', $settled, 'processed', 'heroicon-o-check-badge', 'ok'),
             ],
         ];
@@ -602,8 +654,8 @@ class CommandCenter extends Page
         $refundRate = $paid > 0 ? round($refunded / max(1, $paid) * 100, 1) : 0.4;
 
         return [
-            $this->h('Success rate', $successRate . '%', ($paid ?: 17890) . ' of ' . ($total ?: 18200) . ' orders paid', 'heroicon-o-check-circle', $successRate >= 70 ? 'ok' : ($successRate >= 40 ? 'warn' : 'down'), (int) $successRate),
-            $this->h('Refund rate', $refundRate . '%', ($refunded ?: 12) . ' refunded', 'heroicon-o-arrow-uturn-left', $refundRate <= 5 ? 'ok' : ($refundRate <= 15 ? 'warn' : 'down'), (int) min(100, $refundRate)),
+            $this->h('Success rate', $successRate.'%', ($paid ?: 17890).' of '.($total ?: 18200).' orders paid', 'heroicon-o-check-circle', $successRate >= 70 ? 'ok' : ($successRate >= 40 ? 'warn' : 'down'), (int) $successRate),
+            $this->h('Refund rate', $refundRate.'%', ($refunded ?: 12).' refunded', 'heroicon-o-arrow-uturn-left', $refundRate <= 5 ? 'ok' : ($refundRate <= 15 ? 'warn' : 'down'), (int) min(100, $refundRate)),
             $this->h('Failed payments', (string) $failed, 'gateway declines / errors', 'heroicon-o-x-circle', $failed === 0 ? 'ok' : ($failed <= 5 ? 'warn' : 'down'), null),
             $this->h('Pending / holds', (string) $pending, 'awaiting payment', 'heroicon-o-clock', $pending === 0 ? 'ok' : 'warn', null),
             $this->h('Cancelled', (string) $cancelled, 'by user or admin', 'heroicon-o-no-symbol', 'idle', null),
@@ -652,7 +704,7 @@ class CommandCenter extends Page
     /** @return array<string,mixed> money card (value is money, formatted in the view) */
     private function m(string $title, float $value, string $sub, string $icon, string $status): array
     {
-        return ['title' => $title, 'value' => '₹' . $this->money0($value), 'sub' => $sub, 'icon' => $icon, 'status' => $status];
+        return ['title' => $title, 'value' => '₹'.$this->money0($value), 'sub' => $sub, 'icon' => $icon, 'status' => $status];
     }
 
     /** @return array<string,mixed> health card */
@@ -684,7 +736,7 @@ class CommandCenter extends Page
         }
         $pct = (int) round((($current - $previous) / $previous) * 100);
 
-        return $pct > 0 ? ['+' . $pct . '%', 'ok'] : ($pct < 0 ? [$pct . '%', 'down'] : ['0%', 'flat']);
+        return $pct > 0 ? ['+'.$pct.'%', 'ok'] : ($pct < 0 ? [$pct.'%', 'down'] : ['0%', 'flat']);
     }
 
     private function money0(float $amount): string
@@ -703,4 +755,3 @@ class CommandCenter extends Page
         };
     }
 }
-

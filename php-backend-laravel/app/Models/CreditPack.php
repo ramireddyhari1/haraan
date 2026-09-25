@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -12,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 final class CreditPack extends Model
 {
+    use AuditsAdminChanges;
+
     protected $fillable = ['code', 'name', 'conversations', 'price_inr', 'is_active', 'sort'];
 
     protected $casts = [

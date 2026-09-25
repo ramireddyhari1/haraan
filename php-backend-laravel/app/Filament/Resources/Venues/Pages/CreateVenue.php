@@ -20,6 +20,10 @@ class CreateVenue extends CreateRecord
      */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
+        $data['status'] = 'draft';
+        $data['is_active'] = false;
+        $data['is_bookable'] = false;
+
         $data = VenueForm::mergeImageSources($data);
         $data = VenueForm::mergeAmenities($data);
         $data = VenueForm::mergeRules($data);
@@ -35,12 +39,19 @@ class CreateVenue extends CreateRecord
     }
 
     /**
-     * After creating, land back on the venues list (not the edit form). Filament's
-     * default drops you on the new record's edit page, which reads as "nothing
-     * happened" — the user expects the new venue to show up in the list.
+     * After creating, redirect to the edit page so the admin can complete configuration
+     * (Courts, Pricing, Slots, Photos) before publishing.
      */
     protected function getRedirectUrl(): string
     {
-        return $this->getResource()::getUrl('index');
+        return $this->getResource()::getUrl('edit', ['record' => $this->record]);
+    }
+
+    protected function getCreatedNotification(): ?\Filament\Notifications\Notification
+    {
+        return \Filament\Notifications\Notification::make()
+            ->title('Venue draft created')
+            ->body('Venue created in Draft mode. Please configure courts, slots, pricing, and photos before publishing.')
+            ->info();
     }
 }

@@ -29,6 +29,17 @@ class CourtsRelationManager extends RelationManager
 
     protected static ?string $title = 'Courts / pitches / lanes';
 
+    /**
+     * Filament makes relation managers read-only on a resource View page by
+     * default. The Venue 360 IS the view page, and these are the controls it
+     * exists to offer — so the default is declined here deliberately. Authority
+     * still comes from the resource and the capability checks on each action.
+     */
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema

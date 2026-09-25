@@ -789,16 +789,17 @@ class EventForm
                 Select::make('tax_type')
                     ->label('Tax')
                     ->options([
+                        'inherit' => 'Platform default',
                         'none'    => 'No tax',
                         'flat'    => 'Flat ₹ amount',
-                        'percent' => 'Percentage of subtotal',
+                        'percent' => 'Percentage of subtotal (after discount)',
                     ])
-                    ->default('none')
+                    ->default('inherit')
                     ->native(false)
                     ->live()
                     // Tax (e.g. GST) — set by Haraan staff in /control, hidden from organisers.
                     ->visible(self::adminOnly())
-                    ->helperText('Not charged yet — stored on the event for now.'),
+                    ->helperText('Charged to the customer at checkout. “Platform default” follows Platform → Platform rules → Fees.'),
                 TextInput::make('tax_value')
                     ->label(fn (Get $get): string => $get('tax_type') === 'percent' ? 'Tax percentage' : 'Tax amount')
                     ->numeric()
@@ -847,8 +848,9 @@ class EventForm
                             ->columnSpanFull(),
                         Select::make('gateway_fee_type')
                             ->label('Fee type')
-                            ->options(['none' => 'No fee', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of subtotal'])
-                            ->default('none')
+                            ->options(['inherit' => 'Platform default', 'none' => 'No fee', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of subtotal'])
+                            ->default('inherit')
+                            ->helperText('“Platform default” also uses the platform’s choice of who pays.')
                             ->native(false)
                             ->live(),
                         TextInput::make('gateway_fee_value')
@@ -877,8 +879,9 @@ class EventForm
                             ->columnSpanFull(),
                         Select::make('platform_fee_type')
                             ->label('Fee type')
-                            ->options(['none' => 'No fee', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of subtotal'])
-                            ->default('none')
+                            ->options(['inherit' => 'Platform default', 'none' => 'No fee', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of subtotal'])
+                            ->default('inherit')
+                            ->helperText('“Platform default” also uses the platform’s choice of who pays.')
                             ->native(false)
                             ->live(),
                         TextInput::make('platform_fee_value')

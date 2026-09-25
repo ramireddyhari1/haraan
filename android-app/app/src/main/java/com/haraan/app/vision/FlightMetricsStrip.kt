@@ -38,9 +38,11 @@ import kotlin.math.abs
  * pitch calibration" reads as the truth, and tells whoever is holding the phone what to go
  * and do about it.
  *
- * NO DECISIONS. Nothing here says out, not out, pitched in line or anything adjacent to
- * one. The pipeline measures a ball; umpiring is a different product with a different
- * standard of evidence, and the gap between them is not one a fading trail can close.
+ * STILL NO DECISIONS IN THIS STRIP. It measures a ball and says nothing about out or not
+ * out. The wicket projection that now exists lives in [LbwProjectionPanel] instead, on its
+ * own, with every LBW question it did NOT answer printed underneath it — because the
+ * moment a verdict word appears beside a row of measurements it borrows their authority,
+ * and a projection from one uncalibrated phone has not earned it.
  */
 @Composable
 fun FlightMetricsStrip(
@@ -64,6 +66,7 @@ fun FlightMetricsStrip(
             "Curve" to metrics.curve,
             "Swing" to metrics.swing,
             "Off the pitch" to metrics.lateral,
+            "Turn" to metrics.turn,
             "Spin" to metrics.spin,
             "Bounce · length" to metrics.bounceLength,
             "Bounce · line" to metrics.bounceLine,
@@ -175,11 +178,26 @@ private fun formatValue(value: MetricValue): String = when (value) {
 
 private fun render(value: Double, unit: String): String {
     if (value.isNaN() || value.isInfinite()) return "—"
-    val text = when {
-        unit == "m" -> "%.1f".format(value)
+    return when {
+        // Degrees and km/h carry their own mark, tight against the number the way they are
+        // written everywhere else, so they are finished here rather than suffixed below.
+        unit == "°" -> "%+.1f°".format(value)
+        unit == "km/h" -> "%.0f km/h".format(value)
+
+        /*
+         * Metres, to the precision the measurement behind them supports.
+         *
+         * A bounce length is metres up a pitch and printed to the decimetre, because the
+         * calibration under it does not support the centimetre - [Bounce] says so at
+         * length. A swing figure is a few centimetres in total and printed to the
+         * centimetre, because rounded to the decimetre it would read 0.1 m for every
+         * delivery ever bowled. Same unit, different measurement, different precision.
+         */
+        unit == "m" && abs(value) < 1.0 -> "%.2f m".format(value)
+        unit == "m" -> "%.1f m".format(value)
+
         unit.isEmpty() -> "%.0f%%".format(value * 100)
-        abs(value) >= 10 -> "%.1f".format(value)
-        else -> "%.2f".format(value)
+        abs(value) >= 10 -> "%.1f $unit".format(value)
+        else -> "%.2f $unit".format(value)
     }
-    return if (unit.isEmpty() || unit == "%") text else "$text $unit"
 }

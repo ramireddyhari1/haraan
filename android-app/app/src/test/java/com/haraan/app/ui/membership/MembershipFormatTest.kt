@@ -72,10 +72,30 @@ class MembershipFormatTest {
     @Test
     fun yearlySaving_isComputedFromRealPricesAndNeverInvented() {
         // Pro: 999 vs 1188 → 15%; Hero: 2499 vs 2988 → 16%. Claim the smaller, true for both.
-        assertEquals(15, MembershipFormat.yearlySaving(listOf(free, pro, hero)))
+        assertEquals(15, MembershipFormat.saving(listOf(free, pro, hero), "year"))
         val noDiscount = pro.copy(prices = listOf(PlanPrice(1, "month", 9_900), PlanPrice(2, "year", 118_800)))
-        assertNull(MembershipFormat.yearlySaving(listOf(noDiscount)))
-        assertNull(MembershipFormat.yearlySaving(listOf(pro.copy(prices = listOf(PlanPrice(1, "month", 9_900))))))
+        assertNull(MembershipFormat.saving(listOf(noDiscount), "year"))
+        assertNull(MembershipFormat.saving(listOf(pro.copy(prices = listOf(PlanPrice(1, "month", 9_900)))), "year"))
+        assertNull(MembershipFormat.saving(listOf(pro), "month"))
+    }
+
+    @Test
+    fun longerTerms_saveAgainstMonthlyForTheSameSpanAndListOnlyWhatIsOnSale() {
+        // The launch prices: Pro ₹99/month, ₹249 for 3 months, ₹449 for 6, ₹799 a year.
+        val launchPro = pro.copy(prices = listOf(
+            PlanPrice(1, "month", 9_900), PlanPrice(2, "quarter", 24_900),
+            PlanPrice(3, "half_year", 44_900), PlanPrice(4, "year", 79_900),
+        ))
+        assertEquals(16, MembershipFormat.saving(listOf(launchPro), "quarter"))   // 297 → 249
+        assertEquals(24, MembershipFormat.saving(listOf(launchPro), "half_year")) // 594 → 449
+        assertEquals(32, MembershipFormat.saving(listOf(launchPro), "year"))      // 1188 → 799
+        assertEquals(listOf("month", "quarter", "half_year", "year"), MembershipFormat.terms(listOf(free, launchPro)))
+        assertEquals(listOf("month", "year"), MembershipFormat.terms(listOf(free, pro)))
+        assertEquals("/3 months", MembershipFormat.perInterval("quarter"))
+        assertEquals("6 months", MembershipFormat.termLabel("half_year"))
+
+        val quarterly = MembershipFormat.ctaFor(launchPro, onFree(), "quarter", signedIn = true) as MembershipFormat.Cta.Buy
+        assertEquals("Renews every 3 months · Cancel anytime", MembershipFormat.commitTerms(quarterly, onFree(), ist))
     }
 
     // ── Status sentence ─────────────────────────────────────────────────────

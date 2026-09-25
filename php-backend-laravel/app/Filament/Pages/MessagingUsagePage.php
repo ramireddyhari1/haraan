@@ -8,6 +8,7 @@ use App\Models\MessageLog;
 use App\Models\MessagingOptOut;
 use App\Models\MessagingUsage;
 use App\Models\ScheduledMessage;
+use App\Support\PlatformRules;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
@@ -246,7 +247,7 @@ class MessagingUsagePage extends Page
             ->all();
 
         return [
-            'enabled' => (bool) config('messaging.journeys.enabled', false),
+            'enabled' => PlatformRules::bool('messaging.journeys_enabled'),
             'counts' => $counts,
             'upcoming' => $upcoming,
             'skips' => $skips,

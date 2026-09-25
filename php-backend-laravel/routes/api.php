@@ -63,8 +63,8 @@ use Illuminate\Support\Facades\Storage;
 */
 
 Route::get('/health', static fn () => response()->json([
-    'status'    => 'success',
-    'message'   => 'Haraan Laravel API is running',
+    'status' => 'success',
+    'message' => 'Haraan Laravel API is running',
     'timestamp' => now()->toIso8601String(),
 ]));
 
@@ -72,14 +72,14 @@ Route::get('/health', static fn () => response()->json([
 Route::middleware('auth.jwt.optional')->get('/config', [ConfigController::class, 'index']);
 
 // On-the-fly UI translation (Google Cloud Translation proxy; server-side key + cache).
-Route::middleware('throttle:120,1')->post('/translate', [\App\Http\Controllers\Api\TranslationController::class, 'translate']);
+Route::middleware('throttle:120,1')->post('/translate', [TranslationController::class, 'translate']);
 
 // Open matches near the viewer looking for players (browse public; requesting needs auth).
-Route::middleware('auth.jwt.optional')->get('/matches/open', [\App\Http\Controllers\Api\MatchJoinController::class, 'open']);
+Route::middleware('auth.jwt.optional')->get('/matches/open', [MatchJoinController::class, 'open']);
 
 // Localization bundles — public; app overlays these on its built-in strings.
-Route::get('/i18n', [\App\Http\Controllers\Api\I18nController::class, 'index']);
-Route::get('/i18n/{locale}', [\App\Http\Controllers\Api\I18nController::class, 'show']);
+Route::get('/i18n', [I18nController::class, 'index']);
+Route::get('/i18n/{locale}', [I18nController::class, 'show']);
 
 // -------------------------------------------------------------------------
 //  Authentication
@@ -110,13 +110,13 @@ Route::prefix('auth/email')->controller(EmailAuthController::class)->group(funct
 });
 
 // "Continue with Google" — the app posts a Google ID token; we verify it and log in.
-Route::post('/auth/google', [\App\Http\Controllers\Api\GoogleAuthController::class, 'login'])->middleware('throttle:auth');
+Route::post('/auth/google', [GoogleAuthController::class, 'login'])->middleware('throttle:auth');
 
 // "Continue with phone" — WhatsApp (MSG91) first. `start` answers {channel} and the
 // app drives whichever it names; `verify` checks the code locally and returns a JWT.
 // Token-based twin of the website's /auth/whatsapp-otp/*. NOT the older
 // /api/auth/whatsapp/* — that one keys accounts differently; see PhoneOtpController.
-Route::prefix('auth/phone-otp')->controller(\App\Http\Controllers\Api\PhoneOtpController::class)->group(function (): void {
+Route::prefix('auth/phone-otp')->controller(PhoneOtpController::class)->group(function (): void {
     Route::post('/start', 'start')->middleware('throttle:otp');
     Route::post('/verify', 'verify')->middleware('throttle:auth');
 });
@@ -124,7 +124,7 @@ Route::prefix('auth/phone-otp')->controller(\App\Http\Controllers\Api\PhoneOtpCo
 // The SMS fallback beneath it — the app posts a Firebase phone-auth ID token; we verify
 // it and log in (creating the account on first sign-in). Token-based twin of the
 // website's session-based /auth/firebase-phone.
-Route::post('/auth/firebase-phone', [\App\Http\Controllers\Api\FirebasePhoneAuthController::class, 'login'])->middleware('throttle:auth');
+Route::post('/auth/firebase-phone', [FirebasePhoneAuthController::class, 'login'])->middleware('throttle:auth');
 
 // -------------------------------------------------------------------------
 //  Users (admin-only)
@@ -147,8 +147,9 @@ Route::middleware(['auth.jwt', 'auth.admin', 'throttle:60,1'])->prefix('users')-
 // -------------------------------------------------------------------------
 
 Route::prefix('events')->group(function (): void {
-    Route::get('/', [EventsController::class, 'index']);
-    Route::get('/search', [EventsController::class, 'index']);
+    // Optional JWT: a member's early-access perk changes which ticket tiers read as on sale.
+    Route::get('/', [EventsController::class, 'index'])->middleware('auth.jwt.optional');
+    Route::get('/search', [EventsController::class, 'index'])->middleware('auth.jwt.optional');
     Route::get('/categories', [EventsController::class, 'categories']);
     // optional JWT so a signed-in viewer's open is attributed (user + city) for Views analytics.
     Route::get('/{id}', [EventsController::class, 'show'])->middleware('auth.jwt.optional');
@@ -160,39 +161,40 @@ Route::prefix('events')->group(function (): void {
 });
 
 // Host (organiser) follow — Phase 2. The host object itself rides on each event.
-Route::middleware('auth.jwt')->post('/host/{slug}/follow', [\App\Http\Controllers\Api\HostController::class, 'follow']);
+Route::middleware('auth.jwt')->post('/host/{slug}/follow', [HostController::class, 'follow']);
 
 // -------------------------------------------------------------------------
 //  Venues (public, read-only) — feeds GameHub browse + venue detail screens.
 //  Content managed in the Filament "Haraan Control" admin (/control/venues).
 // -------------------------------------------------------------------------
 
-Route::prefix('venues')->controller(\App\Http\Controllers\Api\VenuesController::class)->group(function (): void {
+Route::prefix('venues')->controller(VenuesController::class)->group(function (): void {
     Route::get('/', 'index');
     Route::get('/{id}', 'show')->whereNumber('id');
     // Real per-slot bookability for a day (bookings + holds + blocks), polled by the venue page.
-    Route::get('/{id}/availability', 'availability')->whereNumber('id');
+    // Optional JWT: a member's priority-booking perk extends how far ahead they can see and book.
+    Route::get('/{id}/availability', 'availability')->whereNumber('id')->middleware('auth.jwt.optional');
 });
 
 // Home feed content (ads + For You / Trending), managed in Filament admin.
 // Optional auth: a member whose plan includes ads.hidden gets an empty list.
-Route::middleware('auth.jwt.optional')->get('/ads', [\App\Http\Controllers\Api\AppContentController::class, 'ads']);
+Route::middleware('auth.jwt.optional')->get('/ads', [AppContentController::class, 'ads']);
 // Impression / click beacons — de-duplicated per viewer in AdTracker, throttled per IP here.
 Route::middleware(['auth.jwt.optional', 'throttle:240,1'])->group(function (): void {
-    Route::post('/ads/{id}/impression', [\App\Http\Controllers\Api\AppContentController::class, 'trackImpression'])->whereNumber('id');
-    Route::post('/ads/{id}/click', [\App\Http\Controllers\Api\AppContentController::class, 'trackClick'])->whereNumber('id');
+    Route::post('/ads/{id}/impression', [AppContentController::class, 'trackImpression'])->whereNumber('id');
+    Route::post('/ads/{id}/click', [AppContentController::class, 'trackClick'])->whereNumber('id');
 });
-Route::get('/home/feed', [\App\Http\Controllers\Api\AppContentController::class, 'feed']);
+Route::get('/home/feed', [AppContentController::class, 'feed']);
 // Admin-curated home composition (ordered typed blocks); anonymous-safe, viewer-resolved.
-Route::middleware('auth.jwt.optional')->get('/home/layout', [\App\Http\Controllers\Api\AppContentController::class, 'layout']);
+Route::middleware('auth.jwt.optional')->get('/home/layout', [AppContentController::class, 'layout']);
 
 // Campaign skins (header colours + decoration + validity window) for the Events and Pulse lanes.
 // Public: every viewer sees the same campaign, so there is nothing to resolve per user.
-Route::get('/section-themes', [\App\Http\Controllers\Api\SectionThemeController::class, 'index']);
+Route::get('/section-themes', [SectionThemeController::class, 'index']);
 
 // Login screen posters — public, no auth needed, used by the Android app on launch.
 Route::get('/login-posters', static function () {
-    $posters = \App\Models\Ad::where('placement', 'login_poster')
+    $posters = Ad::where('placement', 'login_poster')
         ->where('is_active', true)
         ->orderBy('sort_order')
         ->orderBy('id')
@@ -201,9 +203,9 @@ Route::get('/login-posters', static function () {
     // The app loads `image` straight into Coil as a URL. Filament's FileUpload stores a
     // *relative* path on the public disk (e.g. "login-posters/x.jpg"), while the older Blade
     // admin stored an absolute URL — resolve either to an absolute URL so both render.
-    $posters->each(function (\App\Models\Ad $poster): void {
+    $posters->each(function (Ad $poster): void {
         if ($poster->image && ! str_starts_with($poster->image, 'http')) {
-            $poster->image = \Illuminate\Support\Facades\Storage::disk('public')->url($poster->image);
+            $poster->image = Storage::disk('public')->url($poster->image);
         }
     });
 
@@ -214,12 +216,12 @@ Route::get('/login-posters', static function () {
 //  Legal copy (Terms & Conditions, Privacy Policy), admin-editable in /control.
 //  Public on purpose: the terms must be readable before you have an account.
 // -------------------------------------------------------------------------
-Route::get('/legal/{slug}', [\App\Http\Controllers\Api\LegalController::class, 'show']);
+Route::get('/legal/{slug}', [LegalController::class, 'show']);
 
 // -------------------------------------------------------------------------
 //  The signed-in user's own privacy controls (Account → Privacy in the app).
 // -------------------------------------------------------------------------
-Route::middleware('auth.jwt')->prefix('account')->controller(\App\Http\Controllers\Api\PrivacyController::class)->group(function (): void {
+Route::middleware('auth.jwt')->prefix('account')->controller(PrivacyController::class)->group(function (): void {
     Route::get('/privacy', 'show');
     Route::put('/privacy', 'update');
 });
@@ -231,14 +233,14 @@ Route::middleware('auth.jwt')->prefix('account')->controller(\App\Http\Controlle
 //  it is irreversible and there is no reason to call it twice.
 // -------------------------------------------------------------------------
 Route::middleware(['auth.jwt', 'throttle:6,60'])
-    ->delete('/account', [\App\Http\Controllers\Api\AccountController::class, 'destroy']);
+    ->delete('/account', [AccountController::class, 'destroy']);
 
 // -------------------------------------------------------------------------
 //  In-app support chat — user <-> admin. Backed by SupportController; the
 //  admin side lives in the Filament "Support" resource. Requires a signed-in
 //  user (JWT); the app opens the thread and polls it while the chat is open.
 // -------------------------------------------------------------------------
-Route::middleware('auth.jwt')->prefix('support')->controller(\App\Http\Controllers\Api\SupportController::class)->group(function (): void {
+Route::middleware('auth.jwt')->prefix('support')->controller(SupportController::class)->group(function (): void {
     Route::get('/categories', 'categories');
     Route::get('/thread', 'thread');
     Route::post('/messages', 'send');
@@ -249,7 +251,7 @@ Route::middleware('auth.jwt')->prefix('support')->controller(\App\Http\Controlle
 //  side lives in the Filament "Notifications" resource; open apps refetch live
 //  via the Reverb `notifications` signal, closed apps get FCM (Phase 2).
 // -------------------------------------------------------------------------
-Route::middleware('auth.jwt')->controller(\App\Http\Controllers\Api\NotificationsController::class)->group(function (): void {
+Route::middleware('auth.jwt')->controller(NotificationsController::class)->group(function (): void {
     Route::get('/notifications', 'index');
     Route::post('/notifications/read', 'markRead');
     Route::post('/devices/register', 'registerDevice');
@@ -355,21 +357,21 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
 //  Gated on mutual follow inside DirectMessageService.
 // -------------------------------------------------------------------------
 Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
-    Route::get('/', [\App\Http\Controllers\Api\DirectMessageController::class, 'index']);
+    Route::get('/', [DirectMessageController::class, 'index']);
     // Mutual follows — the honest contents of a "start chat / add to group" picker.
-    Route::get('/eligible', [\App\Http\Controllers\Api\DirectMessageController::class, 'eligible']);
+    Route::get('/eligible', [DirectMessageController::class, 'eligible']);
     // Group creation. Registered before /{id}/* so "group" is never read as an id.
-    Route::post('/group', [\App\Http\Controllers\Api\DirectMessageController::class, 'group']);
-    Route::post('/with/{playerId}', [\App\Http\Controllers\Api\DirectMessageController::class, 'with']);
-    Route::get('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'messages'])->whereNumber('id');
-    Route::post('/{id}/messages', [\App\Http\Controllers\Api\DirectMessageController::class, 'send'])->whereNumber('id');
+    Route::post('/group', [DirectMessageController::class, 'group']);
+    Route::post('/with/{playerId}', [DirectMessageController::class, 'with']);
+    Route::get('/{id}/messages', [DirectMessageController::class, 'messages'])->whereNumber('id');
+    Route::post('/{id}/messages', [DirectMessageController::class, 'send'])->whereNumber('id');
     // Unsend your own message — the long-press action. Sender-only, enforced in the service.
-    Route::delete('/{id}/messages/{message}', [\App\Http\Controllers\Api\DirectMessageController::class, 'unsend'])->whereNumber('id')->whereNumber('message');
+    Route::delete('/{id}/messages/{message}', [DirectMessageController::class, 'unsend'])->whereNumber('id')->whereNumber('message');
     // React to a message — the emoji row on long press. Same emoji again clears it.
-    Route::post('/{id}/messages/{message}/reaction', [\App\Http\Controllers\Api\DirectMessageController::class, 'react'])->whereNumber('id')->whereNumber('message');
+    Route::post('/{id}/messages/{message}/reaction', [DirectMessageController::class, 'react'])->whereNumber('id')->whereNumber('message');
     // Forward a message into another of your conversations.
-    Route::post('/messages/{message}/forward', [\App\Http\Controllers\Api\DirectMessageController::class, 'forward'])->whereNumber('message');
-    Route::post('/{id}/leave', [\App\Http\Controllers\Api\DirectMessageController::class, 'leave'])->whereNumber('id');
+    Route::post('/messages/{message}/forward', [DirectMessageController::class, 'forward'])->whereNumber('message');
+    Route::post('/{id}/leave', [DirectMessageController::class, 'leave'])->whereNumber('id');
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).
@@ -382,10 +384,10 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
 // holding the camera phone may never have signed up. The pairing token is short-lived
 // and single-use; the session token it mints is what the device uses afterwards, and
 // the scorer can revoke it at any time.
-Route::get('match-devices/{token}/preview', [\App\Http\Controllers\Api\MatchDeviceController::class, 'preview']);
-Route::post('match-devices/claim', [\App\Http\Controllers\Api\MatchDeviceController::class, 'claim']);
-Route::post('match-devices/heartbeat', [\App\Http\Controllers\Api\MatchDeviceController::class, 'heartbeat']);
-Route::post('match-devices/clips', [\App\Http\Controllers\Api\MatchDeviceController::class, 'uploadClip']);
+Route::get('match-devices/{token}/preview', [MatchDeviceController::class, 'preview']);
+Route::post('match-devices/claim', [MatchDeviceController::class, 'claim']);
+Route::post('match-devices/heartbeat', [MatchDeviceController::class, 'heartbeat']);
+Route::post('match-devices/clips', [MatchDeviceController::class, 'uploadClip']);
 
 Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);
 
@@ -403,9 +405,9 @@ Route::middleware('auth.jwt.optional')->get('players/{player}/tournaments', [Pla
 // Player-hosted tournaments, every sport. Creating one is a ranked action (complete profile +
 // trust gate in the controller); reading one is public.
 Route::middleware(['auth.jwt', 'actionboard.profile'])
-    ->post('tournaments', [\App\Http\Controllers\Api\TournamentsController::class, 'store']);
+    ->post('tournaments', [TournamentsController::class, 'store']);
 Route::middleware('auth.jwt.optional')
-    ->get('tournaments/{id}', [\App\Http\Controllers\Api\TournamentsController::class, 'show'])
+    ->get('tournaments/{id}', [TournamentsController::class, 'show'])
     ->whereNumber('id');
 
 // The Instagram-style Home feed: recent posts from public accounts + a stories strip.
@@ -439,10 +441,10 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     Route::get('/scheduled', [MatchesController::class, 'scheduled']);
 
     // Join-a-match: request to join an open match, and the owner's request inbox.
-    Route::get('/join-requests', [\App\Http\Controllers\Api\MatchJoinController::class, 'incoming']);
-    Route::post('/join-requests/{id}/respond', [\App\Http\Controllers\Api\MatchJoinController::class, 'respond'])->whereNumber('id');
-    Route::post('/{id}/join', [\App\Http\Controllers\Api\MatchJoinController::class, 'requestJoin'])->whereNumber('id');
-    Route::delete('/{id}/join', [\App\Http\Controllers\Api\MatchJoinController::class, 'cancelJoin'])->whereNumber('id');
+    Route::get('/join-requests', [MatchJoinController::class, 'incoming']);
+    Route::post('/join-requests/{id}/respond', [MatchJoinController::class, 'respond'])->whereNumber('id');
+    Route::post('/{id}/join', [MatchJoinController::class, 'requestJoin'])->whereNumber('id');
+    Route::delete('/{id}/join', [MatchJoinController::class, 'cancelJoin'])->whereNumber('id');
     Route::post('/{id}/team-logo', [MatchesController::class, 'uploadTeamLogo']); // custom team crest
     Route::post('/{id}/complete', [MatchesController::class, 'complete']);
     Route::post('/{id}/confirm', [MatchesController::class, 'confirm']);   // captain confirm → Medium
@@ -452,15 +454,15 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
 
     // Multi-device match sessions: the scorer opens a pairing for a role, lists what is
     // attached, and can cut any of it loose. Creator-only — see MatchDeviceController.
-    Route::post('/{id}/devices', [\App\Http\Controllers\Api\MatchDeviceController::class, 'store']);
-    Route::get('/{id}/devices', [\App\Http\Controllers\Api\MatchDeviceController::class, 'index']);
-    Route::delete('/{id}/devices/{deviceId}', [\App\Http\Controllers\Api\MatchDeviceController::class, 'destroy']);
-    Route::get('/{id}/clips', [\App\Http\Controllers\Api\MatchDeviceController::class, 'clips']);
+    Route::post('/{id}/devices', [MatchDeviceController::class, 'store']);
+    Route::get('/{id}/devices', [MatchDeviceController::class, 'index']);
+    Route::delete('/{id}/devices/{deviceId}', [MatchDeviceController::class, 'destroy']);
+    Route::get('/{id}/clips', [MatchDeviceController::class, 'clips']);
     // On demand, never per ball: a review costs a video model call, and only an appealed
     // delivery is worth one. Scorer-only, like the clips themselves.
-    Route::post('/{id}/clips/{clipId}/review', [\App\Http\Controllers\Api\MatchDeviceController::class, 'reviewClip']);
+    Route::post('/{id}/clips/{clipId}/review', [MatchDeviceController::class, 'reviewClip']);
     // Polled while the queued review runs. One row read, no model call.
-    Route::get('/{id}/clips/{clipId}/review', [\App\Http\Controllers\Api\MatchDeviceController::class, 'reviewStatus']);
+    Route::get('/{id}/clips/{clipId}/review', [MatchDeviceController::class, 'reviewStatus']);
 
     // Football / badminton scoring. Deliberately separate from /score-action:
     // cricket keeps its per-ball pipeline, and recordEvent refuses cricket, so a
@@ -522,12 +524,16 @@ Route::middleware('auth.jwt')->prefix('bookings')->group(function (): void {
     Route::get('/', [BookingsController::class, 'index']);
     Route::post('/venue', [BookingsController::class, 'storeVenue']);
     Route::post('/validate-coupon', [BookingsController::class, 'validateCoupon']);
-    // Payment: reserve (store) → confirm after checkout, or release an abandoned hold.
+    Route::post('/quote', [BookingsController::class, 'quote']);
+    // Payment: reserve (store) → confirm after checkout, status check, or release an abandoned hold.
     Route::post('/confirm', [BookingsController::class, 'confirm']);
+    Route::post('/status', [BookingsController::class, 'status']);
     Route::post('/release', [BookingsController::class, 'release']);
     Route::get('/{id}', [BookingsController::class, 'show']);
     Route::post('/', [BookingsController::class, 'store']);
     Route::patch('/{id}/cancel', [BookingsController::class, 'cancel']);
+    Route::post('/{id}/cancel', [BookingsController::class, 'cancel']);
+    Route::post('/{id}/reschedule', [BookingsController::class, 'reschedule']);
 });
 
 // -------------------------------------------------------------------------
@@ -538,7 +544,7 @@ Route::middleware('auth.jwt')->prefix('bookings')->group(function (): void {
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
-    ->controller(\App\Http\Controllers\Api\PartnerController::class)
+    ->controller(PartnerController::class)
     ->group(function (): void {
         // The shell: business, capabilities, the branches this caller may act on,
         // and their altitude. Every client calls this first.
@@ -605,7 +611,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
-    ->controller(\App\Http\Controllers\Api\ShiftController::class)
+    ->controller(ShiftController::class)
     ->group(function (): void {
         Route::get('/venues/{id}/shift/current', 'current')->whereNumber('id');
         Route::post('/venues/{id}/shift/open', 'open')->whereNumber('id');
@@ -617,7 +623,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
-    ->controller(\App\Http\Controllers\Api\StandingContractController::class)
+    ->controller(StandingContractController::class)
     ->group(function (): void {
         Route::get('/venues/{id}/standing-contracts/dashboard', 'dashboard')->whereNumber('id');
         Route::get('/venues/{id}/standing-contracts', 'index')->whereNumber('id');
@@ -635,7 +641,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
-    ->controller(\App\Http\Controllers\Api\PricingMatrixController::class)
+    ->controller(PricingMatrixController::class)
     ->group(function (): void {
         Route::get('/venues/{id}/pricing/dashboard', 'dashboard')->whereNumber('id');
         Route::get('/venues/{id}/pricing/matrix', 'matrix')->whereNumber('id');
@@ -653,7 +659,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
-    ->controller(\App\Http\Controllers\Api\WhatsAppDeskController::class)
+    ->controller(WhatsAppDeskController::class)
     ->group(function (): void {
         Route::get('/venues/{id}/whatsapp/dashboard', 'dashboard')->whereNumber('id')->middleware('partner.can:bookings');
         Route::get('/venues/{id}/whatsapp/conversations', 'index')->whereNumber('id')->middleware('partner.can:bookings');
@@ -672,7 +678,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 
 Route::middleware(['auth.jwt', 'auth.partner'])
     ->prefix('partner')
-    ->controller(\App\Http\Controllers\Api\OwnerOperationsController::class)
+    ->controller(OwnerOperationsController::class)
     ->group(function (): void {
         Route::get('/venues/{id}/operations/overview', 'overview')->whereNumber('id')->middleware('partner.can:reports');
         Route::get('/venues/{id}/operations/revenue', 'revenue')->whereNumber('id')->middleware('partner.can:reports');
@@ -727,14 +733,14 @@ Route::middleware('auth.jwt')->prefix('membership')->controller(MembershipContro
 
 // Member subscription webhook. Unauthenticated by necessity; the HMAC signature (member
 // secret, distinct from the partner webhook's) is the authentication and it fails closed.
-Route::post('/webhooks/razorpay/members', [\App\Http\Controllers\Api\MemberRazorpayWebhookController::class, 'handle'])
+Route::post('/webhooks/razorpay/members', [MemberRazorpayWebhookController::class, 'handle'])
     ->middleware('throttle:60,1')
     ->name('webhooks.razorpay.members');
 
 // Razorpay billing webhook — subscription lifecycle and prepaid credit grants.
 // Unauthenticated by necessity; the HMAC signature check in the controller is
 // the authentication, and it fails closed.
-Route::post('/webhooks/razorpay', [\App\Http\Controllers\Api\RazorpayWebhookController::class, 'handle'])
+Route::post('/webhooks/razorpay', [RazorpayWebhookController::class, 'handle'])
     ->middleware('throttle:60,1')
     ->name('webhooks.razorpay');
 
@@ -742,29 +748,29 @@ Route::post('/webhooks/razorpay', [\App\Http\Controllers\Api\RazorpayWebhookCont
 // carries message events, signed with the app secret. Both fail closed.
 // One callback URL for the whole Meta app: Instagram DMs arrive as
 // entry[].messaging[], WhatsApp Cloud as entry[].changes[] — same signature.
-Route::get('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify'])
+Route::get('/webhooks/meta', [MetaWebhookController::class, 'verify'])
     ->name('webhooks.meta.verify');
-Route::post('/webhooks/meta', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
+Route::post('/webhooks/meta', [MetaWebhookController::class, 'handle'])
     ->middleware('throttle:240,1')
     ->name('webhooks.meta');
 
 // Alias kept so a callback already pointed here doesn't break.
-Route::get('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'verify']);
-Route::post('/webhooks/meta/instagram', [\App\Http\Controllers\Api\MetaWebhookController::class, 'handle'])
+Route::get('/webhooks/meta/instagram', [MetaWebhookController::class, 'verify']);
+Route::post('/webhooks/meta/instagram', [MetaWebhookController::class, 'handle'])
     ->middleware('throttle:240,1');
 
 // MSG91 inbound WhatsApp, when MSG91 is the BSP instead of Meta. Same destination
 // (InboundMessages), different envelope. MSG91 signs nothing, so a shared secret in
 // a request header is the authentication — configured in the panel under the
 // number's Action menu → Webhook — and it fails closed.
-Route::post('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'handle'])
+Route::post('/webhooks/msg91/whatsapp', [Msg91WebhookController::class, 'handle'])
     ->middleware('throttle:240,1')
     ->name('webhooks.msg91.whatsapp');
 
 // GET is a reachability check only — it carries no data and does nothing. It
 // exists because a provider validating the URL (or a human pasting it into a
 // browser) otherwise gets a 405, which reads as a broken endpoint.
-Route::get('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookController::class, 'ping'])
+Route::get('/webhooks/msg91/whatsapp', [Msg91WebhookController::class, 'ping'])
     ->middleware('throttle:60,1')
     ->name('webhooks.msg91.whatsapp.ping');
 
@@ -774,26 +780,25 @@ Route::get('/webhooks/msg91/whatsapp', [\App\Http\Controllers\Api\Msg91WebhookCo
 
 Route::prefix('v1/workforce')->middleware('auth.jwt')->group(function (): void {
     // Health & System Monitoring
-    Route::get('/health', function (\App\Services\Hrms\WorkforceHealthService $service) {
+    Route::get('/health', function (WorkforceHealthService $service) {
         return response()->json($service->checkHealth());
     })->middleware('throttle:60,1');
 
     // Edge Ingestion & Sync (Phase 3)
-    Route::post('/punch', [\App\Http\Controllers\Api\WorkforceSyncController::class, 'punch'])
+    Route::post('/punch', [WorkforceSyncController::class, 'punch'])
         ->middleware('throttle:120,1');
-    Route::post('/sync-batch', [\App\Http\Controllers\Api\WorkforceSyncController::class, 'syncBatch'])
+    Route::post('/sync-batch', [WorkforceSyncController::class, 'syncBatch'])
         ->middleware('throttle:120,1');
 
     // Workforce Intelligence, Predictive Labor & Statutory Payroll (Phase 4)
-    Route::post('/roster/auto-schedule', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'autoSchedule'])
+    Route::post('/roster/auto-schedule', [WorkforceIntelligenceController::class, 'autoSchedule'])
         ->middleware('throttle:60,1');
-    Route::get('/labor/forecast', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'forecastLabor'])
+    Route::get('/labor/forecast', [WorkforceIntelligenceController::class, 'forecastLabor'])
         ->middleware('throttle:60,1');
-    Route::post('/payroll/generate-batch', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'generatePayrollBatch'])
+    Route::post('/payroll/generate-batch', [WorkforceIntelligenceController::class, 'generatePayrollBatch'])
         ->middleware('throttle:60,1');
-    Route::post('/payroll/lock-batch', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'lockPayrollBatch'])
+    Route::post('/payroll/lock-batch', [WorkforceIntelligenceController::class, 'lockPayrollBatch'])
         ->middleware('throttle:60,1');
-    Route::get('/payroll/compliance-export', [\App\Http\Controllers\Api\WorkforceIntelligenceController::class, 'complianceExport'])
+    Route::get('/payroll/compliance-export', [WorkforceIntelligenceController::class, 'complianceExport'])
         ->middleware('throttle:60,1');
 });
-

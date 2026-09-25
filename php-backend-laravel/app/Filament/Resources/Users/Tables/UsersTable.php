@@ -5,9 +5,8 @@ namespace App\Filament\Resources\Users\Tables;
 use App\Filament\Support\AvatarColumn;
 use App\Models\User;
 use App\Support\ContactPrefill;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -111,6 +110,16 @@ class UsersTable
                     ->numeric()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('lifetime_spend')
+                    ->label('Lifetime spend')
+                    ->money('INR')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('bookings_count')
+                    ->label('Bookings placed')
+                    ->numeric()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 // The blue tick, grantable straight from the list — verifying someone is a
                 // one-flip decision an operator makes while looking at the row, not a
                 // reason to open an edit form. Visible by default so it can be audited at
@@ -120,6 +129,34 @@ class UsersTable
                     ->sortable(),
             ])
             ->filters([
+                SelectFilter::make('cohort')
+                    ->label('Intelligence Cohort')
+                    ->options([
+                        'vip_spenders'     => 'VIP Spenders (> ₹5,000)',
+                        'frequent_bookers' => 'Frequent Bookers (5+ bookings)',
+                        'gamehub_athletes' => 'Active Athletes (3+ matches / 500+ XP)',
+                        'subscribers'      => 'Paid Pass Subscribers',
+                        'verified'         => 'Verified Blue-Tick Citizens',
+                        'at_risk'          => 'At-Risk / Lapsed (Booked before, inactive >30d)',
+                        'reported'         => 'Reported Players (1+ complaints)',
+                        'flagged_risk'     => 'Flagged Risk (Trust < 70 or suspended)',
+                        'new_signups'      => 'New Signups (Last 7 days)',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        return match ($data['value'] ?? null) {
+                            'vip_spenders'     => $query->where('lifetime_spend', '>=', 5000),
+                            'frequent_bookers' => $query->where('bookings_count', '>=', 5),
+                            'gamehub_athletes' => $query->where(fn (Builder $sub) => $sub->where('matches_played_count', '>=', 3)->orWhere('ranked_xp', '>=', 500)),
+                            'subscribers'      => $query->whereHas('memberSubscriptions', fn (Builder $sub) => $sub->whereIn('status', ['active', 'authenticated'])),
+                            'verified'         => $query->where('is_verified', true),
+                            'at_risk'          => $query->where('bookings_count', '>', 0)->where(fn (Builder $sub) => $sub->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(30))),
+                            'reported'         => $query->whereHas('receivedPlayerReports'),
+                            'flagged_risk'     => $query->where(fn (Builder $sub) => $sub->where('trust_score', '<', 70)->orWhereIn('status', ['SUSPENDED', 'BANNED'])),
+                            'new_signups'      => $query->where('created_at', '>=', now()->subDays(7)),
+                            default            => $query,
+                        };
+                    }),
+
                 // Drill-in for the "New this week" KPI tile above the table.
                 SelectFilter::make('joined')
                     ->label('Joined')
@@ -142,12 +179,11 @@ class UsersTable
                 SelectFilter::make('status')
                     ->label('Status')
                     ->options([
-                        'active'    => 'Active',
-                        'suspended' => 'Suspended',
+                        'ACTIVE'    => 'Active',
+                        'SUSPENDED' => 'Suspended',
                     ])
-                    // Status casing is mixed in the DB (ACTIVE/active), so match case-insensitively.
                     ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
-                        ? $query->whereRaw('lower(status) = ?', [strtolower($data['value'])])
+                        ? $query->where('status', strtoupper($data['value']))
                         : $query),
 
                 SelectFilter::make('activity')
@@ -176,24 +212,24 @@ class UsersTable
 
                 SelectFilter::make('role')
                     ->options([
-                        'user'    => 'User',
-                        'partner' => 'Partner',
-                        'coadmin' => 'Co-admin',
-                        'admin'   => 'Admin',
+                        'USER'    => 'User',
+                        'PARTNER' => 'Partner',
+                        'COADMIN' => 'Co-admin',
+                        'ADMIN'   => 'Admin',
                     ])
-                    // Column casing is mixed in the DB, so match case-insensitively.
                     ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
-                        ? $query->whereRaw('lower(role) = ?', [strtolower($data['value'])])
+                        ? $query->where('role', strtoupper($data['value']))
                         : $query),
             ])
             ->recordActions([
+                ViewAction::make(),
                 EditAction::make(),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
             ]);
+            // No bulk delete, deliberately. `bookings.user_id` cascades on delete (and
+            // fourteen other tables cascade off `users`), so a bulk delete here would
+            // silently destroy the financial records of everyone selected. Removing an
+            // account goes through AccountEraser, one person at a time, with a reason —
+            // see EditAppUser::getHeaderActions().
     }
 
     /**

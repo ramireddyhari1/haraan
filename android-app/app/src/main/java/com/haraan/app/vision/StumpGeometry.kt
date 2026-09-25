@@ -81,6 +81,15 @@ data class StumpSet(
  * is geometry, it is where this either works or doesn't, and it should be provable at a
  * desk rather than only on a ground.
  */
+/**
+ * What a search of one frame's bars came to.
+ *
+ * [reason] is populated ONLY when [set] is null, and it describes the nearest miss rather
+ * than the last one tried — a frame full of fence palings should report the complaint about
+ * the three most stump-like bars in it, not about three specks in a corner.
+ */
+data class StumpSearch(val set: StumpSet?, val reason: String?)
+
 object StumpGeometry {
 
     /** Fewer than three bars cannot be a wicket. */
@@ -96,14 +105,14 @@ object StumpGeometry {
     const val MAX_CANDIDATES = 40
 
     /** Tallest over shortest. Perspective makes the far stump shorter, but not by much. */
-    const val MAX_HEIGHT_RATIO = 1.7f
+    const val MAX_HEIGHT_RATIO = 1.85f
 
     /** How far the three bases may sit apart vertically, as a share of their own height. */
-    const val MAX_BASE_SPREAD = 0.4f
+    const val MAX_BASE_SPREAD = 0.45f
 
     /** Wider gap over narrower. A wicket is evenly spaced; a fence is too, which is why
      *  this alone proves nothing and the other tests exist. */
-    const val MAX_GAP_RATIO = 1.8f
+    const val MAX_GAP_RATIO = 2.2f
 
     /**
      * Span across the three over their height in the picture.
@@ -147,8 +156,29 @@ object StumpGeometry {
         candidates: List<StumpCandidate>,
         creases: List<CreaseSegment> = emptyList(),
         frameAspect: Float = 1f,
-    ): StumpSet? {
-        if (candidates.size < MIN_CANDIDATES) return null
+    ): StumpSet? = search(candidates, creases, frameAspect).set
+
+    /**
+     * The best wicket-shaped triple, AND — when there is none — which rule threw the
+     * nearest miss out.
+     *
+     * WHY THIS EXISTS, WRITTEN ON THE GROUND IT WAS NEEDED ON. Pointed at three stumps a
+     * metre away, the screen read "3 bars, none of them three in a wicket's shape". Three
+     * bars is exactly one triple, so exactly one rule rejected it — and the readout could
+     * not say which, which left tuning to guesswork from a photograph.
+     *
+     * A detector that can explain its refusal is tunable in an afternoon on a ground. One
+     * that only says no is tunable by rebuilding with print statements, which is a
+     * different day's work every time.
+     */
+    fun search(
+        candidates: List<StumpCandidate>,
+        creases: List<CreaseSegment> = emptyList(),
+        frameAspect: Float = 1f,
+    ): StumpSearch {
+        if (candidates.size < MIN_CANDIDATES) {
+            return StumpSearch(null, "only ${candidates.size} tall thin bars in frame")
+        }
 
         val pool = candidates
             .sortedByDescending { it.height }
@@ -156,15 +186,86 @@ object StumpGeometry {
             .sortedBy { it.centreX }
 
         var best: StumpSet? = null
+        /*
+         * The nearest miss is the TALLEST rejected triple, not the first or the last.
+         *
+         * The pool is sorted by centreX for the combinatorial search, so iteration
+         * order says nothing about how stump-like a triple is. Instead, we track which
+         * rejected triple had the tallest average height — the bars most likely to be
+         * the real stumps — and explain only that one, once, after the search.
+         */
+        var missI = -1
+        var missJ = -1
+        var missK = -1
+        var missHeight = -1f
         for (i in pool.indices) {
             for (j in i + 1 until pool.size) {
                 for (k in j + 1 until pool.size) {
-                    val set = evaluate(pool[i], pool[j], pool[k], creases, frameAspect) ?: continue
-                    if (best == null || set.score > best!!.score) best = set
+                    val set = evaluate(pool[i], pool[j], pool[k], creases, frameAspect)
+                    if (set != null) {
+                        if (best == null || set.score > best.score) best = set
+                    } else {
+                        val h = (pool[i].height + pool[j].height + pool[k].height) / 3f
+                        if (h > missHeight) {
+                            missHeight = h
+                            missI = i; missJ = j; missK = k
+                        }
+                    }
                 }
             }
         }
-        return best
+        val reason = if (best != null || missI < 0) null
+            else explain(pool[missI], pool[missJ], pool[missK])
+        return StumpSearch(best, reason)
+    }
+
+    /**
+     * Why these three cannot be a wicket, or null when they can.
+     *
+     * The same rules as [evaluate] in the same order, deliberately duplicated as text
+     * rather than threaded through it as an out-parameter: [evaluate] is on the hot path
+     * for every triple of up to forty candidates, and it returns null without building a
+     * string. This is called only when that has already said no.
+     *
+     * Each message carries the MEASURED value and the LIMIT, because "too uneven" sends a
+     * tester back to the source and "gaps 2.3:1, limit 1.8" sends them to a number.
+     */
+    fun explain(left: StumpCandidate, middle: StumpCandidate, right: StumpCandidate): String? {
+        val lh = left.height; val mh = middle.height; val rh = right.height
+        if (lh <= 0f || mh <= 0f || rh <= 0f) return "a bar with no height"
+
+        val heightRatio = maxOf(lh, maxOf(mh, rh)) / minOf(lh, minOf(mh, rh))
+        if (heightRatio > MAX_HEIGHT_RATIO) {
+            return "heights %.1f:1, limit %.1f".format(heightRatio, MAX_HEIGHT_RATIO)
+        }
+
+        val meanHeight = (lh + mh + rh) / 3f
+        val baseSpread = maxOf(left.baseY, maxOf(middle.baseY, right.baseY)) -
+            minOf(left.baseY, minOf(middle.baseY, right.baseY))
+        if (baseSpread > MAX_BASE_SPREAD * meanHeight) {
+            return "bases %.2f apart, limit %.2f of their height"
+                .format(baseSpread / meanHeight, MAX_BASE_SPREAD)
+        }
+
+        val gapLeft = middle.centreX - left.centreX
+        val gapRight = right.centreX - middle.centreX
+        if (gapLeft <= 0f || gapRight <= 0f) return "two bars at the same place across"
+
+        val gapRatio = max(gapLeft, gapRight) / min(gapLeft, gapRight)
+        if (gapRatio > MAX_GAP_RATIO) {
+            return "gaps %.1f:1, limit %.1f".format(gapRatio, MAX_GAP_RATIO)
+        }
+
+        val spanRatio = (right.centreX - left.centreX) / meanHeight
+        if (spanRatio < MIN_SPAN_RATIO) {
+            return "span %.2f of its height, floor %.2f — too narrow for a wicket"
+                .format(spanRatio, MIN_SPAN_RATIO)
+        }
+        if (spanRatio > MAX_SPAN_RATIO) {
+            return "span %.2f of its height, ceiling %.2f — too wide for a wicket"
+                .format(spanRatio, MAX_SPAN_RATIO)
+        }
+        return null
     }
 
     /** Three bars, left to right, scored as a wicket — or null if they cannot be one. */
@@ -175,19 +276,20 @@ object StumpGeometry {
         creases: List<CreaseSegment> = emptyList(),
         frameAspect: Float = 1f,
     ): StumpSet? {
-        val heights = listOf(left.height, middle.height, right.height)
-        if (heights.any { it <= 0f }) return null
+        val lh = left.height; val mh = middle.height; val rh = right.height
+        if (lh <= 0f || mh <= 0f || rh <= 0f) return null
 
-        val tallest = heights.max()
-        val shortest = heights.min()
+        val tallest = maxOf(lh, maxOf(mh, rh))
+        val shortest = minOf(lh, minOf(mh, rh))
         val heightRatio = tallest / shortest
         if (heightRatio > MAX_HEIGHT_RATIO) return null
 
-        val meanHeight = heights.average().toFloat()
+        val meanHeight = (lh + mh + rh) / 3f
 
         // Stumps stand on one line. Bases scattered up and down the picture are three
         // separate objects at three different distances, not a wicket.
-        val baseSpread = listOf(left.baseY, middle.baseY, right.baseY).let { it.max() - it.min() }
+        val baseSpread = maxOf(left.baseY, maxOf(middle.baseY, right.baseY)) -
+            minOf(left.baseY, minOf(middle.baseY, right.baseY))
         if (baseSpread > MAX_BASE_SPREAD * meanHeight) return null
 
         val gapLeft = middle.centreX - left.centreX

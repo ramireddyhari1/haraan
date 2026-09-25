@@ -305,13 +305,30 @@ document.addEventListener('DOMContentLoaded', () => {
      * Apply the chosen city to the header pill, persist it, and close
      * the modal.
      */
-    function selectCity(city) {
+    function selectCity(city, coords) {
         // Persist the choice in a cookie so the server can scope content
         // (events/venues) to this city and render the pill on every page.
         try {
             const maxAge = 60 * 60 * 24 * 365; // 1 year
             document.cookie = 'haraan_city=' + encodeURIComponent(city.name) +
                 '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+
+            const lat = (coords && coords.latitude != null) ? coords.latitude : (city && city.latitude);
+            const lng = (coords && coords.longitude != null) ? coords.longitude : (city && city.longitude);
+
+            if (lat != null && lng != null) {
+                document.cookie = 'haraan_lat=' + encodeURIComponent(lat) +
+                    '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+                document.cookie = 'haraan_lng=' + encodeURIComponent(lng) +
+                    '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+                document.cookie = 'hb_geo=' + encodeURIComponent(lat + ',' + lng) +
+                    '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+            } else {
+                document.cookie = 'haraan_lat=; path=/; max-age=0; SameSite=Lax';
+                document.cookie = 'haraan_lng=; path=/; max-age=0; SameSite=Lax';
+                document.cookie = 'hb_geo=; path=/; max-age=0; SameSite=Lax';
+            }
+
             localStorage.setItem('bv_selected_city', JSON.stringify(city));
             pushRecentCity(city);
         } catch (_) {}
@@ -351,7 +368,13 @@ document.addEventListener('DOMContentLoaded', () => {
             'delhi': 'Delhi NCR', 'new delhi': 'Delhi NCR', 'gurgaon': 'Delhi NCR',
             'gurugram': 'Delhi NCR', 'noida': 'Delhi NCR', 'ghaziabad': 'Delhi NCR', 'faridabad': 'Delhi NCR',
             'bengaluru': 'Bengaluru', 'bangalore': 'Bengaluru',
+            'hyderabad': 'Hyderabad', 'secunderabad': 'Hyderabad', 'cyberabad': 'Hyderabad', 'kondapur': 'Hyderabad', 'gachibowli': 'Hyderabad',
+            'chennai': 'Chennai', 'madras': 'Chennai', 'tambaram': 'Chennai', 'avadi': 'Chennai',
             'pune': 'Pune', 'pimpri': 'Pune', 'chinchwad': 'Pune',
+            'kolkata': 'Kolkata', 'calcutta': 'Kolkata', 'howrah': 'Kolkata',
+            'vijayawada': 'Vijayawada', 'visakhapatnam': 'Visakhapatnam', 'vizag': 'Visakhapatnam',
+            'kochi': 'Kochi', 'cochin': 'Kochi', 'coimbatore': 'Coimbatore', 'mysuru': 'Mysuru', 'mysore': 'Mysuru',
+            'ahmedabad': 'Ahmedabad', 'jaipur': 'Jaipur',
             'goa': 'Goa', 'panaji': 'Goa', 'panjim': 'Goa', 'mapusa': 'Goa', 'margao': 'Goa', 'vasco': 'Goa',
         };
         const findCity = (label) =>
@@ -382,15 +405,15 @@ document.addEventListener('DOMContentLoaded', () => {
      * reflects the viewer's actual city. Returns true when a city was applied
      * (which triggers a reload), false when nothing usable was found.
      */
-    function applyDetectedCity(candidates, detectedName, countryName) {
+    function applyDetectedCity(candidates, detectedName, countryName, coords) {
         const matched = matchServedCity(candidates);
         if (matched) {
-            selectCity(matched); // persists cookie + reloads (updates the pill)
+            selectCity(matched, coords); // persists cookie + reloads (updates the pill)
             return true;
         }
         const name = (detectedName || '').trim();
         if (name) {
-            selectCity({ name: name, country: countryName || 'India' });
+            selectCity({ name: name, country: countryName || 'India' }, coords);
             return true;
         }
         return false;
@@ -399,15 +422,59 @@ document.addEventListener('DOMContentLoaded', () => {
     /** Resolve a city from precise GPS coordinates (browser geolocation). */
     async function resolveCityByCoords(latitude, longitude) {
         if (!cachedCities.length) await fetchCities();
-        const resp = await fetch(
-            'https://api.bigdatacloud.net/data/reverse-geocode-client' +
-            `?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
-        );
-        if (!resp.ok) return false;
-        const data = await resp.json();
-        const admin = (data.localityInfo && data.localityInfo.administrative) || [];
-        const candidates = [data.city, data.locality, data.principalSubdivision, ...admin.map((a) => a && a.name)];
-        return applyDetectedCity(candidates, data.city || data.locality, data.countryName);
+
+        // 1. Google Maps Geocoding API (high accuracy) when API key is configured
+        if (window.HaraanGoogleMapsKey) {
+            try {
+                const gResp = await fetch(
+                    `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${encodeURIComponent(window.HaraanGoogleMapsKey)}`
+                );
+                if (gResp.ok) {
+                    const gData = await gResp.json();
+                    if (gData.status === 'OK' && Array.isArray(gData.results) && gData.results.length > 0) {
+                        let city = '';
+                        let district = '';
+                        let area = '';
+                        for (let i = 0; i < gData.results.length; i++) {
+                            const components = gData.results[i].address_components || [];
+                            for (let j = 0; j < components.length; j++) {
+                                const c = components[j];
+                                const name = c.long_name || '';
+                                if (!name) continue;
+                                const types = c.types || [];
+                                if (!city && (types.includes('locality') || types.includes('postal_town'))) city = name;
+                                if (!district && types.includes('administrative_area_level_2')) district = name;
+                                if (!area && (types.includes('sublocality_level_1') || types.includes('sublocality') || types.includes('neighborhood'))) area = name;
+                            }
+                            if (city && district) break;
+                        }
+                        const candidates = [city, district, area].filter(Boolean);
+                        const detected = city || district || area;
+                        if (detected) {
+                            return applyDetectedCity(candidates, detected, 'India', { latitude, longitude });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('Google reverse-geocode failed, falling back:', err);
+            }
+        }
+
+        // 2. Free reverse-geocoding fallback
+        try {
+            const resp = await fetch(
+                'https://api.bigdatacloud.net/data/reverse-geocode-client' +
+                `?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+            );
+            if (resp.ok) {
+                const data = await resp.json();
+                const admin = (data.localityInfo && data.localityInfo.administrative) || [];
+                const candidates = [data.city, data.locality, data.principalSubdivision, ...admin.map((a) => a && a.name)];
+                return applyDetectedCity(candidates, data.city || data.locality, data.countryName, { latitude, longitude });
+            }
+        } catch (_) {}
+
+        return false;
     }
 
     /**
@@ -422,7 +489,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await resp.json();
         if (data && data.success === false) return false;
         const candidates = [data.city, data.region, data.country];
-        return applyDetectedCity(candidates, data.city, data.country);
+        const coords = (data.latitude && data.longitude) ? { latitude: data.latitude, longitude: data.longitude } : null;
+        return applyDetectedCity(candidates, data.city, data.country, coords);
     }
 
     useCurrentBtn?.addEventListener('click', () => {
@@ -665,6 +733,9 @@ document.addEventListener('DOMContentLoaded', () => {
             loginModal.style.display = 'none';
         }, 300);
     }
+
+    window.openLoginModal = openLoginModal;
+    window.closeLoginModal = closeLoginModal;
 
     loginBtn?.addEventListener('click', (e) => {
         e.preventDefault();

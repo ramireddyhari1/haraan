@@ -307,19 +307,19 @@
 						<td>
 							<div style="display: flex; align-items: center; gap: 8px;">
 								<div style="width: 32px; height: 32px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-weight: 700; display: grid; place-items: center; font-size: 12px; border: 1px solid rgba(139, 30, 63, 0.12);">
-									${(u.name || 'U').substring(0, 2).toUpperCase()}
+									${esc((u.name || 'U').substring(0, 2).toUpperCase())}
 								</div>
 								<div>
-									<div style="font-weight: 700; color: var(--text); font-size: 13px;">${u.name}</div>
-									<div style="font-size: 11px; color: var(--muted);">${u.email}</div>
+									<div style="font-weight: 700; color: var(--text); font-size: 13px;">${esc(u.name)}</div>
+									<div style="font-size: 11px; color: var(--muted);">${esc(u.email)}</div>
 								</div>
 							</div>
 						</td>
 						<td>
-							<span class="muted-chip" style="background:${roleBg}; color:${roleColor}; border:none; padding:4px 10px; font-size:11px;">${roleVal}</span>
+							<span class="muted-chip" style="background:${roleBg}; color:${roleColor}; border:none; padding:4px 10px; font-size:11px;">${esc(roleVal)}</span>
 						</td>
-						<td><span style="font-size: 12px; font-weight: 600; color: #475569;">${u.organizations_list || '—'}</span></td>
-						<td><span style="font-weight: 600; font-size: 13px;">${u.bookings_count || 0}</span></td>
+						<td><span style="font-size: 12px; font-weight: 600; color: #475569;">${esc(u.organizations_list) || '—'}</span></td>
+						<td><span style="font-weight: 600; font-size: 13px;">${esc(u.bookings_count) || 0}</span></td>
 						<td>
 							<span style="font-weight: 700; color: #16a34a; font-size: 13px;">
 								₹${parseFloat(u.revenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -333,9 +333,9 @@
 								</div>
 							</div>
 						</td>
-						<td><span style="font-size: 12px; color: var(--muted);">${u.last_active_human}</span></td>
+						<td><span style="font-size: 12px; color: var(--muted);">${esc(u.last_active_human)}</span></td>
 						<td>
-							<span class="muted-chip" style="background:${riskBg}; color:${riskColor}; border:none; padding:4px 10px; font-size:11px; font-weight: 700;">${riskVal}</span>
+							<span class="muted-chip" style="background:${riskBg}; color:${riskColor}; border:none; padding:4px 10px; font-size:11px; font-weight: 700;">${esc(riskVal)}</span>
 						</td>
 					`;
 

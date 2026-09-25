@@ -72,9 +72,8 @@ class HostProfile extends Model
     /** A venue owner's active venues — the venue-lane page's grid. */
     public function venuesQuery(): Builder
     {
-        return Venue::query()
+        return Venue::published()
             ->where('partner_id', $this->user_id)
-            ->where('is_active', true)
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->orderBy('name');

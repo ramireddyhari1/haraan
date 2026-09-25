@@ -22,12 +22,31 @@ import com.haraan.app.ui.matches.ScoringScreen
 
 @Composable
 fun MainNavigation() {
-  val backStack = rememberNavBackStack(Main, InsightSportsPicker)
+  val backStack = rememberNavBackStack(Main)
 
   // Any screen can ask for the plans (account card, a locked feature, a refused gate).
   LaunchedEffect(backStack) {
     com.haraan.app.data.membership.MembershipNav.requests.collect {
       if (backStack.lastOrNull() != Membership) backStack.add(Membership)
+    }
+  }
+  // Post-match rewards: the scorer finishing, a reward push, the match page, or deep link.
+  LaunchedEffect(backStack) {
+    com.haraan.app.data.rewards.RewardsNav.requests.collect { matchId ->
+      val key = MatchRewardsKey(matchId)
+      if (backStack.lastOrNull() != key) backStack.add(key)
+    }
+  }
+  LaunchedEffect(backStack) {
+    com.haraan.app.push.DeepLinkState.pending.collect { link ->
+      if (link != null) {
+        val target = com.haraan.app.push.DeepLinks.parse(link)
+        if (target is com.haraan.app.push.DeepLinkTarget.MatchRewards) {
+          val key = MatchRewardsKey(target.matchId)
+          if (backStack.lastOrNull() != key) backStack.add(key)
+          com.haraan.app.push.DeepLinkState.consume()
+        }
+      }
     }
   }
   LaunchedEffect(backStack) {
@@ -82,7 +101,11 @@ fun MainNavigation() {
         entry<OrderSummary> { order ->
           OrderSummaryScreen(
             order = order,
-            onBack = { backStack.removeLastOrNull() }
+            onBack = { backStack.removeLastOrNull() },
+            onRequireSignIn = {
+              backStack.removeLastOrNull()
+              backStack.add(LoginGate(order))
+            }
           )
         }
         entry<MatchDetails> { match ->
@@ -123,6 +146,12 @@ fun MainNavigation() {
           com.haraan.app.ui.membership.MembershipScreen(
             onClose = { backStack.removeLastOrNull() },
             onSignIn = { backStack.add(MembershipSignIn) },
+          )
+        }
+        entry<MatchRewardsKey> { key ->
+          com.haraan.app.ui.rewards.PostMatchRewardsScreen(
+            matchId = key.matchId,
+            onClose = { backStack.removeLastOrNull() },
           )
         }
         entry<InsightSportsPicker> {

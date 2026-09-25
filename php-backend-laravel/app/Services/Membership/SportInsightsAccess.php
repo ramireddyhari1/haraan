@@ -9,6 +9,7 @@ use App\Models\MemberSportSelection;
 use App\Models\User;
 use App\Support\Membership\InsightSports;
 use App\Support\Membership\MemberFeature;
+use App\Support\Membership\MembershipSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -206,6 +207,6 @@ class SportInsightsAccess
 
     private function cooldownDays(): int
     {
-        return max(0, (int) config('membership.insight_sport_cooldown_days', 7));
+        return MembershipSettings::int('insight_sport_cooldown_days');
     }
 }

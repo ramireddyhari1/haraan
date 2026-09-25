@@ -7,6 +7,7 @@
         'lng'     => 'longitude',
         'name'    => 'name',
         'address' => 'address',
+        'city'    => 'city',
         'mapLink' => 'map_link',
         'placeId' => 'place_id',
     ],

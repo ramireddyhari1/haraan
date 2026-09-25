@@ -28,6 +28,8 @@ data class EventTicketType(
     val remaining: Int?,    // null = unlimited (bounded by event slots)
     val onSale: Boolean,    // false when outside its sales window
     val phases: List<PricingPhase> = emptyList(), // empty = flat price
+    /** On sale for this viewer only because their plan's early ticket access opened it. */
+    val earlyAccess: Boolean = false,
 )
 
 /** One "Good to Know" row (icon key + label + value), assembled by the API. */
@@ -164,8 +166,10 @@ class EventRepository(
      * admin-authored "Good to Know" attributes and T&C notes. Blank on failure
      * so the detail screen can fall back to whatever it already has.
      */
-    suspend fun getEventDetail(eventId: String): EventDetailInfo = withContext(Dispatchers.IO) {
-        val body = runCatching { URL("${baseUrl}/api/events/$eventId").readText() }.getOrNull()
+    suspend fun getEventDetail(eventId: String, token: String? = null): EventDetailInfo = withContext(Dispatchers.IO) {
+        // Signed in, the server answers for this member: tiers their early access has opened
+        // read as on sale.
+        val body = ConditionalHttp.getText("${baseUrl}/api/events/$eventId", token?.takeIf { TokenStore.isSignedIn(it) })
             ?: return@withContext EventDetailInfo()
         val d = runCatching { JSONObject(body).optJSONObject("data") }.getOrNull()
             ?: return@withContext EventDetailInfo()
@@ -184,6 +188,7 @@ class EventRepository(
                     minPrice = if (o.isNull("minPrice")) null else o.optDouble("minPrice"),
                     remaining = if (o.isNull("remaining")) null else o.optInt("remaining"),
                     onSale = o.optBoolean("onSale", true),
+                    earlyAccess = o.optBoolean("earlyAccess", false),
                     phases = o.optJSONArray("phases")?.let { ph ->
                         (0 until ph.length()).mapNotNull { j ->
                             val po = ph.optJSONObject(j) ?: return@mapNotNull null
@@ -305,8 +310,8 @@ class EventRepository(
     }
 
     /** Sellable ticket tiers for one event. Empty when the event has none (flat-price event). */
-    suspend fun getEventTickets(eventId: String): List<EventTicketType> =
-        getEventDetail(eventId).ticketTypes
+    suspend fun getEventTickets(eventId: String, token: String? = null): List<EventTicketType> =
+        getEventDetail(eventId, token).ticketTypes
 
     private fun firstImage(o: JSONObject): String {
         o.optJSONArray("images")?.let { a ->

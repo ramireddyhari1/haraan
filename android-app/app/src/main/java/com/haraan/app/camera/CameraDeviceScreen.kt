@@ -21,7 +21,11 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -56,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,10 +83,12 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.haraan.app.vision.WicketDiagnosticsPanel
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -92,6 +99,7 @@ import com.haraan.app.theme.ArchivoDisplay
 import com.haraan.app.ui.Feel
 import com.haraan.app.data.CameraDeviceRepository
 import com.haraan.app.vision.OpenCvBallTracker
+import com.haraan.app.vision.drawWicketLock
 import com.haraan.app.vision.TrackQuality
 import com.haraan.app.data.CameraSession
 import com.haraan.app.data.PairingPreview
@@ -138,6 +146,17 @@ fun CameraDeviceScreen(
 
     LaunchedEffect(initialCode) {
         val code = initialCode
+        if (code == "TEST" || code == "DEBUG" || (com.haraan.app.BuildConfig.DEBUG && code == null)) {
+            session = com.haraan.app.data.CameraSession(
+                sessionToken = "debug_token",
+                role = com.haraan.app.data.MatchDeviceRole.LBW_REVIEW,
+                roleLabel = "Review Camera (Field Test)",
+                matchId = "debug_match",
+                matchTitle = "Live Camera · Field Test",
+                venue = "Cricket Ground",
+            )
+            return@LaunchedEffect
+        }
         if (code == null) {
             error = "That link is missing its pairing code."
             return@LaunchedEffect
@@ -162,6 +181,7 @@ fun CameraDeviceScreen(
                     session = null
                     error = "The scorer removed this camera from the match."
                 },
+                onExit = onExit,
             )
 
             else -> JoinPanel(
@@ -415,6 +435,7 @@ private fun CameraMode(
     hasCameraPermission: () -> Boolean,
     requestCameraPermission: ((Boolean) -> Unit) -> Unit,
     onDropped: () -> Unit,
+    onExit: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -440,11 +461,39 @@ private fun CameraMode(
 
     var granted by remember { mutableStateOf(hasCameraPermission()) }
     var recording by remember { mutableStateOf(false) }
-    var uploading by remember { mutableStateOf(false) }
+
+    /*
+     * THE PERSISTENT REVIEW CLIP QUEUE.
+     *
+     * Application-scoped singleton:
+     * - Exactly one instance per application process, surviving screen recreation.
+     * - Clips are stored durably on internal disk (context.filesDir/review_clips/).
+     * - The shutter re-arms immediately so the operator can film consecutive deliveries.
+     * - Drains in the background with exponential backoff on patchy cellular signal.
+     * - Deletes ONLY upon confirmed 2xx landing with the scorer.
+     */
+    val uploadQueue = remember { ClipUploadQueue.getInstance(ctx) }
+    val queueStatus by uploadQueue.status.collectAsState()
+
+    DisposableEffect(uploadQueue) {
+        val listener = object : ClipUploadQueue.UploadListener {
+            override fun onUploadSuccess(overBall: String?) {
+                view.performHapticFeedback(Feel.COMMIT)
+            }
+
+            override fun onUploadPermanentFailure(message: String) {
+                view.performHapticFeedback(Feel.REMOVE)
+            }
+        }
+        uploadQueue.addListener(listener)
+        onDispose {
+            uploadQueue.removeListener(listener)
+        }
+    }
+
     // Cleared on the next tap: a refusal is about the clip just filmed, not a mode the
     // camera is stuck in.
     var uploadError by remember { mutableStateOf<String?>(null) }
-    var clipsSent by remember { mutableStateOf(0) }
     var score by remember { mutableStateOf("") }
     var overs by remember { mutableStateOf("") }
     var live by remember { mutableStateOf(true) }
@@ -518,6 +567,19 @@ private fun CameraMode(
      * a whole, so it is worth the four characters it costs on a line that is already there.
      */
     var trackQuality by remember { mutableStateOf(TrackQuality.UNCERTAIN) }
+
+    /*
+     * WHERE THE LAST DELIVERY PITCHED.
+     *
+     * The only thing this phone can say in metres and be right about, so it is the only
+     * number that goes on the screen. Worked out once when the clip ends rather than per
+     * frame: it needs the whole track, and during the delivery there is nothing to say.
+     *
+     * Kept until the next tap, because it is also the plainest evidence the operator has
+     * that the calibration is good — a marker sitting where the ball actually landed means
+     * the corners are right, and one out in the covers means they are not.
+     */
+    var lastBounce by remember { mutableStateOf<com.haraan.app.vision.Bounce?>(null) }
     // Off by default: it is an aiming aid, not decoration, and it is in the way once the
     // phone is set. Persisted for the session so it does not reappear every delivery.
     var showGuide by remember { mutableStateOf(true) }
@@ -566,6 +628,49 @@ private fun CameraMode(
     var tapping by remember { mutableStateOf(false) }
 
     /*
+     * THE WICKET, HELD ACROSS FRAMES.
+     *
+     * A pitch quad needs four painted crease corners, and on the grounds this app is used
+     * on that paint is faded, mown off, or was never there. A wicket is never absent and is
+     * exactly 0.2286 m across, which makes it the one landmark that can put a speed in
+     * km/h and a projection in centimetres on a ground with no visible creases at all.
+     *
+     * Three pieces, and the order they run in matters:
+     *
+     *   [OpenCvCameraMotion] first, so the tripod's own settling is subtracted before
+     *   anything is compared between frames.
+     *
+     *   [OpenCvStumpDetector] second, for one frame's opinion.
+     *
+     *   [WicketTracker] last, which is the only one of the three that ever says CONFIRMED.
+     *   Nothing downstream reads the detector directly any more: a single frame's three
+     *   aligned bars could be a bat, a pad and a boot, and the tracker is what makes them
+     *   prove otherwise before a scale is taken from them.
+     */
+    val stumpDetector = remember { com.haraan.app.vision.OpenCvStumpDetector() }
+    val cameraMotion = remember { com.haraan.app.vision.OpenCvCameraMotion() }
+    val wicketTracker = remember { com.haraan.app.vision.WicketTracker() }
+    var wicketLock by remember { mutableStateOf<com.haraan.app.vision.WicketLock?>(null) }
+    var wicketDiagnostics by remember { mutableStateOf(wicketTracker.diagnostics()) }
+    /** Throttle: panel recomposes at ~5 Hz rather than analysis rate. */
+    var lastDiagnosticsMs = remember { 0L }
+    var showAdminPanel by remember { mutableStateOf(false) }
+
+    /** The wicket placed by hand, two taps at the base of the outer stumps. */
+    var wicketTapping by remember { mutableStateOf(false) }
+    var wicketTaps by remember { mutableStateOf<List<com.haraan.app.vision.Point2>>(emptyList()) }
+
+    /*
+     * The last delivery's numbers, worked out once when the clip ends.
+     *
+     * The same moment and the same reason as [lastBounce] beside it: the whole track is
+     * needed, and during the delivery there is nothing to say. What is new is that the
+     * wicket lock goes in with the quad, which is what lets a speed and a wicket projection
+     * exist on a ground where no quad was ever found.
+     */
+    var lastMetrics by remember { mutableStateOf<com.haraan.app.vision.FlightMetrics?>(null) }
+
+    /*
      * ROTATION, now that the Activity survives one.
      *
      * A use case's target rotation is fixed at bind time. A turn of the phone used to tear
@@ -593,12 +698,27 @@ private fun CameraMode(
         pitchQuad = null
         tappedCorners = emptyList()
         tapping = false
+        /*
+         * Auto-detected wicket is reset on rotation so it immediately re-detects upright
+         * in the new orientation/aspect ratio without carrying stale rotated coordinates.
+         * Manual locks placed by hand are preserved.
+         */
+        if (wicketLock?.source != com.haraan.app.vision.WicketLockSource.MANUAL) {
+            wicketTracker.reset()
+            wicketLock = null
+            wicketDiagnostics = wicketTracker.diagnostics()
+        }
+        cameraMotion.reset()
+        wicketTaps = emptyList()
+        wicketTapping = false
     }
 
     DisposableEffect(Unit) {
         onDispose {
             vision.release()
             pitchDetector.release()
+            stumpDetector.release()
+            cameraMotion.release()
             analysisExecutor.shutdown()
         }
     }
@@ -619,6 +739,10 @@ private fun CameraMode(
          * one while the analyzer quietly kept the first.
          */
         var lumaScratch: ByteArray? = null
+
+        /** The turn the previous frame arrived at, so a rotation can be told from a pan. */
+        var lastTurn: Int? = null
+        var idleAnalysisFrame = 0
 
         ImageAnalysis.Analyzer { image ->
             try {
@@ -646,6 +770,21 @@ private fun CameraMode(
                      * no use for it. Deciding first is most of the thermal saving on this
                      * screen, and it costs nothing that was ever worth having.
                      */
+                    /*
+                     * THE TURN IS ANNOUNCED BEFORE THE FRAME IS LOOKED AT.
+                     *
+                     * A quarter turn rotates the whole scene, so every correspondence in it
+                     * agrees with every other one and the motion estimator would fit a
+                     * confident nonsense translation to the lot. The tracker maps its
+                     * anchor through the turn exactly instead, and the estimator restarts
+                     * its difference from this frame.
+                     */
+                    val previousTurn = lastTurn
+                    if (previousTurn != null && previousTurn != turn) {
+                        wicketTracker.onRotation((turn - previousTurn) / 90, uprightAspect)
+                    }
+                    lastTurn = turn
+
                     val trackingNow = trackingLive
                     val lookingForPitch = !trackingNow &&
                         pitchQuad == null &&
@@ -656,7 +795,19 @@ private fun CameraMode(
                     // Vision yields to heat. Filming is the product; this is bolted to the
                     // side of it, and a phone that throttles its encoder mid-delivery has
                     // lost the thing the operator is actually standing there to do.
-                    if (thermalThrottled || (!trackingNow && !lookingForPitch)) {
+                    /*
+                     * Unlike the pitch, the wicket is worth looking for on every idle
+                     * frame, not only until it is found once.
+                     *
+                     * A quad is four corners of a painted rectangle and does not change; a
+                     * wicket lock is a live claim with a state, and the whole value of the
+                     * state machine is that it keeps re-deciding — re-acquiring after the
+                     * batter walks across it, dropping when the phone is repointed. A lock
+                     * that stopped being checked the moment it was found would be the
+                     * twelve-frame hold this replaced, wearing better clothes.
+                     */
+                    val lookingForWicket = !trackingNow && stumpDetector.available
+                    if (thermalThrottled || (!trackingNow && !lookingForPitch && !lookingForWicket)) {
                         return@Analyzer
                     }
 
@@ -677,7 +828,36 @@ private fun CameraMode(
                      * re-finding a stationary rectangle mid-delivery would cost frames of
                      * the one thing there is only one chance to see.
                      */
+                    /*
+                     * CAMERA MOTION RUNS ON EVERY ANALYSED FRAME, INCLUDING DURING A
+                     * DELIVERY, and it is the only thing here that does.
+                     *
+                     * It is cheap — a hundred corners followed at 320 wide, a couple of
+                     * milliseconds — and it is what keeps the wicket lock attached to the
+                     * ground while the heavy detector is switched off for the delivery. A
+                     * lock that stopped being carried the moment the ball was bowled would
+                     * be stale at exactly the moment its scale is used.
+                     */
+                    val cameraMove = cameraMotion.onFrame(
+                        luma = bytes,
+                        width = image.width,
+                        height = image.height,
+                        rowStride = plane.rowStride,
+                        rotationDegrees = image.imageInfo.rotationDegrees,
+                    )
+
                     if (trackingNow) {
+                        /*
+                         * The wicket is CARRIED, not missed.
+                         *
+                         * The detector is deliberately not run during a delivery — see the
+                         * one-frame-one-job note below — and handing the tracker a null
+                         * sighting would be telling it the wicket was looked for and not
+                         * found, which would drop a perfectly good lock eight frames into
+                         * every single ball.
+                         */
+                        wicketLock = wicketTracker.carry(cameraMove, uprightAspect)
+
                         // The camera's own monotonic clock, never the UI clock: ball
                         // motion timing has to come from when the sensor saw it.
                         val sighting = vision.onFrame(
@@ -698,17 +878,41 @@ private fun CameraMode(
                             trackQuality = vision.quality()
                         }
                     } else {
-                        // Stops as soon as it succeeds — see the gate above. The phone is on
-                        // a tripod; re-running this every frame would burn battery to
-                        // re-derive an answer that is already correct, and let the guide
-                        // twitch between readings.
-                        pitchDetector.detect(
-                            luma = bytes,
-                            width = image.width,
-                            height = image.height,
-                            rowStride = plane.rowStride,
-                            rotationDegrees = image.imageInfo.rotationDegrees,
-                        )?.let { pitchQuad = it }
+                        // Pitch detector is throttled to once every 4 frames so the Hough
+                        // transform does not starve CPU from stump detection. Stump detector
+                        // runs on every frame at full 25+ FPS for instant lock-on.
+                        idleAnalysisFrame++
+                        if (lookingForPitch && (idleAnalysisFrame % 4 == 0)) {
+                            pitchDetector.detect(
+                                luma = bytes,
+                                width = image.width,
+                                height = image.height,
+                                rowStride = plane.rowStride,
+                                rotationDegrees = image.imageInfo.rotationDegrees,
+                            )?.let { pitchQuad = it }
+                        }
+
+                        if (lookingForWicket) {
+                            val wicket = stumpDetector.detectWicket(
+                                luma = bytes,
+                                width = image.width,
+                                height = image.height,
+                                rowStride = plane.rowStride,
+                                rotationDegrees = image.imageInfo.rotationDegrees,
+                                creases = pitchDetector.creases(),
+                            )
+                            wicketLock = wicketTracker.onFrame(
+                                sighting = wicket,
+                                motion = cameraMove,
+                                frameAspect = uprightAspect,
+                                timestampMs = image.imageInfo.timestamp / 1_000_000,
+                            )
+                            val now = System.currentTimeMillis()
+                            if (now - lastDiagnosticsMs >= 200L) {
+                                wicketDiagnostics = wicketTracker.diagnostics()
+                                lastDiagnosticsMs = now
+                            }
+                        }
                     }
                 }
             } catch (_: Throwable) {
@@ -740,6 +944,12 @@ private fun CameraMode(
          * that the scorer sees it before wondering why no clips are arriving. The screen
          * shows "reconnecting" in between rather than pretending nothing is wrong.
          */
+        if (session.sessionToken == "debug_token") {
+            live = true
+            while (true) {
+                delay(30_000)
+            }
+        }
         var missed = 0
         while (true) {
             val beat = repo.heartbeat(session.sessionToken)
@@ -862,8 +1072,10 @@ private fun CameraMode(
 
                 found.toImage()?.let { toImage ->
                     val half = com.haraan.app.vision.PitchGeometry.RETURN_CREASE_HALF_WIDTH_M * 0.35
-                    val near = -com.haraan.app.vision.PitchGeometry.POPPING_CREASE_AHEAD_M
-                    val far = com.haraan.app.vision.PitchGeometry.CALIBRATION_LENGTH_M + near
+                    // From the quad's own calibration, so this cannot disagree with the
+                    // corners it is being drawn inside — or with the end it was tapped at.
+                    val near = found.calibration[0].y
+                    val far = found.calibration[2].y
 
                     val band = listOf(
                         com.haraan.app.vision.Point2(-half, near),
@@ -1021,6 +1233,164 @@ private fun CameraMode(
             }
         }
 
+        /*
+         * THE WICKET, DRAWN FROM THE LOCK.
+         *
+         * Not from the detector's newest sighting, which is the change worth being explicit
+         * about. A sighting is one frame's opinion, and three bars that happen to line up
+         * for one frame — a bat, a pad and a boot; three palings past a gap in the
+         * sightscreen — used to be painted with exactly the confidence of a wicket seen for
+         * a minute. The lock has survived multi-frame confirmation with the phone's own
+         * movement subtracted, and when it is coasting rather than seen it is drawn dashed
+         * and fading, which is a picture nobody can mistake for a detection.
+         *
+         * Above the trail and below the bounce marker: it is the landmark the trail is
+         * measured against, and the bounce is the one thing on this screen with a position
+         * in metres.
+         */
+        if (granted) {
+            wicketLock?.let { lock ->
+                Canvas(Modifier.fillMaxSize()) {
+                    drawWicketLock(
+                        lock = lock,
+                        box = com.haraan.app.vision.FrameBox.letterbox(
+                            size.width,
+                            size.height,
+                            uprightAspect,
+                        ),
+                        density = this,
+                    )
+                }
+            }
+        }
+
+        /*
+         * PLACING THE WICKET BY HAND.
+         *
+         * Two taps, at the base of each outer stump. The detector will fail on a wicket in
+         * shadow, behind a batter, or made of a stone with a bail-coloured chip in it, and a
+         * calibration that only works when the detector agrees is not a calibration. A
+         * person who can see the wicket can always point at it.
+         *
+         * Its own overlay and its own taps rather than a mode on the corner flow, because
+         * the two are answering different questions and a shared "tapping" flag would let an
+         * interrupted corner sequence finish as a wicket.
+         */
+        if (wicketTapping && granted) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(uprightAspect) {
+                        detectTapGestures { offset ->
+                            val box = com.haraan.app.vision.FrameBox.letterbox(
+                                size.width.toFloat(),
+                                size.height.toFloat(),
+                                uprightAspect,
+                            )
+                            // A tap on a letterbox bar is outside the analysed frame, where
+                            // no detector can ever agree with it.
+                            if (!box.contains(offset)) return@detectTapGestures
+                            val next = wicketTaps + box.toFrame(offset)
+                            wicketTaps = next
+                            if (next.size >= 2) {
+                                wicketTracker.lockManually(
+                                    baseLeft = next[0],
+                                    baseRight = next[1],
+                                    // The optional third tap is the top of a stump, and it
+                                    // buys the vertical scale. The two base points cannot
+                                    // give it at any price: they are collinear, and a line
+                                    // fixes distances only along itself.
+                                    top = next.getOrNull(2),
+                                    kind = com.haraan.app.vision.WicketKind.STUMPS,
+                                    frameAspect = uprightAspect,
+                                )
+                                wicketLock = wicketTracker.lock()
+                                wicketDiagnostics = wicketTracker.diagnostics()
+                            }
+                            // Told by feel, because the person doing this is looking at a
+                            // wicket rather than at the phone.
+                            view.performHapticFeedback(if (next.size >= 2) Feel.COMMIT else Feel.TICK)
+                            if (next.size >= 3) {
+                                wicketTapping = false
+                                wicketTaps = emptyList()
+                            }
+                        }
+                    },
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val box = com.haraan.app.vision.FrameBox.letterbox(
+                        size.width,
+                        size.height,
+                        uprightAspect,
+                    )
+                    wicketTaps.forEachIndexed { i, point ->
+                        val o = box.toView(point)
+                        drawCircle(Color(0xFFBDD3FF), radius = 7.dp.toPx(), center = o)
+                        drawCircle(
+                            Color.Black.copy(alpha = 0.6f),
+                            radius = 7.dp.toPx(),
+                            center = o,
+                            style = Stroke(width = 1.5.dp.toPx()),
+                        )
+                        if (i > 0) {
+                            drawLine(
+                                Color(0xFFBDD3FF).copy(alpha = 0.75f),
+                                box.toView(wicketTaps[i - 1]),
+                                o,
+                                strokeWidth = 2.dp.toPx(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        /*
+         * WHERE IT PITCHED.
+         *
+         * Drawn flat on the grass rather than as a floating dot: a ring and a cross, at the
+         * one point in the whole delivery the app is entitled to say it knows the position
+         * of. If it sits where the ball landed, the calibration is good; if it sits in the
+         * covers, it is not — which is worth more to the operator than the number is.
+         */
+        lastBounce?.let { bounce ->
+            if (granted) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val frame = frameRect(size.width, size.height, uprightAspect)
+                    val at = frame.at(bounce.image.x.toFloat(), bounce.image.y.toFloat())
+                    val radius = 11.dp.toPx()
+
+                    drawCircle(
+                        Color.Black.copy(alpha = 0.45f),
+                        radius = radius + 1.5.dp.toPx(),
+                        center = at,
+                        style = Stroke(width = 3.5.dp.toPx()),
+                    )
+                    drawCircle(
+                        BounceMark,
+                        radius = radius,
+                        center = at,
+                        style = Stroke(width = 2.dp.toPx()),
+                    )
+                    val arm = radius * 0.55f
+                    drawLine(
+                        BounceMark,
+                        Offset(at.x - arm, at.y),
+                        Offset(at.x + arm, at.y),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        BounceMark,
+                        Offset(at.x, at.y - arm),
+                        Offset(at.x, at.y + arm),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
+
         if (tapping && granted) {
             Box(
                 Modifier
@@ -1083,91 +1453,371 @@ private fun CameraMode(
             }
         }
 
-        Column(
-            Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                // In landscape the cutout is on a side rather than the top, and the status
-                // bar inset alone does not clear it.
-                .displayCutoutPadding()
-                .padding(16.dp)
-                // Held to a column's width. Unbounded, this panel stretched to whatever
-                // the longest line happened to be, which on a landscape screen is a
-                // half-metre banner of chrome laid across the pitch it is describing.
-                .widthIn(max = 330.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 14.dp, vertical = 11.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) Good else Rec))
-                Spacer(Modifier.width(8.dp))
-                Text(session.roleLabel, color = Ink, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                buildString {
-                    append(session.matchTitle)
-                    if (score.isNotBlank()) append("  ·  $score")
-                    if (overs.isNotBlank()) append(" ($overs)")
-                },
-                color = Ink.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                maxLines = 1,
+        /*
+         * THE PANEL STANDS DOWN WHILE A WICKET IS BEING PLACED.
+         *
+         * Found on a phone with three stumps in frame: this panel sits over the middle of
+         * the picture, and a Compose surface that handles its own touches eats every tap
+         * inside it. Every tap aimed at a stump did nothing at all, with nothing on screen
+         * to say why.
+         *
+         * Hidden rather than layered under the tap catcher, because while somebody is
+         * pointing at a wicket the whole picture IS the control, and a panel merely sitting
+         * underneath would still be covering the thing they are aiming at. The prompt and
+         * the way out are drawn separately below.
+         */
+        /*
+         * SPORTS TECH STATUS PILL & MINIMAL CONTROLS
+         *
+         * Shows only simple, high-tech states: "Detecting stumps…", "Ready", or "Tracking delivery".
+         * All complex calculations continue running internally without cluttering the screen.
+         */
+        if (!wicketTapping) {
+            val currentLock = wicketLock
+            val isReady = currentLock != null && (
+                currentLock.state == com.haraan.app.vision.WicketTrackState.CONFIRMED ||
+                currentLock.source == com.haraan.app.vision.WicketLockSource.MANUAL
             )
-            Spacer(Modifier.height(9.dp))
-            if (showGuide) {
-                Text(
-                    when {
-                        // Named in the order the calibration rectangle expects them. Asking
-                        // for "the corners" and hoping would put the pitch inside out.
-                        tapping -> CORNER_PROMPTS.getOrElse(tappedCorners.size) { "" }
-                        tappedQuad != null -> "Corners set by hand"
-                        pitchQuad != null -> "Pitch found \u2014 guide locked to the creases"
-                        tappedCorners.size >= 4 ->
-                            "Those four corners are not a pitch shape \u2014 tap them again"
-                        else -> "Line the far stumps up inside the guide"
-                    },
-                    color = Ink.copy(alpha = 0.55f),
-                    fontSize = 11.sp,
-                    maxLines = 2,
-                )
-                Spacer(Modifier.height(2.dp))
+
+            // Tactile physical feedback the instant stumps lock into place
+            LaunchedEffect(isReady) {
+                if (isReady) {
+                    view.performHapticFeedback(Feel.COMMIT)
+                }
             }
-            if (found == null || tappedCorners.isNotEmpty()) {
-                Text(
-                    when {
-                        tapping -> "Cancel"
-                        tappedCorners.isNotEmpty() -> "Set the corners again"
-                        else -> "Set the corners by hand"
-                    },
-                    color = Color(0xFFFACC15),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
+
+            val isTracking = recording || trackingLive
+            val statusColor = when {
+                isTracking -> Color(0xFFEF4444)
+                isReady -> Color(0xFF10B981)
+                else -> Color(0xFFF59E0B)
+            }
+            val statusText = when {
+                isTracking -> "Tracking delivery"
+                isReady -> "Ready"
+                else -> "Detecting stumps…"
+            }
+
+            val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.35f,
+                targetValue = 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(850, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "ledPulse",
+            )
+
+            // ─────────────────────────────────────────────────────────────────
+            // 1. UNIFIED BROADCAST TOP MASTER BAR (Zero Collision)
+            // ─────────────────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                // Left: Camera identity & framerate badge
+                Row(
                     modifier = Modifier
-                        .clickableCapture(enabled = true) {
-                            if (tapping) {
-                                tapping = false
-                                tappedCorners = emptyList()
-                            } else {
-                                tappedCorners = emptyList()
-                                tapping = true
-                                showGuide = true
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xD90F172A))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.5.dp)
+                            .clip(CircleShape)
+                            .background(if (recording) Color(0xFFEF4444) else Color(0xFF10B981))
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "STUMP CAM",
+                        color = Color.White,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = "60fps",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+
+                // Center: Optical Status Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xE60A0E17))
+                        .border(
+                            1.dp,
+                            Brush.horizontalGradient(
+                                listOf(
+                                    statusColor.copy(alpha = 0.35f),
+                                    Color.White.copy(alpha = 0.15f),
+                                    statusColor.copy(alpha = 0.35f),
+                                )
+                            ),
+                            RoundedCornerShape(20.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.5.dp)
+                                .clip(CircleShape)
+                                .background(statusColor.copy(alpha = if (isReady) 1.0f else pulseAlpha))
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (isReady) "HAWK-EYE CALIBRATED" else statusText.uppercase(),
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp,
+                        )
+                    }
+                }
+
+                // Right: Tuning gear & Exit cross
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Settings / Tuning toggle
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(if (showAdminPanel) Color(0xFF2563EB) else Color(0xD90F172A))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                            .clickableCapture(enabled = true) { showAdminPanel = !showAdminPanel },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        TuningGearGlyph(Modifier.size(13.dp), if (showAdminPanel) Color.White else Color(0xFF94A3B8))
+                    }
+
+                    // Dismiss / Exit button
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xD90F172A))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                            .clickableCapture(enabled = true, onClick = onExit),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ExitCrossGlyph(Modifier.size(11.dp), Color.White.copy(alpha = 0.85f))
+                    }
+                }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // 2. FOX SPORTS BROADCAST TELEMETRY CHYRON (Below Top Bar)
+            // ─────────────────────────────────────────────────────────────────
+            val (speedVal, speedU) = when (val s = lastMetrics?.groundSpeed) {
+                is com.haraan.app.vision.MetricValue.Measured -> "%.0f".format(s.value * 0.621371) to "MPH"
+                else -> "--" to "MPH"
+            }
+            val (spinVal, spinU) = when (val t = lastMetrics?.turn) {
+                is com.haraan.app.vision.MetricValue.Measured -> "%.1f".format(kotlin.math.abs(t.value)) to "°"
+                else -> "--" to "°"
+            }
+            val (swingVal, swingU) = when (val sw = lastMetrics?.swing) {
+                is com.haraan.app.vision.MetricValue.Measured -> "%.1f".format(kotlin.math.abs(sw.value)) to "SF"
+                else -> "--" to "SF"
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(top = 52.dp, start = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FoxSportsTelemetryChyron(
+                    speedValue = speedVal,
+                    speedUnit = speedU,
+                    spinValue = spinVal,
+                    spinUnit = spinU,
+                    swingValue = swingVal,
+                    swingUnit = swingU,
+                )
+
+                if (showAdminPanel) {
+                    Spacer(Modifier.height(4.dp))
+                    WicketDiagnosticsPanel(
+                        diagnostics = wicketDiagnostics,
+                        lock = currentLock,
+                        modifier = Modifier
+                            .widthIn(max = 280.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.85f))
+                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                    )
+                }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // 3. TACTILE MACHINED CAMERA TOOL RAIL (Middle-Left in Portrait, Bottom-Left in Landscape)
+            // ─────────────────────────────────────────────────────────────────
+            val toolRailModifier = if (landscape) {
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .navigationBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(start = 16.dp, bottom = 18.dp)
+            } else {
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 14.dp)
+            }
+
+            Box(
+                modifier = toolRailModifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xD90F172A))
+                    .border(
+                        1.2.dp,
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.25f), Color.White.copy(alpha = 0.08f))
+                        ),
+                        RoundedCornerShape(24.dp),
+                    )
+                    .padding(vertical = 8.dp, horizontal = 5.dp),
+            ) {
+                val railButtons: @Composable () -> Unit = {
+                    MachinedDialButton(
+                        active = showGuide,
+                        activeColor = Color(0xFF00E5FF),
+                        onClick = { showGuide = !showGuide },
+                    ) { tint ->
+                        ReticleGlyph(Modifier.size(17.dp), tint)
+                    }
+
+                    // Knurled tactile separator grooves
+                    val grooveColor = Color.White.copy(alpha = 0.15f)
+                    if (landscape) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            repeat(3) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.2.dp)
+                                        .height(14.dp)
+                                        .background(grooveColor)
+                                )
                             }
                         }
-                        .padding(vertical = 2.dp),
-                )
-                Spacer(Modifier.height(2.dp))
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            repeat(3) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(14.dp)
+                                        .height(1.2.dp)
+                                        .background(grooveColor)
+                                )
+                            }
+                        }
+                    }
+
+                    MachinedDialButton(
+                        active = wicketDiagnostics.lockSource == com.haraan.app.vision.WicketLockSource.MANUAL,
+                        activeColor = Color(0xFFE2C48D),
+                        onClick = {
+                            if (wicketDiagnostics.lockSource == com.haraan.app.vision.WicketLockSource.MANUAL) {
+                                wicketTracker.clearManualLock()
+                                wicketLock = wicketTracker.lock()
+                                wicketDiagnostics = wicketTracker.diagnostics()
+                                wicketTaps = emptyList()
+                            } else {
+                                wicketTaps = emptyList()
+                                wicketTapping = true
+                            }
+                        },
+                    ) { tint ->
+                        CalibrationGlyph(Modifier.size(17.dp), tint)
+                    }
+                }
+
+                if (landscape) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        railButtons()
+                    }
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        railButtons()
+                    }
+                }
             }
-            Text(
-                if (showGuide) "Hide aiming guide" else "Show aiming guide",
-                color = Ink.copy(alpha = 0.85f),
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .clickableCapture(enabled = true) { showGuide = !showGuide }
-                    .padding(vertical = 2.dp),
-            )
+        }
+
+        // And what replaces it: the one instruction that matters, and the way out. Bottom
+        // centre, clear of the picture, where a thumb already is.
+        if (wicketTapping && granted) {
+            Column(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    when (wicketTaps.size) {
+                        0 -> "Tap the outside of one stump, at the ground"
+                        1 -> "Now the far stump, at the ground"
+                        else -> "Optional: tap the top of a stump"
+                    },
+                    color = Ink,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.66f))
+                        .padding(horizontal = 13.dp, vertical = 9.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Cancel",
+                    color = Color(0xFFBDD3FF),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.66f))
+                        .clickableCapture(enabled = true) {
+                            wicketTapping = false
+                            wicketTaps = emptyList()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                )
+            }
         }
 
         /*
@@ -1189,15 +1839,49 @@ private fun CameraMode(
             ballTrail = emptyList()
             latestBall = null
             trackQuality = TrackQuality.UNCERTAIN
+            lastBounce = null
+            lastMetrics = null
             trackingLive = true
             recording = true
+            val clipFile = uploadQueue.createClipFile()
             activeRecording = startClip(
                 context = ctx,
                 capture = capture,
                 executor = executor,
+                targetFile = clipFile,
                 onFinished = { file, durationMs ->
                     recording = false
                     trackingLive = false
+                    /*
+                     * The measurement, taken once the delivery is over.
+                     *
+                     * Against the pitch as it was calibrated when the clip started, not as
+                     * it might be now: the ball was filmed on that pitch. Null is the
+                     * common answer — no calibration, a full toss, too few points — and it
+                     * simply means nothing is claimed.
+                     */
+                    lastBounce = found?.let { pitch ->
+                        com.haraan.app.vision.BouncePoint.find(vision.track(), pitch)
+                    }
+                    /*
+                     * And the rest of the delivery's numbers, from the same track.
+                     *
+                     * Both landmarks go in, and they answer different questions: the quad
+                     * is the only thing that can say how far UP the pitch the ball landed,
+                     * and the wicket lock is the only thing that can put a speed in km/h or
+                     * a projection in centimetres. On most grounds there is no quad and the
+                     * wicket is all there is, which is the entire reason it was built.
+                     *
+                     * The lock is read through [WicketLock.isMeasurable] inside, not
+                     * checked for null here: a lock that is coasting is still a lock and
+                     * must not be measured from.
+                     */
+                    lastMetrics = com.haraan.app.vision.FlightMetrics.of(
+                        track = vision.track(),
+                        frameAspect = uprightAspect,
+                        quad = found,
+                        wicket = wicketLock,
+                    )
                     // The window closed. Nobody pressed stop, so this is the only way to
                     // know it is shut and the next delivery can be armed.
                     view.performHapticFeedback(Feel.TICK)
@@ -1209,30 +1893,18 @@ private fun CameraMode(
                         uploadError = "That clip is too large to send. Record a shorter delivery."
                         return@startClip
                     }
-                    uploading = true
-                    scope.launch {
-                        val ok = repo.uploadClip(
-                            session.sessionToken,
-                            file,
-                            durationMs,
-                            overs.takeIf { it.isNotBlank() },
-                        )
-                        if (ok) {
-                            clipsSent += 1
-                            // It is the scorer's now.
-                            view.performHapticFeedback(Feel.COMMIT)
-                        } else {
-                            // A refusal and a success must not feel alike: this is the one
-                            // moment the operator can still refilm the ball.
-                            view.performHapticFeedback(Feel.REMOVE)
-                            uploadError = "That clip didn't reach the scorer. Tap to film the next one."
-                        }
-                        // Either way. The phone is a camera, not a library: a clip that
-                        // landed belongs to the scorer, and one that did not is not worth
-                        // a cache full of dead deliveries.
-                        runCatching { file.delete() }
-                        uploading = false
-                    }
+                    /*
+                     * Persisted in the review queue:
+                     * The operator is free to film the next delivery immediately without
+                     * waiting on cellular latency. Backlog drains in background with
+                     * exponential backoff, deleting only upon confirmed 2xx landing.
+                     */
+                    uploadQueue.enqueue(
+                        file = file,
+                        sessionToken = session.sessionToken,
+                        durationMs = durationMs,
+                        overBall = overs.takeIf { it.isNotBlank() },
+                    )
                 },
             )
             /*
@@ -1282,21 +1954,67 @@ private fun CameraMode(
             TrackQuality.PARTIAL -> " · patchy"
             TrackQuality.UNCERTAIN -> ""
         }
+        val pendingCount = queueStatus.pendingCount
+        val clipsSent = queueStatus.clipsSent
+        val isUploading = queueStatus.isUploading
+        val queueError = queueStatus.lastError
+
         val status = when {
             // The point count is the only honest signal of whether vision is doing
             // anything, and it belongs where the person filming can see it.
             recording && trackedPoints > 0 -> "Recording · $trackedPoints ball points$trackWord"
             recording -> "Recording this delivery…"
-            uploading -> "Sending to the scorer…"
             uploadError != null -> uploadError!!
             // Said out loud rather than left to a small coloured dot. Somebody holding
             // this phone at the boundary needs to know the difference between "idle" and
             // "the scorer has stopped hearing from me".
             !live -> "Reconnecting to the match…"
+            /*
+             * One line, and only after a delivery.
+             *
+             * The rest of a pitch map belongs to the scorer and the player, not to somebody
+             * standing at a boundary holding a phone. What earns its place here is the
+             * confirmation that the calibration under it is working — which is why the
+             * spoken length comes first and the number second, and why there is no tile,
+             * no card and no second row.
+             */
+            /*
+             * THE DELIVERY'S ONE LINE, and what gets to be in it.
+             *
+             * A speed goes first when there is one, because it is the number everybody at
+             * a ground asks for and it only exists when the wicket lock was measurable AND
+             * the camera was square enough to the flight to see the motion at all — so its
+             * presence is itself the confirmation that the setup is right. The length comes
+             * next, because it is the only thing on this screen measured in metres up the
+             * pitch. Nothing else fits, and a second row here would be a scoreboard on a
+             * screen whose job is to film.
+             */
+            lastMetrics?.groundSpeed is com.haraan.app.vision.MetricValue.Measured ->
+                with(lastMetrics!!.groundSpeed as com.haraan.app.vision.MetricValue.Measured) {
+                    buildString {
+                        append("%.0f km/h".format(value))
+                        val turn = lastMetrics?.turn
+                        if (turn is com.haraan.app.vision.MetricValue.Measured &&
+                            kotlin.math.abs(turn.value) >= 2.0
+                        ) {
+                            append(" · turned %.0f°".format(kotlin.math.abs(turn.value)))
+                        }
+                        lastBounce?.let { append(" · ${it.length.spoken}") }
+                    }
+                }
+
+            lastBounce != null -> with(lastBounce!!) {
+                "Pitched ${length.spoken} · ${"%.1f".format(lengthM)} m"
+            }
             // Said plainly, and said with what still works. A phone that has gone quiet
             // about the ball while the operator can see it is filming invites the guess
             // that the whole thing has broken.
             thermalThrottled -> "Phone's hot · still filming, tracking paused"
+            queueError != null && pendingCount > 0 -> "Upload paused · $pendingCount pending"
+            isUploading && pendingCount > 1 -> "Sending clip to scorer · $pendingCount queued"
+            isUploading -> "Sending to the scorer…"
+            pendingCount > 0 && clipsSent > 0 -> "$clipsSent sent · $pendingCount queued"
+            pendingCount > 0 -> "$pendingCount queued · waiting to send"
             trackedPoints > 0 -> "$clipsSent sent · $trackedPoints ball points$trackWord"
             clipsSent > 0 -> "$clipsSent sent"
             else -> "Tap when the bowler runs in"
@@ -1313,10 +2031,9 @@ private fun CameraMode(
                     bottom = if (landscape) 0.dp else 30.dp,
                 ),
             status = status,
-            isError = uploadError != null,
+            isError = uploadError != null || (queueError != null && pendingCount > 0),
             recording = recording,
-            uploading = uploading,
-            canFilm = granted && videoCapture != null && !recording && !uploading,
+            canFilm = granted && videoCapture != null && !recording,
             landscape = landscape,
             onArm = armDelivery,
         )
@@ -1338,7 +2055,6 @@ private fun ShutterControl(
     status: String,
     isError: Boolean,
     recording: Boolean,
-    uploading: Boolean,
     canFilm: Boolean,
     landscape: Boolean,
     onArm: () -> Unit,
@@ -1355,7 +2071,7 @@ private fun ShutterControl(
      * bowler ran in, and the operator had no way to tell that from a camera that had
      * stopped responding.
      *
-     * It also refuses a press while a clip is still being filmed or sent, instead of
+     * It also refuses a press while a clip is still being filmed, instead of
      * letting one land on a control that cannot act on it.
      */
     val shutter = remember { MutableInteractionSource() }
@@ -1367,16 +2083,23 @@ private fun ShutterControl(
     )
 
     val statusLine: @Composable () -> Unit = {
-        Text(
-            status,
-            color = if (isError) Rec else Ink.copy(alpha = 0.85f),
-            fontSize = 13.5.sp,
-            lineHeight = 19.sp,
-            // Bounded in landscape so a long refusal wraps instead of shouldering the
-            // shutter off the edge of the screen.
-            modifier = if (landscape) Modifier.widthIn(max = 230.dp) else Modifier,
-            textAlign = if (landscape) TextAlign.End else TextAlign.Center,
-        )
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xD90A0E17))
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            Text(
+                status,
+                color = if (isError) Rec else Color.White.copy(alpha = 0.90f),
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.3.sp,
+                modifier = if (landscape) Modifier.widthIn(max = 230.dp) else Modifier,
+                textAlign = if (landscape) TextAlign.End else TextAlign.Center,
+            )
+        }
     }
 
     val disc: @Composable () -> Unit = {
@@ -1385,10 +2108,26 @@ private fun ShutterControl(
                 // First in the chain, so the disc itself dips rather than its contents
                 // shrinking inside a ring that stays where it was.
                 .graphicsLayer { scaleX = shutterScale; scaleY = shutterScale }
-                .size(84.dp)
+                .size(76.dp)
                 .clip(CircleShape)
-                .background(if (recording) Rec else Color.White.copy(alpha = 0.9f))
-                .border(4.dp, Color.White.copy(alpha = 0.55f), CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(Color(0xFF222B3D), Color(0xFF0F1523)),
+                    )
+                )
+                .border(
+                    2.5.dp,
+                    Brush.sweepGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.85f),
+                            Color(0xFF64748B),
+                            Color.White.copy(alpha = 0.85f),
+                            Color(0xFF475569),
+                            Color.White.copy(alpha = 0.85f),
+                        ),
+                    ),
+                    CircleShape,
+                )
                 .clickable(
                     interactionSource = shutter,
                     indication = null,
@@ -1401,20 +2140,34 @@ private fun ShutterControl(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            if (recording || uploading) {
+            if (recording) {
                 CircularProgressIndicator(
-                    color = if (recording) Color.White else Accent,
+                    color = Rec,
                     strokeWidth = 3.dp,
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(34.dp),
                 )
-            } else {
-                // Decoration now, not the target. Dimmed when the camera cannot film, so
-                // a disc that will not answer does not look like one that will.
                 Box(
                     Modifier
-                        .size(30.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (canFilm) Rec else Rec.copy(alpha = 0.35f)),
+                        .size(14.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Rec),
+                )
+            } else {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (canFilm) {
+                                Brush.radialGradient(
+                                    listOf(Color(0xFFFF4D4D), Rec),
+                                )
+                            } else {
+                                Brush.radialGradient(
+                                    listOf(Rec.copy(alpha = 0.35f), Rec.copy(alpha = 0.20f)),
+                                )
+                            }
+                        ),
                 )
             }
         }
@@ -1492,6 +2245,368 @@ private fun GhostButton(label: String, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = Ink.copy(alpha = 0.75f), fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDCRAFTED BROADCAST SPORTS-TECH GLYPHS (Precision Canvas Paths)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun VelocityGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFF00E5FF)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = with(density) { 1.5.dp.toPx() }
+        val path1 = Path().apply {
+            moveTo(w * 0.15f, h * 0.20f)
+            lineTo(w * 0.52f, h * 0.50f)
+            lineTo(w * 0.15f, h * 0.80f)
+        }
+        val path2 = Path().apply {
+            moveTo(w * 0.45f, h * 0.20f)
+            lineTo(w * 0.82f, h * 0.50f)
+            lineTo(w * 0.45f, h * 0.80f)
+        }
+        drawPath(path1, tint.copy(alpha = 0.45f), style = Stroke(width = stroke, cap = StrokeCap.Round))
+        drawPath(path2, tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+    }
+}
+
+@Composable
+private fun SpinGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFFA855F7)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val r = kotlin.math.min(w, h) * 0.36f
+        val c = Offset(w / 2f, h / 2f)
+        val stroke = with(density) { 1.5.dp.toPx() }
+        drawArc(
+            color = tint,
+            startAngle = 35f,
+            sweepAngle = 275f,
+            useCenter = false,
+            topLeft = Offset(c.x - r, c.y - r),
+            size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
+            style = Stroke(width = stroke, cap = StrokeCap.Round),
+        )
+        val arrow = Path().apply {
+            moveTo(c.x + r * 0.70f, c.y - r * 0.72f)
+            lineTo(c.x + r * 1.05f, c.y - r * 0.22f)
+            lineTo(c.x + r * 0.42f, c.y - r * 0.38f)
+            close()
+        }
+        drawPath(arrow, tint)
+    }
+}
+
+@Composable
+private fun TrajectoryGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFF10B981)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = with(density) { 1.6.dp.toPx() }
+        val arc = Path().apply {
+            moveTo(w * 0.18f, h * 0.82f)
+            cubicTo(w * 0.28f, h * 0.35f, w * 0.65f, h * 0.22f, w * 0.82f, h * 0.38f)
+        }
+        drawPath(arc, tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+        drawCircle(tint, radius = with(density) { 2.dp.toPx() }, center = Offset(w * 0.82f, h * 0.38f))
+    }
+}
+
+@Composable
+private fun ReticleGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val c = Offset(w / 2f, h / 2f)
+        val r = kotlin.math.min(w, h) * 0.32f
+        drawCircle(tint.copy(alpha = 0.55f), radius = r, center = c, style = Stroke(width = with(density) { 1.2.dp.toPx() }))
+        val tickLen = kotlin.math.min(w, h) * 0.18f
+        val strokeW = with(density) { 1.3.dp.toPx() }
+        drawLine(tint, Offset(c.x, c.y - r - tickLen), Offset(c.x, c.y - r + with(density) { 2.dp.toPx() }), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(tint, Offset(c.x, c.y + r - with(density) { 2.dp.toPx() }), Offset(c.x, c.y + r + tickLen), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(tint, Offset(c.x - r - tickLen, c.y), Offset(c.x - r + with(density) { 2.dp.toPx() }, c.y), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(tint, Offset(c.x + r - with(density) { 2.dp.toPx() }, c.y), Offset(c.x + r + tickLen, c.y), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawCircle(tint, radius = with(density) { 1.6.dp.toPx() }, center = c)
+    }
+}
+
+@Composable
+private fun CalibrationGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFFFACC15)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val bolt = Path().apply {
+            moveTo(w * 0.58f, h * 0.12f)
+            lineTo(w * 0.28f, h * 0.52f)
+            lineTo(w * 0.52f, h * 0.52f)
+            lineTo(w * 0.42f, h * 0.88f)
+            lineTo(w * 0.72f, h * 0.46f)
+            lineTo(w * 0.48f, h * 0.46f)
+            close()
+        }
+        drawPath(bolt, tint)
+    }
+}
+
+@Composable
+private fun TuningGearGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeW = with(density) { 1.2.dp.toPx() }
+        val r = with(density) { 2.dp.toPx() }
+        // 3 horizontal slider bars with tuning knobs
+        drawLine(tint.copy(alpha = 0.40f), Offset(w * 0.12f, h * 0.28f), Offset(w * 0.88f, h * 0.28f), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawCircle(tint, radius = r, center = Offset(w * 0.38f, h * 0.28f))
+
+        drawLine(tint.copy(alpha = 0.40f), Offset(w * 0.12f, h * 0.52f), Offset(w * 0.88f, h * 0.52f), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawCircle(tint, radius = r, center = Offset(w * 0.68f, h * 0.52f))
+
+        drawLine(tint.copy(alpha = 0.40f), Offset(w * 0.12f, h * 0.76f), Offset(w * 0.88f, h * 0.76f), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawCircle(tint, radius = r, center = Offset(w * 0.32f, h * 0.76f))
+    }
+}
+
+@Composable
+private fun ExitCrossGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeW = with(density) { 1.8.dp.toPx() }
+        drawLine(tint, Offset(w * 0.22f, h * 0.22f), Offset(w * 0.78f, h * 0.78f), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.78f, h * 0.22f), Offset(w * 0.22f, h * 0.78f), strokeWidth = strokeW, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun TelemetryItem(
+    label: String,
+    value: String,
+    unit: String,
+    accentColor: Color,
+    glyph: @Composable () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            glyph()
+            Spacer(Modifier.width(3.dp))
+            Text(
+                text = label,
+                color = Color(0xFF94A3B8),
+                fontSize = 7.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = value,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+            )
+            Spacer(Modifier.width(2.dp))
+            Text(
+                text = unit,
+                color = accentColor,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FoxSportsTelemetryChyron(
+    speedValue: String,
+    speedUnit: String,
+    spinValue: String,
+    spinUnit: String,
+    swingValue: String,
+    swingUnit: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xE60A0E17))
+            .border(
+                1.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.20f),
+                        Color.White.copy(alpha = 0.06f),
+                    )
+                ),
+                RoundedCornerShape(10.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // Speed column
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    VelocityGlyph(Modifier.size(10.dp), Color(0xFFE2C48D))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "SPEED",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = speedValue,
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text = speedUnit,
+                        color = Color(0xFF94A3B8),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            Box(Modifier.width(1.dp).height(26.dp).background(Color.White.copy(alpha = 0.12f)))
+
+            // Spin column
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SpinGlyph(Modifier.size(10.dp), Color(0xFFE2C48D))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "SPIN",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = spinValue,
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Text(
+                        text = spinUnit,
+                        color = Color(0xFF94A3B8),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            Box(Modifier.width(1.dp).height(26.dp).background(Color.White.copy(alpha = 0.12f)))
+
+            // Swing column
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TrajectoryGlyph(Modifier.size(10.dp), Color(0xFFE2C48D))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "SWING",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = swingValue,
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text = swingUnit,
+                        color = Color(0xFF94A3B8),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MachinedDialButton(
+    active: Boolean,
+    activeColor: Color = Color(0xFF00E5FF),
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable (tint: Color) -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.90f else 1.0f,
+        animationSpec = spring(stiffness = 600f),
+        label = "machined_dial_scale",
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(
+                if (active) {
+                    Brush.radialGradient(
+                        listOf(activeColor.copy(alpha = 0.30f), Color(0xF20A0E17)),
+                    )
+                } else {
+                    Brush.radialGradient(
+                        listOf(Color(0xFF1E293B), Color(0xF20A0E17)),
+                    )
+                }
+            )
+            .border(
+                1.dp,
+                if (active) {
+                    Brush.sweepGradient(listOf(activeColor, Color.White.copy(alpha = 0.5f), activeColor))
+                } else {
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.30f), Color.White.copy(alpha = 0.08f)))
+                },
+                CircleShape,
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        content(if (active) activeColor else Color.White.copy(alpha = 0.90f))
     }
 }
 
@@ -1578,6 +2693,13 @@ internal val TrailWeak = Color(0xFFF59E0B)
 
 /** Round, and continuing the track as a thrown ball would. */
 internal val TrailStrong = Color(0xFF6E9BF5)
+
+/**
+ * The bounce marker. Its own colour, because it is its own kind of thing: everything else
+ * drawn over the pitch is a guess about where the ball was, and this is the one place the
+ * app can say it knows.
+ */
+private val BounceMark = Color(0xFF4ADE80)
 
 /*
  * THE SPAN OF SCORES WORTH TELLING APART.
@@ -1772,10 +2894,10 @@ private fun startClip(
     context: Context,
     capture: VideoCapture<Recorder>,
     executor: java.util.concurrent.Executor,
+    targetFile: File,
     onFinished: (File, Long) -> Unit,
 ): Recording? {
-    val file = File(context.cacheDir, "clip-${System.currentTimeMillis()}.mp4")
-    val options = androidx.camera.video.FileOutputOptions.Builder(file).build()
+    val options = androidx.camera.video.FileOutputOptions.Builder(targetFile).build()
     val startedAt = System.currentTimeMillis()
 
     return runCatching {
@@ -1783,7 +2905,7 @@ private fun startClip(
             .prepareRecording(context, options)
             .start(executor) { event ->
                 if (event is VideoRecordEvent.Finalize) {
-                    onFinished(file, System.currentTimeMillis() - startedAt)
+                    onFinished(targetFile, System.currentTimeMillis() - startedAt)
                 }
             }
     }.getOrNull()

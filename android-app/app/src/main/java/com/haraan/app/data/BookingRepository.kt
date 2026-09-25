@@ -486,6 +486,88 @@ class BookingRepository(
     }
   }
 
+  suspend fun cancelBooking(token: String, bookingId: Int): BookingResult = withContext(Dispatchers.IO) {
+    try {
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/$bookingId/cancel").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+
+      if (code in 200..299) {
+        val root = JSONObject(body)
+        val data = root.optJSONObject("data")
+        BookingResult.Success(
+          bookingId = data?.optInt("id", bookingId) ?: bookingId,
+          quantity = data?.optInt("quantity", 1) ?: 1,
+          totalAmount = data?.optString("totalAmount", "0") ?: "0",
+          status = data?.optString("status", "CANCELLED") ?: "CANCELLED",
+          message = root.optString("message", "Booking cancelled."),
+        )
+      } else {
+        BookingResult.Error(parseErrorMessage(body, "Cancellation failed (Status code: $code)"))
+      }
+    } catch (e: Exception) {
+      BookingResult.Error(e.message ?: "Failed to connect. Please check your network.")
+    }
+  }
+
+  suspend fun rescheduleBooking(
+    token: String,
+    bookingId: Int,
+    date: String,
+    slotId: Int? = null,
+    courtId: Int? = null,
+  ): BookingResult = withContext(Dispatchers.IO) {
+    try {
+      val jsonBody = JSONObject().apply {
+        put("date", date)
+        if (slotId != null) put("slotId", slotId)
+        if (courtId != null) put("courtId", courtId)
+      }
+
+      val connection = (URL(baseUrl.trimEnd('/') + "/api/bookings/$bookingId/reschedule").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 15000
+        readTimeout = 15000
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+
+      connection.outputStream.use { outputStream ->
+        outputStream.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+      }
+
+      val code = connection.responseCode
+      val body = readBody(connection)
+      connection.disconnect()
+
+      if (code in 200..299) {
+        val root = JSONObject(body)
+        val data = root.optJSONObject("data")
+        BookingResult.Success(
+          bookingId = data?.optInt("id", bookingId) ?: bookingId,
+          quantity = data?.optInt("quantity", 1) ?: 1,
+          totalAmount = data?.optString("totalAmount", "0") ?: "0",
+          status = data?.optString("status", "CONFIRMED") ?: "CONFIRMED",
+          message = root.optString("message", "Booking rescheduled successfully."),
+          ticketCode = data?.optString("ticketCode")?.takeIf { it.isNotBlank() && it != "null" },
+        )
+      } else {
+        BookingResult.Error(parseErrorMessage(body, "Reschedule failed (Status code: $code)"))
+      }
+    } catch (e: Exception) {
+      BookingResult.Error(e.message ?: "Failed to connect. Please check your network.")
+    }
+  }
+
   private fun readBody(connection: HttpURLConnection): String {
     val stream = if (connection.responseCode >= 400) connection.errorStream else connection.inputStream
     if (stream == null) {

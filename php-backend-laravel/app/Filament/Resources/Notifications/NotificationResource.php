@@ -18,6 +18,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
+use Illuminate\Database\Eloquent\Builder;
 /**
  * Compose and send bell-inbox notifications to the app. A "Sent" notification
  * appears in the targeted users' bells immediately (open apps via Reverb);
@@ -38,6 +39,12 @@ class NotificationResource extends Resource
     protected static ?int $navigationSort = 5;
 
     protected static ?string $recordTitleAttribute = 'title';
+
+    /** Only what the team composed — the per-player reward notices the engine sends stay out of it. */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->where('source', 'composer');
+    }
 
     /** Super-admins and ops/marketing — the people who message the userbase. */
     public static function canAccess(): bool

@@ -19,11 +19,21 @@ return [
     'insight_sport_cooldown_days' => (int) env('MEMBERSHIP_INSIGHT_SPORT_COOLDOWN_DAYS', 7),
 
     /*
+     * Ceilings for booking perks set to "unlimited" on a plan: an early-access head start and
+     * extra venue booking days can't be endless, or a member could bypass a sale or a venue's
+     * calendar entirely. A numeric plan value above these is capped too.
+     */
+    'early_access_max_hours' => (int) env('MEMBERSHIP_EARLY_ACCESS_MAX_HOURS', 72),
+    'priority_booking_max_days' => (int) env('MEMBERSHIP_PRIORITY_BOOKING_MAX_DAYS', 30),
+
+    /*
      * Billing cycles a subscription is created for. Razorpay marks it `completed` after the
      * last one; the member then simply subscribes again.
      */
     'total_count' => [
         'month' => (int) env('MEMBERSHIP_TOTAL_COUNT_MONTHLY', 120),
+        'quarter' => (int) env('MEMBERSHIP_TOTAL_COUNT_QUARTERLY', 40),
+        'half_year' => (int) env('MEMBERSHIP_TOTAL_COUNT_HALF_YEARLY', 20),
         'year' => (int) env('MEMBERSHIP_TOTAL_COUNT_YEARLY', 10),
     ],
 ];

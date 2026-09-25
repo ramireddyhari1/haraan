@@ -48,7 +48,7 @@ class RecurringConflictEngine
         $endDay = $endDate ? Carbon::parse($endDate) : $startDay->copy()->addWeeks($weeksToCheck);
 
         $startMin = $this->timeToMinutes($startTime);
-        $endMin = $this->timeToMinutes($endTime);
+        $endMin = BookingService::endMinutes($endTime);
 
         $targetWeekday = strtolower(trim($dayOfWeek));
 
@@ -169,7 +169,7 @@ class RecurringConflictEngine
 
         foreach ($existing as $b) {
             $es = $this->timeToMinutes($b->start_time);
-            $ee = $this->timeToMinutes($b->end_time);
+            $ee = BookingService::endMinutes($b->end_time);
 
             if ($es === null || $ee === null) {
                 return $b;
@@ -197,7 +197,7 @@ class RecurringConflictEngine
             }
 
             $bs = $this->timeToMinutes($block->start_time);
-            $be = $this->timeToMinutes($block->end_time);
+            $be = BookingService::endMinutes($block->end_time);
 
             if ($bs === null || $be === null) {
                 return $block;
@@ -237,7 +237,7 @@ class RecurringConflictEngine
 
         foreach ($contracts as $c) {
             $cs = $this->timeToMinutes($c->start_time);
-            $ce = $this->timeToMinutes($c->end_time);
+            $ce = BookingService::endMinutes($c->end_time);
 
             if ($cs === null || $ce === null) {
                 return $c;

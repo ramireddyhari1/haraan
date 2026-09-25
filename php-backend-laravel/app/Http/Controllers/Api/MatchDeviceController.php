@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use App\Jobs\ReviewMatchClip;
 use App\Services\DeliveryReview;
 use App\Services\Membership\MemberEntitlements;
+use App\Support\AiGate;
 use App\Support\Membership\MemberFeature;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -396,6 +397,16 @@ final class MatchDeviceController extends Controller
             ]);
 
             return $this->reviewState($clip->id, DeliveryReview::STATUS_FAILED, [], 422);
+        }
+
+        // AI switched off in /control (Platform rules → AI, or the emergency switch): say so
+        // now, before any quota is spent or a job queued. Nothing is written to the clip, so
+        // the scorer can simply retry once it's back on.
+        if (! AiGate::enabled(AiGate::DELIVERY_REVIEW)) {
+            return response()->json([
+                'error' => 'ai_unavailable',
+                'message' => 'AI review is switched off right now. Please try again later.',
+            ], 503);
         }
 
         // A member plan quota. Consumed only here, where a NEW Vertex call is about to be

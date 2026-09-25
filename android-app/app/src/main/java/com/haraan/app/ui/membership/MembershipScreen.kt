@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -42,7 +44,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -136,7 +137,11 @@ fun MembershipScreen(
                 val cta = selected?.let { MembershipFormat.ctaFor(it, state.membership, state.interval, state.signedIn) }
                 // The checkout tray floats over the list, so the plan panel scrolls beneath it; the
                 // list leaves room at the end so its last line can still clear the tray.
-                val trayShown = cta is MembershipFormat.Cta.Buy || cta == MembershipFormat.Cta.SignIn
+                // The app sells plans only when an admin has allowed it; otherwise the plans are
+                // shown and the admin's note stands where the buy button would be.
+                val canSellHere = state.catalogue?.checkout?.inApp == true
+                val buyable = cta is MembershipFormat.Cta.Buy || cta == MembershipFormat.Cta.SignIn
+                val trayShown = canSellHere && buyable
 
                 Box(Modifier.weight(1f)) {
                     LazyColumn(
@@ -156,13 +161,13 @@ fun MembershipScreen(
                         }
 
                         item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Plans", color = Text1, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f))
-                                if (MembershipFormat.hasYearly(state.plans)) {
-                                    IntervalToggle(state.interval, MembershipFormat.yearlySaving(state.plans), vm::selectInterval)
-                                }
-                            }
+                            Text("Plans", color = Text1, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
                             Spacer(Modifier.height(12.dp))
+                            val terms = MembershipFormat.terms(state.plans)
+                            if (terms.size > 1) {
+                                TermSelector(terms, state.interval, state.plans, vm::selectInterval)
+                                Spacer(Modifier.height(12.dp))
+                            }
                         }
 
                         item(key = "plans") {
@@ -175,6 +180,9 @@ fun MembershipScreen(
                                 onSelect = vm::selectPlan,
                             )
                             Spacer(Modifier.height(12.dp))
+                            if (!canSellHere && buyable) {
+                                StoreNote(state.catalogue?.checkout?.note)
+                            }
                         }
 
                         if (state.payments.isNotEmpty()) {
@@ -200,7 +208,8 @@ fun MembershipScreen(
                         }
                     }
 
-                    CommitBar(
+                    // Only when an admin lets the app sell: otherwise nothing here can start a payment.
+                    if (canSellHere) CommitBar(
                         plan = selected,
                         cta = cta,
                         membership = state.membership,
@@ -326,32 +335,67 @@ private fun AttentionBanner(m: Membership) {
     }
 }
 
-/** Monthly / Yearly as one control: blue tint for the selected side, never a solid fill. */
+/**
+ * The billing terms on sale (Monthly, 3 months, 6 months, Yearly) as one control: blue tint for
+ * the chosen one, never a solid fill, with each longer term's real saving beside it.
+ */
 @Composable
-private fun IntervalToggle(interval: String, saving: Int?, onSelect: (String) -> Unit) {
+private fun TermSelector(terms: List<String>, interval: String, plans: List<CataloguePlan>, onSelect: (String) -> Unit) {
+    // Every term gets an equal share of the row, with its saving on a second line, so all four
+    // fit on a phone without scrolling a price choice out of view.
     Row(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFFEEF2F7)).padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFEEF2F7))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        listOf(MembershipFormat.MONTH to "Monthly", MembershipFormat.YEAR to "Yearly").forEach { (key, label) ->
-            val on = interval == key
-            val bg by animateColorAsState(if (on) Surface else Color.Transparent, label = "interval-bg")
-            Row(
+        val anySaving = terms.any { MembershipFormat.saving(plans, it) != null }
+        terms.forEach { term ->
+            val on = interval == term
+            val bg by animateColorAsState(if (on) Surface else Color.Transparent, label = "term-bg")
+            val saving = MembershipFormat.saving(plans, term)
+            Column(
                 Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .pressable(haptic = if (on) null else com.haraan.app.ui.Feel.SELECT) { onSelect(term) }
+                    .weight(1f)
+                    .clip(RoundedCornerShape(11.dp))
                     .background(bg)
-                    .then(if (on) Modifier.border(1.dp, Blue.copy(alpha = 0.35f), RoundedCornerShape(8.dp)) else Modifier)
-                    .clickable { onSelect(key) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .then(if (on) Modifier.border(1.dp, Blue.copy(alpha = 0.35f), RoundedCornerShape(11.dp)) else Modifier)
+                    .padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(label, color = if (on) Blue else Text2, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                if (key == MembershipFormat.YEAR && saving != null) {
-                    Spacer(Modifier.width(5.dp))
-                    Text("−$saving%", color = Green, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                Text(MembershipFormat.termLabel(term), color = if (on) Blue else Text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                if (anySaving) {
+                    Text(
+                        saving?.let { "Save $it%" } ?: " ",
+                        color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                    )
                 }
             }
         }
+    }
+}
+
+/**
+ * Stands where the buy button would be when an admin hasn't let the app sell plans. Words only
+ * — no link or button to pay elsewhere — so the store build stays within billing rules.
+ */
+@Composable
+private fun StoreNote(note: String?) {
+    val text = note?.takeIf { it.isNotBlank() } ?: return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFEEF2F7))
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Info, null, tint = Text3, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(text, color = Text2, fontSize = 13.sp, lineHeight = 18.sp)
     }
 }
 

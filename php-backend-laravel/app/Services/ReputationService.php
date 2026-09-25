@@ -62,7 +62,7 @@ final class ReputationService
         $penalties = (int) ReputationEvent::where('player_id', $playerId)->sum('amount');
 
         $score = ActionboardXp::TRUST_SCORE_START
-            + ($rankedMatches * ActionboardXp::TRUST_SCORE_RECOVERY_PER_RANKED_MATCH)
+            + ($rankedMatches * ActionboardXp::trustRecoveryPerRankedMatch())
             - $penalties;
 
         $score = max(ActionboardXp::TRUST_SCORE_MIN, min(ActionboardXp::TRUST_SCORE_MAX, $score));
@@ -83,20 +83,20 @@ final class ReputationService
     public static function canCreateRankedTournament(User $user): bool
     {
         return (int) ($user->trust_score ?? ActionboardXp::TRUST_SCORE_START)
-            >= ActionboardXp::RANKED_TOURNAMENT_MIN_TRUST_SCORE;
+            >= ActionboardXp::rankedTournamentMinTrustScore();
     }
 
     public static function canOrganize(User $user): bool
     {
         return (bool) ($user->is_organizer ?? false)
             && (int) ($user->trust_score ?? ActionboardXp::TRUST_SCORE_START)
-                >= ActionboardXp::ORGANIZE_MIN_TRUST_SCORE;
+                >= ActionboardXp::organizeMinTrustScore();
     }
 
     public static function canVerifyResults(User $user): bool
     {
         return self::canOrganize($user)
             && (int) ($user->trust_score ?? ActionboardXp::TRUST_SCORE_START)
-                >= ActionboardXp::VERIFY_MIN_TRUST_SCORE;
+                >= ActionboardXp::verifyMinTrustScore();
     }
 }

@@ -67,8 +67,8 @@ final class PlayerXpLedgerService
                 $mom = $bonusOK && $match->mom_player_id !== null && (string) $match->mom_player_id === (string) $pid;
 
                 $effectiveBase = $match->base_xp
-                    + ($won ? (int) round($match->base_xp * ActionboardXp::WIN_BONUS_FRACTION) : 0)
-                    + ($mom ? (int) round($match->base_xp * ActionboardXp::MOM_BONUS_FRACTION) : 0);
+                    + ($won ? (int) round($match->base_xp * ActionboardXp::winBonusFraction()) : 0)
+                    + ($mom ? (int) round($match->base_xp * ActionboardXp::momBonusFraction()) : 0);
 
                 $xp = (int) round($effectiveBase * $trustMult * $diversity);
 
@@ -119,7 +119,7 @@ final class PlayerXpLedgerService
         $rankedMatches = MatchXpLedger::where('player_id', $playerId)->where('is_ranked', true)->count();
         $penalties = ReputationService::totalPenalties($playerId);
         $trustScore = ActionboardXp::TRUST_SCORE_START
-            + ($rankedMatches * ActionboardXp::TRUST_SCORE_RECOVERY_PER_RANKED_MATCH)
+            + ($rankedMatches * ActionboardXp::trustRecoveryPerRankedMatch())
             - $penalties;
         $trustScore = max(ActionboardXp::TRUST_SCORE_MIN, min(ActionboardXp::TRUST_SCORE_MAX, $trustScore));
 

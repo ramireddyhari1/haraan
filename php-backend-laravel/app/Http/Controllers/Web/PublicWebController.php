@@ -4,23 +4,39 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Web;
 
+use App\Http\Controllers\Api\LiveMatchController;
 use App\Http\Controllers\Controller;
-use App\Services\EventService;
-use App\Services\LeaderboardService;
-use App\Support\CityResolver;
-use App\Support\MatchGeocoder;
-use Illuminate\Support\Collection;
-use Illuminate\Contracts\View\View;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 use App\Models\Ad;
 use App\Models\Event;
 use App\Models\HostProfile;
 use App\Models\LiveMatch;
 use App\Models\User;
 use App\Models\Venue;
+use App\Services\AdTracker;
+use App\Services\BookingService;
+use App\Services\DistrictService;
+use App\Services\EventService;
+use App\Services\Insights\SportInsights;
+use App\Services\LeaderboardService;
+use App\Services\Membership\EntitlementDenied;
+use App\Services\Membership\MemberEntitlements;
+use App\Services\Membership\SportInsightsAccess;
+use App\Services\Stats\MatchPlayerStatsService;
+use App\Support\CityResolver;
+use App\Support\EventViewRecorder;
+use App\Support\MatchGeocoder;
+use App\Support\MatchProximity;
+use App\Support\MediaUrl;
+use App\Support\Membership\MemberFeature;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 final class PublicWebController extends Controller
 {
@@ -36,8 +52,8 @@ final class PublicWebController extends Controller
 
         $city = CityResolver::selected();
         $listingCount = Event::query()->where('status', 'published')
-                ->when($city, fn ($q) => $q->where('city', $city))->count()
-            + Venue::query()->where('is_active', true)
+            ->when($city, fn ($q) => $q->where('city', $city))->count()
+            + Venue::published()
                 ->when($city, fn ($q) => $q->where('city', $city))->count();
 
         return view('site.home', [
@@ -72,22 +88,22 @@ final class PublicWebController extends Controller
         return view('site.events', [
             'title' => $isHome
                 ? 'Haraan — Events, Turf Booking & Live Sports'
-                : ($seoCity ? 'Events in ' . $seoCity : 'Events near you'),
+                : ($seoCity ? 'Events in '.$seoCity : 'Events near you'),
             'seo' => [
                 'title' => $isHome
                     ? 'Haraan — Book Events, Sports Turfs & Live Scores'
                     : ($seoCity
-                        ? 'Events in ' . $seoCity . ' — book tickets'
+                        ? 'Events in '.$seoCity.' — book tickets'
                         : 'Events near you — book tickets'),
                 // Keep this under the partial's 158-char cap: at 164 it used to be
                 // cut mid-word, so results ended "...live gully-cricket s...".
                 'description' => $isHome
                     ? 'Haraan — book concerts, comedy, workshops and sports events near you, '
-                        . 'reserve cricket turfs and badminton courts, and follow live '
-                        . 'gully-cricket scores.'
+                        .'reserve cricket turfs and badminton courts, and follow live '
+                        .'gully-cricket scores.'
                     : 'Concerts, comedy nights, workshops, sports and festivals'
-                        . ($seoCity ? ' in ' . $seoCity : '')
-                        . '. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
+                        .($seoCity ? ' in '.$seoCity : '')
+                        .'. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
                 // Each keeps its own canonical so the homepage stays the homepage.
                 'canonical' => $isHome ? url('/') : url('/events'),
                 // City comes from a cookie (crawlers never send one), so only the
@@ -147,7 +163,7 @@ final class PublicWebController extends Controller
         // reflects real visitors, not their own edits — and skip unpublished
         // previews entirely, which have no real visitors by definition.
         if (! $isPreview && $viewer?->id !== $event->partner_id) {
-            \App\Support\EventViewRecorder::record($event, $request);
+            EventViewRecorder::record($event, $request);
         }
 
         // Link "Hosted by" to the organiser's public page, but only if it's live.
@@ -172,13 +188,13 @@ final class PublicWebController extends Controller
         return view('site.event', [
             'title' => $event->title,
             'event' => $event,
-            'id'    => $id,
+            'id' => $id,
             'hostProfile' => $hostProfile,
             'similar' => $similar,
             // A draft preview must never be indexed, even though only its owner and
             // internal staff can reach it: preview URLs get pasted into chats, and a
             // draft must not end up outranking the real listing once it publishes.
-            'seo'   => $isPreview
+            'seo' => $isPreview
                 ? [...$this->eventSeo($event), 'robots' => 'noindex,nofollow']
                 : $this->eventSeo($event),
         ]);
@@ -215,7 +231,7 @@ final class PublicWebController extends Controller
                 $event->title,
                 $when,
                 $where,
-            ]))) . '. Book tickets on Haraan.';
+            ]))).'. Book tickets on Haraan.';
         }
 
         // Start time: the date column is a datetime, the clock is a separate
@@ -223,7 +239,7 @@ final class PublicWebController extends Controller
         $start = $event->date?->copy();
         if ($start && filled($event->time)) {
             try {
-                $t = \Illuminate\Support\Carbon::parse((string) $event->time);
+                $t = Carbon::parse((string) $event->time);
                 $start->setTime((int) $t->format('H'), (int) $t->format('i'));
             } catch (\Throwable) {
                 // Unparseable clock text — the date alone is still valid markup.
@@ -237,14 +253,14 @@ final class PublicWebController extends Controller
             '@context' => 'https://schema.org',
             '@type' => 'Event',
             'name' => $event->title,
-            'url' => url('/events/' . $event->id),
-            'description' => \Illuminate\Support\Str::limit($desc, 300),
+            'url' => url('/events/'.$event->id),
+            'description' => Str::limit($desc, 300),
             'image' => array_values(array_filter($event->imageUrls())) ?: null,
             // The stored date/time is IST wall-clock (the app runs on UTC), so
             // stamp the offset without shifting the hands — otherwise Google shows
             // an event that starts 5½ hours early.
             'startDate' => $start
-                ? \Illuminate\Support\Carbon::parse($start->format('Y-m-d H:i:s'), 'Asia/Kolkata')->toIso8601String()
+                ? Carbon::parse($start->format('Y-m-d H:i:s'), 'Asia/Kolkata')->toIso8601String()
                 : null,
             'eventStatus' => 'https://schema.org/EventScheduled',
             'eventAttendanceMode' => 'https://schema.org/OfflineEventAttendanceMode',
@@ -262,12 +278,12 @@ final class PublicWebController extends Controller
                 ? [
                     '@type' => 'Organization',
                     'name' => $event->partner->hostProfile->display_name,
-                    'url' => url('/host/' . $event->partner->hostProfile->slug),
+                    'url' => url('/host/'.$event->partner->hostProfile->slug),
                 ]
                 : null,
             'offers' => array_filter([
                 '@type' => 'Offer',
-                'url' => url('/events/' . $event->id),
+                'url' => url('/events/'.$event->id),
                 'price' => number_format($price, 2, '.', ''),
                 'priceCurrency' => 'INR',
                 'availability' => ($event->available_slots ?? 1) > 0
@@ -282,11 +298,11 @@ final class PublicWebController extends Controller
         ], static fn ($v) => $v !== null && $v !== []);
 
         return [
-            'title' => trim($event->title . ($where !== '' ? ' — ' . $where : '')),
+            'title' => trim($event->title.($where !== '' ? ' — '.$where : '')),
             'description' => $desc,
             'image' => $event->heroImageUrl(),
             'type' => 'event',
-            'canonical' => url('/events/' . $event->id),
+            'canonical' => url('/events/'.$event->id),
             'jsonld' => $schema,
             'breadcrumbs' => [
                 ['name' => 'Haraan', 'url' => url('/')],
@@ -314,14 +330,14 @@ final class PublicWebController extends Controller
         $isOwner = $viewer !== null && $viewer->id === $profile->user_id;
 
         // Count one view per visitor per day (owner's own visits don't count).
-        $seenKey = 'hpv_' . $profile->id . '_' . today()->toDateString();
+        $seenKey = 'hpv_'.$profile->id.'_'.today()->toDateString();
         if (! $isOwner && ! session()->has($seenKey)) {
             $profile->recordView();
             session()->put($seenKey, 1);
         }
 
         return view('site.host', [
-            'title' => $profile->display_name . ' · Haraan',
+            'title' => $profile->display_name.' · Haraan',
             'seo' => $this->hostSeo($profile, $isVenue),
             'profile' => $profile,
             'lane' => $isVenue ? 'venue' : 'event',
@@ -346,7 +362,7 @@ final class PublicWebController extends Controller
      */
     private function hostSeo(HostProfile $profile, bool $isVenue): array
     {
-        $url = url('/host/' . $profile->slug);
+        $url = url('/host/'.$profile->slug);
         $noun = $isVenue ? 'Sports venues' : 'Events';
         $rating = $profile->ratingSummary();
 
@@ -354,9 +370,9 @@ final class PublicWebController extends Controller
         // description wants. `about` is the fallback and gets truncated.
         $desc = trim((string) ($profile->tagline ?: $profile->about));
         if ($desc === '') {
-            $desc = $noun . ' by ' . $profile->display_name
-                . ($profile->city ? ' in ' . $profile->city : '')
-                . '. See what\'s on and book on Haraan.';
+            $desc = $noun.' by '.$profile->display_name
+                .($profile->city ? ' in '.$profile->city : '')
+                .'. See what\'s on and book on Haraan.';
         }
 
         $schema = array_filter([
@@ -366,7 +382,7 @@ final class PublicWebController extends Controller
             '@type' => $isVenue ? 'LocalBusiness' : 'Organization',
             'name' => $profile->display_name,
             'url' => $url,
-            'description' => \Illuminate\Support\Str::limit(strip_tags($desc), 300),
+            'description' => Str::limit(strip_tags($desc), 300),
             'logo' => $profile->logoUrl(),
             'image' => $profile->coverUrl() ?: $profile->logoUrl(),
             'address' => $profile->city ? [
@@ -386,7 +402,7 @@ final class PublicWebController extends Controller
         ], static fn ($v) => $v !== null && $v !== []);
 
         return [
-            'title' => $profile->display_name . ' — ' . $noun . ' on Haraan',
+            'title' => $profile->display_name.' — '.$noun.' on Haraan',
             'description' => $desc,
             'image' => $profile->coverUrl() ?: $profile->logoUrl(),
             'type' => 'profile',
@@ -401,7 +417,7 @@ final class PublicWebController extends Controller
     }
 
     /** Toggle following an organiser (auth). Returns to the page. */
-    public function followHost(Request $request, string $slug): \Illuminate\Http\RedirectResponse
+    public function followHost(Request $request, string $slug): RedirectResponse
     {
         $profile = HostProfile::query()->where('slug', $slug)->first();
 
@@ -415,22 +431,64 @@ final class PublicWebController extends Controller
     public function gamehub(): View
     {
         $city = CityResolver::selected();
+        [$userLat, $userLng] = $this->viewerLatLng();
 
-        $venues = Venue::query()
-            ->where('is_active', true)
-            ->when($city, fn ($q) => $q->where('city', $city))
+        $allVenues = Venue::published()
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
-            ->get()
-            ->map(fn (Venue $v) => $this->decorateVenueCard($v));
+            ->get();
+
+        if ($userLat !== null && $userLng !== null) {
+            // Compute real distance to each venue
+            $venuesWithDistance = $allVenues->map(function (Venue $v) use ($userLat, $userLng) {
+                $km = ($v->latitude !== null && $v->longitude !== null)
+                    ? $this->haversineKm($userLat, $userLng, (float) $v->latitude, (float) $v->longitude)
+                    : null;
+                $card = $this->decorateVenueCard($v);
+                if ($km !== null) {
+                    $card->distance = $this->formatKm($km);
+                    $card->distance_km = $km;
+                }
+                return $card;
+            });
+
+            // 1. Pinned venues within radius (30 km, expanding up to 50 km if none within 30 km)
+            $pinned = $venuesWithDistance->filter(fn ($v) => isset($v->distance_km));
+            $within30 = $pinned->filter(fn ($v) => $v->distance_km <= 30)->sortBy('distance_km')->values();
+
+            if ($within30->isNotEmpty()) {
+                $nearby = $within30;
+            } else {
+                $within50 = $pinned->filter(fn ($v) => $v->distance_km <= 50)->sortBy('distance_km')->values();
+                $nearby = $within50->isNotEmpty() ? $within50 : $pinned->sortBy('distance_km')->take(10)->values();
+            }
+
+            // 2. Unpinned venues matching chosen city (if any)
+            $unpinned = $venuesWithDistance->filter(fn ($v) => !isset($v->distance_km));
+            if ($city) {
+                $unpinned = $unpinned->filter(fn ($v) =>
+                    strcasecmp((string) $v->city, $city) === 0 ||
+                    stripos((string) $v->location, $city) !== false ||
+                    stripos((string) $v->title, $city) !== false
+                );
+            }
+
+            $venues = $nearby->concat($unpinned)->values();
+        } else {
+            // No coordinates available: filter by chosen city (if any), matching city or location
+            if ($city) {
+                $venues = $allVenues->filter(function (Venue $v) use ($city) {
+                    return strcasecmp((string) $v->city, $city) === 0 ||
+                           stripos((string) $v->location, $city) !== false ||
+                           stripos((string) $v->address, $city) !== false;
+                })->map(fn (Venue $v) => $this->decorateVenueCard($v))->values();
+            } else {
+                $venues = $allVenues->map(fn (Venue $v) => $this->decorateVenueCard($v))->values();
+            }
+        }
 
         // Real per-sport venue counts for the "Explore by Sport" tiles.
-        $sportCounts = Venue::query()
-            ->where('is_active', true)
-            ->when($city, fn ($q) => $q->where('city', $city))
-            ->selectRaw('category, COUNT(*) as c')
-            ->groupBy('category')
-            ->pluck('c', 'category');
+        $sportCounts = $venues->groupBy('category')->map->count();
 
         // Live now: real in-progress matches for the mobile live strip (app parity).
         $liveMatches = LiveMatch::where('status', 'Live')
@@ -457,13 +515,13 @@ final class PublicWebController extends Controller
         $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
 
         return view('site.gamehub', [
-            'title'         => 'Pulse — book turfs, courts & play',
-            'seo'           => [
+            'title' => 'Pulse — book turfs, courts & play',
+            'seo' => [
                 'title' => 'Book turfs, courts and sports venues'
-                    . ($city ? ' in ' . $city : ' near you'),
+                    .($city ? ' in '.$city : ' near you'),
                 'description' => 'Book cricket turfs, football grounds and badminton courts'
-                    . ($city ? ' in ' . $city : ' near you')
-                    . ' by the hour on Haraan — plus live gully-cricket scores and player rankings.',
+                    .($city ? ' in '.$city : ' near you')
+                    .' by the hour on Haraan — plus live gully-cricket scores and player rankings.',
                 'canonical' => url('/gamehub'),
                 'robots' => request()->query('sport') ? 'noindex,follow' : 'index,follow,max-image-preview:large',
                 'breadcrumbs' => [
@@ -471,14 +529,14 @@ final class PublicWebController extends Controller
                     ['name' => 'Pulse'],
                 ],
             ],
-            'venues'        => $venues,
-            'sportCounts'   => $sportCounts,
-            'liveMatches'   => $liveMatches,
-            'topPlayer'     => $this->topRankedPlayer($city),
+            'venues' => $venues,
+            'sportCounts' => $sportCounts,
+            'liveMatches' => $liveMatches,
+            'topPlayer' => $this->topRankedPlayer($city),
             'selectedSport' => $selectedSport,
-            'sportChips'    => self::GAMEHUB_SPORTS,
+            'sportChips' => self::GAMEHUB_SPORTS,
             'popularVenues' => $popularVenues,
-            'moreVenues'    => $moreVenues,
+            'moreVenues' => $moreVenues,
         ]);
     }
 
@@ -525,6 +583,7 @@ final class PublicWebController extends Controller
                     }
                 }
             }
+
             return $w;
         };
 
@@ -540,24 +599,24 @@ final class PublicWebController extends Controller
         $awayBatted = ! $battingHome || (int) $m->away_score > 0 || $awayWkts > 0;
 
         return [
-            'id'          => $m->id,
+            'id' => $m->id,
             'competition' => $m->competition,
             'home' => [
-                'abbr'    => $m->home,
-                'name'    => $m->home_full ?: $m->home,
-                'logo'    => (string) ($m->home_logo ?? ''),
-                'emblem'  => (string) ($m->home_emblem ?? ''),
-                'score'   => $homeBatted ? ($m->home_score . '/' . $homeWkts) : 'Yet to bat',
-                'overs'   => $battingHome ? $m->overs : '',
+                'abbr' => $m->home,
+                'name' => $m->home_full ?: $m->home,
+                'logo' => (string) ($m->home_logo ?? ''),
+                'emblem' => (string) ($m->home_emblem ?? ''),
+                'score' => $homeBatted ? ($m->home_score.'/'.$homeWkts) : 'Yet to bat',
+                'overs' => $battingHome ? $m->overs : '',
                 'batting' => $battingHome,
             ],
             'away' => [
-                'abbr'    => $m->away,
-                'name'    => $m->away_full ?: $m->away,
-                'logo'    => (string) ($m->away_logo ?? ''),
-                'emblem'  => (string) ($m->away_emblem ?? ''),
-                'score'   => $awayBatted ? ($m->away_score . '/' . $awayWkts) : 'Yet to bat',
-                'overs'   => $battingHome ? '' : $m->overs,
+                'abbr' => $m->away,
+                'name' => $m->away_full ?: $m->away,
+                'logo' => (string) ($m->away_logo ?? ''),
+                'emblem' => (string) ($m->away_emblem ?? ''),
+                'score' => $awayBatted ? ($m->away_score.'/'.$awayWkts) : 'Yet to bat',
+                'overs' => $battingHome ? '' : $m->overs,
                 'batting' => ! $battingHome,
             ],
         ];
@@ -565,9 +624,15 @@ final class PublicWebController extends Controller
 
     public function gamehubDetail(string $id): View
     {
-        $venue = Venue::query()
-            ->where('is_active', true)
-            ->with(['reviews' => fn ($q) => $q->where('is_active', true)->latest(), 'partner.hostProfile'])
+        $venue = Venue::published()
+            ->with([
+                'reviews' => fn ($q) => $q->where('is_active', true)->latest(),
+                'partner.hostProfile',
+                'slots',
+                // Only courts that can be sold: checkout refuses an inactive one by name and
+                // would fall back to a different court than the one the player picked.
+                'courts' => fn ($q) => $q->where('is_active', true),
+            ])
             ->findOrFail($id);
 
         // Link to the owner's public page when they have a live one.
@@ -576,10 +641,10 @@ final class PublicWebController extends Controller
 
         return view('site.gamehub-detail', [
             'hostProfile' => $hostProfile,
-            'title' => $venue->name . ($venue->city ? ' — ' . $venue->city : ''),
-            'id'    => $id,
+            'title' => $venue->name.($venue->city ? ' — '.$venue->city : ''),
+            'id' => $id,
             'venue' => $this->decorateVenueDetail($venue),
-            'seo'   => $this->venueSeo($venue),
+            'seo' => $this->venueSeo($venue),
         ]);
     }
 
@@ -593,20 +658,20 @@ final class PublicWebController extends Controller
     private function venueSeo(Venue $venue): array
     {
         $sports = implode(', ', array_slice($venue->sportsList(), 0, 3));
-        $image = \App\Support\MediaUrl::resolveMany(is_array($venue->images) ? $venue->images : [])[0] ?? null;
+        $image = MediaUrl::resolveMany(is_array($venue->images) ? $venue->images : [])[0] ?? null;
 
         $desc = trim(strip_tags((string) ($venue->tagline ?: $venue->about))) ?: trim(
-            'Book ' . ($sports ?: 'a slot') . ' at ' . $venue->name
-            . ($venue->city ? ' in ' . $venue->city : '')
-            . ($venue->price ? ' from ₹' . $venue->price . '/hr' : '') . ' on Haraan.'
+            'Book '.($sports ?: 'a slot').' at '.$venue->name
+            .($venue->city ? ' in '.$venue->city : '')
+            .($venue->price ? ' from ₹'.$venue->price.'/hr' : '').' on Haraan.'
         );
 
         $schema = array_filter([
             '@context' => 'https://schema.org',
             '@type' => 'SportsActivityLocation',
             'name' => $venue->name,
-            'url' => url('/gamehub/' . $venue->id),
-            'description' => \Illuminate\Support\Str::limit($desc, 300),
+            'url' => url('/gamehub/'.$venue->id),
+            'description' => Str::limit($desc, 300),
             'image' => $image,
             'address' => array_filter([
                 '@type' => 'PostalAddress',
@@ -619,7 +684,7 @@ final class PublicWebController extends Controller
                 'latitude' => $venue->latitude,
                 'longitude' => $venue->longitude,
             ] : null,
-            'priceRange' => $venue->price ? '₹' . $venue->price : null,
+            'priceRange' => $venue->price ? '₹'.$venue->price : null,
             'aggregateRating' => ($venue->ratings_count ?? 0) > 0 ? [
                 '@type' => 'AggregateRating',
                 'ratingValue' => (string) round((float) $venue->rating, 1),
@@ -628,10 +693,10 @@ final class PublicWebController extends Controller
         ], static fn ($v) => $v !== null && $v !== []);
 
         return [
-            'title' => $venue->name . ($venue->city ? ' — ' . $venue->city : ''),
+            'title' => $venue->name.($venue->city ? ' — '.$venue->city : ''),
             'description' => $desc,
             'image' => $image,
-            'canonical' => url('/gamehub/' . $venue->id),
+            'canonical' => url('/gamehub/'.$venue->id),
             'jsonld' => $schema,
             'breadcrumbs' => [
                 ['name' => 'Haraan', 'url' => url('/')],
@@ -660,6 +725,16 @@ final class PublicWebController extends Controller
             }
         }
 
+        $cLat = request()->cookie('haraan_lat');
+        $cLng = request()->cookie('haraan_lng');
+        if (is_numeric($cLat) && is_numeric($cLng)) {
+            $lat = (float) $cLat;
+            $lng = (float) $cLng;
+            if ($lat >= -90 && $lat <= 90 && $lng >= -180 && $lng <= 180) {
+                return [$lat, $lng];
+            }
+        }
+
         $city = CityResolver::selected();
         if ($city !== null && $city !== '') {
             return $this->geocodeCity($city);
@@ -670,7 +745,7 @@ final class PublicWebController extends Controller
 
     private function geocodeCity(string $city): array
     {
-        return $this->geocode($city . ', India');
+        return $this->geocode($city.', India');
     }
 
     /**
@@ -681,7 +756,7 @@ final class PublicWebController extends Controller
      */
     private function geocode(string $address): array
     {
-        return (new MatchGeocoder())->geocode($address);
+        return (new MatchGeocoder)->geocode($address);
     }
 
     /**
@@ -691,7 +766,7 @@ final class PublicWebController extends Controller
      */
     private function ensureMatchCoords(LiveMatch $m): void
     {
-        (new MatchGeocoder())->ensureCoords($m);
+        (new MatchGeocoder)->ensureCoords($m);
     }
 
     public function actionBoard(): View
@@ -719,7 +794,7 @@ final class PublicWebController extends Controller
         if ($viewerLat !== null && $viewerLng !== null) {
             $feed->each(fn (LiveMatch $m) => $this->ensureMatchCoords($m));
         }
-        $near = new \App\Support\MatchProximity(
+        $near = new MatchProximity(
             latitude: $viewerLat,
             longitude: $viewerLng,
             district: (string) ($viewer->district ?? ''),
@@ -741,40 +816,41 @@ final class PublicWebController extends Controller
                 }
                 $overs = (string) ($m->overs ?? '');
                 $scoreText = (string) ($m->score_text ?: '');
+
                 return [
-                    'id'          => (string) $m->id,
+                    'id' => (string) $m->id,
                     // Which sport this match is — the key the app filters on ("table_tennis",
                     // not "Table Tennis"). Without it the web board could only ever pretend
                     // to switch sports, because every row looked like cricket.
-                    'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
-                    'team1'       => (string) $m->home,
-                    'team2'       => (string) $m->away,
+                    'sport' => strtolower((string) ($m->sport ?: 'cricket')),
+                    'team1' => (string) $m->home,
+                    'team2' => (string) $m->away,
                     // Team crests: uploaded logo path/URL + default emblem key (action1..4)
                     // so the list can render real icons, not just monograms.
-                    'team1Logo'   => (string) ($m->home_logo ?? ''),
+                    'team1Logo' => (string) ($m->home_logo ?? ''),
                     'team1Emblem' => (string) ($m->home_emblem ?? ''),
-                    'team2Logo'   => (string) ($m->away_logo ?? ''),
+                    'team2Logo' => (string) ($m->away_logo ?? ''),
                     'team2Emblem' => (string) ($m->away_emblem ?? ''),
-                    'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
-                    'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
-                    'overs1'      => $battingTeam === 2 ? '' : $overs,
-                    'overs2'      => $battingTeam === 2 ? $overs : '',
+                    'score1' => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
+                    'score2' => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
+                    'overs1' => $battingTeam === 2 ? '' : $overs,
+                    'overs2' => $battingTeam === 2 ? $overs : '',
                     'battingTeam' => $battingTeam,
-                    'status'      => (string) ($m->status ?? ''),
-                    'venue'       => (string) ($m->venue ?? ''),
+                    'status' => (string) ($m->status ?? ''),
+                    'venue' => (string) ($m->venue ?? ''),
                     'competition' => (string) ($m->competition ?? ''),
-                    'isLive'      => strtolower((string) $m->status) === 'live',
-                    'visibility'  => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
-                    'district'    => (string) ($m->district ?? ''),
-                    'locality'    => (string) ($m->locality ?? ''),
-                    'isMine'      => $viewer !== null && (int) $m->user_id === (int) $viewer->id,
+                    'isLive' => strtolower((string) $m->status) === 'live',
+                    'visibility' => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
+                    'district' => (string) ($m->district ?? ''),
+                    'locality' => (string) ($m->locality ?? ''),
+                    'isMine' => $viewer !== null && (int) $m->user_id === (int) $viewer->id,
                     // Grouping hint only (see Api\LiveMatchController::index) —
                     // everyone sees every public match; false for guests.
                     'isLocalToViewer' => $viewer !== null
                         && (string) ($viewer->district ?? '') !== ''
                         && (string) $m->district === (string) $viewer->district,
-                    'isFeatured'  => (string) $m->visibility === LiveMatch::VIS_FEATURED,
-                    'distanceKm'  => ($d = $near->distanceKm($m)) === null ? null : round($d, 1),
+                    'isFeatured' => (string) $m->visibility === LiveMatch::VIS_FEATURED,
+                    'distanceKm' => ($d = $near->distanceKm($m)) === null ? null : round($d, 1),
                 ];
             })
             ->values();
@@ -784,13 +860,13 @@ final class PublicWebController extends Controller
         $districtSummary = null;
         $districtBoard = [];
         $stateBoard = [];
-        $leaderboards = app(\App\Services\LeaderboardService::class);
-        if ($viewer !== null && !empty($viewer->district)) {
-            $districtSummary = app(\App\Services\DistrictService::class)
+        $leaderboards = app(LeaderboardService::class);
+        if ($viewer !== null && ! empty($viewer->district)) {
+            $districtSummary = app(DistrictService::class)
                 ->summary((string) $viewer->district, $viewer->state !== null ? (string) $viewer->state : null);
             $districtBoard = $leaderboards->monthly('district', null, (string) $viewer->district, 50);
         }
-        if ($viewer !== null && !empty($viewer->state)) {
+        if ($viewer !== null && ! empty($viewer->state)) {
             $stateBoard = $leaderboards->monthly('state', null, (string) $viewer->state, 50);
         }
 
@@ -828,7 +904,8 @@ final class PublicWebController extends Controller
     {
         $match = $this->visibleMatch($id);
         $viewer = auth()->user();
-        return app(\App\Http\Controllers\Api\LiveMatchController::class)->detailPayload($match, $viewer);
+
+        return app(LiveMatchController::class)->detailPayload($match, $viewer);
     }
 
     private function isCricket(LiveMatch $match): bool
@@ -852,21 +929,21 @@ final class PublicWebController extends Controller
         $insightsLock = null;
         if ($tab === 'insights') {
             try {
-                app(\App\Services\Membership\SportInsightsAccess::class)->authorizeMatch($member, $match);
-            } catch (\App\Services\Membership\EntitlementDenied $denied) {
+                app(SportInsightsAccess::class)->authorizeMatch($member, $match);
+            } catch (EntitlementDenied $denied) {
                 $insightsLock = ['message' => $denied->getMessage(), 'code' => $denied->reason, 'signed_in' => $member !== null];
             }
         }
 
         return view('site.sport-match', [
-            'title' => ($match->home_full ?: $match->home) . ' vs ' . ($match->away_full ?: $match->away),
+            'title' => ($match->home_full ?: $match->home).' vs '.($match->away_full ?: $match->away),
             'match' => $match,
-            'detail' => app(\App\Http\Controllers\Api\LiveMatchController::class)->detailPayload($match, $viewer instanceof User ? $viewer : null),
+            'detail' => app(LiveMatchController::class)->detailPayload($match, $viewer instanceof User ? $viewer : null),
             'players' => $tab === 'players' || $tab === 'summary'
-                ? app(\App\Services\Stats\MatchPlayerStatsService::class)->forMatch($match)
+                ? app(MatchPlayerStatsService::class)->forMatch($match)
                 : [],
             'insights' => $tab === 'insights' && $insightsLock === null
-                ? app(\App\Services\Insights\SportInsights::class)->for($match)
+                ? app(SportInsights::class)->for($match)
                 : null,
             'insightsLock' => $insightsLock,
             'matchAd' => $this->matchAd($match),
@@ -891,7 +968,7 @@ final class PublicWebController extends Controller
         return view('site.actionboard-match-live', ['title' => 'Live Match', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'live']);
     }
 
-    public function actionBoardMatchInfo(string $id): View|\Illuminate\Http\RedirectResponse
+    public function actionBoardMatchInfo(string $id): View|RedirectResponse
     {
         $match = $this->visibleMatch($id);
         if (! $this->isCricket($match)) {
@@ -901,7 +978,7 @@ final class PublicWebController extends Controller
         return view('site.actionboard-match-info', ['title' => 'Match Info', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'info']);
     }
 
-    public function actionBoardMatchCommentary(string $id): View|\Illuminate\Http\RedirectResponse
+    public function actionBoardMatchCommentary(string $id): View|RedirectResponse
     {
         $match = $this->visibleMatch($id);
         if (! $this->isCricket($match)) {
@@ -911,7 +988,7 @@ final class PublicWebController extends Controller
         return view('site.actionboard-match-commentary', ['title' => 'Commentary', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'commentary']);
     }
 
-    public function actionBoardMatchScorecard(string $id): View|\Illuminate\Http\RedirectResponse
+    public function actionBoardMatchScorecard(string $id): View|RedirectResponse
     {
         $match = $this->visibleMatch($id);
         if (! $this->isCricket($match)) {
@@ -936,48 +1013,50 @@ final class PublicWebController extends Controller
         return view('site.profile', ['title' => 'My Profile']);
     }
 
-
     public function getPlayerDetails($playerId)
     {
-        $user = \App\Models\User::where('player_id', $playerId)->first();
+        $user = User::where('player_id', $playerId)->first();
         if ($user) {
             return response()->json([
                 'success' => true,
                 'name' => $user->name,
                 'role' => $user->player_role ?? 'Unknown',
-                'style' => $user->playing_style ?? 'Unknown'
+                'style' => $user->playing_style ?? 'Unknown',
             ]);
         }
+
         return response()->json(['success' => false]);
     }
 
     public function showPlayerProfile(string $player_id): View
     {
-        $player = \App\Models\User::where('player_id', $player_id)->firstOrFail();
-        
+        $player = User::where('player_id', $player_id)->firstOrFail();
+
         // Find recent matches where this player is in the squad
-        $allMatches = \App\Models\LiveMatch::orderBy('created_at', 'desc')->get();
+        $allMatches = LiveMatch::orderBy('created_at', 'desc')->get();
         $recentMatches = [];
-        
+
         foreach ($allMatches as $match) {
             $inHome = is_array($match->home_squad) && collect($match->home_squad)->contains(function ($p) use ($player_id) {
                 $id = is_array($p) ? ($p['id'] ?? null) : $p;
-                return (string)$id === (string)$player_id;
+
+                return (string) $id === (string) $player_id;
             });
             $inAway = is_array($match->away_squad) && collect($match->away_squad)->contains(function ($p) use ($player_id) {
                 $id = is_array($p) ? ($p['id'] ?? null) : $p;
-                return (string)$id === (string)$player_id;
+
+                return (string) $id === (string) $player_id;
             });
-            
+
             if ($inHome || $inAway) {
                 $recentMatches[] = $match;
             }
         }
-        
+
         return view('site.player-profile', [
-            'title' => $player->name . ' - Player Profile',
+            'title' => $player->name.' - Player Profile',
             'player' => $player,
-            'recentMatches' => $recentMatches
+            'recentMatches' => $recentMatches,
         ]);
     }
 
@@ -985,11 +1064,11 @@ final class PublicWebController extends Controller
     {
         $query = request()->input('q', '');
         $type = request()->input('type', 'all');
-        
+
         $city = CityResolver::selected();
         $results = [];
         if ($query !== '') {
-            $like = '%' . $query . '%';
+            $like = '%'.$query.'%';
 
             if ($type === 'all' || $type === 'events') {
                 $events = Event::query()
@@ -1006,17 +1085,16 @@ final class PublicWebController extends Controller
 
                 if ($events->isNotEmpty()) {
                     $results['events'] = $events->map(fn (Event $e) => [
-                        'id'       => $e->id,
-                        'title'    => $e->title,
+                        'id' => $e->id,
+                        'title' => $e->title,
                         'category' => $e->category ?: 'Event',
-                        'venue'    => $e->venue ?: 'Mumbai',
+                        'venue' => $e->venue ?: 'Mumbai',
                     ])->all();
                 }
             }
 
             if ($type === 'all' || $type === 'venues') {
-                $venues = Venue::query()
-                    ->where('is_active', true)
+                $venues = Venue::published()
                     ->when($city, fn ($q) => $q->where('city', $city))
                     ->where(function ($w) use ($like) {
                         $w->where('name', 'like', $like)
@@ -1029,15 +1107,15 @@ final class PublicWebController extends Controller
 
                 if ($venues->isNotEmpty()) {
                     $results['venues'] = $venues->map(fn (Venue $v) => [
-                        'id'       => $v->id,
-                        'title'    => $v->name,
-                        'sport'    => $v->category ?: 'Sport',
+                        'id' => $v->id,
+                        'title' => $v->name,
+                        'sport' => $v->category ?: 'Sport',
                         'location' => $v->location ?: 'Mumbai',
                     ])->all();
                 }
             }
         }
-        
+
         return view('site.search', [
             'title' => "Search Results for \"$query\"",
             'query' => $query,
@@ -1062,7 +1140,7 @@ final class PublicWebController extends Controller
         }
 
         $city = CityResolver::selected();
-        $like = '%' . $query . '%';
+        $like = '%'.$query.'%';
 
         $events = Event::query()
             ->where('status', 'published')
@@ -1076,14 +1154,13 @@ final class PublicWebController extends Controller
             ->limit(5)
             ->get(['id', 'title', 'category', 'venue'])
             ->map(fn (Event $e) => [
-                'id'    => $e->id,
+                'id' => $e->id,
                 'title' => $e->title,
-                'meta'  => trim(($e->category ?: 'Event') . ' · ' . ($e->venue ?: 'Mumbai'), ' ·'),
-                'url'   => '/events/' . $e->id,
+                'meta' => trim(($e->category ?: 'Event').' · '.($e->venue ?: 'Mumbai'), ' ·'),
+                'url' => '/events/'.$e->id,
             ])->all();
 
-        $venues = Venue::query()
-            ->where('is_active', true)
+        $venues = Venue::published()
             ->when($city, fn ($q) => $q->where('city', $city))
             ->where(function ($w) use ($like) {
                 $w->where('name', 'like', $like)
@@ -1094,23 +1171,23 @@ final class PublicWebController extends Controller
             ->limit(5)
             ->get(['id', 'name', 'category', 'location'])
             ->map(fn (Venue $v) => [
-                'id'    => $v->id,
+                'id' => $v->id,
                 'title' => $v->name,
-                'meta'  => trim(($v->category ?: 'Venue') . ' · ' . ($v->location ?: 'Mumbai'), ' ·'),
-                'url'   => '/gamehub/' . $v->id,
+                'meta' => trim(($v->category ?: 'Venue').' · '.($v->location ?: 'Mumbai'), ' ·'),
+                'url' => '/gamehub/'.$v->id,
             ])->all();
 
         return response()->json(['events' => $events, 'venues' => $venues]);
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Leaderboard (batting / bowling career boards)                      */
+    /*  Leaderboard (batting / bowling career boards) */
     /* ------------------------------------------------------------------ */
 
     public function leaderboard(): View
     {
         $scope = request()->query('scope', 'country');
-        if (!in_array($scope, ['country', 'state', 'district'], true)) {
+        if (! in_array($scope, ['country', 'state', 'district'], true)) {
             $scope = 'country';
         }
 
@@ -1134,7 +1211,7 @@ final class PublicWebController extends Controller
             ->values()
             ->all();
 
-        $selectedState    = request()->query('state', $states[0] ?? 'Andhra Pradesh');
+        $selectedState = request()->query('state', $states[0] ?? 'Andhra Pradesh');
         $selectedDistrict = request()->query('district', $districts[0] ?? 'Kadapa');
 
         $scopeFilter = function ($query) use ($scope, $selectedState, $selectedDistrict) {
@@ -1144,6 +1221,7 @@ final class PublicWebController extends Controller
             } elseif ($scope === 'district') {
                 $query->where('district', $selectedDistrict);
             }
+
             return $query;
         };
 
@@ -1160,19 +1238,19 @@ final class PublicWebController extends Controller
             ->get();
 
         return view('site.leaderboard', [
-            'title'              => 'Leaderboard',
-            'scope'              => $scope,
-            'states'             => $states,
-            'districts'          => $districts,
-            'selectedState'      => $selectedState,
-            'selectedDistrict'   => $selectedDistrict,
+            'title' => 'Leaderboard',
+            'scope' => $scope,
+            'states' => $states,
+            'districts' => $districts,
+            'selectedState' => $selectedState,
+            'selectedDistrict' => $selectedDistrict,
             'battingLeaderboard' => $battingLeaderboard,
             'bowlingLeaderboard' => $bowlingLeaderboard,
         ]);
     }
 
     /* ------------------------------------------------------------------ */
-    /*  ActionBoard match JSON (polled by the live scoreboards)            */
+    /*  ActionBoard match JSON (polled by the live scoreboards) */
     /* ------------------------------------------------------------------ */
 
     /**
@@ -1201,7 +1279,7 @@ final class PublicWebController extends Controller
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Player directory (squad builder + profile-setup claiming)          */
+    /*  Player directory (squad builder + profile-setup claiming) */
     /* ------------------------------------------------------------------ */
 
     public function searchPlayers(Request $request): JsonResponse
@@ -1234,11 +1312,11 @@ final class PublicWebController extends Controller
 
         // 'username' is additive — existing website callers keep reading the same keys.
         return response()->json($players->map(fn (User $u) => [
-            'id'       => $u->player_id,
+            'id' => $u->player_id,
             'username' => $u->username,
-            'name'     => $u->name,
-            'role'     => $u->player_role ?: 'Player',
-            'style'    => $u->batting_style ?: ($u->playing_style ?: ''),
+            'name' => $u->name,
+            'role' => $u->player_role ?: 'Player',
+            'style' => $u->batting_style ?: ($u->playing_style ?: ''),
             'district' => $u->district ?: '—',
         ])->all());
     }
@@ -1252,22 +1330,22 @@ final class PublicWebController extends Controller
         }
 
         $guest = User::create([
-            'name'          => $name,
-            'email'         => 'guest_' . Str::random(16) . '@guest.haraan',
-            'password'      => Hash::make(Str::random(24)),
-            'role'          => 'user',
-            'status'        => 'active',
-            'is_guest'      => true,
-            'player_role'   => 'All-rounder',
+            'name' => $name,
+            'email' => 'guest_'.Str::random(16).'@guest.haraan',
+            'password' => Hash::make(Str::random(24)),
+            'role' => 'user',
+            'status' => 'active',
+            'is_guest' => true,
+            'player_role' => 'All-rounder',
             'playing_style' => 'Unknown',
         ]);
 
         return response()->json([
             'success' => true,
-            'id'      => $guest->player_id,
-            'name'    => $guest->name,
-            'role'    => $guest->player_role,
-            'style'   => $guest->playing_style,
+            'id' => $guest->player_id,
+            'name' => $guest->name,
+            'role' => $guest->player_role,
+            'style' => $guest->playing_style,
         ]);
     }
 
@@ -1293,59 +1371,59 @@ final class PublicWebController extends Controller
                 ->first();
 
             $playedWith = $match
-                ? ($match->title ?: trim(($match->home ?? '') . ' vs ' . ($match->away ?? '')))
+                ? ($match->title ?: trim(($match->home ?? '').' vs '.($match->away ?? '')))
                 : 'Guest match record';
 
             return [
-                'id'          => $g->id,
-                'name'        => $g->name,
-                'player_id'   => $g->player_id,
+                'id' => $g->id,
+                'name' => $g->name,
+                'player_id' => $g->player_id,
                 'played_with' => $playedWith !== 'vs' ? $playedWith : 'Guest match record',
             ];
         })->all());
     }
 
     /* ------------------------------------------------------------------ */
-    /*  ActionBoard profile setup (cricket onboarding)                     */
+    /*  ActionBoard profile setup (cricket onboarding) */
     /* ------------------------------------------------------------------ */
 
     public function showProfileSetupForm(): View
     {
         return view('site.profile-setup', [
             'title' => 'Complete Your Profile',
-            'user'  => auth()->user(),
+            'user' => auth()->user(),
         ]);
     }
 
     public function saveProfileSetup(Request $request)
     {
         $user = auth()->user();
-        if (!$user) {
+        if (! $user) {
             return redirect()->route('site.login');
         }
 
         $validated = $request->validate([
-            'name'          => 'required|string|max:255',
-            'state'         => 'required|string|max:255',
-            'district'      => 'required|string|max:255',
+            'name' => 'required|string|max:255',
+            'state' => 'required|string|max:255',
+            'district' => 'required|string|max:255',
             'batting_style' => 'nullable|string|max:100',
             'bowling_style' => 'nullable|string|max:100',
             'claim_user_id' => 'nullable|integer',
-            'photo'         => 'nullable|image|mimes:jpg,jpeg,png,webp|max:4096',
+            'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:4096',
         ]);
 
         // Merge a claimed guest profile's career stats into this account.
-        if (!empty($validated['claim_user_id'])) {
+        if (! empty($validated['claim_user_id'])) {
             $guest = User::query()
                 ->where('id', $validated['claim_user_id'])
                 ->where('is_guest', true)
                 ->first();
 
             if ($guest) {
-                $user->career_runs          += (int) $guest->career_runs;
-                $user->career_balls         += (int) $guest->career_balls;
-                $user->career_matches       += (int) $guest->career_matches;
-                $user->career_wickets       += (int) $guest->career_wickets;
+                $user->career_runs += (int) $guest->career_runs;
+                $user->career_balls += (int) $guest->career_balls;
+                $user->career_matches += (int) $guest->career_matches;
+                $user->career_wickets += (int) $guest->career_wickets;
                 $user->career_runs_conceded += (int) $guest->career_runs_conceded;
                 $guest->delete();
             }
@@ -1353,19 +1431,19 @@ final class PublicWebController extends Controller
 
         if ($request->hasFile('photo')) {
             $path = $request->file('photo')->store('avatars', 'public');
-            $user->avatar = '/storage/' . $path;
+            $user->avatar = '/storage/'.$path;
         }
 
-        $user->name          = $validated['name'];
-        $user->state         = $validated['state'];
-        $user->district      = $validated['district'];
+        $user->name = $validated['name'];
+        $user->state = $validated['state'];
+        $user->district = $validated['district'];
         $user->batting_style = $validated['batting_style'] ?? $user->batting_style;
         $user->bowling_style = $validated['bowling_style'] ?? $user->bowling_style;
-        $user->player_role   = $user->player_role ?: 'All-rounder';
+        $user->player_role = $user->player_role ?: 'All-rounder';
         $user->primary_sport = $user->primary_sport ?: 'Cricket';
 
         $attrs = $user->sport_attributes ?? [];
-        $attrs['role']    = $attrs['role'] ?? $user->player_role;
+        $attrs['role'] = $attrs['role'] ?? $user->player_role;
         $attrs['batting'] = $validated['batting_style'] ?? ($attrs['batting'] ?? '');
         $attrs['bowling'] = $validated['bowling_style'] ?? ($attrs['bowling'] ?? '');
         $user->sport_attributes = $attrs;
@@ -1380,19 +1458,20 @@ final class PublicWebController extends Controller
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Pulse venue view-model helpers                                   */
+    /*  Pulse venue view-model helpers */
     /* ------------------------------------------------------------------ */
 
     /** Normalize a stored venue image path into a usable URL. */
     private function venueImageUrl(?string $path): string
     {
-        if (!$path) {
+        if (! $path) {
             return asset('gamehub.png');
         }
         if (preg_match('/^(http|https):\/\//', $path) || str_starts_with($path, '/')) {
             return $path;
         }
-        return asset('storage/' . ltrim($path, '/'));
+
+        return asset('storage/'.ltrim($path, '/'));
     }
 
     /** Compact venue shape for the Pulse browse grid. */
@@ -1401,26 +1480,56 @@ final class PublicWebController extends Controller
         $images = is_array($v->images) ? $v->images : [];
 
         return (object) [
-            'id'       => $v->id,
-            'title'    => $v->name,
-            'image'    => $this->venueImageUrl($images[0] ?? null),
+            'id' => $v->id,
+            'title' => $v->name,
+            'image' => ! empty($images) ? $this->venueImageUrl($images[0]) : null,
             'location' => $v->location,
+            'city' => $v->city,
+            'distance' => $v->distance,
             'category' => $v->category,
-            'rating'   => $v->rating ?: '0.0',
-            'reviews'  => (int) ($v->reviews_count ?? 0),
-            'price'    => (int) ($v->price ?? 0),
-            'badge'    => $v->is_featured ? 'Featured' : null,
+            'rating' => ($v->ratings_count > 0 && $v->rating) ? $v->rating : null,
+            'reviews' => (int) ($v->reviews_count ?? 0),
+            'price' => (int) ($v->price ?? 0),
+            'badge' => $v->is_featured ? 'Featured' : null,
             // The app's cards carry these two (VenueItem.tagline / .sports); the web card
             // shape predates them. Additive — the desktop markup ignores both.
-            'tagline'  => (string) ($v->tagline ?? ''),
-            'sports'   => $v->sportsList(),
+            'tagline' => (string) ($v->tagline ?? ''),
+            'sports' => $v->sportsList(),
         ];
+    }
+
+    /** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */
+    private function haversineKm(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $earthRadius = 6371.0;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($dLng / 2) * sin($dLng / 2);
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        return $earthRadius * $c;
+    }
+
+    /** Human distance: "800 m away" under 1 km, "1.2 km away" under 10, "12 km away" beyond. */
+    private function formatKm(float $km): string
+    {
+        if ($km < 1.0) {
+            $m = (int) max(50, round($km * 1000));
+            return "{$m} m away";
+        }
+        if ($km < 10.0) {
+            $formatted = number_format($km, 1);
+            return "{$formatted} km away";
+        }
+        $intKm = (int) round($km);
+        return "{$intKm} km away";
     }
 
     /** Full venue shape for the Pulse detail page. */
     private function decorateVenueDetail(Venue $v): object
     {
-        $images  = is_array($v->images) ? $v->images : [];
+        $images = is_array($v->images) ? $v->images : [];
         $gallery = array_values(array_map(
             fn ($p) => $this->venueImageUrl($p),
             array_slice($images, 1)
@@ -1428,9 +1537,7 @@ final class PublicWebController extends Controller
 
         $amenities = is_array($v->amenities) ? $v->amenities : [];
 
-        // The detail scheduler needs at least one sport, each with a bookable court.
-        // Courts are real, sport-aware units now: group them by the sports each hosts so the
-        // scheduler's "pick sport → pick court" flow matches what the venue actually has.
+        // Group actual courts by the sports each hosts.
         $sports = $v->sportsList();
         if ($sports === []) {
             $sports = [$v->category ?: 'Cricket'];
@@ -1441,12 +1548,6 @@ final class PublicWebController extends Controller
             $names = array_map(fn ($c) => $c->name, $list);
             if ($names !== []) {
                 $courts[$sport] = array_values($names);
-            }
-        }
-        // Every offered sport must resolve to at least one court or the scheduler breaks.
-        foreach ($sports as $sport) {
-            if (empty($courts[$sport])) {
-                $courts[$sport] = ['Court 1'];
             }
         }
 
@@ -1468,43 +1569,75 @@ final class PublicWebController extends Controller
             }
         }
 
+        // The admin's own slot rows for each day the date strip offers (/control → venue →
+        // slots, or generated from its hours). The scheduler renders exactly these and asks
+        // /api/venues/{id}/availability which are taken; it used to draw a fixed 6 AM–11 PM
+        // grid with a random 30% marked "Reserved", whatever the venue had set up.
+        $step = max(30, (int) ($v->slot_minutes ?: 60));
+        $label = static fn (int $m): string => Carbon::today()->addMinutes($m)->format('h:i A');
+        $slotsByDate = [];
+        for ($i = 0; $i < 7; $i++) {
+            $date = now()->addDays($i)->startOfDay();
+            $slotsByDate[$date->toDateString()] = $v->slotsOn($date)->map(function ($s) use ($step, $label) {
+                $start = BookingService::timeToMinutes($s->time);
+                if ($start === null) {
+                    return null;
+                }
+                $end = min(24 * 60, $start + $step);
+
+                return [
+                    'id' => (int) $s->id,
+                    'start' => $start,
+                    'time' => $label($start).' - '.$label($end),
+                    'sports' => $s->sportsList(),
+                    'open' => (bool) $s->is_available,
+                ];
+            })->filter()->values()->all();
+        }
+        $courtIds = $v->courts->mapWithKeys(fn ($c) => [$c->name => (int) $c->id])->all();
+
         $reviewsList = $v->reviews->map(fn ($r) => (object) [
-            'user'    => $r->name,
-            'date'    => $r->ago ?: 'recently',
-            'rating'  => (int) $r->rating,
+            'user' => $r->name,
+            'date' => $r->ago ?: 'recently',
+            'rating' => (int) $r->rating,
             'comment' => $r->text ?: '',
         ])->all();
 
         return (object) [
-            'id'           => $v->id,
-            'title'        => $v->name,
-            'image'        => $this->venueImageUrl($images[0] ?? null),
-            'gallery'      => $gallery,
-            'location'     => $v->location,
-            'category'     => $v->category,
-            'rating'       => $v->rating ?: '0.0',
-            'reviews'      => (int) ($v->reviews_count ?? 0),
+            'id' => $v->id,
+            'title' => $v->name,
+            'image' => ! empty($images) ? $this->venueImageUrl($images[0]) : null,
+            'gallery' => $gallery,
+            'location' => $v->location,
+            'category' => $v->category,
+            'rating' => ($v->ratings_count > 0 && $v->rating) ? $v->rating : null,
+            'reviews' => (int) ($v->reviews_count ?? 0),
             'reviews_list' => $reviewsList,
-            'price'        => (int) ($v->price ?? 0),
-            'hours'        => $v->displayHours() ?: '6:00 AM – 11:00 PM',
+            'price' => (int) ($v->price ?? 0),
+            // The booking sheet estimates the total from these; the server recomputes it.
+            'convenience_fee_type' => (string) ($v->convenience_fee_type ?? 'none'),
+            'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),
+            'hours' => $v->displayHours() ?: '',
             'cancellation' => $v->cancellationText(),
             // The app's VenueDetailScreen reads these (address line, "Show in Map"/
             // "Get directions", the "Good to know" checklist, the rating summary);
             // the web shape predates them. Additive — the desktop markup ignores them.
-            'address'      => (string) ($v->address ?? ''),
-            'latitude'     => $v->latitude,
-            'longitude'    => $v->longitude,
-            'map_link'     => (string) ($v->map_link ?? ''),
-            'rules'        => is_array($v->rules) ? array_values(array_filter($v->rules)) : [],
+            'address' => (string) ($v->address ?? ''),
+            'latitude' => $v->latitude,
+            'longitude' => $v->longitude,
+            'map_link' => (string) ($v->map_link ?? ''),
+            'rules' => is_array($v->rules) ? array_values(array_filter($v->rules)) : [],
             'ratings_count' => (int) ($v->ratings_count ?? 0),
-            'is_bookable'  => (bool) ($v->is_bookable ?? true),
-            'badge'        => $v->is_featured ? 'Featured' : null,
-            'description'  => $v->about ?: 'A premium sports facility with well-maintained playing surfaces and modern amenities.',
-            'amenities'    => $amenities,
-            'sports'       => $sports,
-            'courts'       => $courts,
+            'is_bookable' => (bool) ($v->is_bookable && $v->isPublished()),
+            'badge' => $v->is_featured ? 'Featured' : null,
+            'description' => (string) ($v->about ?? ''),
+            'amenities' => $amenities,
+            'sports' => $sports,
+            'courts' => $courts,
             'court_prices' => $courtPrices,
-            'court_peak'   => $courtPeak,
+            'court_peak' => $courtPeak,
+            'court_ids' => $courtIds,
+            'slots_by_date' => $slotsByDate,
         ];
     }
 
@@ -1537,8 +1670,8 @@ final class PublicWebController extends Controller
      * lower() both sides because the city column is free-text and mixed-case.
      * No city selected ("All India") → a no-op, leaving the caller's order.
      *
-     * @param  \Illuminate\Database\Eloquent\Builder  $query
-     * @return \Illuminate\Database\Eloquent\Builder
+     * @param  Builder  $query
+     * @return Builder
      */
     private function orderLocalFirst($query, ?string $city)
     {
@@ -1588,6 +1721,14 @@ final class PublicWebController extends Controller
      */
     private function usableAd(string $placement): ?Ad
     {
+        // Ad-free is a member plan feature, and it covers the website as well as the app
+        // (the app's /api/ads already honours it). No impression is counted either.
+        $viewer = auth()->user();
+        if ($viewer instanceof User
+            && app(MemberEntitlements::class)->allows($viewer, MemberFeature::ADS_HIDDEN)) {
+            return null;
+        }
+
         $ad = Ad::query()
             ->serving($placement)
             ->orderBy('sort_order')
@@ -1599,14 +1740,14 @@ final class PublicWebController extends Controller
 
         // Needs something to look at or somewhere to go — otherwise it's just noise.
         $hasImage = trim((string) $ad->image_url) !== '';
-        $hasLink  = trim((string) $ad->link_url) !== '';
+        $hasLink = trim((string) $ad->link_url) !== '';
 
         if (! ($hasImage || $hasLink)) {
             return null;
         }
 
         // The page render IS the impression on the web — one per session per 30 minutes.
-        app(\App\Services\AdTracker::class)->impression(
+        app(AdTracker::class)->impression(
             $ad, $placement, 'web', request()->hasSession() ? request()->session()->getId() : null, auth()->id(),
         );
 
@@ -1617,7 +1758,7 @@ final class PublicWebController extends Controller
      * GET /go/ad/{id}?p=placement — a web ad click: count it, then send the viewer on to the
      * advertiser. Only an http(s) destination on a serving ad is followed.
      */
-    public function adClick(\Illuminate\Http\Request $request, string $id): \Illuminate\Http\RedirectResponse
+    public function adClick(Request $request, string $id): RedirectResponse
     {
         $ad = Ad::query()->find((int) $id);
         $target = $ad?->link_url;
@@ -1625,7 +1766,7 @@ final class PublicWebController extends Controller
             return redirect('/events');
         }
 
-        app(\App\Services\AdTracker::class)->click(
+        app(AdTracker::class)->click(
             $ad, (string) $ad->placement, 'web',
             $request->hasSession() ? $request->session()->getId() : null, auth()->id(),
         );
@@ -1651,9 +1792,9 @@ final class PublicWebController extends Controller
 
         $cards = [[
             'title' => 'All',
-            'href'  => '/events',
-            'stat'  => Event::query()->where('status', 'published')->count() . ' Total',
-            'on'    => $active === 'All',
+            'href' => '/events',
+            'stat' => Event::query()->where('status', 'published')->count().' Total',
+            'on' => $active === 'All',
         ]];
 
         $top = Event::query()
@@ -1669,9 +1810,9 @@ final class PublicWebController extends Controller
         foreach ($top as $row) {
             $cards[] = [
                 'title' => ucfirst(strtolower((string) $row->category)),
-                'href'  => '/events?category=' . urlencode((string) $row->category),
-                'stat'  => $row->total . ' ' . ($row->total === 1 ? 'Event' : 'Events'),
-                'on'    => strcasecmp($active, (string) $row->category) === 0,
+                'href' => '/events?category='.urlencode((string) $row->category),
+                'stat' => $row->total.' '.($row->total === 1 ? 'Event' : 'Events'),
+                'on' => strcasecmp($active, (string) $row->category) === 0,
             ];
         }
 

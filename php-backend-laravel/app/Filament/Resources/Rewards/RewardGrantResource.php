@@ -71,6 +71,11 @@ class RewardGrantResource extends Resource
                 TextColumn::make('expires_at')->label('Expires')->dateTime('d M Y')->placeholder('—'),
             ])
             ->filters([
+                SelectFilter::make('user_id')
+                    ->label('Player')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload(),
                 SelectFilter::make('status')->options(RewardGrant::STATUSES),
                 SelectFilter::make('type')->options(RewardTypes::RULE_TYPES + [RewardTypes::BADGE => 'Badge', RewardTypes::STREAK => 'Streak']),
                 SelectFilter::make('program_id')->label('Program')->options(fn (): array => RewardProgram::query()->orderBy('name')->pluck('name', 'id')->all()),

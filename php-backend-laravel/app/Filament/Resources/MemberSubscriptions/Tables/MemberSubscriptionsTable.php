@@ -55,6 +55,11 @@ class MemberSubscriptionsTable
                 TextColumn::make('created_at')->label('Created')->since()->sortable(),
             ])
             ->filters([
+                SelectFilter::make('user_id')
+                    ->label('Member')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload(),
                 SelectFilter::make('status')->options(array_combine($statuses, array_map('ucfirst', $statuses))),
                 SelectFilter::make('plan_id')->label('Plan')->relationship('plan', 'name')->preload(),
                 SelectFilter::make('provider')->options([

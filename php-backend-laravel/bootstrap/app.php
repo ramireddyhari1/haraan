@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnforcePlatformOperations;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -23,6 +24,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\SetConditionalHeaders::class,
         ]);
+
+        // /control → Operations: maintenance mode and the minimum app version, enforced on
+        // the server for the public site and the app API (staff consoles stay open).
+        $middleware->api(prepend: [EnforcePlatformOperations::class]);
+        $middleware->web(append: [EnforcePlatformOperations::class]);
 
         $middleware->alias([
             'auth.jwt'         => \App\Http\Middleware\EnsureJwtAuthenticated::class,

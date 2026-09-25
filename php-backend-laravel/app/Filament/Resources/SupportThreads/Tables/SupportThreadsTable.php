@@ -80,6 +80,11 @@ class SupportThreadsTable
                         'pending' => 'Pending',
                         'closed'  => 'Closed',
                     ]),
+                SelectFilter::make('user_id')
+                    ->label('User')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload(),
                 SelectFilter::make('category_id')
                     ->label('Topic')
                     ->relationship('category', 'label')

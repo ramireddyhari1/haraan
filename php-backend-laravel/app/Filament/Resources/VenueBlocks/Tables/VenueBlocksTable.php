@@ -86,6 +86,16 @@ class VenueBlocksTable
                     }),
             ])
             ->filters([
+                // Lets the Venue 360's "Open in Blocked time" land on one venue.
+                SelectFilter::make('venue_id')
+                    ->label('Venue')
+                    ->options(fn (): array => \App\Filament\Resources\Venues\VenueResource::getEloquentQuery()
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all())
+                    ->searchable()
+                    ->preload(),
+
                 Filter::make('current')
                     ->label('In force or upcoming')
                     ->default()

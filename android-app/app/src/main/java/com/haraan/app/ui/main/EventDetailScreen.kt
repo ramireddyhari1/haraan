@@ -40,8 +40,10 @@ fun EventDetailScreen(
     // Load full detail once: sellable ticket tiers for the booking bar plus the
     // admin-authored "Good to Know" attributes and T&C notes. Blank for
     // flat-price / mock events, in which case we fall back to the nav-key notes.
+    val tokenContext = LocalContext.current
     val detail by produceState(initialValue = EventDetailInfo(), event.id) {
-        value = runCatching { EventRepository().getEventDetail(event.id) }.getOrDefault(EventDetailInfo())
+        val token = com.haraan.app.data.TokenStore.getSignedInToken(tokenContext)
+        value = runCatching { EventRepository().getEventDetail(event.id, token) }.getOrDefault(EventDetailInfo())
     }
     val ticketTypes = detail.ticketTypes
     val infoNotes = detail.infoNotes.ifEmpty { event.infoNotes }

@@ -20,13 +20,15 @@ use App\Models\LiveMatch;
 final class MatchProximity
 {
     /** Bucket boundaries in km, paired with the text tier they correspond to. */
-    private const NEAR_KM = 5.0;     // ~same village/neighbourhood
-    private const DISTRICT_KM = 40.0;  // ~same district
-    private const REGION_KM = 150.0; // ~same state region
+    // Bucket radii live in /control → Platform rules → Tournaments & matches
+    // (defaults: 5 km ~same neighbourhood, 40 km ~same district, 150 km ~same state region).
 
     public const BUCKET_HERE = 0;
+
     public const BUCKET_DISTRICT = 1;
+
     public const BUCKET_REGION = 2;
+
     public const BUCKET_FAR = 3;
 
     public function __construct(
@@ -35,8 +37,7 @@ final class MatchProximity
         private readonly string $locality = '',
         private readonly string $district = '',
         private readonly string $state = '',
-    ) {
-    }
+    ) {}
 
     /** True when we know anything at all about where the viewer is. */
     public function isKnown(): bool
@@ -89,9 +90,9 @@ final class MatchProximity
         $km = $this->distanceKm($match);
         if ($km !== null) {
             return match (true) {
-                $km <= self::NEAR_KM => self::BUCKET_HERE,
-                $km <= self::DISTRICT_KM => self::BUCKET_DISTRICT,
-                $km <= self::REGION_KM => self::BUCKET_REGION,
+                $km <= PlatformRules::float('creation.proximity_near_km') => self::BUCKET_HERE,
+                $km <= PlatformRules::float('creation.proximity_district_km') => self::BUCKET_DISTRICT,
+                $km <= PlatformRules::float('creation.proximity_region_km') => self::BUCKET_REGION,
                 default => self::BUCKET_FAR,
             };
         }
@@ -140,6 +141,7 @@ final class MatchProximity
      * Order a collection of matches by this viewer's position.
      *
      * @template T of \Illuminate\Support\Collection<int, LiveMatch>
+     *
      * @param  T  $matches
      * @return T
      */

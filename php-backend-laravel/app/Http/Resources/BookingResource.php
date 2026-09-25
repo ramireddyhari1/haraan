@@ -24,6 +24,12 @@ final class BookingResource extends JsonResource
             'quantity'    => $this->quantity,
             'totalAmount' => $this->total_amount,
             'convenienceFee' => $this->convenience_fee,
+            // Customer-paid platform charges (0 on rows other than an order's first).
+            'platformFee' => (float) $this->platform_fee,
+            'gatewayFee' => (float) $this->gateway_fee,
+            'taxAmount' => (float) $this->tax_amount,
+            // What the customer paid for this row, tax included (Booking::amountCharged()).
+            'amountCharged' => $this->resource->amountCharged(),
             'status'      => $this->status,
             // Scannable entry-pass code — the app renders `haraan:ticket:<ticketCode>` as the QR.
             'ticketCode'  => $this->ticket_code,

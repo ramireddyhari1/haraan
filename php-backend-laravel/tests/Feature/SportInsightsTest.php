@@ -6,8 +6,11 @@ namespace Tests\Feature;
 
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
+use App\Models\MemberPlan;
+use App\Models\MemberSubscription;
 use App\Models\User;
 use App\Services\MatchEventRecorder;
+use App\Support\JwtService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -22,6 +25,7 @@ class SportInsightsTest extends TestCase
     use RefreshDatabase;
 
     private MatchEventRecorder $recorder;
+
     private User $owner;
 
     protected function setUp(): void
@@ -62,13 +66,13 @@ class SportInsightsTest extends TestCase
      */
     private function insights(LiveMatch $m): array
     {
-        \App\Models\MemberSubscription::query()->firstOrCreate(
-            ['user_id' => $this->owner->id, 'provider' => \App\Models\MemberSubscription::PROVIDER_ADMIN],
-            ['plan_id' => \App\Models\MemberPlan::query()->where('code', 'hero')->value('id'), 'status' => \App\Models\MemberSubscription::STATUS_ACTIVE],
+        MemberSubscription::query()->firstOrCreate(
+            ['user_id' => $this->owner->id, 'provider' => MemberSubscription::PROVIDER_ADMIN],
+            ['plan_id' => MemberPlan::query()->where('code', 'hero')->value('id'), 'status' => MemberSubscription::STATUS_ACTIVE],
         );
-        $token = \App\Support\JwtService::issueForUser($this->owner, (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')));
+        $token = JwtService::issueForUser($this->owner, (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')));
 
-        return $this->withHeader('Authorization', 'Bearer ' . $token)
+        return $this->withHeader('Authorization', 'Bearer '.$token)
             ->getJson("/api/live-matches/{$m->id}/insights")->assertOk()->json();
     }
 
@@ -210,6 +214,176 @@ class SportInsightsTest extends TestCase
         $d = $this->insights($m);
         self::assertSame('Game', $d['team']['set_noun']);
         self::assertSame('Game 1', $d['team']['sets'][0]['label']);
+    }
+
+    /**
+     * The serve chain. Nobody recorded who served first, and nobody had to: the rally winner
+     * serves the next rally, so every rally after the first has a server that is known exactly.
+     * The one rally that cannot be known is counted as unknown, not assigned to a side.
+     */
+    public function test_badminton_derives_who_served_every_rally_from_the_rally_winner(): void
+    {
+        $m = $this->match('badminton', ['bestOf' => 1, 'pointsTo' => 3]);
+        $this->point($m, 'home', 'Sindhu');    // 1-0  server unknown
+        $this->point($m, 'home', 'Sindhu');    // 2-0  HHH served (won the last), held
+        $this->point($m, 'away', 'Momota');    // 2-1  HHH served, KKJ broke — and saved a game point
+        $this->point($m, 'away', 'Momota');    // 2-2  KKJ served, held — saved another
+        $this->point($m, 'home', 'Sindhu');    // 3-2  KKJ served, HHH broke, at deuce
+        $this->point($m, 'home', 'Sindhu');    // 4-2  HHH served, held, closes Game 1
+
+        $serve = $this->insights($m)['team']['serve'];
+
+        self::assertTrue($serve['known']);
+        self::assertFalse($serve['recorded']);          // derived, not told
+        self::assertSame(5, $serve['rallies']);         // six rallies, one unknowable
+        self::assertSame(1, $serve['unknown']);
+        self::assertSame([3, 2, 67], [$serve['home']['played'], $serve['home']['won'], $serve['home']['pct']]);
+        self::assertSame([2, 1, 50], [$serve['away']['played'], $serve['away']['won'], $serve['away']['pct']]);
+        self::assertSame(1, $serve['home']['breaks']);
+        self::assertSame(1, $serve['away']['breaks']);
+    }
+
+    public function test_badminton_reads_game_points_deuce_and_runs_from_the_rules(): void
+    {
+        $m = $this->match('badminton', ['bestOf' => 1, 'pointsTo' => 3]);
+        $this->point($m, 'home', 'Sindhu');
+        $this->point($m, 'home', 'Sindhu');
+        $this->point($m, 'away', 'Momota');
+        $this->point($m, 'away', 'Momota');
+        $this->point($m, 'home', 'Sindhu');
+        $this->point($m, 'home', 'Sindhu');
+
+        $d = $this->insights($m);
+        $gp = $d['team']['pressure']['game_points'];
+
+        // HHH were one rally from the game three times and took the third.
+        self::assertSame(['for' => 3, 'converted' => 1, 'faced' => 0, 'saved' => 0], $gp['home']);
+        self::assertSame(['for' => 0, 'converted' => 0, 'faced' => 3, 'saved' => 2], $gp['away']);
+        self::assertSame(2, $d['team']['set_points_saved']['away']);
+        self::assertSame(['home' => 2, 'away' => 0], $d['team']['pressure']['deuce']);
+        self::assertTrue($d['team']['sets'][0]['deuce']);
+        self::assertSame('home', $d['team']['sets'][0]['winner']);
+        self::assertSame([4, 2], [$d['team']['sets'][0]['home'], $d['team']['sets'][0]['away']]);
+
+        // Three pairs of rallies — nothing reached three unanswered.
+        self::assertSame(['home' => 0, 'away' => 0], $d['team']['pressure']['runs3']);
+        self::assertSame(2, $d['team']['pressure']['longest']['count']);
+
+        $sindhu = $this->card($d, 'Sindhu');
+        $momota = $this->card($d, 'Momota');
+        self::assertSame(2, $sindhu['on_serve']);       // won two of the rallies she served
+        self::assertSame(1, $sindhu['game_points_won']);
+        self::assertSame(2, $sindhu['deuce']);
+        self::assertSame(3, $sindhu['decisive']);       // 1 game point won + 0 saved + 2 at deuce
+        self::assertSame(2, $momota['game_points_saved']);
+        self::assertSame(1, $momota['on_serve']);
+        self::assertContains('closer', $this->tagKeys($sindhu));
+        self::assertContains('Saved 2 game points', array_column($momota['tags'], 'label'));
+    }
+
+    /**
+     * The 11-point interval is a rule, so the half either side of it is countable. A 21–5 game
+     * that was 11–0 at the break is the case the split exists to describe.
+     */
+    public function test_badminton_splits_a_game_at_the_eleven_point_interval(): void
+    {
+        $m = $this->match('badminton', ['bestOf' => 1, 'pointsTo' => 21]);
+        for ($i = 0; $i < 11; $i++) {
+            $this->point($m, 'home', 'Sindhu');   // 11-0, the interval
+        }
+        for ($i = 0; $i < 5; $i++) {
+            $this->point($m, 'away', 'Momota');   // 11-5
+        }
+        for ($i = 0; $i < 10; $i++) {
+            $this->point($m, 'home', 'Sindhu');   // 21-5
+        }
+
+        $d = $this->insights($m);
+        $p = $d['team']['pressure'];
+
+        self::assertSame(11, $p['interval']);
+        // Fifteen rallies were played after either side reached 11; HHH won ten of them.
+        self::assertSame(['home' => 10, 'away' => 5], $p['after_interval']);
+        self::assertSame([10, 5], [$d['team']['sets'][0]['interval_home'], $d['team']['sets'][0]['interval_away']]);
+        self::assertTrue($d['team']['sets'][0]['reached_interval']);
+
+        // Runs of three or more, and the rally that stopped each of them.
+        self::assertSame(['home' => 2, 'away' => 1], $p['runs3']);
+        self::assertSame(['home' => 1, 'away' => 1], $p['responses']);
+        self::assertSame(11, $p['longest']['count']);
+        // Three runs, in order, summing to every rally played.
+        self::assertSame([['home', 11], ['away', 5], ['home', 10]], array_map(
+            fn (array $r): array => [$r['side'], $r['count']],
+            $p['runs'],
+        ));
+        self::assertSame(26, array_sum(array_column($p['runs'], 'count')));
+
+        $serve = $d['team']['serve'];
+        self::assertSame(25, $serve['rallies']);
+        self::assertSame([20, 19, 95], [$serve['home']['played'], $serve['home']['won'], $serve['home']['pct']]);
+        self::assertSame(10, $serve['home']['best_streak']);
+        self::assertSame([5, 4, 80], [$serve['away']['played'], $serve['away']['won'], $serve['away']['pct']]);
+        self::assertSame(10, $this->card($d, 'Sindhu')['after_interval']);
+    }
+
+    /**
+     * Aces and forced errors are optional taps. Untagged, badminton says so; tagged, the
+     * figures appear and the "not recorded" line stops claiming they are missing.
+     */
+    public function test_badminton_names_aces_as_untracked_until_a_scorer_taps_one(): void
+    {
+        $plain = $this->match('badminton', ['bestOf' => 1, 'pointsTo' => 2]);
+        $this->point($plain, 'home', 'Sindhu');
+        $this->point($plain, 'home', 'Sindhu');
+        $untracked = $this->insights($plain)['untracked'];
+        self::assertContains('Aces', $untracked);
+        self::assertContains('Smashes', $untracked);
+        self::assertFalse($this->insights($plain)['team']['serve']['detailed']);
+
+        $tagged = $this->match('badminton', ['bestOf' => 1, 'pointsTo' => 2]);
+        $this->point($tagged, 'home', 'Sindhu', 'ace');
+        $this->point($tagged, 'home', 'Sindhu', 'error');
+        $d = $this->insights($tagged);
+
+        self::assertNotContains('Aces', $d['untracked']);
+        self::assertContains('Smashes', $d['untracked']);
+        self::assertTrue($d['team']['serve']['detailed']);
+        self::assertSame(1, $d['team']['serve']['home']['aces']);
+        self::assertSame(1, $d['team']['serve']['home']['errors_forced']);
+        self::assertSame(1, $this->card($d, 'Sindhu')['aces']);
+        self::assertContains('ace', $this->tagKeys($this->card($d, 'Sindhu')));
+    }
+
+    /** A recorded `serve` event is believed over the rule, and makes the first rally knowable. */
+    public function test_badminton_believes_a_recorded_first_server(): void
+    {
+        $m = $this->match('badminton', ['bestOf' => 1, 'pointsTo' => 3]);
+        $this->ev($m, ['kind' => MatchEvent::SERVE, 'side' => 'away']);
+        $this->point($m, 'home', 'Sindhu');    // KKJ served, HHH broke
+        $this->point($m, 'home', 'Sindhu');    // HHH served, held
+
+        $serve = $this->insights($m)['team']['serve'];
+
+        self::assertTrue($serve['recorded']);
+        self::assertSame('away', $serve['first_server']);
+        self::assertSame(0, $serve['unknown']);
+        self::assertSame(2, $serve['rallies']);
+        self::assertSame(1, $serve['home']['breaks']);
+        self::assertSame([1, 1], [$serve['home']['played'], $serve['home']['won']]);
+        self::assertSame([1, 0], [$serve['away']['played'], $serve['away']['won']]);
+    }
+
+    /** Badminton's own reading must not leak into the sports that still share RallyInsights. */
+    public function test_volleyball_still_reads_as_a_rally_sport_without_a_serve_section(): void
+    {
+        $m = $this->match('volleyball', ['bestOf' => 1, 'pointsTo' => 2]);
+        $this->point($m, 'home', 'Mo');
+        $this->point($m, 'home', 'Mo');
+
+        $team = $this->insights($m)['team'];
+        self::assertSame('Set', $team['set_noun']);
+        self::assertArrayNotHasKey('serve', $team);
+        self::assertArrayNotHasKey('pressure', $team);
     }
 
     public function test_tennis_counts_games_and_names_serve_as_untracked(): void

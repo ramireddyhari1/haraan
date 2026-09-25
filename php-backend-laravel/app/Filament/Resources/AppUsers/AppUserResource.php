@@ -7,6 +7,16 @@ namespace App\Filament\Resources\AppUsers;
 use App\Filament\Concerns\ScopesToOrganization;
 use App\Filament\Resources\AppUsers\Pages\EditAppUser;
 use App\Filament\Resources\AppUsers\Pages\ListAppUsers;
+use App\Filament\Resources\AppUsers\Pages\ViewAppUser;
+use App\Filament\Resources\AppUsers\RelationManagers\ActivityTimelineRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\BookingsRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\DevicesRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\GameHubActivityRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\PaymentsRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\RewardGrantsRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\SupportThreadsRelationManager;
+use App\Filament\Resources\AppUsers\RelationManagers\UserNotesRelationManager;
+use App\Filament\Resources\AppUsers\Schemas\UserInfolist;
 use App\Filament\Resources\Users\Schemas\UserForm;
 use App\Filament\Resources\Users\Tables\UsersTable;
 use App\Models\User;
@@ -51,10 +61,7 @@ class AppUserResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return static::scopedOrgQuery()
-            ->whereRaw(
-                "upper(coalesce(role, 'USER')) not in (" . implode(',', array_fill(0, count(self::NON_USER_ROLES), '?')) . ')',
-                self::NON_USER_ROLES,
-            );
+            ->whereNotIn('role', self::NON_USER_ROLES);
     }
 
     /** Super-admins and Operations manage the people lists. */
@@ -80,6 +87,11 @@ class AppUserResource extends Resource
         return false; // app users self-register
     }
 
+    public static function canView(Model $record): bool
+    {
+        return static::canManagePeople();
+    }
+
     public static function canEdit(Model $record): bool
     {
         return static::canManagePeople();
@@ -101,15 +113,35 @@ class AppUserResource extends Resource
         return UserForm::configure($schema);
     }
 
+    public static function infolist(Schema $schema): Schema
+    {
+        return UserInfolist::configure($schema);
+    }
+
     public static function table(Table $table): Table
     {
         return UsersTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            BookingsRelationManager::class,
+            PaymentsRelationManager::class,
+            GameHubActivityRelationManager::class,
+            UserNotesRelationManager::class,
+            SupportThreadsRelationManager::class,
+            RewardGrantsRelationManager::class,
+            ActivityTimelineRelationManager::class,
+            DevicesRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
     {
         return [
             'index' => ListAppUsers::route('/'),
+            'view' => ViewAppUser::route('/{record}'),
             'edit' => EditAppUser::route('/{record}/edit'),
         ];
     }

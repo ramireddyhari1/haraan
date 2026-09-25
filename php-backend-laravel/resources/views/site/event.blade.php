@@ -1801,8 +1801,10 @@
             @php
                 // Buyable now (visible + in its sales window + release phase opened) and
                 // the tiers a later phase still holds back — shown, but locked.
-                $dkTiers        = $event->saleableTicketTypes();
-                $dkLocked       = $event->lockedTicketTypes();
+                // A signed-in member's early-access perk opens tiers sooner, same as checkout.
+                $memberEarlyHours = app(\App\Services\Membership\MemberBookingPerks::class)->earlyAccessHours(auth()->user());
+                $dkTiers        = $event->saleableTicketTypes($memberEarlyHours);
+                $dkLocked       = $event->lockedTicketTypes($memberEarlyHours);
                 $dkFrom         = $dkTiers->count() ? (float) $dkTiers->min(fn ($t) => $t->effectivePrice()) : (float) $event->price;
                 $dkSoldOut      = $event->soldOut();
                 $dkSalesClosed  = $event->ticketTypes->isNotEmpty() && $dkTiers->isEmpty() && $dkLocked->isEmpty();
@@ -2398,9 +2400,10 @@
     {{-- Ticket selection sheet (both breakpoints) — GET to the auth-gated
          checkout review, so guests bounce through /login and resume. --}}
     @php
-        $tixTiers = $event->saleableTicketTypes();
+        $tixEarlyHours = app(\App\Services\Membership\MemberBookingPerks::class)->earlyAccessHours(auth()->user());
+        $tixTiers = $event->saleableTicketTypes($tixEarlyHours);
         // Tiers a later release phase still holds back — listed, but not selectable.
-        $tixLocked = $event->lockedTicketTypes();
+        $tixLocked = $event->lockedTicketTypes($tixEarlyHours);
         $tixSalesClosed = $event->ticketTypes->isNotEmpty() && $tixTiers->isEmpty() && $tixLocked->isEmpty();
         $tixSoldOut = $event->soldOut();
         // Already happened — nothing here is buyable, whatever the tiers say.
@@ -2425,7 +2428,7 @@
                     </div>
                     <div class="dr-stepper">
                         <button type="button" onclick="drStep(this, -1)" aria-label="Fewer">−</button>
-                        <input type="number" name="qty[{{ $tier->id }}]" value="0" min="0" max="10" readonly>
+                        <input type="number" name="qty[{{ $tier->id }}]" value="0" min="0" max="{{ $tier->orderBounds()['max'] }}" readonly>
                         <button type="button" onclick="drStep(this, 1)" aria-label="More">+</button>
                     </div>
                 </div>
@@ -2449,7 +2452,7 @@
                 </div>
                 <div class="dr-stepper">
                     <button type="button" onclick="drStep(this, -1)" aria-label="Fewer">−</button>
-                    <input type="number" name="qty[0]" value="0" min="0" max="10" readonly>
+                    <input type="number" name="qty[0]" value="0" min="0" max="{{ \App\Support\PlatformRules::int('bookings.default_max_per_tier') }}" readonly>
                     <button type="button" onclick="drStep(this, 1)" aria-label="More">+</button>
                 </div>
             </div>
@@ -2470,7 +2473,7 @@
         }
         function drStep(btn, delta) {
             const input = btn.parentElement.querySelector('input');
-            input.value = Math.min(10, Math.max(0, parseInt(input.value || '0', 10) + delta));
+            input.value = Math.min(parseInt(input.max || '10', 10), Math.max(0, parseInt(input.value || '0', 10) + delta));
             drTixTotal();
         }
         function drTixTotal() {

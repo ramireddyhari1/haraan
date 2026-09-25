@@ -46,12 +46,24 @@ final class PartnerSettlement
             ->orWhereIn('venue_id', $venueIds));
     }
 
-    /** Everything collected from attendees for this partner, all time. */
+    /**
+     * What the partner has earned from attendees, all time: the ticket/slot value, less what
+     * the platform keeps from it (`host_deduction` — host-paid platform/gateway fees on events,
+     * Pulse commission on online venue bookings, both set in /control → Platform rules).
+     */
     public function collected(int $partnerId): float
+    {
+        $paid = $this->bookings($partnerId)->whereIn(DB::raw('lower(status)'), self::PAID_BOOKING);
+
+        return max(0.0, (float) (clone $paid)->sum('total_amount') - (float) (clone $paid)->sum('host_deduction'));
+    }
+
+    /** The platform's share of this partner's paid bookings (host-paid fees + commission). */
+    public function platformShare(int $partnerId): float
     {
         return (float) $this->bookings($partnerId)
             ->whereIn(DB::raw('lower(status)'), self::PAID_BOOKING)
-            ->sum('total_amount');
+            ->sum('host_deduction');
     }
 
     /** Money that has actually reached the partner (both ledgers). */

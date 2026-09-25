@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\AiGate;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -51,6 +52,9 @@ class InningsHeadline
             . ":$runs:" . ($innings['wickets'] ?? 0) . ':' . ($innings['overs'] ?? '');
 
         return Cache::remember($key, now()->addDay(), function () use ($innings, $allowed): ?string {
+            if (! AiGate::attempt(AiGate::MATCH_COMMENTARY)) {
+                return null;
+            }
             $text = $this->gemini->generate(
                 $this->systemPrompt(),
                 $this->factsPrompt($innings),

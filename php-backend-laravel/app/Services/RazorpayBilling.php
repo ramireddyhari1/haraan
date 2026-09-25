@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exceptions\PaymentsPaused;
 use App\Models\Booking;
 use App\Models\BookingPayment;
 use App\Models\CreditPack;
@@ -54,6 +55,8 @@ final class RazorpayBilling
      */
     public function startSubscription(User $partner, PartnerPlan $plan, int $months = 12): array
     {
+        PaymentsPaused::guard();
+
         if (! $this->gateway->isConfigured()) {
             throw new RuntimeException('Payments are not configured.', 500);
         }
@@ -118,7 +121,8 @@ final class RazorpayBilling
             'subscription.activated', 'subscription.charged' => $this->markPaid($payload),
             'subscription.halted', 'subscription.pending' => $this->markStatus($payload, PartnerSubscription::STATUS_HALTED),
             'subscription.cancelled', 'subscription.completed', 'subscription.expired' => $this->markStatus($payload, PartnerSubscription::STATUS_CANCELLED),
-            'payment.captured' => $this->applyCapturedPayment($payload),
+            'payment.captured', 'order.paid' => $this->applyCapturedPayment($payload),
+            'payment.failed' => $this->applyFailedPayment($payload),
             'payment_link.paid' => $this->applyPaidPaymentLink($payload),
             default => 'ignored',
         };
@@ -193,6 +197,19 @@ final class RazorpayBilling
         $orderId = trim((string) ($entity['order_id'] ?? ''));
         $paymentId = trim((string) ($entity['id'] ?? ''));
 
+        if ($orderId === '') {
+            $orderEntity = $payload['payload']['order']['entity'] ?? [];
+            $orderId = trim((string) ($orderEntity['id'] ?? ''));
+        }
+
+        if ($orderId !== '' && $paymentId === '') {
+            try {
+                $paymentId = (string) ($this->gateway->capturedPaymentFor($orderId) ?? '');
+            } catch (\Throwable) {
+                $paymentId = '';
+            }
+        }
+
         if ($orderId === '' || $paymentId === '') {
             return $this->grantFromPayment($payload);
         }
@@ -235,6 +252,29 @@ final class RazorpayBilling
         BookingNotifier::dispatch($confirmable->first()->refresh());
 
         return 'booking_confirmed';
+    }
+
+    /**
+     * Audit a failed payment event from Razorpay.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function applyFailedPayment(array $payload): string
+    {
+        $entity = $payload['payload']['payment']['entity'] ?? [];
+        $orderId = trim((string) ($entity['order_id'] ?? ''));
+        $paymentId = trim((string) ($entity['id'] ?? ''));
+        $errorCode = trim((string) ($entity['error_code'] ?? ''));
+        $errorDesc = trim((string) ($entity['error_description'] ?? 'Payment failed at bank.'));
+
+        Log::warning('Razorpay payment failed', [
+            'payment_id' => $paymentId,
+            'order_id'   => $orderId,
+            'code'       => $errorCode,
+            'desc'       => $errorDesc,
+        ]);
+
+        return 'payment_failed_logged';
     }
 
     /** @param array<string, mixed> $payload */

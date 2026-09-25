@@ -34,7 +34,11 @@ final class OptionalJwtAuthenticated
                 // of what they are looking at (posts `mine`, `social.is_following`), so a
                 // revoked session that still resolved to a user would keep owner
                 // affordances on a public page.
-                if ($user !== null && JwtService::versionMatches($payload, $user)) {
+                // Same reasoning for a suspended account: it falls through to "guest"
+                // rather than being resolved. This middleware never rejects, so a
+                // suspended viewer still sees public pages — but as a stranger, without
+                // the owner affordances a resolved user would carry.
+                if ($user !== null && JwtService::versionMatches($payload, $user) && $user->isAccountActive()) {
                     Auth::setUser($user);
                     $request->attributes->set('auth_user', $user);
                     $user->touchLastSeen();

@@ -81,6 +81,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -153,13 +154,6 @@ private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double):
 private fun formatDistanceKm(km: Double): String =
   if (km < 1.0) "${(km * 1000).toInt()} m" else "%.1f km".format(km)
 
-// Photo fallback when a venue has no uploaded images yet (mirrors the browse card behaviour).
-private fun detailCategoryImage(category: String): String = when {
-  category.contains("Cricket", true) -> "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=800&q=80"
-  category.contains("Football", true) -> "https://images.unsplash.com/photo-1522778526097-ce0a22ceb253?w=800&q=80"
-  category.contains("Badminton", true) -> "https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=800&q=80"
-  else -> "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=800&q=80"
-}
 
 /**
  * Venue detail — a "view → trust → book" page (Playo-style). Hero gallery + rating/amenities/
@@ -202,7 +196,7 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
   val rating = detail?.rating?.takeIf { it.isNotBlank() } ?: venue.rating
   val price = detail?.price ?: venue.price
   val images = detail?.images?.takeIf { it.isNotEmpty() }
-    ?: listOf(venue.imageUrl.takeIf { it.isNotBlank() } ?: detailCategoryImage(category))
+    ?: listOfNotNull(venue.imageUrl.takeIf { it.isNotBlank() })
 
   // Live distance: measured from the user's last-known location to the venue's
   // coordinates (no GPS prompt — cached fix only). Falls back to the backend's
@@ -631,14 +625,22 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
             Text("Tap to see slots", color = HaraanColors.TextSecondary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
           }
         }
+        val hasSlotsOrCourts = (detail?.courts?.isNotEmpty() == true) || (detail?.slots?.isNotEmpty() == true)
+        val canBook = (detail?.isBookable ?: false) && hasSlotsOrCourts
         Button(
           onClick = { showBooking = true },
-          enabled = detail?.isBookable ?: true,
+          enabled = canBook,
           colors = ButtonDefaults.buttonColors(containerColor = HaraanColors.GameHubGreen),
           shape = RoundedCornerShape(50),
           modifier = Modifier.height(48.dp)
         ) {
-          Text("Book Now", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 20.dp))
+          Text(
+            if (!hasSlotsOrCourts && detail != null) "No slots available" else "Book Now",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            modifier = Modifier.padding(horizontal = 20.dp)
+          )
         }
       }
       }
@@ -805,11 +807,12 @@ private fun TodaySlotRail(
 
   // ── Live availability ────────────────────────────────────────────────────────────
   val repo = remember { VenueRepository() }
+  val railContext = LocalContext.current
   // Keyed by venue + day: a rail rolling over to tomorrow must never paint today's answer.
   var availability by remember(venue.id, railDate) { mutableStateOf<Map<Int, SlotAvailability>?>(null) }
   val loadAvailability: suspend () -> Unit = {
     // A failed refresh keeps the last good answer instead of wiping chips back to "unknown".
-    repo.getSlotAvailability(venue.id, railDate)?.let { availability = it }
+    repo.getSlotAvailability(venue.id, railDate, TokenStore.getSignedInToken(railContext))?.let { availability = it }
   }
   // First load, and again every time the booking sheet closes — whatever happened in there
   // (booked, abandoned, refused because someone beat them to it) changed what's free.
@@ -1496,6 +1499,11 @@ internal fun BookingSheet(
   val ctx = LocalContext.current
   val scope = rememberCoroutineScope()
 
+  // How far ahead this person may book — the server's answer, including their plan's priority days.
+  val bookingWindow by produceState<com.haraan.app.data.BookingWindow?>(initialValue = null, venue.id) {
+    value = VenueRepository().getBookingWindow(venue.id, TokenStore.getSignedInToken(ctx))
+  }
+
   val sports = remember(venue) { venue.sports.ifEmpty { listOf(venue.category) }.filter { it.isNotBlank() } }
 
   var selectedSport by remember { mutableStateOf(sports.firstOrNull() ?: venue.category) }
@@ -1513,6 +1521,16 @@ internal fun BookingSheet(
   var submitting by remember { mutableStateOf(false) }
   var result by remember { mutableStateOf<String?>(null) }
   var success by remember { mutableStateOf(false) }
+  var isPaidOnline by remember { mutableStateOf(false) }
+  val venueRepo = remember { VenueRepository() }
+  var sheetAvailability by remember { mutableStateOf<Map<Int, SlotAvailability>?>(null) }
+
+  LaunchedEffect(venue.id, selectedDate) {
+    venueRepo.getSlotAvailability(venue.id, selectedDate, TokenStore.getSignedInToken(ctx))?.let {
+      sheetAvailability = it
+    }
+  }
+
   // Booking used to fire straight off the form's button, so the first time the user saw
   // what they'd agreed to was after it was done. The form now hands off to a summary
   // they confirm from. FORM → SUMMARY → (booked) slip.
@@ -1547,10 +1565,16 @@ internal fun BookingSheet(
   // the times that actually run its sport — offering a 6 AM turf slot the server refuses
   // wastes the tap and reads as a bug. Either side listing no sports means no restriction,
   // so a single-sport venue sees exactly what it saw before.
-  val startTimes = remember(venue, selectedDayLabel, selectedCourt) {
+  val startTimes = remember(venue, selectedDayLabel, selectedCourt, sheetAvailability) {
     val courtSports = selectedCourt?.sports.orEmpty()
     venue.slots.filter { slot ->
-      slot.day.equals(selectedDayLabel, ignoreCase = true) && slot.available &&
+      val slotState = sheetAvailability?.get(slot.id)
+      val isAvailable = if (slotState != null) {
+        slotState.state == SlotAvailability.State.OPEN && slotState.courtsFree > 0
+      } else {
+        slot.available
+      }
+      slot.day.equals(selectedDayLabel, ignoreCase = true) && isAvailable &&
         (slot.sports.isEmpty() || courtSports.isEmpty() || slot.sports.any { it in courtSports })
     }
   }
@@ -1569,8 +1593,10 @@ internal fun BookingSheet(
   // The venue's fee rule until the server quotes its own for this order. Both are the
   // same arithmetic on the same two columns, so the summary reads the charge either way.
   val feeRs = quotedFeeRs ?: venue.convenienceFeeOn(subtotalRs)
-  // Fee is added and the discount taken off, mirroring reserveVenue's order exactly.
-  val total = (subtotalRs + feeRs - discountRs).coerceAtLeast(0)
+  // Pulse tax on the post-discount subtotal (/control → Fees), as reserveVenue charges it.
+  val taxRs = venue.taxOn(subtotalRs, discountRs)
+  // Fee added, discount taken off, tax on top — mirroring reserveVenue's order exactly.
+  val total = (subtotalRs + feeRs - discountRs).coerceAtLeast(0) + taxRs
 
   // A coupon is quoted against ONE subtotal. Change the duration, court or slot and that
   // quote is about a different order — and since the code now travels with the booking,
@@ -1663,12 +1689,23 @@ internal fun BookingSheet(
                     when (confirmed) {
                       is BookingResult.Success -> {
                         // Paid and verified server-side — print the slip.
+                        isPaidOnline = true
                         bookedCode = confirmed.ticketCode
                         result = confirmed.message
                         success = true
                       }
-                      else -> result = (confirmed as? BookingResult.Error)?.message
-                        ?: "Payment could not be verified."
+                      else -> {
+                        val status = BookingRepository().checkOrderStatus(token, r.orderId)
+                        if (status is BookingResult.Success) {
+                          isPaidOnline = true
+                          bookedCode = status.ticketCode
+                          result = status.message
+                          success = true
+                        } else {
+                          result = (confirmed as? BookingResult.Error)?.message
+                            ?: "Payment could not be verified."
+                        }
+                      }
                     }
                   }
                   is com.haraan.app.data.PaymentBridge.Outcome.Cancelled -> {
@@ -1725,9 +1762,8 @@ internal fun BookingSheet(
           durationHours = duration,
           totalLabel = "₹$total",
           ticketCode = bookedCode,
-          // Nothing was charged in-app: venue slots confirm without a payment step, so
-          // the money changes hands at the desk. Said on the slip rather than implied.
-          payAtVenue = true,
+          // Only show 'Pay at the venue' if not paid online and amount > 0.
+          payAtVenue = !isPaidOnline && total > 0,
           onDone = onDismiss,
         )
       }
@@ -1754,6 +1790,7 @@ internal fun BookingSheet(
         subtotal = subtotalRs,
         fee = feeRs,
         discount = discountRs,
+        tax = taxRs,
         appliedCode = appliedCode,
         total = total,
         isPeak = isPeakNow,
@@ -1839,7 +1876,15 @@ internal fun BookingSheet(
           }
           // Date — opens a calendar (no past dates).
           FormField("Date") {
-            DateField(selected = selectedDate) { selectedDate = it; selectedSlot = null }
+            DateField(selected = selectedDate, lastDate = bookingWindow?.lastDate) { selectedDate = it; selectedSlot = null }
+            bookingWindow?.let { w ->
+              Text(
+                if (w.priorityDays > 0) "Book up to ${w.days + w.priorityDays} days ahead, including ${w.priorityDays} priority ${if (w.priorityDays == 1) "day" else "days"} from your plan."
+                else "Book up to ${w.days} days ahead.",
+                color = HaraanColors.TextMuted, fontSize = 12.sp, lineHeight = 16.sp,
+                modifier = Modifier.padding(top = 6.dp),
+              )
+            }
           }
           // Start time
           FormField("Start Time") {
@@ -1964,6 +2009,7 @@ private fun VenueOrderSummaryPage(
   subtotal: Int,
   fee: Int,
   discount: Int,
+  tax: Int,
   appliedCode: String?,
   total: Int,
   isPeak: Boolean,
@@ -2084,6 +2130,7 @@ private fun VenueOrderSummaryPage(
         subtotal = subtotal,
         fee = fee,
         discount = discount,
+        tax = tax,
         appliedCode = appliedCode,
         total = total,
         isPeak = isPeak,
@@ -2166,6 +2213,7 @@ private fun OrderSummaryBody(
   subtotal: Int,
   fee: Int,
   discount: Int,
+  tax: Int,
   appliedCode: String?,
   total: Int,
   isPeak: Boolean,
@@ -2224,6 +2272,7 @@ private fun OrderSummaryBody(
         )
       }
     }
+    if (tax > 0) SummaryLine(venue.taxLabel, "₹$tax", muted = true)
     if (isPeak) {
       Spacer(Modifier.height(2.dp))
       Text(
@@ -2490,7 +2539,7 @@ private fun dayLabelFor(date: LocalDate): String =
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateField(selected: LocalDate, onPick: (LocalDate) -> Unit) {
+private fun DateField(selected: LocalDate, lastDate: LocalDate? = null, onPick: (LocalDate) -> Unit) {
   var open by remember { mutableStateOf(false) }
   val label = "${dayLabelFor(selected)}  ·  ${selected.format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))}"
 
@@ -2514,10 +2563,13 @@ private fun DateField(selected: LocalDate, onPick: (LocalDate) -> Unit) {
 
   if (open) {
     val todayUtc = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    // The last day the server will take a booking from this person; null = no known limit.
+    val lastUtc = lastDate?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
     val state = rememberDatePickerState(
       initialSelectedDateMillis = selected.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
       selectableDates = object : SelectableDates {
-        override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis >= todayUtc
+        override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+          utcTimeMillis >= todayUtc && (lastUtc == null || utcTimeMillis <= lastUtc)
       },
     )
     DatePickerDialog(

@@ -13,6 +13,20 @@ data class DataEnvelope<T>(val data: T)
 data class MembershipCatalogue(
     @SerialName("current_plan") val currentPlan: String = "free",
     val plans: List<CataloguePlan> = emptyList(),
+    /** Whether this app may sell plans, decided by an admin. Absent (older server) = it may not. */
+    val checkout: CheckoutPolicy = CheckoutPolicy(),
+)
+
+/**
+ * Where plans are bought. [inApp] is an admin switch (Finance → Membership settings), off by
+ * default so the Play build shows plans without selling them; [note] is the admin's line shown
+ * in place of a buy button.
+ */
+@Serializable
+data class CheckoutPolicy(
+    @SerialName("in_app") val inApp: Boolean = false,
+    val note: String? = null,
+    @SerialName("web_url") val webUrl: String? = null,
 )
 
 @Serializable

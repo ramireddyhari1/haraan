@@ -135,13 +135,15 @@ class PartnerCannotCreateVenueTest extends TestCase
         $this->inPanel('partner', $partner, function () use ($venue): void {
             $page = Livewire::test(EditVenue::class, ['record' => $venue->getKey()]);
 
-            foreach (['partner_id', 'is_featured', 'sort_order'] as $field) {
+            // Haraan sets the convenience fee too; the partner only sees it, read-only.
+            foreach (['partner_id', 'is_featured', 'sort_order', 'convenience_fee_type', 'convenience_fee_value'] as $field) {
                 $page->assertFormFieldHidden($field);
             }
+            $page->assertSee('set by Haraan');
 
-            // The operational switches stay — a partner still closes their own venue.
-            $page->assertFormFieldExists('is_active')
-                ->assertFormFieldExists('is_bookable')
+            // The operational switch stays — a partner still closes their own venue. It is
+            // one Status now (Draft / Live / bookings paused), not two toggles.
+            $page->assertFormFieldExists('visibility_state')
                 ->assertFormFieldExists('name');
         });
     }

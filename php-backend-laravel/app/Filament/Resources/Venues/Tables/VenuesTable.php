@@ -9,6 +9,7 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\Layout\Split;
 use Filament\Tables\Columns\Layout\Stack;
@@ -52,7 +53,7 @@ class VenuesTable
                             ->size('sm')
                             ->wrap(),
 
-                        // Chip row: category + live status + bookable/info.
+                        // Chip row: category + lifecycle status badge + bookable/info.
                         Split::make([
                             TextColumn::make('category')
                                 ->badge()
@@ -63,11 +64,16 @@ class VenuesTable
                                     default => 'gray',
                                 }),
 
-                            TextColumn::make('is_active')
+                            TextColumn::make('lifecycle_status')
                                 ->label('')
                                 ->badge()
-                                ->formatStateUsing(fn (bool $state): string => $state ? 'Live' : 'Hidden')
-                                ->color(fn (bool $state): string => $state ? 'success' : 'gray'),
+                                ->getStateUsing(fn (Venue $r): string => $r->lifecycleLabel())
+                                ->color(fn (string $state): string => match ($state) {
+                                    'Live / Published' => 'success',
+                                    'Ready to Publish' => 'warning',
+                                    'Setup Incomplete (Draft)' => 'danger',
+                                    default => 'gray',
+                                }),
 
                             TextColumn::make('is_bookable')
                                 ->label('')
@@ -105,6 +111,12 @@ class VenuesTable
                 ]),
             ])
             ->filters([
+                SelectFilter::make('status')
+                    ->label('Lifecycle Status')
+                    ->options([
+                        'published' => 'Published',
+                        'draft' => 'Draft',
+                    ]),
                 SelectFilter::make('category')
                     ->options(['Cricket' => 'Cricket', 'Football' => 'Football', 'Badminton' => 'Badminton', 'Basketball' => 'Basketball']),
                 TernaryFilter::make('is_bookable')->label('Bookable'),
@@ -129,12 +141,71 @@ class VenuesTable
                         ->url(fn (): string => CreateVenue::getUrl())
                     : null,
             ])))
+            // Clicking a card opens the 360 rather than the form: reading a venue is
+            // the common act, editing it the occasional one.
+            ->recordUrl(fn (Venue $record): string => VenueResource::getUrl('view', ['record' => $record]))
             ->recordActions([
+                ViewAction::make()
+                    ->label('Venue 360')
+                    ->icon('heroicon-m-squares-2x2'),
                 EditAction::make(),
+                Action::make('publish')
+                    ->label('Publish')
+                    ->icon('heroicon-m-globe-alt')
+                    ->color('success')
+                    ->visible(fn (Venue $r): bool => ! $r->isPublished())
+                    ->action(function (Venue $r): void {
+                        $errors = $r->readinessErrors();
+                        if (! empty($errors)) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Cannot publish venue — Setup incomplete')
+                                ->body("Please fix the following issues before publishing:\n• " . implode("\n• ", $errors))
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        $r->publish();
+                        \Filament\Notifications\Notification::make()
+                            ->title('Venue Published!')
+                            ->body('This venue is now live and bookable.')
+                            ->success()
+                            ->send();
+                    }),
+                Action::make('unpublish')
+                    ->label('Unpublish')
+                    ->icon('heroicon-m-eye-slash')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->visible(fn (Venue $r): bool => $r->isPublished())
+                    ->action(function (Venue $r): void {
+                        $r->unpublish();
+                        \Filament\Notifications\Notification::make()
+                            ->title('Venue Unpublished')
+                            ->body('This venue has been returned to draft.')
+                            ->info()
+                            ->send();
+                    }),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    // Deletes only venues without bookings and says which it kept: a venue's
+                    // bookings reference it by id only, so deleting one would orphan them.
+                    DeleteBulkAction::make()
+                        ->action(function (\Illuminate\Support\Collection $records): void {
+                            $kept = $records->filter(fn (Venue $v): bool => $v->hasBookings());
+                            $records->reject(fn (Venue $v): bool => $v->hasBookings())->each->delete();
+
+                            if ($kept->isNotEmpty()) {
+                                \Filament\Notifications\Notification::make()
+                                    ->title($kept->count() . ' venue(s) kept — they have bookings')
+                                    ->body($kept->pluck('name')->implode(', ') . '. Unpublish them instead.')
+                                    ->warning()
+                                    ->persistent()
+                                    ->send();
+                            }
+                        }),
                 ]),
             ]);
     }

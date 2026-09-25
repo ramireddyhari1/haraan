@@ -202,7 +202,7 @@ final class WhatsAppDeskController extends Controller
             'data'    => [
                 'booking_id'           => $booking->id,
                 'reserved_until'       => $booking->reserved_until->toIso8601String(),
-                'seconds_remaining'    => WhatsAppReservationService::HOLD_DURATION_MINUTES * 60,
+                'seconds_remaining' => WhatsAppReservationService::holdMinutes() * 60,
                 'ticket_code'          => $booking->ticket_code,
             ],
         ]);

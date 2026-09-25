@@ -10,6 +10,8 @@ use App\Models\MemberPlanPrice;
 use App\Models\MemberSubscription;
 use App\Models\MemberSubscriptionEvent;
 use App\Models\User;
+use App\Support\Membership\MembershipSettings;
+use App\Support\Operations;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -72,9 +74,14 @@ class MemberSubscriptions
             throw new MembershipException('Payments are not configured.', 503, 'payments_unavailable');
         }
 
+        // /control → Operations → Stop taking payments. Checked before any row is written.
+        if (Operations::paymentsDisabled()) {
+            throw new MembershipException(Operations::paymentsMessage(), 503, 'payments_paused');
+        }
+
         // One checkout at a time per member. Two taps racing each other would otherwise
         // create two Razorpay subscriptions — and two mandates that both charge.
-        $lock = Cache::lock('member-subscribe:' . $user->id, 30);
+        $lock = Cache::lock('member-subscribe:'.$user->id, 30);
         if (! $lock->get()) {
             throw new MembershipException('A checkout is already starting. Try again in a moment.', 409, 'checkout_in_progress');
         }
@@ -105,13 +112,13 @@ class MemberSubscriptions
                 'starts_at' => $startAt,
                 'change_type' => $changeType,
                 'replaces_subscription_id' => $current?->id,
-                'checkout_expires_at' => Carbon::now()->addMinutes(max(5, (int) config('membership.checkout_ttl_minutes', 30))),
+                'checkout_expires_at' => Carbon::now()->addMinutes(MembershipSettings::int('checkout_ttl_minutes')),
             ]);
 
             try {
                 $remote = $this->razorpay->createSubscription(
                     planId: (string) $price->razorpay_plan_id,
-                    totalCount: max(1, (int) config('membership.total_count.' . $price->interval, 12)),
+                    totalCount: MembershipSettings::totalCount($price->interval),
                     startAt: $startAt?->getTimestamp(),
                     // Razorpay wants a little headroom past the checkout window.
                     expireBy: $local->checkout_expires_at->copy()->addMinutes(5)->getTimestamp(),
@@ -275,7 +282,7 @@ class MemberSubscriptions
                 try {
                     $this->razorpay->cancelSubscription((string) $next->provider_subscription_id, false);
                 } catch (MembershipException $e) {
-                    Log::warning('Could not cancel scheduled member subscription ' . $next->id . ': ' . $e->getMessage());
+                    Log::warning('Could not cancel scheduled member subscription '.$next->id.': '.$e->getMessage());
                 }
                 $this->transition($next, MemberSubscription::STATUS_CANCELLED, 'scheduled_change_cancelled', $actor);
             });
@@ -323,7 +330,7 @@ class MemberSubscriptions
             return DB::transaction(function () use ($subscription, $event, $payload, $entity, $eventId, $eventAt): string {
                 // Claim the event id first. A concurrent redelivery hits the UNIQUE index and
                 // rolls back with nothing applied.
-                $this->record($subscription, 'webhook:' . $event, $subscription->status, $entity['status'] ?? null, null, [
+                $this->record($subscription, 'webhook:'.$event, $subscription->status, $entity['status'] ?? null, null, [
                     'event' => $event,
                     'subscription' => array_intersect_key($entity, array_flip(['id', 'status', 'current_start', 'current_end', 'paid_count', 'charge_at', 'start_at'])),
                 ], $eventId);
@@ -428,7 +435,7 @@ class MemberSubscriptions
     public function reconcile(bool $dryRun = false): array
     {
         $now = Carbon::now();
-        $grace = max(0, (int) config('membership.grace_hours', 48));
+        $grace = MembershipSettings::int('grace_hours');
         $summary = ['abandoned' => 0, 'synced' => 0, 'sync_failed' => 0, 'grants_expired' => 0, 'replaced_cancelled' => 0];
 
         // 1. Checkouts nobody finished.
@@ -472,7 +479,7 @@ class MemberSubscriptions
                 $summary['synced']++;
             } catch (MembershipException $e) {
                 $summary['sync_failed']++;
-                Log::warning('Member subscription reconcile failed for ' . $subscription->id . ': ' . $e->getMessage());
+                Log::warning('Member subscription reconcile failed for '.$subscription->id.': '.$e->getMessage());
             }
         }
 
@@ -576,7 +583,7 @@ class MemberSubscriptions
 
         if ($source !== 'webhook') {
             // Webhooks record their own event before applying.
-            $this->record($subscription, $source . ':' . $status, $from, $status, $actor);
+            $this->record($subscription, $source.':'.$status, $from, $status, $actor);
         }
 
         if ($status === MemberSubscription::STATUS_ACTIVE) {
@@ -644,7 +651,7 @@ class MemberSubscriptions
         } catch (MembershipException $e) {
             // Left open on purpose: reconcile() retries, and a false "cancelled" here would
             // hide a subscription that is still charging.
-            Log::error('Could not cancel member subscription ' . $subscription->id . " ({$reason}): " . $e->getMessage());
+            Log::error('Could not cancel member subscription '.$subscription->id." ({$reason}): ".$e->getMessage());
             $this->record($subscription, 'cancel_failed', $subscription->status, $subscription->status, null, ['reason' => $reason, 'error' => $e->getMessage()]);
 
             return;

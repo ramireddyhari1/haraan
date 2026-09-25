@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -13,6 +14,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 final class PartnerPlan extends Model
 {
+    use AuditsAdminChanges;
+
     /** Outbound journeys: reminders and the review request. */
     public const FEATURE_JOURNEYS = 'automations.journeys';
 

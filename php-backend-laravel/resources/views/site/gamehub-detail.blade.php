@@ -376,16 +376,23 @@
                 <p class="detail-card-panel__subtitle">Click on one or more available green slots below to queue your booking.</p>
 
                 <!-- Date Picker Strip -->
+                @php
+                    $datePills = [];
+                    for ($i = 0; $i < 7; $i++) {
+                        $dt = now()->addDays($i);
+                        $datePills[] = [
+                            'ymd' => $dt->toDateString(),
+                            'dayName' => $i === 0 ? 'Today' : ($i === 1 ? 'Tomorrow' : $dt->format('D')),
+                            'dateStr' => $dt->format('d M'),
+                            'display' => $i === 0 ? 'Today' : ($i === 1 ? 'Tomorrow' : $dt->format('D, d M')),
+                        ];
+                    }
+                @endphp
                 <div class="date-picker-strip">
-                    @php
-                        $days = ['Today', 'Tomorrow', 'Fri, 22 May', 'Sat, 23 May', 'Sun, 24 May', 'Mon, 25 May', 'Tue, 26 May'];
-                    @endphp
-                    @foreach($days as $index => $day)
-                        <button onclick="selectDate(this, '{{ $day }}')" class="date-pill {{ $index === 0 ? 'is-active' : '' }}">
-                            <span class="date-pill__day">{{ $index === 0 ? 'Today' : ($index === 1 ? 'Tomorrow' : explode(', ', $day)[0]) }}</span>
-                            <span class="date-pill__date">
-                                {{ $index < 2 ? date('d M', strtotime("+$index days")) : explode(', ', $day)[1] }}
-                            </span>
+                    @foreach($datePills as $index => $dp)
+                        <button type="button" onclick="selectDate(this, '{{ $dp['ymd'] }}', '{{ $dp['display'] }}')" class="date-pill {{ $index === 0 ? 'is-active' : '' }}">
+                            <span class="date-pill__day">{{ $dp['dayName'] }}</span>
+                            <span class="date-pill__date">{{ $dp['dateStr'] }}</span>
                         </button>
                     @endforeach
                 </div>
@@ -596,7 +603,7 @@
 
                 <div class="mb-16">
                     <label class="sidebar-label">Date</label>
-                    <div id="selected-date-text" class="selected-date-preview">Today</div>
+                    <div id="selected-date-text" class="selected-date-preview">{{ $datePills[0]['display'] }}</div>
                 </div>
 
                 <div class="mb-24">
@@ -612,13 +619,13 @@
                         <span>Subtotal (<span id="calc-hours">0</span> hr)</span>
                         <span id="calc-subtotal">₹0</span>
                     </div>
-                    <div class="calc-row">
-                        <span>GST (18%)</span>
-                        <span id="calc-gst">₹0</span>
+                    <div class="calc-row" id="calc-fee-row" style="display:none">
+                        <span>Convenience fee</span>
+                        <span id="calc-fee">₹0</span>
                     </div>
-                    <div class="calc-row">
-                        <span>Platform Fee</span>
-                        <span>₹50</span>
+                    <div class="calc-row" id="calc-tax-row" style="display:none">
+                        <span id="calc-tax-label">{{ \App\Models\Venue::taxLabel() }}</span>
+                        <span id="calc-tax">₹0</span>
                     </div>
                     <hr class="dashed-divider">
                     <div class="calc-row calc-row--bold">
@@ -631,7 +638,13 @@
                     Select slots to book
                 </button>
 
-                <p class="booking-notice-text">You won't be charged yet. Instant digital confirmation and invoice will be generated.</p>
+                @guest
+                    <p class="booking-notice-text" style="color: #64748B;">
+                        🔒 Sign in required to complete reservation.
+                    </p>
+                @else
+                    <p class="booking-notice-text">Instant digital confirmation backed by Razorpay secure payment.</p>
+                @endguest
             </div>
         </div>
 
@@ -639,25 +652,743 @@
 
 </section>
 
-<!-- Success Checkout Overlay Modal -->
-<div id="success-modal" class="success-overlay-modal">
-    <div class="success-modal-card">
-        <div class="success-check-badge">✓</div>
-        <h2 class="success-modal-title">Booking Confirmed!</h2>
-        <p class="success-modal-description">Your court slots at <strong>{{ $venue->title }}</strong> have been locked and reserved successfully.</p>
+<style>
+/* ==========================================================================
+   MINI THERMAL PRINTER MODAL & PHYSICAL RECEIPT STYLING
+   ========================================================================== */
+.printer-overlay-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(10, 15, 29, 0.78);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 999999;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+.printer-modal-wrapper {
+    width: 100%;
+    max-width: 360px;
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    padding: 12px 0 24px;
+}
+
+/* Virtual Mini Printer Bezel / Casing */
+.virtual-printer-housing {
+    width: 100%;
+    background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
+    border-radius: 18px 18px 0 0;
+    padding: 14px 18px 12px;
+    border: 1px solid #334155;
+    border-bottom: none;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    box-sizing: border-box;
+    position: relative;
+    z-index: 2;
+}
+
+.printer-housing-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.printer-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.printer-brand__icon {
+    font-size: 16px;
+}
+
+.printer-brand__name {
+    font-size: 11.5px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #94A3B8;
+    text-transform: uppercase;
+}
+
+.printer-status-led {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.printer-led-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22C55E;
+    box-shadow: 0 0 8px #22C55E;
+    animation: printerLedPulse 2s infinite ease-in-out;
+}
+
+@keyframes printerLedPulse {
+    0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 8px #22C55E; }
+    50% { opacity: 0.6; transform: scale(0.92); box-shadow: 0 0 3px #22C55E; }
+}
+
+.printer-led-text {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #22C55E;
+}
+
+/* Paper Output Slit */
+.printer-slot-mouth {
+    height: 8px;
+    background: #030712;
+    border-radius: 4px;
+    box-shadow: inset 0 3px 6px rgba(0,0,0,0.9);
+    margin-top: 10px;
+    border-bottom: 1.5px solid #475569;
+}
+
+/* Paper Ejection Container */
+.thermal-receipt-scroll-container {
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+    margin-top: -3px;
+    display: flex;
+    justify-content: center;
+}
+
+/* The Thermal Paper Receipt */
+.thermal-receipt-paper {
+    width: 320px;
+    background: #FFFFFF;
+    color: #111827;
+    font-family: 'Courier New', Courier, 'Space Mono', Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.4;
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
+    position: relative;
+}
+
+/* Animated sliding out of printer */
+.thermal-receipt-paper.is-ejecting {
+    animation: receiptEjectAnim 1.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes receiptEjectAnim {
+    0% {
+        transform: translateY(-80%);
+        opacity: 0;
+    }
+    40% {
+        opacity: 1;
+    }
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Sawtooth Serrated Tear Cut (Top & Bottom) */
+.receipt-sawtooth {
+    width: 100%;
+    height: 8px;
+    background-repeat: repeat-x;
+    background-size: 14px 8px;
+}
+
+.receipt-sawtooth--top {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 8'%3E%3Cpolygon points='0,0 7,8 14,0' fill='%230F172A'/%3E%3C/svg%3E");
+}
+
+.receipt-sawtooth--bottom {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 8'%3E%3Cpolygon points='0,0 7,8 14,0' fill='%23FFFFFF'/%3E%3C/svg%3E");
+    margin-top: -1px;
+}
+
+.receipt-inner-content {
+    padding: 16px 20px 18px;
+}
+
+/* Receipt Header */
+.receipt-header {
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.receipt-haraan-logo {
+    height: 34px;
+    width: auto;
+    margin: 0 auto 6px auto;
+    display: block;
+    filter: grayscale(100%) contrast(250%);
+}
+
+.receipt-brand-text {
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    color: #000;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.receipt-venue-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #111;
+    margin: 4px 0 2px 0;
+    text-transform: uppercase;
+}
+
+.receipt-venue-sub {
+    font-size: 11px;
+    color: #4B5563;
+    margin: 0 0 8px 0;
+}
+
+/* Dividers */
+.receipt-divider-stars,
+.receipt-divider-dash,
+.receipt-divider-double,
+.receipt-divider-dots {
+    text-align: center;
+    letter-spacing: 0.05em;
+    color: #6B7280;
+    font-size: 11px;
+    user-select: none;
+    margin: 8px 0;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.receipt-divider-double {
+    color: #111827;
+    font-weight: bold;
+}
+
+/* Key-Value Tables */
+.receipt-table {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.receipt-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.receipt-label {
+    font-size: 11.5px;
+    color: #4B5563;
+    font-weight: 600;
+}
+
+.receipt-value {
+    font-size: 12px;
+    color: #000;
+    font-weight: 700;
+    text-align: right;
+    word-break: break-word;
+}
+
+.receipt-bold {
+    font-weight: 900;
+    color: #000;
+}
+
+/* Slots Section */
+.receipt-slots-block {
+    margin: 6px 0;
+}
+
+.receipt-slots-title {
+    font-size: 11.5px;
+    font-weight: 800;
+    color: #111;
+    margin-bottom: 4px;
+}
+
+.receipt-slots-lines {
+    font-size: 11.5px;
+    color: #1F2937;
+    line-height: 1.5;
+}
+
+.receipt-slot-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11.5px;
+    margin-bottom: 3px;
+}
+
+.receipt-total-row {
+    margin: 8px 0 4px;
+    align-items: center;
+}
+
+.receipt-total-label {
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: #000;
+}
+
+.receipt-total-value {
+    font-size: 18px;
+    font-weight: 900;
+    color: #000;
+}
+
+.receipt-payment-status {
+    text-align: right;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #16A34A;
+    margin-bottom: 6px;
+    letter-spacing: 0.04em;
+}
+
+/* QR Code Section */
+.receipt-qr-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 12px 0 10px;
+}
+
+.receipt-qr-box {
+    padding: 8px;
+    background: #fff;
+    border: 1px dashed #9CA3AF;
+    display: inline-block;
+}
+
+.receipt-qr-box canvas,
+.receipt-qr-box img {
+    display: block;
+    margin: 0 auto;
+}
+
+.receipt-qr-caption {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #4B5563;
+    margin-top: 6px;
+    text-transform: uppercase;
+}
+
+/* Simulated Barcode */
+.receipt-barcode-box {
+    text-align: center;
+    margin: 10px 0 8px;
+}
+
+.receipt-barcode-lines {
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    color: #111;
+    line-height: 1;
+}
+
+.receipt-barcode-code {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: #4B5563;
+    margin-top: 3px;
+}
+
+/* Receipt Footer */
+.receipt-footer {
+    text-align: center;
+    margin-top: 8px;
+}
+
+.receipt-tear-notice {
+    font-size: 10px;
+    color: #9CA3AF;
+    margin-bottom: 6px;
+}
+
+.receipt-footer-tag {
+    font-size: 11px;
+    font-weight: 700;
+    color: #111;
+    margin: 0 0 2px 0;
+}
+
+.receipt-footer-url {
+    font-size: 10px;
+    color: #6B7280;
+    margin: 0;
+}
+
+/* Action Control Buttons Below Receipt */
+.printer-actions-panel {
+    width: 320px;
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.printer-btn {
+    width: 100%;
+    padding: 13px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-decoration: none;
+    border: none;
+    box-sizing: border-box;
+    transition: transform 0.12s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+.printer-btn:active {
+    transform: scale(0.98);
+}
+
+.printer-btn--print {
+    background: #2563EB;
+    color: #FFFFFF;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
+.printer-btn--print:hover {
+    background: #1D4ED8;
+}
+
+.printer-btn--bt {
+    background: #1E293B;
+    color: #38BDF8;
+    border: 1px solid #334155;
+}
+
+.printer-btn--bt:hover {
+    background: #0F172A;
+    color: #7DD3FC;
+}
+
+.printer-actions-subrow {
+    display: flex;
+    gap: 8px;
+}
+
+.printer-btn--link {
+    flex: 1;
+    background: #FFFFFF;
+    color: #0F172A;
+    border: 1.5px solid #CBD5E1;
+    font-size: 13px;
+}
+
+.printer-btn--link:hover {
+    background: #F8FAFC;
+    border-color: #94A3B8;
+}
+
+.printer-btn--close {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.1);
+    color: #E2E8F0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 13px;
+}
+
+.printer-btn--close:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* Spinner */
+.printer-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: pSpin 0.7s linear infinite;
+}
+@keyframes pSpin { to { transform: rotate(360deg); } }
+
+/* ==========================================================================
+   PHYSICAL THERMAL PRINT MEDIA QUERY (58mm & 80mm Roll Support)
+   ========================================================================== */
+@media print {
+    body * {
+        visibility: hidden !important;
+    }
+    
+    html, body {
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+    }
+
+    #success-modal {
+        display: block !important;
+        position: static !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+        visibility: visible !important;
+    }
+
+    .printer-modal-wrapper,
+    .thermal-receipt-scroll-container {
+        display: block !important;
+        width: 100% !important;
+        max-height: none !important;
+        overflow: visible !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        visibility: visible !important;
+    }
+
+    #thermal-printable-receipt,
+    #thermal-printable-receipt * {
+        visibility: visible !important;
+    }
+
+    #thermal-printable-receipt {
+        display: block !important;
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 58mm !important; /* Perfect fit for 58mm & 80mm thermal rolls */
+        max-width: 58mm !important;
+        margin: 0 !important;
+        padding: 2mm 1.5mm !important;
+        background: #fff !important;
+        color: #000 !important;
+        box-shadow: none !important;
+        border: none !important;
+        transform: none !important;
+        animation: none !important;
+        font-family: 'Courier New', Courier, monospace !important;
+        font-size: 10.5px !important;
+        line-height: 1.3 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .receipt-sawtooth,
+    .virtual-printer-housing,
+    .printer-actions-panel {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    @page {
+        size: 58mm auto;
+        margin: 0mm;
+    }
+}
+</style>
+
+<!-- Mini Thermal Printer Interactive Ticket Modal -->
+<div id="success-modal" class="printer-overlay-modal" style="display:none;" role="dialog" aria-modal="true" aria-label="Official Booking Pass">
+    <div class="printer-modal-wrapper">
         
-        <div class="success-receipt-box">
-            <div class="success-receipt-row"><strong>Booking Reference:</strong> <span class="receipt-ref-id" id="modal-ref-id">BV-GH-49291</span></div>
-            <div class="success-receipt-row"><strong>Date:</strong> <span class="receipt-highlight" id="modal-date">Today</span></div>
-            <div class="success-receipt-row"><strong>Slots:</strong> <span class="receipt-highlight" id="modal-slots">...</span></div>
-            <div class="success-receipt-row"><strong>Total Amount:</strong> <span class="receipt-total" id="modal-total">₹0</span></div>
+        <!-- Virtual POS Mini Printer Bezel Slot -->
+        <div class="virtual-printer-housing" aria-hidden="true">
+            <div class="printer-housing-header">
+                <div class="printer-brand">
+                    <span class="printer-brand__icon">🖨️</span>
+                    <span class="printer-brand__name">HARAAN POS-58 MINI PRINTER</span>
+                </div>
+                <div class="printer-status-led">
+                    <span class="printer-led-dot"></span>
+                    <span class="printer-led-text">PRINTING READY</span>
+                </div>
+            </div>
+            <div class="printer-slot-mouth"></div>
         </div>
 
-        <button onclick="closeSuccessModal()" class="success-done-btn">
-            Done & Return to Pulse
-        </button>
+        <!-- Thermal Paper Slip (Ejects from printer) -->
+        <div class="thermal-receipt-scroll-container">
+            <div id="thermal-printable-receipt" class="thermal-receipt-paper is-ejecting">
+                
+                <!-- Serrated Top Tear Edge -->
+                <div class="receipt-sawtooth receipt-sawtooth--top" aria-hidden="true"></div>
+
+                <div class="receipt-inner-content">
+                    <!-- Receipt Header -->
+                    <div class="receipt-header">
+                        <img src="{{ asset('images/haraan-logo.png') }}" class="receipt-haraan-logo" alt="HARAAN">
+                        <p class="receipt-brand-text">HARAAN SPORTS</p>
+                        <h2 class="receipt-venue-title">{{ $venue->title }}</h2>
+                        <p class="receipt-venue-sub">
+                            {{ $venue->location ? $venue->location . ' · ' : '' }}Official Entry Pass
+                        </p>
+                        <div class="receipt-divider-stars">* * * * * * * * * * * * * * * * * * * *</div>
+                    </div>
+
+                    <!-- Meta Information -->
+                    <div class="receipt-table">
+                        <div class="receipt-row">
+                            <span class="receipt-label">PASS REF #:</span>
+                            <span class="receipt-value receipt-bold" id="tp-ref">HT-0000000000</span>
+                        </div>
+                        <div class="receipt-row">
+                            <span class="receipt-label">BOOKED ON:</span>
+                            <span class="receipt-value" id="tp-time">--</span>
+                        </div>
+                        <div class="receipt-row">
+                            <span class="receipt-label">CUSTOMER:</span>
+                            <span class="receipt-value" id="tp-user">{{ auth()->user()?->name ?? 'Guest User' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="receipt-divider-dash">----------------------------------------</div>
+
+                    <!-- Court & Sport Details -->
+                    <div class="receipt-table">
+                        <div class="receipt-row">
+                            <span class="receipt-label">SPORT:</span>
+                            <span class="receipt-value receipt-bold" id="tp-sport">--</span>
+                        </div>
+                        <div class="receipt-row">
+                            <span class="receipt-label">COURT/TURF:</span>
+                            <span class="receipt-value receipt-bold" id="tp-court">--</span>
+                        </div>
+                        <div class="receipt-row">
+                            <span class="receipt-label">PLAY DATE:</span>
+                            <span class="receipt-value" id="tp-date">--</span>
+                        </div>
+                    </div>
+
+                    <div class="receipt-divider-dots">. . . . . . . . . . . . . . . . . . . .</div>
+
+                    <!-- Booked Slots List -->
+                    <div class="receipt-slots-block">
+                        <div class="receipt-slots-title">RESERVED SLOTS:</div>
+                        <div id="tp-slots" class="receipt-slots-lines">
+                            <!-- Injected dynamically -->
+                        </div>
+                    </div>
+
+                    <div class="receipt-divider-dash">----------------------------------------</div>
+
+                    <!-- Pricing Breakdown -->
+                    <div class="receipt-table">
+                        <div class="receipt-row">
+                            <span class="receipt-label">SLOTS SUBTOTAL</span>
+                            <span class="receipt-value" id="tp-subtotal">₹0</span>
+                        </div>
+                        <div class="receipt-row" id="tp-fee-row">
+                            <span class="receipt-label">CONVENIENCE FEE</span>
+                            <span class="receipt-value" id="tp-fee">₹0</span>
+                        </div>
+                        <div class="receipt-row" id="tp-tax-row">
+                            <span class="receipt-label" id="tp-tax-label">{{ strtoupper(\App\Models\Venue::taxLabel()) }}</span>
+                            <span class="receipt-value" id="tp-tax">₹0</span>
+                        </div>
+                        <div class="receipt-row" id="tp-discount-row">
+                            <span class="receipt-label">DISCOUNT</span>
+                            <span class="receipt-value" id="tp-discount">₹0</span>
+                        </div>
+                    </div>
+
+                    <div class="receipt-divider-double">========================================</div>
+
+                    <div class="receipt-row receipt-total-row">
+                        <span class="receipt-total-label">TOTAL PAID:</span>
+                        <span class="receipt-total-value" id="tp-total">₹0</span>
+                    </div>
+                    <div class="receipt-payment-status">
+                        STATUS: PAID ONLINE (RAZORPAY) ✓
+                    </div>
+
+                    <div class="receipt-divider-dash">----------------------------------------</div>
+
+                    <!-- Centered QR Code -->
+                    <div class="receipt-qr-center">
+                        <div class="receipt-qr-box" id="tp-qr"></div>
+                        <div class="receipt-qr-caption">SCAN AT ENTRY GATE FOR VERIFICATION</div>
+                    </div>
+
+                    <!-- Simulated Barcode -->
+                    <div class="receipt-barcode-box">
+                        <div class="receipt-barcode-lines">|||||||| | ||| |||||| | ||||| ||| ||||| |||||||</div>
+                        <div class="receipt-barcode-code" id="tp-barcode-code">HT-0000000000</div>
+                    </div>
+
+                    <!-- Receipt Footer -->
+                    <div class="receipt-footer">
+                        <div class="receipt-tear-notice">- - - - - - - - - ✂ CUT HERE ✂ - - - - - - - - -</div>
+                        <p class="receipt-footer-tag">Thank you for playing with Haraan!</p>
+                        <p class="receipt-footer-url">haraan.app • Support: support@haraan.app</p>
+                    </div>
+
+                </div>
+
+                <!-- Serrated Bottom Tear Edge -->
+                <div class="receipt-sawtooth receipt-sawtooth--bottom" aria-hidden="true"></div>
+            </div>
+        </div>
+
+        <!-- Action Control Buttons Below Receipt -->
+        <div class="printer-actions-panel">
+            <button type="button" onclick="printThermalReceipt()" class="printer-btn printer-btn--print">
+                <span class="printer-btn__icon">🖨️</span>
+                <span>Print Ticket Slip (58mm / 80mm)</span>
+            </button>
+
+            <!-- Bluetooth ESC/POS Direct Print Button for Turf Desks / Partners -->
+            <button type="button" id="btn-bt-print" onclick="printViaBluetooth()" class="printer-btn printer-btn--bt">
+                <span class="printer-btn__icon">📶</span>
+                <span>Bluetooth Print (Partner Desk)</span>
+            </button>
+
+            <div class="printer-actions-subrow">
+                <a href="{{ route('site.bookings') }}" class="printer-btn printer-btn--link">
+                    View My Bookings
+                </a>
+                <button type="button" onclick="closeSuccessModal()" class="printer-btn printer-btn--close">
+                    Done
+                </button>
+            </div>
+        </div>
+
     </div>
 </div>
+
+<script src="{{ asset('js/qrcode.min.js') }}"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
 <script>
     const venueCourts = @json($venue->courts);
@@ -665,6 +1396,25 @@
     const courtPrices = @json($venue->court_prices ?? new \stdClass);
     const courtPeak = @json($venue->court_peak ?? new \stdClass);
     const venueBasePrice = {{ (int) $venue->price }};
+    // Mirrors Venue::convenienceFeeFor() — the server recomputes it; this is only the estimate.
+    const venueFeeType = @json((string) ($venue->convenience_fee_type ?? 'none'));
+    const venueFeeValue = {{ (float) ($venue->convenience_fee_value ?? 0) }};
+    function venueFeeFor(subtotal) {
+        if (subtotal <= 0) return 0;
+        if (venueFeeType === 'flat') return Math.round(venueFeeValue * 100) / 100;
+        if (venueFeeType === 'percent') return Math.round(subtotal * venueFeeValue) / 100;
+        return 0;
+    }
+    // Mirrors Venue::taxFor() (/control → Platform rules → Fees → Pulse tax), on subtotal − discount.
+    const venueTaxType = @json(\App\Support\PlatformRules::string('fees.venue_tax_type'));
+    const venueTaxValue = {{ \App\Support\PlatformRules::float('fees.venue_tax_value') }};
+    function venueTaxFor(subtotal, discount = 0) {
+        const base = Math.max(0, subtotal - discount);
+        if (subtotal <= 0 || base <= 0) return 0;
+        if (venueTaxType === 'flat') return Math.round(venueTaxValue * 100) / 100;
+        if (venueTaxType === 'percent') return Math.round(base * venueTaxValue) / 100;
+        return 0;
+    }
 
     // Base hourly rate for the currently-selected court (falls back to the venue base price).
     function currentRate() {
@@ -694,9 +1444,25 @@
         if (t != null && s != null && e != null && t >= s && t < e) return p.price;
         return base;
     }
-    let selectedDate = 'Today';
+    const isAuthenticated = {{ auth()->check() ? 'true' : 'false' }};
+    const venueId = {{ (int) $venue->id }};
+    const csrfToken = '{{ csrf_token() }}';
+    let selectedDate = '{{ $datePills[0]['ymd'] }}';
+    let selectedDateDisplay = '{{ $datePills[0]['display'] }}';
     let selectedSport = venueSports[0];
-    let selectedCourt = venueCourts[selectedSport][0];
+    let selectedCourt = (venueCourts[selectedSport] || [])[0] ?? null;
+    // The admin's slot rows per date (see PublicWebController::decorateVenueDetail) and the
+    // court ids the availability check is keyed by.
+    const slotsByDate = @json($venue->slots_by_date ?? new \stdClass);
+    const courtIds = @json($venue->court_ids ?? new \stdClass);
+    const todayYmd = '{{ $datePills[0]['ymd'] }}';
+    // Live state per slot id from /api/venues/{id}/availability ('open' | 'booked' | 'closed').
+    // null = not answered yet (or unreachable): chips then show the admin's own open/closed
+    // switch and claim nothing about bookings, the same fallback as the app.
+    let liveStates = null;
+    // Set when the whole day can't be booked (outside the booking window).
+    let dayRefusal = '';
+    let availabilitySeq = 0;
     let selectedSlots = [];
     let currentFormRating = 0;
 
@@ -725,22 +1491,24 @@
         }
     }
 
-    function selectDate(element, date) {
+    function selectDate(element, ymd, display) {
         document.querySelectorAll('.date-pill').forEach(btn => btn.classList.remove('is-active'));
         element.classList.add('is-active');
 
-        selectedDate = date;
-        document.getElementById('selected-date-text').innerText = date;
+        selectedDate = ymd;
+        selectedDateDisplay = display || ymd;
+        const dtEl = document.getElementById('selected-date-text');
+        if (dtEl) dtEl.innerText = selectedDateDisplay;
         
-        // Reset selected slots when switching days to simulate a real scheduler
+        // A new day is a new set of slots and bookings.
         selectedSlots = [];
         updatePriceBreakdown();
-        renderSlots();
+        loadAvailability();
     }
 
     function selectSport(sport) {
         selectedSport = sport;
-        selectedCourt = venueCourts[sport][0];
+        selectedCourt = (venueCourts[sport] || [])[0] ?? null;
 
         // Update sport tabs styling
         document.querySelectorAll('.sport-tab').forEach(btn => btn.classList.remove('is-active'));
@@ -754,13 +1522,16 @@
         // Clear selected slots on sport change to avoid invalid court cross-bookings
         selectedSlots = [];
         updatePriceBreakdown();
-        renderSlots();
+        loadAvailability();
     }
 
     function selectCourt(court) {
         selectedCourt = court;
         renderCourtSelector();
-        renderSlots();
+        // Checkout books one court for every picked slot, so a court switch starts over.
+        selectedSlots = [];
+        updatePriceBreakdown();
+        loadAvailability();
     }
 
     function renderCourtSelector() {
@@ -779,52 +1550,124 @@
         }).join('');
     }
 
-    const morningSlots = ['06:00 AM - 07:00 AM', '07:00 AM - 08:00 AM', '08:00 AM - 09:00 AM', '09:00 AM - 10:00 AM', '10:00 AM - 11:00 AM', '11:00 AM - 12:00 PM'];
-    const afternoonSlots = ['12:00 PM - 01:00 PM', '01:00 PM - 02:00 PM', '02:00 PM - 03:00 PM', '03:00 PM - 04:00 PM', '04:00 PM - 05:00 PM'];
-    const eveningSlots = ['05:00 PM - 06:00 PM', '06:00 PM - 07:00 PM', '07:00 PM - 08:00 PM', '08:00 PM - 09:00 PM', '09:00 PM - 10:00 PM', '10:00 PM - 11:00 PM'];
-
-    function isSlotBooked(date, sport, court, slot) {
-        let str = date + sport + court + slot;
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            hash = (hash << 5) - hash + str.charCodeAt(i);
-            hash |= 0;
+    // Bookability per slot for the picked day + court: real bookings, live payment holds,
+    // court blocks and closed days, the same answer checkout gives (VenueSlotAvailability).
+    // `quiet` (the background re-check) keeps the current chips on screen while it asks.
+    async function loadAvailability(quiet = false) {
+        const seq = ++availabilitySeq;
+        if (!quiet) {
+            liveStates = null;
+            dayRefusal = '';
+            renderSlots();
         }
-        return Math.abs(hash) % 10 < 3; // 30% deterministic booked slots
+
+        const params = new URLSearchParams({ date: selectedDate });
+        const courtId = courtIds[selectedCourt];
+        if (courtId) params.set('court_id', courtId);
+
+        try {
+            const res = await fetch('/api/venues/' + venueId + '/availability?' + params.toString(), {
+                headers: { 'Accept': 'application/json' },
+            });
+            const body = await res.json().catch(() => ({}));
+            if (seq !== availabilitySeq) return; // a newer date/court pick owns the grid
+
+            dayRefusal = '';
+            if (res.status === 422) {
+                dayRefusal = body.message || 'This day is not open for booking yet.';
+                liveStates = {};
+            } else if (res.ok && body.data && Array.isArray(body.data.slots)) {
+                liveStates = {};
+                body.data.slots.forEach(r => { liveStates[r.id] = r.state; });
+            } else {
+                return; // unreachable: keep the template fallback
+            }
+        } catch (e) {
+            return;
+        }
+
+        // Drop picks that were taken while the player was deciding.
+        const before = selectedSlots.length;
+        selectedSlots = selectedSlots.filter(s => slotState(s.slotId) === 'open');
+        if (selectedSlots.length !== before) updatePriceBreakdown();
+        renderSlots();
+    }
+
+    function slotState(slotId) {
+        const slot = (slotsByDate[selectedDate] || []).find(s => s.id === slotId);
+        if (!slot || dayRefusal || !slot.open) return 'closed';
+        if (liveStates && liveStates[slot.id]) return liveStates[slot.id];
+        return 'open';
+    }
+
+    // The slots a player can see for the picked day and sport: the admin's rows, minus the
+    // ones that run for other sports and, today, the hours already gone (checkout refuses them).
+    function visibleSlots() {
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        return (slotsByDate[selectedDate] || []).filter(s =>
+            (!s.sports.length || s.sports.includes(selectedSport)) &&
+            (selectedDate !== todayYmd || s.start > nowMin)
+        );
     }
 
     function renderSlots() {
         const container = document.getElementById('slots-grid-container');
         if (!container) return;
 
-        let html = '';
         const rate = currentRate();
 
         // Reflect the selected court's rate in the sticky booking card header.
         const rateEl = document.getElementById('rate-per-hour');
         if (rateEl) rateEl.innerText = '₹' + rate.toLocaleString();
 
-        const renderGroup = (title, slots) => {
+        const note = (text) => `<p class="detail-card-panel__subtitle">${text}</p>`;
+
+        // A venue that models no courts books the venue itself (checkout allows it); one that
+        // has courts but none for this sport has nothing to sell.
+        if (!selectedCourt && Object.keys(courtIds).length) {
+            container.innerHTML = note('No court is open for this sport yet.');
+            return;
+        }
+        if (dayRefusal) {
+            container.innerHTML = note(dayRefusal);
+            return;
+        }
+
+        const slots = visibleSlots();
+        if (!slots.length) {
+            container.innerHTML = note(selectedDate === todayYmd
+                ? 'No more slots today. Pick another day.'
+                : 'No slots on this day. Pick another day.');
+            return;
+        }
+
+        const renderGroup = (title, group) => {
+            if (!group.length) return '';
             let groupHtml = `
                 <div class="slots-group">
                     <h4 class="slots-group__title">${title}</h4>
                     <div class="slots-grid">
             `;
 
-            slots.forEach((slot) => {
-                const isBooked = isSlotBooked(selectedDate, selectedSport, selectedCourt, slot);
-                const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot}`;
+            group.forEach((slot) => {
+                const state = slotState(slot.id);
+                const isTaken = state !== 'open';
+                const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
                 const isSelected = selectedSlots.some(s => s.key === slotKey);
-                const r = slotRate(slot);
+                const r = slotRate(slot.time);
                 const isPeak = r > rate;
 
-                const slotClass = isBooked ? 'is-booked' : (isSelected ? 'is-selected' : '');
-                const onclickAttr = isBooked ? '' : `onclick="toggleSlot(this, '${slot}', ${r})"`;
+                const slotClass = isTaken ? 'is-booked' : (isSelected ? 'is-selected' : '');
+                const onclickAttr = isTaken ? '' : `onclick="toggleSlot(this, ${slot.id}, ${r})"`;
+                const priceHtml = state === 'booked' ? 'Booked'
+                    : state === 'closed' ? 'Unavailable'
+                    : '₹' + r.toLocaleString() + (isPeak ? ' <span style="color:#16a34a;font-weight:600">peak</span>' : '');
 
                 groupHtml += `
                     <div ${onclickAttr} class="slot-item ${slotClass}" data-key="${slotKey}">
-                        <div class="slot-item__time">${slot.split(' - ')[0]}</div>
-                        <div class="slot-item__price">${isBooked ? 'Reserved' : '₹' + r.toLocaleString() + (isPeak ? ' <span style=\"color:#16a34a;font-weight:600\">peak</span>' : '')}</div>
+                        <div class="slot-item__time">${slot.time.split(' - ')[0]}</div>
+                        <div class="slot-item__price">${priceHtml}</div>
                     </div>
                 `;
             });
@@ -836,15 +1679,16 @@
             return groupHtml;
         };
 
-        html += renderGroup('Morning', morningSlots);
-        html += renderGroup('Afternoon', afternoonSlots);
-        html += renderGroup('Evening', eveningSlots);
-
-        container.innerHTML = html;
+        container.innerHTML =
+            renderGroup('Morning', slots.filter(s => s.start < 12 * 60)) +
+            renderGroup('Afternoon', slots.filter(s => s.start >= 12 * 60 && s.start < 17 * 60)) +
+            renderGroup('Evening', slots.filter(s => s.start >= 17 * 60));
     }
 
-    function toggleSlot(element, slot, rate) {
-        const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot}`;
+    function toggleSlot(element, slotId, rate) {
+        const slot = (slotsByDate[selectedDate] || []).find(s => s.id === slotId);
+        if (!slot) return;
+        const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
         if (element.classList.contains('is-selected')) {
             element.classList.remove('is-selected');
             selectedSlots = selectedSlots.filter(s => s.key !== slotKey);
@@ -855,7 +1699,8 @@
                 date: selectedDate,
                 sport: selectedSport,
                 court: selectedCourt,
-                time: slot,
+                slotId: slot.id,
+                time: slot.time,
                 price: rate
             });
         }
@@ -886,7 +1731,7 @@
             listDiv.innerHTML = selectedSlots.map(s => `
                 <div class="selected-slot-item-pill">
                     <div class="selected-slot-item-pill__header">
-                        ${s.sport} • ${s.court}
+                        ${s.sport}${s.court ? ' • ' + s.court : ''}
                     </div>
                     <div class="selected-slot-item-pill__details">
                         <span class="selected-slot-item-pill__time">${s.time} (${s.date})</span>
@@ -897,19 +1742,26 @@
             `).join('');
 
             const subtotal = selectedSlots.reduce((sum, s) => sum + s.price, 0);
-            const gst = Math.round(subtotal * 0.18);
-            const platformFee = 50;
-            const total = subtotal + gst + platformFee;
+            const fee = venueFeeFor(subtotal);
+            const tax = venueTaxFor(subtotal);
+            const total = Math.round((subtotal + fee + tax) * 100) / 100;
 
             document.getElementById('calc-hours').innerText = slotsCount;
             document.getElementById('calc-subtotal').innerText = '₹' + subtotal.toLocaleString();
-            document.getElementById('calc-gst').innerText = '₹' + gst.toLocaleString();
+            document.getElementById('calc-fee-row').style.display = fee > 0 ? '' : 'none';
+            document.getElementById('calc-fee').innerText = '₹' + fee.toLocaleString('en-IN');
+            document.getElementById('calc-tax-row').style.display = tax > 0 ? '' : 'none';
+            document.getElementById('calc-tax').innerText = '₹' + tax.toLocaleString('en-IN');
             document.getElementById('calc-total').innerText = '₹' + total.toLocaleString();
 
             calcBlock.style.display = 'block';
             bookBtn.disabled = false;
             bookBtn.className = 'book-now-button-widget is-ready';
-            bookBtn.innerText = 'Confirm & Book Slots';
+            if (!isAuthenticated) {
+                bookBtn.innerText = 'Sign in to Book (' + slotsCount + ' slot' + (slotsCount > 1 ? 's' : '') + ')';
+            } else {
+                bookBtn.innerText = 'Confirm & Pay ₹' + total.toLocaleString('en-IN');
+            }
         }
     }
 
@@ -984,33 +1836,505 @@
         alert('Thank you for your feedback! Your review has been added.');
     }
 
-    function checkoutBooking() {
-        const refId = 'BV-GH-' + Math.floor(10000 + Math.random() * 90000);
-        const subtotal = selectedSlots.reduce((sum, s) => sum + s.price, 0);
-        const gst = Math.round(subtotal * 0.18);
-        const total = subtotal + gst + 50;
+    async function checkoutBooking() {
+        if (selectedSlots.length === 0) {
+            alert('Please select at least one slot first.');
+            return;
+        }
 
-        document.getElementById('modal-ref-id').innerText = refId;
-        
-        const uniqueDates = selectedSlots.map(s => s.date).filter((value, index, self) => self.indexOf(value) === index);
-        document.getElementById('modal-date').innerText = uniqueDates.join(', ');
-        
-        const slotsDesc = selectedSlots.map(s => `${s.sport} - ${s.court} (${s.time.split(' - ')[0]})`).join(', ');
-        document.getElementById('modal-slots').innerText = slotsDesc;
-        document.getElementById('modal-total').innerText = '₹' + total.toLocaleString();
+        // 1. Strict Authentication Check
+        if (!isAuthenticated) {
+            if (typeof window.openLoginModal === 'function') {
+                window.openLoginModal();
+            } else {
+                const btn = document.getElementById('loginBtn') || document.querySelector('[data-login-open]');
+                if (btn) btn.click();
+                else window.location.href = '/login';
+            }
+            return;
+        }
 
+        const bookBtn = document.getElementById('book-now-button');
+        const originalText = bookBtn.innerText;
+        bookBtn.disabled = true;
+        bookBtn.innerText = 'Securing slots...';
+
+        try {
+            // 2. Reserve slots on backend and obtain Razorpay order parameters
+            const res = await fetch('/gamehub/' + venueId + '/book', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+                body: JSON.stringify({
+                    date: selectedDate,
+                    sport: selectedSport,
+                    court: selectedCourt,
+                    court_id: courtIds[selectedCourt] ?? null,
+                    slots: selectedSlots.map(s => ({ time: s.time, price: s.price })),
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) {
+                alert(data.error || 'Could not reserve slots. Please try another slot.');
+                bookBtn.disabled = false;
+                bookBtn.innerText = originalText;
+                loadAvailability();
+                return;
+            }
+
+            // If 0-amount or free
+            if (!data.requires_payment) {
+                showSuccessModal(data.reference, data.date, data.slots, data.total, data.breakdown);
+                bookBtn.disabled = false;
+                bookBtn.innerText = originalText;
+                return;
+            }
+
+            // 3. Initiate Razorpay Gateway Checkout
+            bookBtn.innerText = 'Opening payment...';
+
+            const options = {
+                key: data.payment.key,
+                order_id: data.payment.orderId,
+                amount: data.payment.amount,
+                currency: data.payment.currency,
+                name: data.payment.name || 'Haraan Sports Venue',
+                description: data.payment.description || 'Court Slot Booking',
+                prefill: data.payment.prefill || {},
+                theme: { color: '#2563EB' },
+                handler: async function (response) {
+                    bookBtn.innerText = 'Verifying payment...';
+
+                    try {
+                        const verifyRes = await fetch('/gamehub/' + venueId + '/confirm', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': csrfToken,
+                            },
+                            body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                            })
+                        });
+
+                        const verifyData = await verifyRes.json();
+
+                        if (verifyRes.ok && verifyData.ok) {
+                            showSuccessModal(
+                                verifyData.reference || data.bookingRef,
+                                data.date,
+                                data.slots,
+                                data.total,
+                                data.breakdown
+                            );
+                        } else {
+                            alert(verifyData.error || 'Payment verification failed. Please check your bookings page.');
+                        }
+                    } catch (vErr) {
+                        console.error('Verification error:', vErr);
+                        alert('Payment was received, but verification encountered a network delay. Please check your bookings page.');
+                        window.location.href = '/bookings';
+                    } finally {
+                        bookBtn.disabled = false;
+                        bookBtn.innerText = originalText;
+                    }
+                },
+                modal: {
+                    ondismiss: function () {
+                        // Release hold
+                        fetch('/gamehub/' + venueId + '/release', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': csrfToken,
+                            },
+                            body: JSON.stringify({ razorpay_order_id: data.payment.orderId })
+                        }).catch(() => {});
+                        bookBtn.disabled = false;
+                        bookBtn.innerText = originalText;
+                        alert('Payment was cancelled. Your slot hold has been released.');
+                        loadAvailability();
+                    }
+                }
+            };
+
+            const rzp = new Razorpay(options);
+            rzp.on('payment.failed', function (resp) {
+                bookBtn.disabled = false;
+                bookBtn.innerText = originalText;
+                const msg = resp && resp.error ? resp.error.description : 'Payment failed. Please try again.';
+                alert(msg);
+            });
+            rzp.open();
+
+        } catch (err) {
+            console.error('Booking checkout error:', err);
+            alert('A network error occurred while preparing your booking. Please try again.');
+            bookBtn.disabled = false;
+            bookBtn.innerText = originalText;
+        }
+    }
+
+    let currentReceiptData = null;
+
+    function showSuccessModal(refId, date, slots, total, breakdown) {
+        const now = new Date();
+        const bookedTimeStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + 
+                              now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        
+        const finalRef = refId || ('HT-' + Math.floor(1000000000 + Math.random() * 9000000000));
+        const finalDate = date || selectedDateDisplay || selectedDate;
+        const sportName = (selectedSlots.length > 0 ? selectedSlots[0].sport : selectedSport).toUpperCase();
+        const courtName = (selectedSlots.length > 0 ? selectedSlots[0].court : selectedCourt).toUpperCase();
+
+        // The server's breakdown is what Razorpay charged; the local sum is only a fallback.
+        const b = breakdown || {};
+        const subtotal = b.subtotal != null ? Number(b.subtotal) : selectedSlots.reduce((sum, s) => sum + s.price, 0);
+        const fee = b.convenienceFee != null ? Number(b.convenienceFee) : venueFeeFor(subtotal);
+        const discount = b.discount != null ? Number(b.discount) : 0;
+        const tax = b.tax != null ? Number(b.tax) : venueTaxFor(subtotal, discount);
+        const taxLabel = b.taxLabel || document.getElementById('calc-tax-label')?.innerText || 'GST';
+        const finalTotal = total != null ? Number(total) : (subtotal + fee - discount + tax);
+        const savedSlots = [...selectedSlots];
+
+        // Cache for Bluetooth / ESC-POS direct printing
+        currentReceiptData = {
+            refId: finalRef,
+            bookedOn: bookedTimeStr,
+            user: "{{ auth()->user()?->name ?? 'Guest User' }}",
+            sport: sportName,
+            court: courtName,
+            date: finalDate,
+            slots: savedSlots,
+            rawSlots: slots,
+            subtotalNum: subtotal,
+            feeNum: fee,
+            discountNum: discount,
+            taxNum: tax,
+            taxLabel: taxLabel,
+            totalNum: finalTotal
+        };
+
+        // Populate receipt text fields
+        const refEl = document.getElementById('tp-ref');
+        if (refEl) refEl.innerText = finalRef;
+
+        const barcodeEl = document.getElementById('tp-barcode-code');
+        if (barcodeEl) barcodeEl.innerText = finalRef;
+
+        const timeEl = document.getElementById('tp-time');
+        if (timeEl) timeEl.innerText = bookedTimeStr;
+
+        const sportEl = document.getElementById('tp-sport');
+        if (sportEl) sportEl.innerText = sportName;
+
+        const courtEl = document.getElementById('tp-court');
+        if (courtEl) courtEl.innerText = courtName;
+
+        const dateEl = document.getElementById('tp-date');
+        if (dateEl) dateEl.innerText = finalDate;
+
+        const subtotalEl = document.getElementById('tp-subtotal');
+        if (subtotalEl) subtotalEl.innerText = '₹' + subtotal.toLocaleString('en-IN');
+
+        const feeEl = document.getElementById('tp-fee');
+        if (feeEl) feeEl.innerText = '₹' + fee.toLocaleString('en-IN');
+        const feeRow = document.getElementById('tp-fee-row');
+        if (feeRow) feeRow.style.display = fee > 0 ? '' : 'none';
+
+        const taxEl = document.getElementById('tp-tax');
+        if (taxEl) taxEl.innerText = '₹' + tax.toLocaleString('en-IN');
+        const taxLabelEl = document.getElementById('tp-tax-label');
+        if (taxLabelEl) taxLabelEl.innerText = taxLabel.toUpperCase();
+        const taxRow = document.getElementById('tp-tax-row');
+        if (taxRow) taxRow.style.display = tax > 0 ? '' : 'none';
+
+        const discountEl = document.getElementById('tp-discount');
+        if (discountEl) discountEl.innerText = '−₹' + discount.toLocaleString('en-IN');
+        const discountRow = document.getElementById('tp-discount-row');
+        if (discountRow) discountRow.style.display = discount > 0 ? '' : 'none';
+
+        const totalEl = document.getElementById('tp-total');
+        if (totalEl) totalEl.innerText = '₹' + finalTotal.toLocaleString('en-IN');
+
+        // Populate slot item rows
+        const slotsContainer = document.getElementById('tp-slots');
+        if (slotsContainer) {
+            if (savedSlots.length > 0) {
+                slotsContainer.innerHTML = savedSlots.map(s => `
+                    <div class="receipt-slot-row">
+                        <span>• ${s.time}</span>
+                        <span class="receipt-bold">₹${Number(s.price).toLocaleString('en-IN')}</span>
+                    </div>
+                `).join('');
+            } else if (slots) {
+                slotsContainer.innerHTML = `
+                    <div class="receipt-slot-row">
+                        <span>• ${slots}</span>
+                        <span class="receipt-bold">₹${subtotal.toLocaleString('en-IN')}</span>
+                    </div>
+                `;
+            } else {
+                slotsContainer.innerHTML = `
+                    <div class="receipt-slot-row">
+                        <span>• Reserved Slot</span>
+                        <span class="receipt-bold">₹${subtotal.toLocaleString('en-IN')}</span>
+                    </div>
+                `;
+            }
+        }
+
+        // Generate Scannable QR Code
+        const qrBox = document.getElementById('tp-qr');
+        if (qrBox) {
+            qrBox.innerHTML = '';
+            if (typeof QRCode !== 'undefined') {
+                try {
+                    new QRCode(qrBox, {
+                        text: 'haraan:pass:' + finalRef + ':' + encodeURIComponent(finalDate),
+                        width: 125,
+                        height: 125,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                } catch (qrErr) {
+                    console.warn('QR code generation error:', qrErr);
+                }
+            }
+        }
+
+        // Show Modal and trigger physical paper ejection animation
         const modal = document.getElementById('success-modal');
-        modal.style.display = 'flex';
+        if (modal) modal.style.display = 'flex';
+
+        const receiptPaper = document.getElementById('thermal-printable-receipt');
+        if (receiptPaper) {
+            receiptPaper.classList.remove('is-ejecting');
+            void receiptPaper.offsetWidth; // Trigger DOM reflow for CSS keyframe animation restart
+            receiptPaper.classList.add('is-ejecting');
+        }
+
+        // Reset scheduler state for future selections
+        selectedSlots = [];
+        updatePriceBreakdown();
+        renderSlots();
     }
 
     function closeSuccessModal() {
-        document.getElementById('success-modal').style.display = 'none';
-        window.location.href = '/gamehub';
+        const modal = document.getElementById('success-modal');
+        if (modal) modal.style.display = 'none';
+        window.location.href = '/bookings';
+    }
+
+    // Standard Browser Print (Formatted via @media print for 58mm/80mm roll)
+    function printThermalReceipt() {
+        window.print();
+    }
+
+    // Bluetooth ESC/POS Direct Print (for turf partners / venue reception desk)
+    async function printViaBluetooth() {
+        const btBtn = document.getElementById('btn-bt-print');
+        const originalContent = btBtn ? btBtn.innerHTML : '';
+
+        if (!navigator.bluetooth) {
+            alert('Web Bluetooth is supported on Google Chrome and Microsoft Edge (Android & Desktop).\n\nSwitching to standard print preview for you now.');
+            window.print();
+            return;
+        }
+
+        try {
+            if (btBtn) {
+                btBtn.disabled = true;
+                btBtn.innerHTML = '<span class="printer-spinner"></span> Connecting...';
+            }
+
+            // Request Bluetooth device with typical POS thermal printer service UUIDs
+            const device = await navigator.bluetooth.requestDevice({
+                acceptAllDevices: true,
+                optionalServices: [
+                    '000018f0-0000-1000-8000-00805f9b34fb', // Standard POS Printer service
+                    '49535343-fe7d-4ae5-8fa9-9fafd205e455', // ISSC Transparent Serial
+                    'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+                    '0000e0ff-3c55-4cc0-a4da-1600f6bd0c5a',
+                    '0000ff00-0000-1000-8000-00805f9b34fb',
+                    '0000fee7-0000-1000-8000-00805f9b34fb'
+                ]
+            });
+
+            if (btBtn) btBtn.innerHTML = '<span class="printer-spinner"></span> Sending Ticket...';
+
+            const server = await device.gatt.connect();
+
+            // Locate writable characteristic
+            let writeChar = null;
+            const services = await server.getPrimaryServices();
+            for (const s of services) {
+                try {
+                    const chars = await s.getCharacteristics();
+                    for (const c of chars) {
+                        if (c.properties.write || c.properties.writeWithoutResponse) {
+                            writeChar = c;
+                            break;
+                        }
+                    }
+                } catch (ce) {
+                    console.warn('Could not inspect service characteristics:', ce);
+                }
+                if (writeChar) break;
+            }
+
+            if (!writeChar) {
+                throw new Error('No writable ESC/POS channel found on selected Bluetooth printer.');
+            }
+
+            // Build ESC/POS Byte Array
+            const bytes = buildEscPosPayload();
+
+            // Send in 64-byte chunks to avoid BLE MTU overflow
+            const chunkSize = 64;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                const chunk = bytes.slice(i, i + chunkSize);
+                if (writeChar.writeValueWithoutResponse) {
+                    await writeChar.writeValueWithoutResponse(chunk);
+                } else {
+                    await writeChar.writeValue(chunk);
+                }
+                await new Promise(r => setTimeout(r, 25));
+            }
+
+            if (btBtn) {
+                btBtn.innerHTML = '✓ Printed Successfully!';
+                setTimeout(() => {
+                    btBtn.disabled = false;
+                    btBtn.innerHTML = originalContent;
+                }, 2500);
+            }
+
+        } catch (err) {
+            console.error('Bluetooth ESC/POS Error:', err);
+            if (btBtn) {
+                btBtn.disabled = false;
+                btBtn.innerHTML = originalContent;
+            }
+            if (err.name !== 'NotFoundError') {
+                const fallback = confirm('Bluetooth printing note: ' + (err.message || 'Printer disconnected') + '.\n\nOpen standard print dialog instead?');
+                if (fallback) {
+                    window.print();
+                }
+            }
+        }
+    }
+
+    // Generate Raw ESC/POS Command Byte Sequence
+    function buildEscPosPayload() {
+        const encoder = new TextEncoder();
+        const parts = [];
+
+        function pushBytes(arr) {
+            parts.push(new Uint8Array(arr));
+        }
+        function pushText(str) {
+            parts.push(encoder.encode(str));
+        }
+
+        // 1. Initialize printer: ESC @
+        pushBytes([0x1B, 0x40]);
+
+        // 2. Center align: ESC a 1
+        pushBytes([0x1B, 0x61, 0x01]);
+
+        // 3. Double-height & bold header: ESC ! 0x18
+        pushBytes([0x1B, 0x21, 0x18]);
+        pushText("HARAAN SPORTS\n");
+
+        // Normal font: ESC ! 0x00
+        pushBytes([0x1B, 0x21, 0x00]);
+        pushText("--------------------------------\n");
+
+        const venueTitle = @json($venue->title);
+        pushText(venueTitle.toUpperCase() + "\n");
+        pushText("Official Entry Pass\n");
+        pushText("* * * * * * * * * * * * * * * *\n\n");
+
+        // Left align: ESC a 0
+        pushBytes([0x1B, 0x61, 0x00]);
+
+        const r = currentReceiptData || {};
+        pushText("PASS REF : " + (r.refId || 'N/A') + "\n");
+        pushText("BOOKED ON: " + (r.bookedOn || '') + "\n");
+        pushText("CUSTOMER : " + (r.user || 'Guest') + "\n");
+        pushText("SPORT    : " + (r.sport || '') + "\n");
+        pushText("COURT    : " + (r.court || '') + "\n");
+        pushText("DATE     : " + (r.date || '') + "\n");
+        pushText("--------------------------------\n");
+        pushText("RESERVED SLOTS:\n");
+
+        if (r.slots && r.slots.length > 0) {
+            r.slots.forEach(s => {
+                pushText(" - " + s.time + "  Rs." + s.price + "\n");
+            });
+        } else {
+            pushText(" - " + (r.rawSlots || 'Reserved Slot') + "\n");
+        }
+
+        pushText("--------------------------------\n");
+        pushText("SUBTOTAL    : Rs. " + (r.subtotalNum ? r.subtotalNum.toLocaleString('en-IN') : '0') + "\n");
+        if (r.feeNum > 0) {
+            pushText("CONV. FEE   : Rs. " + r.feeNum.toLocaleString('en-IN') + "\n");
+        }
+        if (r.discountNum > 0) {
+            pushText("DISCOUNT    : -Rs. " + r.discountNum.toLocaleString('en-IN') + "\n");
+        }
+        if (r.taxNum > 0) {
+            pushText((r.taxLabel || 'GST').toUpperCase().padEnd(12).slice(0, 12) + ": Rs. " + r.taxNum.toLocaleString('en-IN') + "\n");
+        }
+        pushText("================================\n");
+
+        // Bold total: ESC E 1
+        pushBytes([0x1B, 0x45, 0x01]);
+        pushText("TOTAL PAID  : Rs. " + (r.totalNum ? r.totalNum.toLocaleString('en-IN') : '0') + "\n");
+        pushBytes([0x1B, 0x45, 0x00]);
+
+        pushText("STATUS      : PAID ONLINE (RAZORPAY)\n");
+        pushText("--------------------------------\n\n");
+
+        // Center align for footer
+        pushBytes([0x1B, 0x61, 0x01]);
+        pushText("TICKET: " + (r.refId || '') + "\n");
+        pushText("Show this slip at entry gate\n\n");
+        pushText("Thank you for playing with HARAAN!\n");
+        pushText("haraan.app\n");
+        pushText("--------------------------------\n\n\n\n");
+
+        // Paper Cut: GS V 0
+        pushBytes([0x1D, 0x56, 0x00]);
+
+        let totalLength = 0;
+        for (const p of parts) totalLength += p.length;
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const p of parts) {
+            combined.set(p, offset);
+            offset += p.length;
+        }
+        return combined;
     }
 
     // Initialize Scheduler selectors on load
     window.addEventListener('DOMContentLoaded', () => {
         selectSport(selectedSport);
+        // Other players book too: re-check every 30s while the page is on screen.
+        setInterval(() => { if (!document.hidden) loadAvailability(true); }, 30000);
     });
 </script>
 

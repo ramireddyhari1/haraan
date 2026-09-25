@@ -562,7 +562,7 @@
                     <div class="flex items-center gap-4 text-xs text-slate-500 mt-2 font-medium">
                         <span>Net Collected: <strong class="text-slate-800">{{ $hero['net'] ?? '₹48,78,250' }}</strong></span>
                         <span class="text-slate-300">·</span>
-                        <span>Today's Velocity: <strong class="text-slate-800">{{ $hero['today_revenue'] ?? '₹1,42,800' }}</strong></span>
+                        <span>Today's Velocity: <strong class="text-slate-800">{{ $hero['today_revenue'] ?? '₹0' }}</strong></span>
                     </div>
                 </div>
 
@@ -587,33 +587,33 @@
             <div class="ecc-pillars">
                 <div class="ecc-pillar-item">
                     <span class="ecc-pillar-k">Gross Revenue</span>
-                    <p class="ecc-pillar-v">{{ $hero['gmv'] ?? '₹48.92L' }}</p>
-                    <span class="ecc-pillar-s text-emerald-600 font-semibold">▲ {{ $hero['growth'] ?? '+24.8%' }}</span>
+                    <p class="ecc-pillar-v">{{ $hero['gmv'] ?? '₹0' }}</p>
+                    <span class="ecc-pillar-s text-emerald-600 font-semibold">{{ $hero['growth'] ?? '—' }}</span>
                 </div>
                 <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">Net Profit</span>
-                    <p class="ecc-pillar-v">{{ $hero['profit'] ?? '₹10.44L' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">{{ $hero['profit_margin'] ?? '21.4%' }} Net Margin</span>
+                    <span class="ecc-pillar-k">Platform Revenue</span>
+                    <p class="ecc-pillar-v">{{ $hero['profit'] ?? '₹0' }}</p>
+                    <span class="ecc-pillar-s text-slate-500">{{ $hero['profit_margin'] ?? '—' }} take rate</span>
                 </div>
                 <div class="ecc-pillar-item">
                     <span class="ecc-pillar-k">Growth Velocity</span>
-                    <p class="ecc-pillar-v text-emerald-600">{{ $hero['growth'] ?? '+28.4%' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">{{ $hero['growth_label'] ?? 'MoM Expansion' }}</span>
+                    <p class="ecc-pillar-v text-emerald-600">{{ $hero['growth'] ?? '—' }}</p>
+                    <span class="ecc-pillar-s text-slate-500">{{ $hero['growth_label'] ?? '' }}</span>
                 </div>
                 <div class="ecc-pillar-item">
                     <span class="ecc-pillar-k">Today's Run-Rate</span>
                     <p class="ecc-pillar-v">{{ $hero['today_revenue'] ?? '₹1,42,800' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">{{ $hero['today_orders'] ?? '48' }} orders · {{ $hero['today_tickets'] ?? '142' }} tickets</span>
+                    <span class="ecc-pillar-s text-slate-500">{{ $hero['today_orders'] ?? 0 }} orders · {{ $hero['today_tickets'] ?? 0 }} tickets</span>
                 </div>
                 <div class="ecc-pillar-item">
                     <span class="ecc-pillar-k">Live Active Users</span>
-                    <p class="ecc-pillar-v text-indigo-600">{{ $hero['live_users'] ?? '384' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">Realtime App &amp; Web</span>
+                    <p class="ecc-pillar-v text-indigo-600">{{ $hero['live_users'] ?? 0 }}</p>
+                    <span class="ecc-pillar-s text-slate-500">Seen in the last 5 minutes</span>
                 </div>
                 <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">AI Health Score</span>
-                    <p class="ecc-pillar-v text-emerald-600">{{ $hero['ai_score'] ?? '98.6' }}<span class="text-xs text-slate-400 font-normal">/100</span></p>
-                    <span class="ecc-pillar-s text-emerald-600 font-semibold">{{ $hero['ai_status'] ?? 'Optimal SLA' }}</span>
+                    <span class="ecc-pillar-k">AI Calls Today</span>
+                    <p class="ecc-pillar-v text-emerald-600">{{ $hero['ai_score'] ?? 0 }}</p>
+                    <span class="ecc-pillar-s text-emerald-600 font-semibold">{{ $hero['ai_status'] ?? '' }}</span>
                 </div>
             </div>
         </div>
@@ -1017,40 +1017,40 @@
         <section aria-labelledby="cc-sec-money">
             <div class="ecc-sec-head">
                 <h2 id="cc-sec-money" class="ecc-sec-title">Capital &amp; Settlements</h2>
-                <span class="ecc-sec-desc">Platform escrow, fee capture, gateway deductions and partner settlement obligations</span>
+                <span class="ecc-sec-desc">What Haraan earned, tax held, and what partners are still owed — from real bookings and payouts</span>
             </div>
 
             <div class="ecc-card">
                 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     <div>
                         <span class="text-[11px] font-semibold text-slate-500 block">Gross Inflow</span>
-                        <p class="text-lg font-extrabold text-slate-900 m-0 mt-1 tabular-nums">{{ $financialLedger['gross_collected'] ?? '₹48.92L' }}</p>
+                        <p class="text-lg font-extrabold text-slate-900 m-0 mt-1 tabular-nums">{{ $financialLedger['gross_collected'] ?? '₹0' }}</p>
                         <span class="text-[10.5px] text-slate-400">Total collections</span>
                     </div>
                     <div>
                         <span class="text-[11px] font-semibold text-slate-500 block">Platform Commission</span>
-                        <p class="text-lg font-extrabold text-emerald-600 m-0 mt-1 tabular-nums">{{ $financialLedger['platform_commission'] ?? '₹5.87L' }}</p>
-                        <span class="text-[10.5px] text-emerald-600 font-semibold">12.0% Take Rate</span>
+                        <p class="text-lg font-extrabold text-emerald-600 m-0 mt-1 tabular-nums">{{ $financialLedger['platform_commission'] ?? '₹0' }}</p>
+                        <span class="text-[10.5px] text-emerald-600 font-semibold">{{ $financialLedger['take_rate'] ?? '' }}</span>
                     </div>
                     <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Gateway Deductions</span>
-                        <p class="text-lg font-extrabold text-slate-700 m-0 mt-1 tabular-nums">{{ $financialLedger['gateway_deductions'] ?? '₹1.07L' }}</p>
-                        <span class="text-[10.5px] text-slate-400">Razorpay fees (2.2%)</span>
+                        <span class="text-[11px] font-semibold text-slate-500 block">Gateway Fees Collected</span>
+                        <p class="text-lg font-extrabold text-slate-700 m-0 mt-1 tabular-nums">{{ $financialLedger['gateway_deductions'] ?? '₹0' }}</p>
+                        <span class="text-[10.5px] text-slate-400">Paid by customers</span>
                     </div>
                     <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Payouts Scheduled</span>
-                        <p class="text-lg font-extrabold text-amber-600 m-0 mt-1 tabular-nums">{{ $financialLedger['partner_payouts_due'] ?? '₹41.09L' }}</p>
-                        <span class="text-[10.5px] text-amber-600 font-semibold">Awaiting settlement</span>
+                        <span class="text-[11px] font-semibold text-slate-500 block">Owed to Partners</span>
+                        <p class="text-lg font-extrabold text-amber-600 m-0 mt-1 tabular-nums">{{ $financialLedger['partner_payouts_due'] ?? '₹0' }}</p>
+                        <span class="text-[10.5px] text-amber-600 font-semibold">Not yet paid or batched</span>
                     </div>
                     <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Escrow Reserve</span>
-                        <p class="text-lg font-extrabold text-indigo-600 m-0 mt-1 tabular-nums">{{ $financialLedger['escrow_reserve'] ?? '₹20.54L' }}</p>
-                        <span class="text-[10.5px] text-indigo-600 font-semibold">Protected capital</span>
+                        <span class="text-[11px] font-semibold text-slate-500 block">Tax Collected</span>
+                        <p class="text-lg font-extrabold text-indigo-600 m-0 mt-1 tabular-nums">{{ $financialLedger['escrow_reserve'] ?? '₹0' }}</p>
+                        <span class="text-[10.5px] text-indigo-600 font-semibold">Owed to the tax authority</span>
                     </div>
                     <div>
                         <span class="text-[11px] font-semibold text-slate-500 block">Net Settled Today</span>
-                        <p class="text-lg font-extrabold text-emerald-600 m-0 mt-1 tabular-nums">{{ $financialLedger['net_settled_today'] ?? '₹1.42L' }}</p>
-                        <span class="text-[10.5px] text-slate-400">Bank clearing OK</span>
+                        <p class="text-lg font-extrabold text-emerald-600 m-0 mt-1 tabular-nums">{{ $financialLedger['net_settled_today'] ?? '₹0' }}</p>
+                        <span class="text-[10.5px] text-slate-400">Payout batches marked paid</span>
                     </div>
                 </div>
             </div>
@@ -1118,11 +1118,11 @@
             <div class="ecc-col-6">
                 <div class="ecc-sec-head">
                     <h2 class="ecc-sec-title">Audit &amp; Operations Timeline</h2>
-                    <span class="ecc-sec-desc">Immutable ledger of executive and automated actions</span>
+                    <span class="ecc-sec-desc">Latest entries from the audit log (System → Audit Log)</span>
                 </div>
 
                 <div class="ecc-card flex flex-col gap-3">
-                    @foreach($activityTimeline as $act)
+                    @forelse($activityTimeline as $act)
                         <div class="flex items-start gap-3 text-xs pb-2 border-b border-slate-100 last:border-0 last:pb-0">
                             <span class="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded flex-none">{{ $act['time'] }}</span>
                             <div class="flex-1">
@@ -1130,7 +1130,9 @@
                                 <span class="text-[10.5px] text-slate-400">Actor: {{ $act['role'] }}</span>
                             </div>
                         </div>
-                    @endforeach
+                    @empty
+                        <p class="text-xs text-slate-400 m-0">No admin actions recorded yet.</p>
+                    @endforelse
                 </div>
             </div>
         </div>

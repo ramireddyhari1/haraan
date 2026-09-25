@@ -127,6 +127,31 @@
         </main>
     </div>
 @endif
+    {{--
+        Every page below builds table rows with `innerHTML` and a template literal. Any
+        value that reaches one of those templates and came from a person — a display
+        name, an email, a venue title — is attacker-controlled: a member can set their
+        own name to `<img src=x onerror=...>` through the app's profile endpoint, and it
+        would then run inside an ADMIN's session on this origin, next to the role and
+        suspend endpoints.
+
+        `esc()` is the single escape hatch those templates interpolate through. It is
+        defined here rather than per page so a new page cannot forget it, and it is
+        declared before @yield('scripts') so it exists by the time any page script runs.
+    --}}
+    <script>
+        // HTML-escape a value for interpolation into an innerHTML template literal.
+        // Returns '' for null/undefined so callers keep their `|| '—'` fallbacks.
+        function esc(value) {
+            if (value === null || value === undefined) return '';
+            return String(value).replace(/[&<>"'`=\/]/g, function (c) {
+                return {
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
+                    "'": '&#39;', '`': '&#96;', '=': '&#61;', '/': '&#47;',
+                }[c];
+            });
+        }
+    </script>
     @yield('scripts')
 </body>
 </html>

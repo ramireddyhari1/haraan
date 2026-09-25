@@ -45,4 +45,22 @@ class PlayerMatchStat extends Model
     {
         return $this->belongsTo(User::class, 'player_id', 'player_id');
     }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (PlayerMatchStat $stat): void {
+            $user = $stat->user ?? $stat->player;
+            $user?->recalculateKpiMetrics();
+        });
+
+        static::deleted(function (PlayerMatchStat $stat): void {
+            $user = $stat->user ?? $stat->player;
+            $user?->recalculateKpiMetrics();
+        });
+    }
 }

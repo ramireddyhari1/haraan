@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\Users;
 
+use App\Filament\Resources\AppUsers\Schemas\UserInfolist;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
 use App\Filament\Resources\Users\Pages\ListUsers;
+use App\Filament\Resources\Users\Pages\ViewUser;
 use App\Filament\Resources\Users\Schemas\UserForm;
 use App\Filament\Resources\Users\Tables\UsersTable;
 use App\Filament\Concerns\ScopesToOrganization;
@@ -34,11 +36,11 @@ class UserResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
-    /** Only internal staff accounts (role-scoped, case-insensitive), on top of org scoping. */
+    /** Only internal staff accounts (role-scoped, indexed), on top of org scoping. */
     public static function getEloquentQuery(): Builder
     {
         return static::scopedOrgQuery()
-            ->whereRaw('upper(role) in (' . implode(',', array_fill(0, count(self::STAFF_ROLES), '?')) . ')', self::STAFF_ROLES);
+            ->whereIn('role', self::STAFF_ROLES);
     }
 
     protected static ?string $recordTitleAttribute = 'name';
@@ -95,6 +97,11 @@ class UserResource extends Resource
         return static::canManageStaff();
     }
 
+    public static function canView($record): bool
+    {
+        return static::canManageStaff();
+    }
+
     public static function canDelete($record): bool
     {
         if ($record->isSuperAdmin() && ! (auth()->user()?->isSuperAdmin() ?? false)) {
@@ -107,6 +114,11 @@ class UserResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return UserForm::configure($schema);
+    }
+
+    public static function infolist(Schema $schema): Schema
+    {
+        return UserInfolist::configure($schema);
     }
 
     public static function table(Table $table): Table
@@ -126,6 +138,7 @@ class UserResource extends Resource
         return [
             'index' => ListUsers::route('/'),
             'create' => CreateUser::route('/create'),
+            'view' => ViewUser::route('/{record}'),
             'edit' => EditUser::route('/{record}/edit'),
         ];
     }

@@ -8,6 +8,7 @@ use App\Models\Booking;
 use App\Models\MessagingOptOut;
 use App\Models\ScheduledMessage;
 use App\Support\MessageContext;
+use App\Support\PlatformRules;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -57,7 +58,7 @@ final class MessageJourneys
      */
     public function enqueue(): array
     {
-        $horizon = Carbon::now()->addDays((int) config('messaging.journeys.horizon_days', 7));
+        $horizon = Carbon::now()->addDays(PlatformRules::int('messaging.horizon_days'));
 
         $bookings = Booking::query()
             ->with(['event', 'venue', 'user', 'ticketType'])
@@ -127,7 +128,7 @@ final class MessageJourneys
         }
 
         $reviewAt = $this->endsAt($booking, $start)
-            ->addHours((int) config('messaging.journeys.review_delay_hours', 3));
+            ->addHours(PlatformRules::int('messaging.review_delay_hours'));
 
         if ($reviewAt->greaterThan($now)) {
             $queued += $this->queue($booking, $context, $phone, 'review.request', $reviewAt) ? 1 : 0;
@@ -254,7 +255,7 @@ final class MessageJourneys
 
         // The master switch. The queue still fills and drains its bookkeeping, but
         // nothing reaches a customer until journeys are deliberately switched on.
-        if (! (bool) config('messaging.journeys.enabled', false)) {
+        if (! PlatformRules::bool('messaging.journeys_enabled')) {
             return 'held';
         }
 
@@ -305,7 +306,7 @@ final class MessageJourneys
 
         // Retry a couple of times before giving up — a Graph API blip shouldn't cost
         // the customer their reminder, but a rejected template will never work.
-        if ($message->attempts >= (int) config('messaging.journeys.max_attempts', 3)) {
+        if ($message->attempts >= PlatformRules::int('messaging.max_attempts')) {
             $message->status = ScheduledMessage::STATUS_FAILED;
         } else {
             $message->send_after = Carbon::now()->addMinutes(15);
@@ -326,8 +327,8 @@ final class MessageJourneys
     private function inQuietHours(): bool
     {
         $hour = (int) Carbon::now()->setTimezone($this->timezone())->format('G');
-        $start = (int) config('messaging.journeys.quiet_hours.start', 21);
-        $end = (int) config('messaging.journeys.quiet_hours.end', 8);
+        $start = PlatformRules::int('messaging.quiet_start_hour');
+        $end = PlatformRules::int('messaging.quiet_end_hour');
 
         // The window wraps midnight, so it's "at or after 9pm OR before 8am".
         return $start <= $end ? ($hour >= $start && $hour < $end) : ($hour >= $start || $hour < $end);

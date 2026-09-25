@@ -8,6 +8,7 @@ use App\Models\PlayerReport;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The moderation queue behind the app's Report action.
@@ -58,6 +59,29 @@ class PlayerReportResource extends Resource
     public static function getNavigationBadgeColor(): ?string
     {
         return 'danger';
+    }
+
+    /**
+     * Base query for the reports list.
+     *
+     * Eager-loads relationships and adds the correlated subquery for
+     * "total reports on this player" here instead of in modifyQueryUsing,
+     * so that the Eloquent Builder always carries its model reference.
+     * This prevents the null-model crash when Filament applies filters
+     * via Builder::where(Closure).
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->with(['reporter', 'reported', 'reviewer'])
+            ->select('player_reports.*')
+            ->selectSub(
+                PlayerReport::query()
+                    ->from('player_reports as inner_reports')
+                    ->selectRaw('count(*)')
+                    ->whereColumn('inner_reports.reported_id', 'player_reports.reported_id'),
+                'total_on_player'
+            );
     }
 
     public static function table(Table $table): Table

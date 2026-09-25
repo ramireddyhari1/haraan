@@ -109,6 +109,15 @@ class OpenCvPitchDetector(
     private var thresholdMode: String = "otsu"
 
     /**
+     * How many of the recent frames actually agreed with each other last time it was asked.
+     *
+     * Used to read "5/5" straight off the window size, which meant the screen could show
+     * full agreement in the same breath as a rejection for disagreement. It now counts
+     * what it says it counts.
+     */
+    private var agreeingFrames = 0
+
+    /**
      * The crease-angled segments the last analysed frame offered, normalised.
      *
      * Published because stumps stand on a crease, and the stump detector has no way of its
@@ -122,7 +131,7 @@ class OpenCvPitchDetector(
         houghSegments = houghSegments,
         creaseSegments = creaseSegments,
         railSegments = railSegments,
-        agreeingFrames = recent.size,
+        agreeingFrames = agreeingFrames,
         averageProcessingMs = if (framesSeen == 0) 0.0 else totalProcessingMs.toDouble() / framesSeen,
         lastRejection = lastRejection,
         thresholdMode = thresholdMode,
@@ -229,19 +238,78 @@ class OpenCvPitchDetector(
      */
     private fun stableQuad(): PitchQuad? {
         if (recent.size < STABILITY_WINDOW) {
-            lastRejection = "waiting: ${recent.size}/$STABILITY_WINDOW frames agree"
+            agreeingFrames = 0
+            lastRejection = "waiting: ${recent.size}/$STABILITY_WINDOW frames"
+            return null
+        }
+
+        /*
+         * THE MAJORITY INTERPRETATION, not the unanimous one.
+         *
+         * This used to demand that all five frames agree on all four corners, and on a
+         * real ground it therefore produced nothing at all. Field test, 2026-09-22: a
+         * concrete strip with clearly painted creases, five frames in the window, and
+         * corner 0 drifting 0.203 against a tolerance of 0.04 - so the corridor was never
+         * once drawn. The cause is not noise. The near crease is chosen as the lowest
+         * crease-angled segment in frame, and when a slab edge, a shadow and the paint are
+         * all in view, that choice FLIPS between frames; one flipped frame in five then
+         * vetoed the other four.
+         *
+         * The original worry was right and is kept: averaging two different readings of a
+         * scene invents a third that matches neither. A median does not have that failure.
+         * It lands ON the majority reading, the minority is identified by its distance
+         * from it and dropped, and the average is taken over the survivors only. When the
+         * disagreement is real rather than an outlier - genuinely two readings, three
+         * frames each way - no majority forms and this still refuses, which is the case
+         * the veto was protecting.
+         */
+        val median = (0 until 4).map { i ->
+            Point2(
+                recent.map { it.corners[i].x }.median(),
+                recent.map { it.corners[i].y }.median(),
+            )
+        }
+
+        // A frame agrees only when EVERY corner of it sits near the median. Per-corner
+        // agreement would admit a quad that matched on three corners and was somewhere
+        // else entirely on the fourth.
+        val agreeing = recent.filter { quad ->
+            (0 until 4).all { i ->
+                max(
+                    abs(quad.corners[i].x - median[i].x),
+                    abs(quad.corners[i].y - median[i].y),
+                ) <= MAX_CORNER_SPREAD
+            }
+        }
+        agreeingFrames = agreeing.size
+
+        if (agreeing.size < MIN_AGREEING_FRAMES) {
+            // Name the corner that is furthest out, because on a ground that is the clue
+            // to which line is flipping.
+            var worstCorner = 0
+            var worstSpread = 0.0
+            for (i in 0 until 4) {
+                val spread = recent.maxOf { quad ->
+                    max(
+                        abs(quad.corners[i].x - median[i].x),
+                        abs(quad.corners[i].y - median[i].y),
+                    )
+                }
+                if (spread > worstSpread) {
+                    worstSpread = spread
+                    worstCorner = i
+                }
+            }
+            lastRejection = "only ${agreeing.size}/${recent.size} frames agree " +
+                "(corner $worstCorner is ${"%.3f".format(worstSpread)} out)"
             return null
         }
 
         val corners = (0 until 4).map { i ->
-            val xs = recent.map { it.corners[i].x }
-            val ys = recent.map { it.corners[i].y }
-            val spread = max(xs.max() - xs.min(), ys.max() - ys.min())
-            if (spread > MAX_CORNER_SPREAD) {
-                lastRejection = "corner $i drifted ${"%.3f".format(spread)} between frames"
-                return null
-            }
-            Point2(xs.average(), ys.average())
+            Point2(
+                agreeing.map { it.corners[i].x }.average(),
+                agreeing.map { it.corners[i].y }.average(),
+            )
         }
 
         val quad = PitchQuad(
@@ -249,14 +317,23 @@ class OpenCvPitchDetector(
             source = QuadSource.DETECTED,
             // Steadier agreement across frames is the only thing here that resembles
             // confidence. It is not calibrated against anything and is named for what it
-            // is: how much the detector agreed with itself.
-            confidence = recent.map { it.confidence }.average().toFloat(),
+            // is: how much the detector agreed with itself. Frames that disagreed now
+            // lower it rather than silently vetoing everything.
+            confidence = (agreeing.map { it.confidence }.average() *
+                (agreeing.size.toDouble() / recent.size)).toFloat(),
         )
         if (!quad.isPlausible()) {
             lastRejection = "the averaged quad is not a pitch shape"
             return null
         }
         return quad
+    }
+
+    /** Middle value, or the mean of the middle two. Unweighted by anything. */
+    private fun List<Double>.median(): Double {
+        val sorted = sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
     }
 
     /** One frame's best guess at the pitch, before any smoothing. */
@@ -508,8 +585,17 @@ class OpenCvPitchDetector(
         /** Frames that must agree before a quad is handed out. */
         const val STABILITY_WINDOW = 5
 
-        /** How far a corner may wander between frames and still count as the same quad. */
+        /** How far a corner may sit from the window's median and still be the same quad. */
         const val MAX_CORNER_SPREAD = 0.04
+
+        /**
+         * How many of [STABILITY_WINDOW] frames must agree before a quad is handed out.
+         *
+         * Three of five: a real majority, so a single frame that locked onto a slab edge
+         * or a shadow cannot carry the vote, and two frames of genuine disagreement cannot
+         * be waved through either.
+         */
+        const val MIN_AGREEING_FRAMES = 3
 
         const val HOUGH_THRESHOLD = 60
         const val MIN_LINE_FRACTION = 0.12

@@ -61,5 +61,18 @@
                 <data android:scheme="haraan" android:host="vision-replay" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.haraan.app.vision.BowlerLiveTestActivity"
+            android:exported="true"
+            android:label="Bowler live test"
+            android:keepScreenOn="true"
+            android:theme="@style/Theme.Haraan.Camera">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="bowler-test" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

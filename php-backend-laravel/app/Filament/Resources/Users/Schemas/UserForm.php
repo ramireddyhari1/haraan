@@ -31,20 +31,42 @@ class UserForm
                             ->unique(ignoreRecord: true),
                         TextInput::make('phone')
                             ->tel(),
+                        // Only ever offered when creating a STAFF account, where an operator
+                        // has to set the first credential. Editing an existing account never
+                        // shows it: this form is shared with the app-user resource, and a
+                        // silent "set any member's password" field there is an account
+                        // takeover with no notification and no extra confirmation. Resetting
+                        // an existing password is a deliberate, audited action instead —
+                        // see EditAppUser / EditUser.
                         TextInput::make('password')
                             ->password()
                             ->revealable()
-                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->required()
+                            ->minLength(10)
+                            ->visible(fn (string $operation): bool => $operation === 'create')
                             ->dehydrated(fn (?string $state): bool => filled($state))
-                            ->helperText('Set a password for the account. When editing, leave blank to keep the current one.')
+                            ->helperText('The initial password for this staff account. At least 10 characters.')
                             ->columnSpanFull(),
                         Select::make('role')
                             ->label('Role / access')
-                            ->options(self::roleOptions())
+                            // The record's existing role is always listed, even when the
+                            // current operator may not grant it — otherwise opening an OPS
+                            // colleague's record as a non-super would render an empty
+                            // select and silently blank their role on save.
+                            ->options(fn (?\App\Models\User $record): array => self::roleOptions($record))
+                            // Display is not authorization. A crafted request can post any
+                            // value, so the grantable set is re-checked server-side.
+                            ->rule(fn (?\App\Models\User $record) => \Illuminate\Validation\Rule::in(
+                                array_keys(self::roleOptions($record))
+                            ))
+                            ->disabled(fn (?\App\Models\User $record): bool => self::roleIsLocked($record))
+                            ->dehydrated(fn (?\App\Models\User $record): bool => ! self::roleIsLocked($record))
                             ->required()
                             ->native(false)
                             ->default('OPS')
-                            ->helperText('Operations / Finance / Marketing can sign into this control panel. "App user" has no admin access.'),
+                            ->helperText(fn (?\App\Models\User $record): string => self::roleIsLocked($record)
+                                ? 'Only an administrator can change a console role.'
+                                : 'Operations / Finance / Marketing can sign into this control panel. "App user" has no admin access.'),
                         Select::make('status')
                             ->options(['ACTIVE' => 'Active', 'SUSPENDED' => 'Suspended'])
                             ->required()
@@ -99,29 +121,64 @@ class UserForm
     }
 
     /**
-     * Roles selectable in the form. The super-admin roles (ADMIN/COADMIN) are only offered to a
-     * super-admin, so a non-super staff manager can't grant or elevate someone to full access.
+     * Roles selectable in the form.
+     *
+     * Granting a role that opens /control is itself an escalation, so only a super-admin
+     * may do it. Previously ADMIN/COADMIN were hidden from non-supers but OPS/FINANCE/
+     * MARKETING were not — which let an OPS operator mint a Finance console account, or
+     * promote themselves via a second account. That was also inconsistent with the JSON
+     * API, which has always refused to let a non-admin touch privileged roles
+     * ({@see \App\Http\Controllers\Api\UsersController::updateRole}). The two paths write
+     * the same column and now enforce the same rule.
      *
      * @return array<string, string>
      */
-    private static function roleOptions(): array
+    private static function roleOptions(?\App\Models\User $record = null): array
     {
+        // Roles with no console access — safe for any staff manager to assign.
         $roles = [
-            'OPS' => 'Operations — venues, events, bookings',
-            'FINANCE' => 'Finance — payouts & reports',
-            'MARKETING' => 'Marketing — ads, feed, content',
             'PARTNER' => 'Partner — venue / host owner (partner app)',
             'WORKER' => 'Desk staff / worker',
             'USER' => 'App user — no admin access',
         ];
 
         if (auth()->user()?->isSuperAdmin() ?? false) {
-            $roles = [
-                'ADMIN' => 'Admin — full control-panel access',
-                'COADMIN' => 'Co-admin — full control-panel access',
-            ] + $roles;
+            $roles = self::CONSOLE_ROLES + $roles;
+        }
+
+        // Keep the record's own role visible so the field renders what it actually holds.
+        // It is paired with the disabled/dehydrated guards on the field, so showing it
+        // does not make it assignable.
+        $current = strtoupper((string) ($record->role ?? ''));
+        if ($current !== '' && ! array_key_exists($current, $roles)) {
+            $roles[$current] = (self::CONSOLE_ROLES[$current] ?? ucfirst(strtolower($current))).' (current)';
         }
 
         return $roles;
+    }
+
+    /** Roles that grant /control access. Only a super-admin may hand one out. */
+    private const CONSOLE_ROLES = [
+        'ADMIN' => 'Admin — full control-panel access',
+        'COADMIN' => 'Co-admin — full control-panel access',
+        'OPS' => 'Operations — venues, events, bookings',
+        'FINANCE' => 'Finance — payouts & reports',
+        'MARKETING' => 'Marketing — ads, feed, content',
+    ];
+
+    /**
+     * True when this operator must not rewrite this record's role: a non-super-admin
+     * looking at someone who already holds a console role. Dehydration is switched off
+     * alongside the disable, so the field is not merely greyed out in the browser — the
+     * value never reaches the save.
+     */
+    private static function roleIsLocked(?\App\Models\User $record): bool
+    {
+        if (auth()->user()?->isSuperAdmin() ?? false) {
+            return false;
+        }
+
+        return $record !== null
+            && array_key_exists(strtoupper((string) $record->role), self::CONSOLE_ROLES);
     }
 }

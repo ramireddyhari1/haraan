@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
+use App\Support\PlatformRules;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -29,6 +31,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 final class TicketType extends Model
 {
+    use AuditsAdminChanges;
+
+    /** Only changes to these fields are audit-logged (see AuditsAdminChanges). */
+    protected array $auditedAttributes = ['price', 'capacity', 'pricing_phases', 'sales_start', 'sales_end'];
+
     use HasFactory;
 
     protected $fillable = [
@@ -86,7 +93,8 @@ final class TicketType extends Model
         $min = $this->bulk_booking ? max(1, (int) ($this->min_per_order ?? 1)) : 1;
         $max = $this->bulk_booking && $this->max_per_order !== null
             ? max($min, (int) $this->max_per_order)
-            : 25;
+            // Platform default for ordinary tiers — /control → Platform rules → Bookings.
+            : PlatformRules::int('bookings.default_max_per_tier');
 
         return ['min' => $min, 'max' => $max];
     }
@@ -218,12 +226,15 @@ final class TicketType extends Model
         return $rows;
     }
 
-    /** True when the tier is inside its sales window (or has none). */
-    public function isOnSale(): bool
+    /**
+     * True when the tier is inside its sales window (or has none). [earlyAccessHours] opens the
+     * window that many hours sooner — a member's early-access perk; the close is unchanged.
+     */
+    public function isOnSale(int $earlyAccessHours = 0): bool
     {
         $now = now();
 
-        if ($this->sales_start !== null && $now->lt($this->sales_start)) {
+        if ($this->sales_start !== null && $now->lt($this->sales_start->copy()->subHours(max(0, $earlyAccessHours)))) {
             return false;
         }
 
@@ -232,6 +243,12 @@ final class TicketType extends Model
         }
 
         return true;
+    }
+
+    /** On sale for this buyer only because of their early-access head start. */
+    public function openEarlyFor(int $earlyAccessHours): bool
+    {
+        return $earlyAccessHours > 0 && ! $this->isOnSale() && $this->isOnSale($earlyAccessHours);
     }
 
     public function event(): BelongsTo

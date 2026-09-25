@@ -185,19 +185,19 @@
 
 				tr.innerHTML = `
 					<td>
-						<div style="font-weight: 700; font-size: 14px; color: var(--text);">${ev.title}</div>
+						<div style="font-weight: 700; font-size: 14px; color: var(--text);">${esc(ev.title)}</div>
 						<div style="font-size: 11px; color: var(--muted); margin-top: 2px;">
-							<span style="text-transform: uppercase; font-weight: 600; color: var(--brand); margin-right: 6px;">${ev.category || 'General'}</span>
-							• <span style="margin-left: 6px;">${ev.venue || '—'}</span>
+							<span style="text-transform: uppercase; font-weight: 600; color: var(--brand); margin-right: 6px;">${esc(ev.category) || 'General'}</span>
+							• <span style="margin-left: 6px;">${esc(ev.venue) || '—'}</span>
 						</div>
 					</td>
 					<td>
-						<span class="muted-chip" style="background:${badgeBg}; color:${badgeColor}; border:none; padding:4px 10px; font-size:11px;">${statusVal}</span>
+						<span class="muted-chip" style="background:${badgeBg}; color:${badgeColor}; border:none; padding:4px 10px; font-size:11px;">${esc(statusVal)}</span>
 					</td>
 					<td>
-						<div style="font-weight: 600; font-size: 13px;">${ev.tickets_sold || 0} sold</div>
+						<div style="font-weight: 600; font-size: 13px;">${esc(ev.tickets_sold) || 0} sold</div>
 						<div style="font-size: 11px; color: var(--muted); margin-top: 2px;">
-							Cap: ${ev.total_slots > 0 ? ev.total_slots : 'Unlimited'}
+							Cap: ${ev.total_slots > 0 ? esc(ev.total_slots) : 'Unlimited'}
 						</div>
 					</td>
 					<td>
@@ -209,8 +209,8 @@
 						</div>
 					</td>
 					<td>
-						<div style="font-weight: 600; font-size: 13px; color: #334155;">${dateStr}</div>
-						<div style="font-size: 11px; color: var(--muted); margin-top: 2px;">${ev.time || '—'}</div>
+						<div style="font-weight: 600; font-size: 13px; color: #334155;">${esc(dateStr)}</div>
+						<div style="font-size: 11px; color: var(--muted); margin-top: 2px;">${esc(ev.time) || '—'}</div>
 					</td>
 				`;
 

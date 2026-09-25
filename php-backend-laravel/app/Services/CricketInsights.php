@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\LiveMatch;
+use App\Support\AiGate;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -484,6 +485,11 @@ final class CricketInsights
 
         [$url, $headers] = $this->endpoint($model);
         if ($url === null) {
+            return null;
+        }
+
+        // /control → Platform rules → AI: switched off or over budget → numbers only.
+        if (! AiGate::attempt(AiGate::MATCH_INSIGHTS)) {
             return null;
         }
 

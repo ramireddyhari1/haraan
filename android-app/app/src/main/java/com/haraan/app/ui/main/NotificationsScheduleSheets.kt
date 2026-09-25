@@ -22,6 +22,7 @@ import com.haraan.app.data.NotificationInbox
 import com.haraan.app.data.NotificationItem
 import com.haraan.app.data.NotificationRepository
 import com.haraan.app.data.TokenStore
+import com.haraan.app.ui.pressable
 import com.haraan.app.ui.theme.HaraanColors
 
 /**
@@ -72,7 +73,7 @@ fun NotificationsSheet(onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
                 ) {
                     items(current.items, key = { it.id }) { item ->
-                        NotificationRow(item)
+                        NotificationRow(item, onOpen = item.deepLink?.let { link -> { openLink(context, link, onDismiss) } })
                     }
                 }
             }
@@ -90,11 +91,25 @@ private fun NotificationsLoading() {
     }
 }
 
+/**
+ * A notice with a link opens it the way its push would have: a web URL in the browser, an
+ * in-app link through [com.haraan.app.push.DeepLinkState] (e.g. a player's match rewards).
+ */
+private fun openLink(context: android.content.Context, link: String, onDismiss: () -> Unit) {
+    if (com.haraan.app.push.DeepLinks.isWebUrl(link)) {
+        com.haraan.app.ui.openExternalUrl(context, link)
+    } else {
+        com.haraan.app.push.DeepLinkState.set(link)
+    }
+    onDismiss()
+}
+
 @Composable
-private fun NotificationRow(item: NotificationItem) {
+private fun NotificationRow(item: NotificationItem, onOpen: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onOpen != null) Modifier.pressable(onClick = onOpen) else Modifier)
             .clip(RoundedCornerShape(14.dp))
             .background(if (item.read) Color(0xFFF6F8FB) else Color(0xFFEAF2FF))
             .padding(14.dp),

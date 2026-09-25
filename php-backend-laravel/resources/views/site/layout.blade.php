@@ -30,7 +30,7 @@
     <link rel="manifest" href="{{ asset('site.webmanifest') }}?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Poppins:wght@800;900&family=Inter:wght@300..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Poppins:wght@800;900&family=Inter:wght@300..800&display=swap" rel="stylesheet">
     @php
         // Cache-bust assets by file mtime: browsers can cache them, but a new
         // deploy (changed file) yields a new URL. Beats ?v=time() which never caches.
@@ -268,7 +268,7 @@
                     {{-- Inline SVG (was a lord-icon with hardcoded black) so it inherits
                          the section accent — blue on Events, green on Pulse — and drops
                          the cdn.lordicon.com dependency. --}}
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="11" cy="11" r="7"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
@@ -847,6 +847,9 @@
         <script src="{{ $assetVer('js/firebase-phone-auth.js') }}"></script>
     @endif
 
+    <script>
+        window.HaraanGoogleMapsKey = @json(config('services.google_maps.key'));
+    </script>
     <script src="{{ $assetVer('js/site.js') }}"></script>
     <script src="{{ $assetVer('js/for-you-motion.js') }}" defer></script>
     @if(session('show_login'))

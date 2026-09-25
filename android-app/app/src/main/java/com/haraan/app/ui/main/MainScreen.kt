@@ -539,10 +539,17 @@ internal fun MainAppContainer(
   val pendingDeepLink by com.haraan.app.push.DeepLinkState.pending.collectAsState()
   LaunchedEffect(pendingDeepLink) {
     val link = pendingDeepLink ?: return@LaunchedEffect
-    when (com.haraan.app.push.DeepLinks.parse(link)) {
+    when (val target = com.haraan.app.push.DeepLinks.parse(link)) {
       com.haraan.app.push.DeepLinkTarget.Inbox -> { selectedTab = 0; showNotifications = true }
       com.haraan.app.push.DeepLinkTarget.Events -> { selectedTab = 0; activeSubTab = "Events" }
       com.haraan.app.push.DeepLinkTarget.GameHub -> { selectedTab = 0; activeSubTab = "GameHub" }
+      is com.haraan.app.push.DeepLinkTarget.MatchRewards -> com.haraan.app.data.rewards.RewardsNav.open(target.matchId)
+      com.haraan.app.push.DeepLinkTarget.CreateMatch -> {
+        // "Play again": open the ActionBoard; it opens its create wizard (ranked-access gate included).
+        selectedTab = 0
+        showActionBoardDetail = true
+        com.haraan.app.ui.matches.ActionBoardNav.requestCreate()
+      }
       null -> {} // unknown link: just bring the app to the foreground
     }
     com.haraan.app.push.DeepLinkState.consume()
@@ -1834,9 +1841,9 @@ private fun GameHubTabScreen(
         VenueItem(
           id = c.id, title = c.name, location = c.location, rating = c.rating,
           category = c.category, sports = c.sports, price = c.price,
-          imageUrl = c.image ?: venueCategoryImage(c.category),
-          images = c.images.ifEmpty { listOf(c.image ?: venueCategoryImage(c.category)) },
-          tagline = c.tagline, distance = c.distance, availableTonight = true,
+          imageUrl = c.image.orEmpty(),
+          images = c.images.ifEmpty { if (c.image.isNullOrBlank()) emptyList() else listOf(c.image) },
+          tagline = c.tagline, distance = c.distance,
           latitude = c.latitude, longitude = c.longitude,
         )
       } ?: emptyList()
@@ -1913,8 +1920,11 @@ private fun GameHubTabScreen(
       }
       .partition { it.second != null }
 
-    val nearby = pinned
-      .filter { searchRadiusKm <= 0 || it.second!! <= searchRadiusKm } // 0 = Any distance
+    val withinRadius = pinned.filter { searchRadiusKm <= 0 || it.second!! <= searchRadiusKm }
+    // If no venues within 30 km, expand gracefully up to 50 km so venues around ~30-35 km are not hidden
+    val nearbyList = if (withinRadius.isNotEmpty() || searchRadiusKm <= 0) withinRadius
+      else pinned.filter { it.second!! <= 50.0 }
+    val nearby = nearbyList
       .sortedBy { it.second }
       .map { (v, km) -> v.copy(distance = formatKm(km!!)) }
 
@@ -2270,7 +2280,7 @@ private fun GameHubTabScreen(
     // complete, location-ordered list the user scrolls straight into — no separate section breaks
     // the venue flow. The reel's picks do appear again in the full list, on purpose: the list is
     // the catalogue, and a venue vanishing from it because it was highlighted reads as missing.
-    val popularVenues = filteredVenues.sortedByDescending { it.rating.toFloatOrNull() ?: 0f }.take(5)
+    val popularVenues = filteredVenues.filter { (it.rating.toFloatOrNull() ?: 0f) > 0f }.sortedByDescending { it.rating.toFloatOrNull() ?: 0f }.take(5)
     // distinctBy guards the lazy keys below — a duplicated id from the API must not crash the tab.
     val allVenues = filteredVenues.distinctBy { it.id }
 
@@ -3276,7 +3286,6 @@ private data class VenueItem(
   val images: List<String> = listOf(imageUrl),
   val tagline: String,
   val distance: String,
-  val availableTonight: Boolean = true,
   // Coordinates for real GPS-distance ranking + radius filtering. Null when the venue
   // isn't pinned yet — it then keeps the static [distance] string and dodges the radius cut.
   val latitude: Double? = null,
@@ -3298,14 +3307,6 @@ private fun formatKm(km: Double): String = when {
   km < 1.0 -> "${(km * 1000).toInt().coerceAtLeast(50)} m"
   km < 10.0 -> "%.1f km".format(km)
   else -> "${km.toInt()} km"
-}
-
-// Fallback photo when an admin-created venue has no image uploaded yet.
-private fun venueCategoryImage(category: String): String = when {
-  category.contains("Cricket", true) -> "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=600&q=80"
-  category.contains("Football", true) -> "https://images.unsplash.com/photo-1522778526097-ce0a22ceb253?w=600&q=80"
-  category.contains("Badminton", true) -> "https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=600&q=80"
-  else -> "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=600&q=80"
 }
 
 /**
@@ -3864,6 +3865,8 @@ private fun CrexMatchesScreen(
   var openThread by remember { mutableStateOf<com.haraan.app.data.ChatThread?>(null) }
   val dmRepository = remember { com.haraan.app.data.DirectMessageRepository() }
   var showCreateWizard by remember { mutableStateOf(false) }
+  // Asked for from outside (post-match "Play again"): open the wizard through the same gate.
+  val createRequested by com.haraan.app.ui.matches.ActionBoardNav.createRequested.collectAsState()
   // Which follower/following list is open, if any: (playerId, relation, display name).
   // The endpoints shipped with the original follow work and nothing ever opened them.
   var followList by remember {
@@ -4136,6 +4139,14 @@ private fun CrexMatchesScreen(
             Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
         }
       }
+    }
+  }
+
+  // "Play again" from the post-match screen: the same gated path as the Create button.
+  LaunchedEffect(createRequested) {
+    if (createRequested) {
+      com.haraan.app.ui.matches.ActionBoardNav.consumeCreate()
+      requireRankedAccess { showCreateWizard = true }
     }
   }
 
@@ -4787,7 +4798,10 @@ private fun CrexMatchesScreen(
         },
         finishMatch = {
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token != null) matchRepository.completeMatch(token, setup.matchId)
+          if (token != null && matchRepository.completeMatch(token, setup.matchId)) {
+            // The scorer's post-match rewards; everyone else in the squads gets a push.
+            com.haraan.app.data.rewards.RewardsNav.open(setup.matchId)
+          }
         },
         onDone = { footballSetup = null },
         modifier = Modifier.statusBarsPadding(),

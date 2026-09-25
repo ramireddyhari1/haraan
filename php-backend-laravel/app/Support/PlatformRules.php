@@ -60,6 +60,8 @@ final class PlatformRules
 
     private const TAX_TYPES = ['none' => 'No tax', 'flat' => 'Flat ₹ amount', 'percent' => 'Percentage of ticket subtotal (after discount)'];
 
+    private const VENUE_TAX_TYPES = ['none' => 'No tax', 'flat' => 'Flat ₹ amount per order', 'percent' => 'Percentage of slot subtotal (after discount)'];
+
     private const PAYERS = ['customer' => 'Customer pays (added to the order)', 'host' => 'Host pays (deducted from payout)'];
 
     /**
@@ -100,6 +102,9 @@ final class PlatformRules
         'fees.event_tax_value' => ['section' => 'fees', 'type' => self::TYPE_FLOAT, 'default' => 0.0, 'min' => 0, 'max' => 100000, 'label' => 'Event tax: amount or %', 'help' => ''],
         'fees.event_tax_label' => ['section' => 'fees', 'type' => self::TYPE_TEXT, 'default' => 'GST', 'max' => 30, 'label' => 'Tax name on the bill', 'help' => 'Used for every event, including ones with their own tax rate.'],
         'fees.venue_commission_percent' => ['section' => 'fees', 'type' => self::TYPE_FLOAT, 'default' => 0.0, 'min' => 0, 'max' => 50, 'label' => 'Pulse commission (%)', 'help' => 'Haraan’s share of each venue booking paid online, deducted from the venue’s payout. Walk-ins at the desk are never charged.'],
+        'fees.venue_tax_type' => ['section' => 'fees', 'type' => self::TYPE_SELECT, 'options' => self::VENUE_TAX_TYPES, 'default' => 'none', 'label' => 'Pulse (venue) tax', 'help' => 'Added to court bookings paid online, on the app and the website. Haraan collects it and it is NOT paid out to the venue. Walk-ins at the desk are never taxed here. Apps older than the release that shows it will still charge it, but won’t list it before payment.'],
+        'fees.venue_tax_value' => ['section' => 'fees', 'type' => self::TYPE_FLOAT, 'default' => 0.0, 'min' => 0, 'max' => 100000, 'label' => 'Pulse tax: amount or %', 'help' => 'e.g. 18 for 18% GST.'],
+        'fees.venue_tax_label' => ['section' => 'fees', 'type' => self::TYPE_TEXT, 'default' => 'GST', 'max' => 30, 'label' => 'Pulse tax name on the bill', 'help' => ''],
 
         // ── Bookings & holds ────────────────────────────────────────────────────────
         'bookings.event_hold_minutes' => ['section' => 'bookings', 'type' => self::TYPE_INT, 'default' => 15, 'min' => 10, 'max' => 60, 'label' => 'Unpaid ticket hold (minutes)', 'help' => 'Seats in an unpaid order are held this long, then go back on sale. Keep it longer than a UPI payment takes.'],

@@ -21,7 +21,7 @@ async function loadPayments(q=''){
 		const tr = document.createElement('tr');
 		const user = p.user ? p.user.name : '—';
 		const event = p.event ? p.event.title : '—';
-		tr.innerHTML = `<td>${p.id}</td><td>${user}</td><td>${event}</td><td>${p.total_amount}</td><td>${p.status}</td><td><button onclick="markPaid(${p.id})">Mark Paid</button></td>`;
+		tr.innerHTML = `<td>${esc(p.id)}</td><td>${esc(user)}</td><td>${esc(event)}</td><td>${esc(p.total_amount)}</td><td>${esc(p.status)}</td><td><button onclick="markPaid(${Number(p.id)})">Mark Paid</button></td>`;
 		tbody.appendChild(tr);
 	});
 }

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Services\RazorpayBilling;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -49,6 +50,17 @@ class RazorpayWebhookController extends Controller
 
         if (! is_array($payload) || ! isset($payload['event'])) {
             return response('', 400);
+        }
+
+        $eventId = trim((string) $request->header('X-Razorpay-Event-Id', ''));
+
+        if ($eventId !== '') {
+            $cacheKey = 'razorpay_webhook_event:' . md5($eventId);
+            if (! Cache::add($cacheKey, true, 86400)) {
+                Log::info('Razorpay webhook duplicate event ignored: ' . $eventId);
+
+                return response('', 200);
+            }
         }
 
         try {

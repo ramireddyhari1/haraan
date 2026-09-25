@@ -246,6 +246,7 @@ private fun BookingSheet(
                             admits = tier.admits,
                             remaining = tier.remaining,
                             phases = tier.phases,
+                            earlyAccess = tier.earlyAccess,
                             quantity = quantities[tier.id] ?: 0,
                             onQuantityChange = { quantities[tier.id] = it },
                             haptics = haptics,
@@ -353,6 +354,8 @@ private fun TicketRow(
     quantity: Int,
     onQuantityChange: (Int) -> Unit,
     haptics: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    /** Open to this buyer only through their plan's early ticket access. */
+    earlyAccess: Boolean = false,
 ) {
     val soldOut = remaining == 0
     val maxQty = remaining?.coerceAtLeast(0) ?: 20
@@ -371,6 +374,20 @@ private fun TicketRow(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(Modifier.weight(1f)) {
+                if (earlyAccess) {
+                    // The server opened this tier for this member ahead of the public sale.
+                    Text(
+                        text = "Early access",
+                        color = HaraanColors.EventsBlue,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .padding(bottom = 4.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(HaraanColors.AccentTint)
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                    )
+                }
                 Text(
                     text = name.uppercase(),
                     style = HaraanTypography.TitleMedium.copy(

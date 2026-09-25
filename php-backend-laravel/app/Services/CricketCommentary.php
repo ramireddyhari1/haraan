@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\LiveMatch;
+use App\Support\AiGate;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -139,6 +140,10 @@ final class CricketCommentary
             // rate-limits per minute and a busy over fires several balls in a row. One
             // short wait clears most of them. Only transient statuses are retried — a 403
             // or a 404 will say the same thing however many times it is asked.
+            // /control → Platform rules → AI: switched off or over today's budget → no line.
+            if (! AiGate::attempt(AiGate::MATCH_COMMENTARY)) {
+                return null;
+            }
             $response = null;
             foreach ([0, 1] as $attempt) {
                 if ($attempt > 0) {

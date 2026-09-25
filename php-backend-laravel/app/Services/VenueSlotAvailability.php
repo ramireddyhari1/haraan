@@ -38,8 +38,9 @@ final class VenueSlotAvailability
     /**
      * @return list<array{id:int, state:string, courts_free:int, courts_total:int}>
      */
-    public function forDate(Venue $venue, Carbon $date): array
+    public function forDate(Venue $venue, Carbon $date, int $duration = 1, ?int $courtId = null): array
     {
+        $duration = max(1, $duration);
         $day = $date->toDateString();
         $slots = VenueSlot::query()->where('venue_id', $venue->id)->get();
 
@@ -48,7 +49,11 @@ final class VenueSlotAvailability
             || ! $venue->isOpenOn($date)
             || VenueBlockedDate::query()->where('venue_id', $venue->id)->whereDate('date', $day)->exists();
 
-        $courts = VenueCourt::query()->where('venue_id', $venue->id)->where('is_active', true)->get();
+        $courtsQuery = VenueCourt::query()->where('venue_id', $venue->id)->where('is_active', true);
+        if ($courtId !== null) {
+            $courtsQuery->where('id', $courtId);
+        }
+        $courts = $courtsQuery->get();
         // Composite/sub-courts share floor space: booking the full turf takes its halves.
         $related = $courts->mapWithKeys(fn (VenueCourt $c) => [$c->id => $c->allRelatedCourtIds()]);
 
@@ -61,7 +66,7 @@ final class VenueSlotAvailability
 
         $blocks = $dayClosed ? collect() : VenueBlock::query()->applyingOn($venue->id, $date)->get();
 
-        return $slots->map(function (VenueSlot $slot) use ($dayClosed, $courts, $related, $bookings, $blocks): array {
+        return $slots->map(function (VenueSlot $slot) use ($dayClosed, $courts, $related, $bookings, $blocks, $duration): array {
             $eligible = $courts->filter(fn (VenueCourt $c) => $slot->allowsCourt($c))->values();
             $total = max(1, $eligible->count());
 
@@ -70,7 +75,7 @@ final class VenueSlotAvailability
             }
 
             $start = BookingService::timeToMinutes($slot->time);
-            $end = $start !== null ? $start + 60 : null;
+            $end = $start !== null ? $start + ($duration * 60) : null;
 
             // Venues that don't model courts (or whose courts can't host this slot's sports)
             // book by slot alone — the legacy one-booking-per-slot rule checkout still applies.
@@ -116,7 +121,7 @@ final class VenueSlotAvailability
                 continue;
             }
             $bs = BookingService::timeToMinutes($b->start_time);
-            $be = BookingService::timeToMinutes($b->end_time);
+            $be = BookingService::endMinutes($b->end_time);
 
             // A window we can't reason about holds the whole day — checkout refuses it too.
             if ($start === null || $end === null || $bs === null || $be === null) {
@@ -142,7 +147,7 @@ final class VenueSlotAvailability
                 return true;
             }
             $bs = BookingService::timeToMinutes($block->start_time);
-            $be = BookingService::timeToMinutes($block->end_time);
+            $be = BookingService::endMinutes($block->end_time);
             if ($bs === null || $be === null || ($start < $be && $end > $bs)) {
                 return true;
             }

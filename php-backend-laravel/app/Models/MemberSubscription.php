@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Services\Membership\MemberEntitlements;
+use App\Support\Membership\MembershipSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -192,7 +193,7 @@ final class MemberSubscription extends Model
             return $this->current_period_end->greaterThan($now);
         }
 
-        $graceHours = max(0, (int) config('membership.grace_hours', 48));
+        $graceHours = max(0, MembershipSettings::int('grace_hours'));
 
         return $this->current_period_end->copy()->addHours($graceHours)->greaterThan($now);
     }

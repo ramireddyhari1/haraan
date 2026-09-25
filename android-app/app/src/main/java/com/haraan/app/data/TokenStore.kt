@@ -19,8 +19,34 @@ object TokenStore {
 
   fun isGuest(token: String?): Boolean = token == GUEST_TOKEN
 
-  /** True only for a real signed-in session — guest and empty both fail this. */
-  fun isSignedIn(token: String?): Boolean = !token.isNullOrBlank() && !isGuest(token)
+  /**
+   * Returns true if the token is a JWT whose 'exp' claim is in the past.
+   */
+  fun isTokenExpired(token: String?): Boolean {
+    if (token.isNullOrBlank() || isGuest(token)) return true
+    return try {
+      val parts = token.split(".")
+      if (parts.size != 3) return false
+      val payloadJson = String(
+        android.util.Base64.decode(
+          parts[1],
+          android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+        )
+      )
+      val json = org.json.JSONObject(payloadJson)
+      val exp = json.optLong("exp", 0L)
+      if (exp > 0) {
+        exp * 1000L < (System.currentTimeMillis() - 10000L)
+      } else {
+        false
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  /** True only for a real signed-in session — guest, expired, and empty all fail this. */
+  fun isSignedIn(token: String?): Boolean = !token.isNullOrBlank() && !isGuest(token) && !isTokenExpired(token)
 
   fun saveToken(context: Context, token: String) {
     try {

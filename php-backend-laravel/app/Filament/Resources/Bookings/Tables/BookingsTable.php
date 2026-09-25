@@ -80,6 +80,11 @@ class BookingsTable
                     ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
                         ? $query->whereRaw('lower(status) = ?', [strtolower($data['value'])])
                         : $query),
+                SelectFilter::make('user_id')
+                    ->label('Customer')
+                    ->relationship('user', 'name')
+                    ->searchable()
+                    ->preload(),
                 SelectFilter::make('booking_type')
                     ->label('Type')
                     ->options(['venue' => 'Turf', 'event' => 'Event'])

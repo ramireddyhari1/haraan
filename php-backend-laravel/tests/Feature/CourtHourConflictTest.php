@@ -10,6 +10,7 @@ use App\Models\Venue;
 use App\Models\VenueBlock;
 use App\Models\VenueCourt;
 use App\Services\BookingService;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -44,6 +45,7 @@ class CourtHourConflictTest extends TestCase
             'price' => 1400,
             'is_active' => true,
             'is_bookable' => true,
+            'city' => 'Hyderabad', 'images' => ['venues/test.jpg'], 'status' => 'published',
         ]);
 
         $this->turfA = VenueCourt::create([
@@ -257,5 +259,51 @@ class CourtHourConflictTest extends TestCase
         } catch (ConflictHttpException $e) {
             $this->assertStringContainsString('Surface re-lay', $e->getMessage());
         }
+    }
+
+    // ------------------------------------------------------ draft venues & the desk
+
+    public function test_a_draft_venue_refuses_the_app_but_the_desk_still_takes_walk_ins(): void
+    {
+        $this->venue->unpublish();
+
+        try {
+            $this->book(19);
+            $this->fail('A draft venue must not take customer bookings.');
+        } catch (NotFoundHttpException) {
+            // expected: unpublished venues are invisible to the public checkout
+        }
+
+        $slot = $this->venue->slots()->firstOrFail();
+
+        $walkIn = $this->service->createOfflineVenueBooking(
+            $this->deskOwner(), $this->venue->id, $slot->id, $this->date(), 'Kiran Varma', '+91 90000 55412', $this->turfA->id,
+        );
+
+        $this->assertSame('CONFIRMED', $walkIn->status);
+        $this->assertSame('offline', $walkIn->channel);
+    }
+
+    public function test_the_desk_still_respects_court_conflicts_on_a_draft_venue(): void
+    {
+        $this->venue->unpublish();
+        $this->seedBooking();
+
+        $slot = $this->venue->slots()->create([
+            'day' => now()->addDay()->format('D'), 'time' => '19:00', 'is_available' => true, 'capacity' => 1,
+        ]);
+
+        $this->expectException(ConflictHttpException::class);
+        $this->service->createOfflineVenueBooking(
+            $this->deskOwner(), $this->venue->id, $slot->id, $this->date(), 'Kiran Varma', '+91 90000 55412', $this->turfA->id,
+        );
+    }
+
+    private function deskOwner(): User
+    {
+        return User::create([
+            'name' => 'Desk Owner', 'email' => 'desk@haraan.test', 'password' => Hash::make('secret123'),
+            'role' => 'PARTNER', 'partner_type' => 'venue', 'status' => 'active',
+        ]);
     }
 }

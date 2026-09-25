@@ -23,7 +23,7 @@ async function loadBookings(q=''){
 		const tr = document.createElement('tr');
 		const user = b.user ? b.user.name : '—';
 		const event = b.event ? b.event.title : '—';
-		tr.innerHTML = `<td>${b.id}</td><td>${user}</td><td>${event}</td><td>${b.quantity}</td><td>${b.total_amount}</td><td>${b.status}</td><td><button onclick="updateStatus(${b.id},'PAID')">Mark Paid</button> <button onclick="updateStatus(${b.id},'CANCELLED')">Cancel</button></td>`;
+		tr.innerHTML = `<td>${esc(b.id)}</td><td>${esc(user)}</td><td>${esc(event)}</td><td>${esc(b.quantity)}</td><td>${esc(b.total_amount)}</td><td>${esc(b.status)}</td><td><button onclick="updateStatus(${Number(b.id)},'PAID')">Mark Paid</button> <button onclick="updateStatus(${Number(b.id)},'CANCELLED')">Cancel</button></td>`;
 		tbody.appendChild(tr);
 	});
 }

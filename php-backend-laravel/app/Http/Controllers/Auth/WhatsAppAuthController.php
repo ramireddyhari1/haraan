@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\WhatsAppService;
+use App\Support\PlatformRules;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -32,11 +33,11 @@ class WhatsAppAuthController extends Controller
 
         // Find or create user
         $user = User::where('phone', $phone)->first();
-        if (!$user) {
+        if (! $user) {
             // Auto-create account for new users
             $user = User::create([
-                'name' => 'User ' . substr($phone, -4),
-                'email' => $phone . '@whatsapp.local', // Dummy email as it is required
+                'name' => 'User '.substr($phone, -4),
+                'email' => $phone.'@whatsapp.local', // Dummy email as it is required
                 'phone' => $phone,
                 'password' => Hash::make(Str::random(16)),
                 'role' => 'user',
@@ -45,15 +46,17 @@ class WhatsAppAuthController extends Controller
         }
 
         // Generate 6-digit OTP
-        $otp = rand(100000, 999999);
-        
-        // Store OTP in session (expires in 5 mins)
+        $otp = random_int(100000, 999999);
+        $ttl = PlatformRules::int('otp.ttl_seconds');
+
+        // Store OTP in session; lifetime and wrong-try limit come from /control → Platform rules.
         session(['whatsapp_otp' => $otp]);
         session(['whatsapp_phone' => $phone]);
-        session(['whatsapp_otp_expires_at' => now()->addMinutes(5)]);
+        session(['whatsapp_otp_expires_at' => now()->addSeconds($ttl)]);
+        session(['whatsapp_otp_attempts' => 0]);
 
         // Send OTP via WhatsApp
-        $message = "Your Haraan login code is: *{$otp}*\n\nThis code will expire in 5 minutes.";
+        $message = "Your Haraan login code is: *{$otp}*\n\nThis code will expire in ".max(1, intdiv($ttl + 59, 60)).' minutes.';
         $sent = $this->whatsappService->sendMessage($phone, $message);
 
         if ($sent) {
@@ -68,7 +71,7 @@ class WhatsAppAuthController extends Controller
      */
     public function showVerifyForm()
     {
-        if (!session()->has('whatsapp_phone')) {
+        if (! session()->has('whatsapp_phone')) {
             return redirect()->route('login');
         }
 
@@ -88,16 +91,27 @@ class WhatsAppAuthController extends Controller
         $expiresAt = session('whatsapp_otp_expires_at');
         $phone = session('whatsapp_phone');
 
-        if (!$sessionOtp || !$expiresAt || !$phone) {
+        if (! $sessionOtp || ! $expiresAt || ! $phone) {
             return redirect()->route('login')->with('error', 'Session expired. Please try again.');
         }
 
         if (now()->greaterThan($expiresAt)) {
-            session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone']);
+            session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone', 'whatsapp_otp_attempts']);
+
             return redirect()->route('login')->with('error', 'OTP has expired. Please request a new one.');
         }
 
-        if ((int)$request->otp !== (int)$sessionOtp) {
+        if ((int) $request->otp !== (int) $sessionOtp) {
+            $attempts = (int) session('whatsapp_otp_attempts', 0) + 1;
+            session(['whatsapp_otp_attempts' => $attempts]);
+
+            // Burn the code after too many wrong tries, so it can't be guessed.
+            if ($attempts >= PlatformRules::int('otp.max_attempts')) {
+                session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone', 'whatsapp_otp_attempts']);
+
+                return redirect()->route('login')->with('error', 'Too many wrong codes. Please request a new one.');
+            }
+
             return back()->with('error', 'Invalid OTP. Please try again.');
         }
 
@@ -105,7 +119,7 @@ class WhatsAppAuthController extends Controller
         $user = User::where('phone', $phone)->first();
         if ($user) {
             Auth::login($user, true); // login and remember
-            session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone']);
+            session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone', 'whatsapp_otp_attempts']);
 
             // Partners (event hosts / venue owners) go straight to their /partner console.
             if ($user->hasRoleEither(['PARTNER'])) {
@@ -128,7 +142,8 @@ class WhatsAppAuthController extends Controller
      */
     public function cancel()
     {
-        session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone']);
+        session()->forget(['whatsapp_otp', 'whatsapp_otp_expires_at', 'whatsapp_phone', 'whatsapp_otp_attempts']);
+
         return back();
     }
 }

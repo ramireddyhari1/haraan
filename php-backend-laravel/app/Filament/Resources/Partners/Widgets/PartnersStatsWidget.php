@@ -19,12 +19,12 @@ class PartnersStatsWidget extends StatsOverviewWidget
 
     protected function getStats(): array
     {
-        $partner = fn () => User::query()->whereRaw("upper(role) = 'PARTNER'");
+        $partner = fn () => User::query()->where('role', 'PARTNER');
 
         $total = $partner()->count();
         $venue = (clone $partner())->whereRaw("lower(partner_type) = 'venue'")->count();
         $event = (clone $partner())->whereRaw("lower(partner_type) = 'event'")->count();
-        $active = (clone $partner())->whereRaw("lower(status) = 'active'")->count();
+        $active = (clone $partner())->where('status', 'ACTIVE')->count();
 
         return [
             Stat::make('Total partners', number_format($total))

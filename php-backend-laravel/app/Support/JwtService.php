@@ -19,6 +19,13 @@ final class JwtService
      */
     public static function issueForUser(User $user, string $secret, int $ttlSeconds = 604800): string
     {
+        // A suspended account must not be able to sign back in. Refusing here rather than
+        // in each of the six login controllers means a seventh cannot forget it — the same
+        // reason the `tv` claim lives here.
+        if (! $user->isAccountActive()) {
+            throw new \App\Exceptions\AccountSuspendedException();
+        }
+
         return self::issue([
             'sub' => $user->id,
             'email' => $user->email,

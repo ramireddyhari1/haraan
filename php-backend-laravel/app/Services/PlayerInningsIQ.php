@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\LiveMatch;
+use App\Support\AiGate;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -96,6 +97,9 @@ class PlayerInningsIQ
         }
 
         app()->terminating(function () use ($key, $facts): void {
+            if (! AiGate::attempt(AiGate::MATCH_COMMENTARY)) {
+                return;
+            }
             $text = $this->gemini->generate(
                 $this->systemPrompt(),
                 $this->factsPrompt($facts),

@@ -21,7 +21,7 @@
 				list.innerHTML = '';
 				(j.data||[]).forEach(p=>{
 					const d = document.createElement('div'); d.className='list-item';
-					d.innerHTML = `<strong>${p.name}</strong><span>${p.partner_type||'—'} · ${p.status||'—'}</span>`;
+					d.innerHTML = `<strong>${esc(p.name)}</strong><span>${esc(p.partner_type)||'—'} · ${esc(p.status)||'—'}</span>`;
 					const edit = document.createElement('a'); edit.href = '{{ url('/admin/partners') }}/' + p.id + '/edit'; edit.textContent = 'Edit'; edit.style.marginLeft = '12px';
 					const del = document.createElement('button'); del.textContent = 'Delete'; del.style.marginLeft='8px'; del.onclick = function(){ if(!confirm('Delete partner?')) return; fetch('{{ url('/admin/partners') }}/' + p.id, { method:'DELETE', headers:{'X-CSRF-TOKEN':'{{ csrf_token() }}'} }).then(r=>r.json()).then(j=>{ alert(j.message||'Deleted'); location.reload(); }).catch(e=>alert('Failed')); };
 					d.appendChild(edit); d.appendChild(del);

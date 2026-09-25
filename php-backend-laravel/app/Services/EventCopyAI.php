@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\AiGate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -70,6 +71,11 @@ TXT;
             $lines[] = "The host's rough notes (polish these, keep their facts): {$existing}";
         }
         $prompt = implode("\n", $lines) . "\n\nWrite the event description.";
+
+        // /control → Platform rules → AI: off or over budget → the host writes it themselves.
+        if (! AiGate::attempt(AiGate::EVENT_COPY)) {
+            return null;
+        }
 
         try {
             $res = Http::withHeaders([

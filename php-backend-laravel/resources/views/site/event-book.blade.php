@@ -136,8 +136,9 @@
 
         <div class="bk-card bk-sum">
             <div class="bk-line"><span>Subtotal</span><span>₹{{ number_format($subtotal, 2) }}</span></div>
-            @foreach(($feeLines ?? []) as $line)
-                <div class="bk-line"><span>{{ $line['label'] }}</span><span>₹{{ number_format($line['amount'], 2) }}</span></div>
+            {{-- Every charge from Event::orderCharges(): host fees, platform/gateway fee, tax. --}}
+            @foreach(($chargeLines ?? []) as $line)
+                <div class="bk-line"><span>{{ $line['label'] }}</span><span @if(($line['kind'] ?? '') === 'tax') id="bkTaxAmount" @endif>₹{{ number_format($line['amount'], 2) }}</span></div>
             @endforeach
             <div class="bk-line bk-discount" id="bkDiscountLine" hidden>
                 <span>Coupon <span id="bkDiscountCode"></span></span><span id="bkDiscountAmount"></span>
@@ -180,6 +181,9 @@
         var ctaAmount = document.getElementById('bkCtaAmount');
         var idleNote  = note.textContent;
         var total     = totalEl.textContent;
+        // Tax is on the subtotal after discount, so a coupon changes it too.
+        var taxEl     = document.getElementById('bkTaxAmount');
+        var tax       = taxEl ? taxEl.textContent : null;
         var applied   = false;
         var busy      = false;
 
@@ -201,6 +205,7 @@
             btn.disabled = false;
             line.hidden = true;
             totalEl.textContent = total;
+            if (taxEl) taxEl.textContent = tax;
             ctaAmount.textContent = total.replace('₹', '');
             say(idleNote, '');
             input.focus();
@@ -259,6 +264,7 @@
                     lineAmt.textContent = '− ₹' + data.discountLabel;
                     line.hidden = false;
                     totalEl.textContent = '₹' + data.totalLabel;
+                    if (taxEl && data.taxLabel) taxEl.textContent = '₹' + data.taxLabel;
                     ctaAmount.textContent = data.totalLabel;
 
                     pop(line);

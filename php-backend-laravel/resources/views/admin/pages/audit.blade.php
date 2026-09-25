@@ -22,7 +22,7 @@ async function loadAudit(q=''){
     const body = document.getElementById('audit-body'); body.innerHTML = '';
     rows.forEach(r => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${r.id}</td><td>${r.action}</td><td>${r.actor||'system'}</td><td>${r.created_at}</td><td>${r.meta||''}</td>`;
+        tr.innerHTML = `<td>${esc(r.id)}</td><td>${esc(r.action)}</td><td>${esc(r.actor)||'system'}</td><td>${esc(r.created_at)}</td><td>${esc(r.meta)||''}</td>`;
         body.appendChild(tr);
     });
 }

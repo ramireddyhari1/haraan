@@ -15,7 +15,10 @@ use App\Models\VenueBlock;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
+use App\Services\Membership\MemberBookingPerks;
 use App\Support\ContactPrefill;
+use App\Support\Operations;
+use App\Support\PlatformRules;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
@@ -53,6 +56,15 @@ final class BookingService
      * what the desk-registration flow already pushed its own holds out to.
      */
     public const RESERVATION_HOLD_MINUTES = 15;
+
+    /**
+     * The hold actually applied: /control → Platform rules → Bookings (`bookings.event_hold_minutes`),
+     * never below 10 minutes for the reason above. RESERVATION_HOLD_MINUTES is its default.
+     */
+    public static function holdMinutes(): int
+    {
+        return max(10, PlatformRules::int('bookings.event_hold_minutes'));
+    }
 
     public function __construct(
         private readonly RazorpayGateway $razorpay,
@@ -115,8 +127,14 @@ final class BookingService
      *         Who the ticket is for, captured at checkout. Optional so older callers
      *         (and venue bookings) keep working; stored on every row of the order.
      */
-    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], ?int $eventSlotId = null, bool $reserve = false): Collection
+    public function createOrder(User $user, int $eventId, array $lines, ?string $couponCode = null, array $contact = [], ?int $eventSlotId = null, bool $reserve = false, bool $desk = false): Collection
     {
+        // Emergency switch (/control → Operations). The host's own desk keeps working: it is
+        // their box office, and the pause is about the public checkout.
+        if (! $desk) {
+            Operations::assertBookingsOpen(Operations::EVENTS);
+        }
+
         // Reserve mode holds inventory in a PENDING row until payment confirms. Sweep any
         // holds that were never paid first, so their seats are back in the pool for this order.
         if ($reserve) {
@@ -142,6 +160,11 @@ final class BookingService
         }
 
         $totalTickets = array_sum(array_column($normalised, 'quantity'));
+
+        $orderCap = PlatformRules::int('bookings.max_tickets_per_order');
+        if ($orderCap > 0 && $totalTickets > $orderCap) {
+            throw new ConflictHttpException("At most {$orderCap} tickets per order");
+        }
 
         // Fall back to the account for anything checkout didn't supply, so a booking
         // always carries a contact even from a caller that doesn't collect one.
@@ -218,7 +241,8 @@ final class BookingService
                         throw new NotFoundHttpException('Ticket type not found');
                     }
 
-                    if (! $tier->isOnSale()) {
+                    // A member's early-access perk opens the tier's sales window sooner.
+                    if (! $tier->isOnSale(app(MemberBookingPerks::class)->earlyAccessHours($user))) {
                         throw new ConflictHttpException("“{$tier->name}” is not on sale right now");
                     }
 
@@ -255,7 +279,7 @@ final class BookingService
                     // A reserved order sits PENDING (holding its seats) until payment
                     // confirms; the legacy direct path still writes CONFIRMED immediately.
                     'status'         => $reserve ? 'PENDING' : 'CONFIRMED',
-                    'reserved_until' => $reserve ? now()->addMinutes(self::RESERVATION_HOLD_MINUTES) : null,
+                    'reserved_until' => $reserve ? now()->addMinutes(self::holdMinutes()) : null,
                     'coupon_code'    => $couponCode,
                     'discount'       => 0,
                     'user_id'        => $user->id,
@@ -273,27 +297,38 @@ final class BookingService
                 $slot->save();
             }
 
-            // Host-set convenience fee on the ticket subtotal — charged once for the
-            // whole order and stored on the first booking row.
+            // Every charge on the order comes from Event::orderCharges() — host fees, the
+            // platform and gateway fees, tax — charged once for the whole order and stored on
+            // the first booking row. The coupon is clamped against the fees the customer pays.
             $subtotal = (float) $bookings->sum('total_amount');
-            $fee      = $event->convenienceFeeFor($subtotal);
+            $quote = $event->orderCharges($subtotal);
 
             // Coupon: a redeemable code takes an amount off the payable total (never below
             // zero). Same resolution the checkout preview ran, re-done here on the prices
             // this transaction actually wrote — the preview is a quote, this is the charge.
-            $applied  = $this->resolveCoupon($user, $event->id, $couponCode, $subtotal, $fee, $totalTickets);
-            $discount = $applied['discount'];
+            $applied = $this->resolveCoupon($user, $event->id, $couponCode, $subtotal, $quote['charges_before_discount'], $totalTickets);
+            $charges = $event->orderCharges($subtotal, $applied['discount']);
+
+            // Payments paused (/control → Operations): a free order still goes through, a paid
+            // one is refused before any seat is held.
+            if ($reserve && $charges['total'] > 0) {
+                Operations::assertPaymentsOn();
+            }
 
             // A reserved (unpaid) order must not yet burn a coupon use — that's counted
             // on confirmation, so an abandoned checkout doesn't consume the code.
             if ($applied['coupon'] !== null && ! $reserve) {
-                $applied['coupon']->increment('uses');
+                $applied['coupon']->recordUse();
             }
 
-            if ($fee > 0 || $discount > 0) {
-                $first = $bookings->first();
-                $first->convenience_fee = $fee;
-                $first->discount = round($discount, 2);
+            $first = $bookings->first();
+            $first->convenience_fee = $charges['fees'];
+            $first->platform_fee = $charges['platform_fee'];
+            $first->gateway_fee = $charges['gateway_fee'];
+            $first->tax_amount = $charges['tax'];
+            $first->host_deduction = $charges['host_deduction'];
+            $first->discount = $charges['discount'];
+            if ($first->isDirty()) {
                 $first->save();
             }
 
@@ -335,8 +370,12 @@ final class BookingService
 
         $coupon = Coupon::findByCode($code);
 
-        if ($coupon === null || ! $coupon->isRedeemable()) {
+        if ($coupon === null || ! $coupon->isRedeemable() || ! $coupon->usableBy($user)) {
             return $reject('This code isn’t valid.');
+        }
+
+        if ($this->ownedCouponAlreadyInUse($coupon, (int) $user->id)) {
+            return $reject('You’ve already used this code.');
         }
 
         if (! $coupon->appliesToVenue($venueId)) {
@@ -365,8 +404,12 @@ final class BookingService
 
         $coupon = Coupon::findByCode($code);
 
-        if ($coupon === null || ! $coupon->isRedeemable()) {
+        if ($coupon === null || ! $coupon->isRedeemable() || ! $coupon->usableBy($user)) {
             return $reject('This code isn’t valid.');
+        }
+
+        if ($this->ownedCouponAlreadyInUse($coupon, (int) $user->id)) {
+            return $reject('You’ve already used this code.');
         }
 
         if (! $coupon->appliesToEvent($eventId)) {
@@ -399,6 +442,23 @@ final class BookingService
      * an order), so counting this user's discounted rows for this code counts their prior orders
      * that actually used it.
      */
+    private function ownedCouponAlreadyInUse(Coupon $coupon, int $userId): bool
+    {
+        // A single-use reward coupon is spent once an order carrying it is confirmed — or
+        // while one is still waiting for payment, so two checkouts opened side by side can't
+        // both take the discount. An abandoned (expired/cancelled) checkout gives it back.
+        if ($coupon->owner_user_id === null) {
+            return false;
+        }
+
+        return Booking::query()
+            ->where('user_id', $userId)
+            ->whereRaw('lower(coupon_code) = ?', [strtolower((string) $coupon->code)])
+            ->where('discount', '>', 0)
+            ->whereRaw('upper(status) in (?, ?)', ['PENDING', 'CONFIRMED'])
+            ->exists();
+    }
+
     private function couponWithinPerCustomerLimit(Coupon $coupon, int $userId): bool
     {
         if ($coupon->per_customer_limit === null) {
@@ -487,7 +547,11 @@ final class BookingService
                 // sell-through and "Bookings x / y" figures read the event's slot counts,
                 // so a paid ticket would show revenue and no seat sold.
                 if ($was !== 'PENDING') {
-                    $this->reclaimInventory($booking);
+                    if ($booking->booking_type === 'venue') {
+                        $this->reclaimVenueCourt($booking, $paymentId);
+                    } else {
+                        $this->reclaimInventory($booking);
+                    }
                 }
 
                 $booking->status = 'CONFIRMED';
@@ -510,7 +574,7 @@ final class BookingService
             if (! $alreadyConfirmed) {
                 $coupon = Coupon::findByCode($bookings->first()->coupon_code);
                 if ($coupon !== null) {
-                    $coupon->increment('uses');
+                    $coupon->recordUse();
                 }
             }
 
@@ -896,6 +960,49 @@ final class BookingService
     }
 
     /**
+     * Check if the court is still free when an expired hold is reclaimed by a late payment.
+     * If the court was sold in the meantime, mark the booking failed and issue an automatic refund.
+     */
+    private function reclaimVenueCourt(Booking $booking, ?string $paymentId): void
+    {
+        $startMin = self::timeToMinutes($booking->start_time);
+        $endMin = self::endMinutes($booking->end_time);
+
+        try {
+            $this->assertCourtHourFree(
+                (int) $booking->venue_id,
+                $booking->venue_court_id !== null ? (int) $booking->venue_court_id : null,
+                $booking->venue_slot_id !== null ? (int) $booking->venue_slot_id : null,
+                (string) $booking->slot_date,
+                $startMin,
+                $endMin,
+                (int) $booking->id
+            );
+        } catch (ConflictHttpException $e) {
+            $booking->status = 'FAILED_OVERBOOKED';
+            $booking->reserved_until = null;
+            $booking->save();
+
+            Log::critical("Booking {$booking->id} payment cleared after hold expired, but court is now occupied: " . $e->getMessage());
+
+            if ($paymentId !== null) {
+                $charged = $booking->amountCharged();
+                $this->ledger->refund($booking, $charged, 'online', null, $paymentId, 'Automatic refund: court overbooked after hold expired');
+                try {
+                    $this->razorpay->refund($paymentId, (int) round($charged * 100), [
+                        'booking_id' => (string) $booking->id,
+                        'reason' => 'Court overbooked after hold expired',
+                    ]);
+                } catch (\Throwable $re) {
+                    Log::error("Automated Razorpay refund failed for overbooked booking {$booking->id}: " . $re->getMessage());
+                }
+            }
+
+            throw new ConflictHttpException('The court reservation hold expired and was booked by another player. An automatic refund has been issued.');
+        }
+    }
+
+    /**
      * Create a confirmed venue booking for a customer (online / app).
      *
      * The booking reserves a physical {@see VenueCourt} for a time window; because a court
@@ -916,6 +1023,9 @@ final class BookingService
         bool $reserve = false,
         ?string $couponCode = null,
     ): Booking {
+        // Emergency switch (/control → Operations). Walk-ins at the desk are not affected.
+        Operations::assertBookingsOpen(Operations::VENUES);
+
         return $this->reserveVenue($venueId, $slotId, $courtId, $date, $duration, [
             'user_id'     => $user->id,
             'channel'     => 'online',
@@ -976,12 +1086,22 @@ final class BookingService
         $booking = DB::transaction(function () use ($venueId, $slotId, $courtId, $date, $duration, $meta, $reserve): Booking {
             $venue = Venue::query()->lockForUpdate()->find($venueId);
 
-            if ($venue === null || ! $venue->is_active) {
+            if ($venue === null) {
                 throw new NotFoundHttpException('Venue not found');
             }
 
-            if (! $venue->is_bookable) {
-                throw new ConflictHttpException('This venue is not open for booking');
+            // Published + "open for booking" govern the PUBLIC checkout only. The partner
+            // desk is the owner's own counter: a venue still in draft on Haraan (no photos
+            // yet, or unpublished) keeps taking walk-ins, exactly as the event desk ignores
+            // the Operations pause. Courts, blocks and overlaps below still apply to both.
+            if ($meta['channel'] === 'online') {
+                if (! $venue->isPublished()) {
+                    throw new NotFoundHttpException('Venue not found or not currently available');
+                }
+
+                if (! $venue->is_bookable) {
+                    throw new ConflictHttpException('This venue is not open for booking');
+                }
             }
 
             // Owner-blocked day (holiday / maintenance) — no bookings taken.
@@ -992,6 +1112,15 @@ final class BookingService
 
             if ($blocked) {
                 throw new ConflictHttpException('This venue is closed on that date');
+            }
+
+            // Customers book within the venue's window (plus any priority days their plan
+            // adds). The partner desk is never held to it — it's the owner's own calendar.
+            if ($meta['channel'] === 'online') {
+                $window = app(VenueBookingWindow::class);
+                if (! $window->allows($venue, $meta['user'] ?? null, Carbon::parse($date))) {
+                    throw new ConflictHttpException($window->refusal($venue, $meta['user'] ?? null));
+                }
             }
 
             // Structured operating hours: refuse bookings on a day the venue isn't open.
@@ -1059,8 +1188,22 @@ final class BookingService
             }
 
             $endMin = $startMin !== null ? $startMin + $duration * 60 : null;
+
+            // Every booking lives inside one calendar date (slot_date + HH:MM). A venue open
+            // past midnight lists its after-midnight hours on the next day's date instead.
+            if ($endMin !== null && $endMin > 24 * 60) {
+                throw new ConflictHttpException('A booking can’t run past midnight. Book the hours after 12 AM on the next day’s date.');
+            }
             $startHm = $startMin !== null ? $this->minutesToHm($startMin) : null;
             $endHm = $endMin !== null ? $this->minutesToHm($endMin) : null;
+
+            // Reject online reservations for slot times that have already passed today
+            if ($meta['channel'] === 'online' && $date === today()->toDateString() && $startMin !== null) {
+                $nowMin = (int) now()->format('H') * 60 + (int) now()->format('i');
+                if ($startMin <= $nowMin) {
+                    throw new ConflictHttpException('That slot time has already passed for today');
+                }
+            }
 
             $this->assertCourtHourFree($venue->id, $courtId, $slotId, $date, $startMin, $endMin);
 
@@ -1078,23 +1221,44 @@ final class BookingService
 
             // A held (unpaid) booking must not burn a coupon use — that is counted on
             // confirmation, so an abandoned checkout doesn't consume the code.
-            if ($applied['coupon'] !== null && ! $reserve) {
-                $applied['coupon']->increment('uses');
+            $payable = max(0.0, round($subtotal + $fee - $discount, 2));
+
+            // Pulse tax (/control → Platform rules → Fees): online only, kept in `tax_amount`
+            // beside the venue's share so it never reaches the payout. amountCharged() adds it.
+            $tax = $meta['channel'] === 'online' ? Venue::taxFor($subtotal, $discount) : 0.0;
+
+            // Payments paused (/control → Operations): a paid online slot is refused before
+            // the court is held; free slots and desk walk-ins go through.
+            if ($reserve && $payable + $tax > 0) {
+                Operations::assertPaymentsOn();
             }
+
+            if ($applied['coupon'] !== null && ! $reserve) {
+                $applied['coupon']->recordUse();
+            }
+
+            // Pulse commission (/control → Platform rules → Fees): Haraan's share of an ONLINE
+            // booking, on the slot value after discount, deducted from the venue's payout. Never
+            // charged on a desk walk-in — that money never passed through the platform.
+            $commission = $meta['channel'] === 'online'
+                ? round(max(0.0, $subtotal - $discount) * PlatformRules::float('fees.venue_commission_percent') / 100, 2)
+                : 0.0;
 
             return Booking::query()->create([
                 'quantity'        => 1,
+                'host_deduction' => $commission,
                 'convenience_fee' => $fee,
                 'discount'        => round($discount, 2),
                 'coupon_code'     => $applied['coupon']?->code,
-                'total_amount'    => max(0.0, round($subtotal + $fee - $discount, 2)),
+                'total_amount' => $payable,
+                'tax_amount'   => $tax,
                 // Paid online bookings are held PENDING until Razorpay confirms. The hold is
                 // load-bearing: occupyingStatuses() only counts a PENDING row while
                 // `reserved_until` is in the future, so an abandoned checkout frees the court
                 // by itself instead of blocking it forever. Desk/offline bookings and free
                 // slots skip the hold and confirm outright.
                 'status'         => $reserve ? 'PENDING' : 'CONFIRMED',
-                'reserved_until' => $reserve ? now()->addMinutes(self::RESERVATION_HOLD_MINUTES) : null,
+                'reserved_until' => $reserve ? now()->addMinutes(self::holdMinutes()) : null,
                 'booking_type'   => 'venue',
                 'user_id'        => $meta['user_id'],
                 'event_id'       => null,
@@ -1125,9 +1289,9 @@ final class BookingService
      *
      * @throws ConflictHttpException  When the window (or slot) is already taken.
      */
-    private function assertCourtHourFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    private function assertCourtHourFree(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin, ?int $excludeBookingId = null): void
     {
-        $this->assertNoBookingOverlap($venueId, $courtId, $slotId, $date, $startMin, $endMin);
+        $this->assertNoBookingOverlap($venueId, $courtId, $slotId, $date, $startMin, $endMin, $excludeBookingId);
         $this->assertNoBlockOverlap($venueId, $courtId, $date, $startMin, $endMin);
     }
 
@@ -1162,7 +1326,7 @@ final class BookingService
             }
 
             $bs = $this->timeToMinutes($block->start_time);
-            $be = $this->timeToMinutes($block->end_time);
+            $be = self::endMinutes($block->end_time);
 
             if ($bs === null || $be === null) {
                 throw new ConflictHttpException(
@@ -1183,23 +1347,28 @@ final class BookingService
      *
      * @throws ConflictHttpException  When the window (or slot) is already taken.
      */
-    private function assertNoBookingOverlap(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin): void
+    private function assertNoBookingOverlap(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin, ?int $excludeBookingId = null): void
     {
         if ($courtId !== null) {
             $court = VenueCourt::find($courtId);
             $courtIds = $court ? $court->allRelatedCourtIds() : [$courtId];
 
-            $existing = Booking::query()
+            $existingQuery = Booking::query()
                 ->where('booking_type', 'venue')
                 ->where('venue_id', $venueId)
                 ->whereIn('venue_court_id', $courtIds)
                 ->whereDate('slot_date', $date)
-                ->where(fn ($q) => $this->occupyingStatuses($q))
-                ->get(['start_time', 'end_time', 'venue_court_id']);
+                ->where(fn ($q) => $this->occupyingStatuses($q));
+
+            if ($excludeBookingId !== null) {
+                $existingQuery->where('id', '!=', $excludeBookingId);
+            }
+
+            $existing = $existingQuery->get(['start_time', 'end_time', 'venue_court_id']);
 
             foreach ($existing as $b) {
                 $es = $this->timeToMinutes($b->start_time);
-                $ee = $this->timeToMinutes($b->end_time);
+                $ee = self::endMinutes($b->end_time);
 
                 // A booking with no window (or ours has none) coarsely blocks the whole day —
                 // safer than silently allowing a possible clash we can't reason about.
@@ -1220,13 +1389,18 @@ final class BookingService
         }
 
         if ($slotId !== null) {
-            $taken = Booking::query()
+            $takenQuery = Booking::query()
                 ->where('booking_type', 'venue')
                 ->where('venue_id', $venueId)
                 ->where('venue_slot_id', $slotId)
                 ->whereDate('slot_date', $date)
-                ->where(fn ($q) => $this->occupyingStatuses($q))
-                ->exists();
+                ->where(fn ($q) => $this->occupyingStatuses($q));
+
+            if ($excludeBookingId !== null) {
+                $takenQuery->where('id', '!=', $excludeBookingId);
+            }
+
+            $taken = $takenQuery->exists();
 
             if ($taken) {
                 throw new ConflictHttpException('That slot is already booked for this date');
@@ -1268,6 +1442,23 @@ final class BookingService
     }
 
     /** Parse a time label ("7:00 PM", "07:00", "19:00") to minutes-from-midnight, or null. */
+    /**
+     * Minutes-of-day for an END time, where midnight means the end of the day (1440), not its
+     * start. A court booked 11 PM–12 AM used to read back as ending at minute 0, so the
+     * overlap checks (start < end) never saw it and the same hour could be sold twice. An
+     * end can never be the start of its own day, so "00:00" / "24:00" / "12:00 AM" → 1440.
+     */
+    public static function endMinutes(?string $label): ?int
+    {
+        if ($label !== null && str_starts_with(trim($label), '24:')) {
+            return 24 * 60;
+        }
+
+        $m = self::timeToMinutes($label);
+
+        return $m === 0 ? 24 * 60 : $m;
+    }
+
     public static function timeToMinutes(?string $label): ?int
     {
         if ($label === null || trim($label) === '') {
@@ -1299,9 +1490,9 @@ final class BookingService
      * @throws NotFoundHttpException      When the booking does not exist.
      * @throws AccessDeniedHttpException  When the user is not authorised.
      */
-    public function cancel(User $user, string $bookingId): Booking
+    public function cancel(User $user, string $bookingId, string $reason = ''): Booking
     {
-        $booking = Booking::query()->find($bookingId);
+        $booking = Booking::query()->with('venue')->find($bookingId);
 
         if ($booking === null) {
             throw new NotFoundHttpException('Booking not found');
@@ -1318,7 +1509,22 @@ final class BookingService
             return $booking;
         }
 
-        DB::transaction(static function () use ($booking): void {
+        // If already checked in, refuse cancellation
+        if ($booking->checked_in_at !== null && $user->role !== 'ADMIN') {
+            throw new ConflictHttpException('Cannot cancel an already checked-in booking');
+        }
+
+        // If past start time, refuse cancellation for regular user
+        if ($user->role !== 'ADMIN' && $booking->booking_type === 'venue' && $booking->slot_date !== null) {
+            $slotDate = Carbon::parse($booking->slot_date);
+            $startMin = self::timeToMinutes($booking->start_time);
+            $slotStart = $startMin !== null ? $slotDate->copy()->addMinutes($startMin) : $slotDate->copy()->endOfDay();
+            if ($slotStart->isPast()) {
+                throw new ConflictHttpException('Cannot cancel a booking after its start time');
+            }
+        }
+
+        DB::transaction(function () use ($booking, $user): void {
             $event = Event::query()->find($booking->event_id);
 
             if ($event !== null) {
@@ -1342,9 +1548,15 @@ final class BookingService
                 }
             }
 
+            if ($booking->booking_type === 'venue' && (float) $booking->amount_paid > 0) {
+                $this->processVenueCancellationRefund($booking, $user);
+            }
+
             $booking->status = 'CANCELLED';
             $booking->save();
         });
+
+        BookingNotifier::dispatchCancellation($booking, $reason);
 
         return $booking;
     }
@@ -1357,7 +1569,7 @@ final class BookingService
      * @throws NotFoundHttpException      When the booking does not exist.
      * @throws AccessDeniedHttpException  When the venue isn't the partner's.
      */
-    public function cancelAsPartner(User $partner, string $bookingId): Booking
+    public function cancelAsPartner(User $partner, string $bookingId, string $reason = ''): Booking
     {
         $booking = Booking::query()->with('venue')->find($bookingId);
 
@@ -1380,10 +1592,192 @@ final class BookingService
             return $booking;
         }
 
-        $booking->status = 'CANCELLED';
-        $booking->save();
+        DB::transaction(function () use ($booking, $partner): void {
+            if ($booking->booking_type === 'venue' && (float) $booking->amount_paid > 0) {
+                $this->processVenueCancellationRefund($booking, $partner);
+            }
+
+            $booking->status = 'CANCELLED';
+            $booking->save();
+        });
+
+        BookingNotifier::dispatchCancellation($booking, $reason, byPartner: true);
 
         return $booking;
+    }
+
+    /**
+     * Process refund on cancellation based on venue's cancel policy window.
+     */
+    private function processVenueCancellationRefund(Booking $booking, User $actor): void
+    {
+        $venue = $booking->venue;
+        $refundPercent = 100;
+
+        if ($venue !== null && $actor->role !== 'ADMIN' && $booking->slot_date !== null) {
+            $slotDate = Carbon::parse($booking->slot_date);
+            $startMin = self::timeToMinutes($booking->start_time);
+            $slotStart = $startMin !== null ? $slotDate->copy()->addMinutes($startMin) : $slotDate->copy()->startOfDay();
+
+            $hoursUntilSlot = now()->diffInHours($slotStart, false);
+            $freeHours = (int) ($venue->cancel_free_hours ?? 24);
+
+            if ($hoursUntilSlot < $freeHours) {
+                $refundPercent = max(0, min(100, (int) ($venue->cancel_refund_percent ?? 0)));
+            }
+        }
+
+        if ($refundPercent > 0 && (float) $booking->amount_paid > 0) {
+            $refundAmount = round(((float) $booking->amount_paid * $refundPercent) / 100, 2);
+            if ($refundAmount > 0) {
+                $this->ledger->refund(
+                    $booking,
+                    $refundAmount,
+                    'online',
+                    $actor->role === 'PARTNER' ? $actor : null,
+                    $booking->razorpay_payment_id,
+                    "Cancellation refund ({$refundPercent}%)",
+                );
+
+                if ($booking->razorpay_payment_id !== null) {
+                    try {
+                        $this->razorpay->refund($booking->razorpay_payment_id, (int) round($refundAmount * 100), [
+                            'booking_id' => (string) $booking->id,
+                            'reason'     => 'Booking cancellation',
+                        ]);
+                    } catch (\Throwable $e) {
+                        Log::error("Razorpay refund exception on booking {$booking->id}: " . $e->getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reschedule a confirmed venue booking to a new date, slot, or court.
+     * Checks conflict on target slot/court, adjusts window, and notifies customer & partner.
+     *
+     * @throws NotFoundHttpException When booking, target slot or court is missing.
+     * @throws ConflictHttpException When target slot is taken, booking has started, or already checked in.
+     */
+    public function rescheduleVenueBooking(
+        User $user,
+        string $bookingId,
+        string $newDate,
+        ?int $newSlotId = null,
+        ?int $newCourtId = null,
+    ): Booking {
+        $booking = Booking::query()->with(['venue', 'venueCourt'])->find($bookingId);
+
+        if ($booking === null) {
+            throw new NotFoundHttpException('Booking not found');
+        }
+
+        if ($user->role !== 'ADMIN' && (int) $booking->user_id !== (int) $user->id) {
+            throw new AccessDeniedHttpException('Forbidden');
+        }
+
+        if (strtoupper((string) $booking->status) !== 'CONFIRMED') {
+            throw new ConflictHttpException('Only confirmed bookings can be rescheduled');
+        }
+
+        if ($booking->checked_in_at !== null) {
+            throw new ConflictHttpException('Cannot reschedule an already checked-in booking');
+        }
+
+        $newDateStr = date('Y-m-d', strtotime($newDate) ?: time());
+        $venue = $booking->venue;
+        if ($venue === null) {
+            throw new NotFoundHttpException('Venue not found');
+        }
+
+        $slotId = $newSlotId ?? $booking->venue_slot_id;
+        $courtId = $newCourtId ?? $booking->venue_court_id;
+
+        return DB::transaction(function () use ($booking, $venue, $newDateStr, $slotId, $courtId, $user): Booking {
+            if (! $venue->isOpenOn(Carbon::parse($newDateStr))) {
+                throw new ConflictHttpException('The venue is closed on that day');
+            }
+
+            $blocked = VenueBlockedDate::query()
+                ->where('venue_id', $venue->id)
+                ->whereDate('date', $newDateStr)
+                ->exists();
+            if ($blocked) {
+                throw new ConflictHttpException('The venue is closed on that date');
+            }
+
+            $court = null;
+            if ($courtId !== null) {
+                $court = VenueCourt::query()->where('venue_id', $venue->id)->find($courtId);
+                if ($court === null || ! $court->is_active) {
+                    throw new NotFoundHttpException('Court not found or inactive');
+                }
+            }
+
+            $slot = null;
+            $startMin = null;
+            $timeLabel = null;
+            $dayLabel = null;
+
+            if ($slotId !== null) {
+                $slot = VenueSlot::query()->where('venue_id', $venue->id)->find($slotId);
+                if ($slot === null) {
+                    throw new NotFoundHttpException('Slot not found');
+                }
+                $startMin = self::timeToMinutes($slot->time);
+                $timeLabel = $slot->time;
+                $dayLabel = $slot->day;
+            }
+
+            $duration = 1;
+            if ($booking->start_time !== null && $booking->end_time !== null) {
+                $origStart = self::timeToMinutes($booking->start_time);
+                $origEnd = self::endMinutes($booking->end_time);
+                if ($origStart !== null && $origEnd !== null && $origEnd > $origStart) {
+                    $duration = max(1, (int) round(($origEnd - $origStart) / 60));
+                }
+            }
+
+            $endMin = $startMin !== null ? $startMin + $duration * 60 : null;
+
+            // Every booking lives inside one calendar date (slot_date + HH:MM). A venue open
+            // past midnight lists its after-midnight hours on the next day's date instead.
+            if ($endMin !== null && $endMin > 24 * 60) {
+                throw new ConflictHttpException('A booking can’t run past midnight. Book the hours after 12 AM on the next day’s date.');
+            }
+            $startHm = $startMin !== null ? self::minutesToHm($startMin) : null;
+            $endHm = $endMin !== null ? self::minutesToHm($endMin) : null;
+
+            if ($newDateStr === today()->toDateString() && $startMin !== null) {
+                $nowMin = (int) now()->format('H') * 60 + (int) now()->format('i');
+                if ($startMin <= $nowMin && $user->role !== 'ADMIN') {
+                    throw new ConflictHttpException('That slot time has already passed for today');
+                }
+            }
+
+            $this->assertCourtHourFree(
+                $venue->id,
+                $courtId,
+                $slotId,
+                $newDateStr,
+                $startMin,
+                $endMin,
+                (int) $booking->id
+            );
+
+            $booking->slot_date = $newDateStr;
+            $booking->venue_slot_id = $slotId;
+            $booking->venue_court_id = $courtId;
+            $booking->start_time = $startHm;
+            $booking->end_time = $endHm;
+            $booking->slot_label = $this->bookingLabel($court?->name, $dayLabel, $timeLabel, $endHm);
+            $booking->save();
+
+            BookingNotifier::dispatch($booking);
+
+            return $booking;
+        });
     }
 
     /**

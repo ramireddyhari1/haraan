@@ -11,6 +11,7 @@ use App\Services\WhatsAppService;
 use App\Support\PartnerLookup;
 use App\Support\MessageContext;
 use App\Support\PhoneNumber;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -41,11 +42,6 @@ use Illuminate\Support\Str;
  */
 class WhatsAppOtpController extends Controller
 {
-    private const TTL_SECONDS = 300;
-
-    /** Wrong-code attempts allowed before the session is burned. */
-    private const MAX_ATTEMPTS = 5;
-
     public function __construct(
         private readonly WhatsAppService $whatsapp,
         private readonly TemplateResolver $templates,
@@ -124,12 +120,12 @@ class WhatsAppOtpController extends Controller
             // otherwise a code issued on the member page could be redeemed against
             // the partner console by flipping one field.
             'surface' => $partnerSurface ? 'partner' : 'member',
-        ], self::TTL_SECONDS);
+        ], PlatformRules::int('otp.ttl_seconds'));
 
         return response()->json([
             'channel' => 'whatsapp',
             'token' => $token,
-            'expires_in' => self::TTL_SECONDS,
+            'expires_in' => PlatformRules::int('otp.ttl_seconds'),
         ]);
     }
 
@@ -153,13 +149,13 @@ class WhatsAppOtpController extends Controller
 
             // Burn the session rather than let a 6-digit code be walked. The
             // throttle limits rate; this limits total guesses against one code.
-            if ($payload['attempts'] >= self::MAX_ATTEMPTS) {
+            if ($payload['attempts'] >= PlatformRules::int('otp.max_attempts')) {
                 Cache::forget($key);
 
                 return response()->json(['error' => 'Too many incorrect codes. Please request a new one.'], 429);
             }
 
-            Cache::put($key, $payload, self::TTL_SECONDS);
+            Cache::put($key, $payload, PlatformRules::int('otp.ttl_seconds'));
 
             return response()->json(['error' => 'That code is not right. Please check and try again.'], 422);
         }

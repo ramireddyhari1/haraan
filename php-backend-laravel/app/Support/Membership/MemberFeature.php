@@ -44,6 +44,24 @@ final class MemberFeature
      */
     public const INSIGHTS_ADVANCED_SPORTS = 'insights.advanced_sports';
 
+    /** Hours before a ticket tier's sales_start a member may buy it. Enforced by MemberBookingPerks. */
+    public const EVENTS_EARLY_ACCESS = 'events.early_access';
+
+    /** Days beyond a venue's booking window a member may book. Enforced by VenueBookingWindow. */
+    public const VENUES_PRIORITY_BOOKING = 'venues.priority_booking_days';
+
+    /** Rewards that normally unlock with a rewarded video unlock without one. Enforced by RewardEngine. */
+    public const REWARDS_AD_UNLOCK_SKIP = 'rewards.ad_unlock_skip';
+
+    /** Access to reward programs marked members-only. Enforced by RewardEngine. */
+    public const REWARDS_MEMBER_PROGRAMS = 'rewards.member_programs';
+
+    /** Most sponsored rewards one player can win from one match. Enforced by RewardEngine. */
+    public const REWARDS_OFFERS_PER_MATCH = 'rewards.offers_per_match';
+
+    /** Extra Bonus XP, in percent. Bonus XP only — never competitive XP. Enforced by BonusXp. */
+    public const REWARDS_BONUS_XP_BOOST = 'rewards.bonus_xp_boost';
+
     /** @var array<string, array{type: string, label: string}> */
     private const REGISTRY = [
         self::ADS_HIDDEN => ['type' => self::TYPE_BOOLEAN, 'label' => 'No ads'],
@@ -54,6 +72,12 @@ final class MemberFeature
         self::PROFILE_MEMBER_BADGE => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member badge'],
         self::SUPPORT_PRIORITY => ['type' => self::TYPE_BOOLEAN, 'label' => 'Priority support'],
         self::INSIGHTS_ADVANCED_SPORTS => ['type' => self::TYPE_LIMIT, 'label' => 'Advanced insights'],
+        self::EVENTS_EARLY_ACCESS => ['type' => self::TYPE_LIMIT, 'label' => 'Early ticket access'],
+        self::VENUES_PRIORITY_BOOKING => ['type' => self::TYPE_LIMIT, 'label' => 'Priority venue booking'],
+        self::REWARDS_AD_UNLOCK_SKIP => ['type' => self::TYPE_BOOLEAN, 'label' => 'Unlock rewards without ads'],
+        self::REWARDS_MEMBER_PROGRAMS => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member-only rewards'],
+        self::REWARDS_OFFERS_PER_MATCH => ['type' => self::TYPE_LIMIT, 'label' => 'Partner offers per match'],
+        self::REWARDS_BONUS_XP_BOOST => ['type' => self::TYPE_LIMIT, 'label' => 'Bonus XP boost'],
     ];
 
     /** @return list<string> */

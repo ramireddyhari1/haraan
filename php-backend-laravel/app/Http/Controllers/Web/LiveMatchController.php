@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use Illuminate\Http\Request;
 use Illuminate\Contracts\View\View;
+use App\Support\PlatformRules;
 use Illuminate\Http\RedirectResponse;
 
 class LiveMatchController extends Controller
@@ -25,6 +26,10 @@ class LiveMatchController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
+        if (PlatformRules::bool('ops.pause_match_creation')) {
+            return back()->with('error', 'New matches are paused for a short while. Matches already running keep scoring.');
+        }
+
         $validated = $request->validate([
             'home' => 'required|string|max:255',
             'away' => 'required|string|max:255',

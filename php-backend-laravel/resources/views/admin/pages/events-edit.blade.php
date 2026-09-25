@@ -52,7 +52,7 @@
             body: JSON.stringify(data),
         }).then(r=>r.json().then(j=>({s:r.status,b:j}))).then(obj=>{
             if (obj.s >=200 && obj.s < 300) { result.innerHTML = '<div class="placeholder">Saved</div>'; setTimeout(()=> location.href='{{ route('admin.events') }}',800); }
-            else { result.innerHTML = '<div class="placeholder">Error: '+(obj.b.message || JSON.stringify(obj.b))+'</div>'; }
+            else { result.innerHTML = '<div class="placeholder">Error: '+esc(obj.b.message || JSON.stringify(obj.b))+'</div>'; }
         }).catch(err=>{ console.error(err); result.innerHTML = '<div class="placeholder">Request failed</div>'; });
     });
 })();

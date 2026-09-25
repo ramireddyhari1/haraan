@@ -21,6 +21,13 @@ final class EnsureRole
         }
 
         $user = Auth::user();
+
+        // Holding the role is not enough — the account also has to be in good standing.
+        // Without this, suspending an admin left every legacy /admin route open to them.
+        if ($user instanceof \App\Models\User && ! $user->isAccountActive()) {
+            abort(403, 'This account has been suspended.');
+        }
+
         $allowed = array_filter(array_map('trim', explode(',', $roles)));
 
         if (empty($allowed)) {

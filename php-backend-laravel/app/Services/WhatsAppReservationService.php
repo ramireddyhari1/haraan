@@ -15,6 +15,7 @@ use App\Models\WhatsAppConversation;
 use App\Models\WhatsAppIntentExtraction;
 use App\Models\WhatsAppMessage;
 use App\Models\WhatsAppPaymentLink;
+use App\Support\PlatformRules;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -24,6 +25,12 @@ final class WhatsAppReservationService
 {
     /** Temporary Hold duration in minutes — centrally configurable (5 minutes / 300s TTL) */
     public const HOLD_DURATION_MINUTES = 5;
+
+    /** The hold applied: /control → Platform rules → Bookings. HOLD_DURATION_MINUTES is its default. */
+    public static function holdMinutes(): int
+    {
+        return PlatformRules::int('bookings.whatsapp_hold_minutes');
+    }
 
     public function __construct(
         private readonly WhatsAppIntentEngine $intentEngine,
@@ -68,7 +75,7 @@ final class WhatsAppReservationService
             }
 
             // 2. Create the Booking hold row with 2-minute TTL
-            $reservedUntil = now()->addMinutes(self::HOLD_DURATION_MINUTES);
+            $reservedUntil = now()->addMinutes(self::holdMinutes());
 
             $booking = Booking::create([
                 'user_id'         => $actor?->id ?? $conversation->partner_id ?? $venue->user_id ?? 1,
@@ -193,7 +200,7 @@ final class WhatsAppReservationService
         return DB::transaction(function () use ($venue, $conversation, $booking, $amount, $actor) {
             $token = Str::random(12);
             $shortUrl = "https://haraan.app/pay/{$token}";
-            $expiresAt = $booking->reserved_until ?? now()->addMinutes(self::HOLD_DURATION_MINUTES);
+            $expiresAt = $booking->reserved_until ?? now()->addMinutes(self::holdMinutes());
 
             $paymentLink = WhatsAppPaymentLink::create([
                 'conversation_id'          => $conversation->id,

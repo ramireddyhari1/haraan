@@ -10,7 +10,9 @@ use App\Models\User;
 use App\Models\Venue;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
+use App\Services\PartnerSettlement;
 use App\Support\JwtService;
+use App\Support\PlatformRules;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
@@ -62,6 +64,7 @@ class VenueBookingUserToPartnerTest extends TestCase
         $this->venue = Venue::create([
             'name' => 'Kick Off Turf', 'location' => 'Gachibowli', 'price' => 1000,
             'is_active' => true, 'is_bookable' => true, 'partner_id' => $this->owner->id,
+            'city' => 'Hyderabad', 'images' => ['venues/test.jpg'], 'status' => 'published',
         ]);
 
         $this->court = VenueCourt::create([
@@ -192,6 +195,66 @@ class VenueBookingUserToPartnerTest extends TestCase
         $booking = Booking::query()->latest('id')->first();
         $this->assertEqualsWithDelta(1060.0, (float) $booking->total_amount, 0.01);
         $this->assertSame('TURF200', $booking->coupon_code);
+    }
+
+    /**
+     * Pulse tax (/control → Fees): charged on (subtotal − discount), sent to Razorpay, and kept
+     * beside the venue's share so the partner payout never includes it.
+     */
+    public function test_pulse_tax_is_charged_but_never_paid_out_to_the_venue(): void
+    {
+        PlatformRules::save(['fees.venue_tax_type' => 'percent', 'fees.venue_tax_value' => 18]);
+        $this->venue->update(['convenience_fee_type' => 'flat', 'convenience_fee_value' => 50]);
+
+        $data = $this->getJson("/api/venues/{$this->venue->id}")->assertOk()->json('data');
+        $this->assertSame('percent', $data['tax_type']);
+        $this->assertEqualsWithDelta(18.0, (float) $data['tax_value'], 0.01);
+        $this->assertSame('GST', $data['tax_label']);
+
+        // 1200 court + 50 fee + 18% of 1200 (216) = 1466.
+        $booking = $this->confirmedBooking();
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/v1/orders') && (int) $r->data()['amount'] === 146600);
+
+        $this->assertEqualsWithDelta(1250.0, (float) $booking->total_amount, 0.01);
+        $this->assertEqualsWithDelta(216.0, (float) $booking->tax_amount, 0.01);
+        $this->assertEqualsWithDelta(1466.0, $booking->amountCharged(), 0.01);
+        $this->assertEqualsWithDelta(1466.0, (float) $booking->amount_paid, 0.01);
+        $this->assertSame('paid', $booking->payment_status);
+
+        // The venue is owed its court time and fee — not the tax.
+        $this->assertEqualsWithDelta(1250.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+    }
+
+    public function test_pulse_tax_is_taken_on_the_price_after_the_coupon(): void
+    {
+        PlatformRules::save(['fees.venue_tax_type' => 'percent', 'fees.venue_tax_value' => 18]);
+        Coupon::create([
+            'venue_id' => $this->venue->id, 'scope' => 'venue', 'code' => 'TURF200',
+            'type' => 'fixed', 'discount' => 200, 'active' => true,
+        ]);
+
+        $quote = $this->as($this->player)->postJson('/api/bookings/validate-coupon', [
+            'code' => 'TURF200', 'venueId' => $this->venue->id, 'subtotal' => 1200,
+        ])->assertOk();
+        $this->assertEqualsWithDelta(180.0, (float) $quote->json('tax'), 0.01);
+
+        $this->book(['couponCode' => 'TURF200'])->assertCreated();
+        $booking = Booking::query()->latest('id')->first();
+
+        // (1200 − 200) × 18% = 180 → 1000 + 180 = 1180.
+        $this->assertEqualsWithDelta(180.0, (float) $booking->tax_amount, 0.01);
+        $this->assertEqualsWithDelta(1180.0, $booking->amountCharged(), 0.01);
+    }
+
+    public function test_desk_walk_ins_are_never_taxed(): void
+    {
+        PlatformRules::save(['fees.venue_tax_type' => 'percent', 'fees.venue_tax_value' => 18]);
+
+        $walkIn = app(\App\Services\BookingService::class)->createOfflineVenueBooking(
+            $this->owner, $this->venue->id, $this->slot->id, today()->addDay()->toDateString(), 'Kiran', '+91 90000 55412', $this->court->id,
+        );
+
+        $this->assertEqualsWithDelta(0.0, (float) $walkIn->tax_amount, 0.01);
     }
 
     /** A venue that charges a fee has to say so before checkout, not after. */
@@ -421,5 +484,66 @@ class VenueBookingUserToPartnerTest extends TestCase
             ->assertSuccessful();
 
         $this->book()->assertCreated();
+    }
+
+    public function test_reschedule_moves_booking_and_frees_old_slot(): void
+    {
+        $booking = $this->confirmedBooking();
+
+        $tomorrow = now()->addDay()->toDateString();
+        $newSlot = VenueSlot::create([
+            'venue_id' => $this->venue->id,
+            'day' => 'everyday',
+            'time' => '8:00 PM',
+            'is_available' => true,
+            'sort_order' => 2,
+        ]);
+
+        $res = $this->as($this->player)->postJson("/api/bookings/{$booking->id}/reschedule", [
+            'date' => $tomorrow,
+            'slotId' => $newSlot->id,
+            'courtId' => $this->court->id,
+        ])->assertOk();
+
+        $this->assertSame($tomorrow, $res->json('data.slotDate'));
+
+        $fresh = $booking->fresh();
+        $this->assertSame($tomorrow, $fresh->slot_date->toDateString());
+        $this->assertSame($newSlot->id, $fresh->venue_slot_id);
+
+        // The old slot on the old date is now freed and can be booked again!
+        $this->book()->assertCreated();
+    }
+
+    public function test_whatsapp_notifications_sent_to_partner_on_booking_and_cancellation(): void
+    {
+        $this->owner->update(['phone' => '9876543210']);
+
+        $whatsapp = \Mockery::mock(\App\Services\WhatsAppService::class);
+        $whatsapp->shouldReceive('sendMessage')
+            ->atLeast()->once()
+            ->withArgs(function ($phone, $message) {
+                return $phone === '9876543210' && str_contains($message, 'New booking at');
+            })
+            ->andReturn(true);
+
+        $whatsapp->shouldReceive('sendMessage')
+            ->atLeast()->once()
+            ->withArgs(function ($phone, $message) {
+                return $phone === '9876543210' && str_contains($message, 'Booking cancelled at');
+            })
+            ->andReturn(true);
+
+        $whatsapp->shouldReceive('sendMessage')->andReturn(true);
+        $whatsapp->shouldReceive('sendMedia')->andReturn(true);
+        $whatsapp->shouldReceive('sendTemplate')->andReturn(true);
+
+        $this->app->instance(\App\Services\WhatsAppService::class, $whatsapp);
+
+        $booking = $this->confirmedBooking();
+
+        // Cancellation by player
+        $this->as($this->player)->postJson("/api/bookings/{$booking->id}/cancel")
+            ->assertOk();
     }
 }

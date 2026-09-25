@@ -138,8 +138,90 @@ class VisionDiagnosticsActivity : ComponentActivity() {
         }.getOrElse { "FAIL — ${it::class.java.simpleName}: ${it.message}" }
         out += "Tracker (synthetic)" to trackerResult
 
-        val ok = opResult.startsWith("PASS") && trackerResult.startsWith("PASS")
-        out += "Verdict" to if (ok) "PASS — OpenCV usable on this device" else "FAIL"
+        // Bowler Detection & Delivery State Machine
+        val bowlerResult = runCatching {
+            val tracker = BowlerDeliveryTracker(
+                runUpForwardVelocityThreshold = 0.010f,
+                releaseZenithTolerance = 0.020f,
+            )
+            for (i in 1..6) {
+                val hipY = 0.40f + (i * 0.015f)
+                val shoulderY = hipY - 0.25f
+                val skeleton = BowlerSkeleton(
+                    nose = PoseKeypoint(0.5f, 0.5f),
+                    leftShoulder = PoseKeypoint(0.45f, shoulderY),
+                    rightShoulder = PoseKeypoint(0.55f, shoulderY),
+                    leftElbow = PoseKeypoint(0.5f, 0.5f),
+                    rightElbow = PoseKeypoint(0.5f, 0.5f),
+                    leftWrist = PoseKeypoint(0.4f, 0.9f),
+                    rightWrist = PoseKeypoint(0.60f, 0.50f),
+                    leftHip = PoseKeypoint(0.45f, hipY),
+                    rightHip = PoseKeypoint(0.55f, hipY),
+                    leftKnee = PoseKeypoint(0.5f, 0.5f),
+                    rightKnee = PoseKeypoint(0.5f, 0.5f),
+                    leftAnkle = PoseKeypoint(0.45f, hipY + 0.35f),
+                    rightAnkle = PoseKeypoint(0.55f, hipY + 0.35f),
+                )
+                tracker.onFrame(skeleton, i * 33L)
+            }
+            val gatherSkeleton = BowlerSkeleton(
+                nose = PoseKeypoint(0.5f, 0.5f),
+                leftShoulder = PoseKeypoint(0.45f, 0.25f),
+                rightShoulder = PoseKeypoint(0.55f, 0.25f),
+                leftElbow = PoseKeypoint(0.5f, 0.5f),
+                rightElbow = PoseKeypoint(0.5f, 0.5f),
+                leftWrist = PoseKeypoint(0.4f, 0.9f),
+                rightWrist = PoseKeypoint(0.65f, 0.30f),
+                leftHip = PoseKeypoint(0.45f, 0.50f),
+                rightHip = PoseKeypoint(0.55f, 0.50f),
+                leftKnee = PoseKeypoint(0.5f, 0.5f),
+                rightKnee = PoseKeypoint(0.5f, 0.5f),
+                leftAnkle = PoseKeypoint(0.45f, 0.85f),
+                rightAnkle = PoseKeypoint(0.55f, 0.85f),
+            )
+            tracker.onFrame(gatherSkeleton, 250L)
+            val strideSkeleton = BowlerSkeleton(
+                nose = PoseKeypoint(0.5f, 0.5f),
+                leftShoulder = PoseKeypoint(0.45f, 0.27f),
+                rightShoulder = PoseKeypoint(0.55f, 0.27f),
+                leftElbow = PoseKeypoint(0.5f, 0.5f),
+                rightElbow = PoseKeypoint(0.5f, 0.5f),
+                leftWrist = PoseKeypoint(0.4f, 0.9f),
+                rightWrist = PoseKeypoint(0.57f, 0.05f),
+                leftHip = PoseKeypoint(0.45f, 0.52f),
+                rightHip = PoseKeypoint(0.55f, 0.52f),
+                leftKnee = PoseKeypoint(0.5f, 0.5f),
+                rightKnee = PoseKeypoint(0.5f, 0.5f),
+                leftAnkle = PoseKeypoint(0.45f, 0.87f),
+                rightAnkle = PoseKeypoint(0.55f, 0.87f),
+            )
+            tracker.onFrame(strideSkeleton, 300L)
+            val releaseSkeleton = BowlerSkeleton(
+                nose = PoseKeypoint(0.5f, 0.5f),
+                leftShoulder = PoseKeypoint(0.45f, 0.28f),
+                rightShoulder = PoseKeypoint(0.55f, 0.28f),
+                leftElbow = PoseKeypoint(0.5f, 0.5f),
+                rightElbow = PoseKeypoint(0.5f, 0.5f),
+                leftWrist = PoseKeypoint(0.4f, 0.9f),
+                rightWrist = PoseKeypoint(0.65f, 0.15f),
+                leftHip = PoseKeypoint(0.45f, 0.53f),
+                rightHip = PoseKeypoint(0.55f, 0.53f),
+                leftKnee = PoseKeypoint(0.5f, 0.5f),
+                rightKnee = PoseKeypoint(0.5f, 0.5f),
+                leftAnkle = PoseKeypoint(0.45f, 0.88f),
+                rightAnkle = PoseKeypoint(0.55f, 0.88f),
+            )
+            val releaseSighting = tracker.onFrame(releaseSkeleton, 333L)
+            if (releaseSighting.isReleaseMoment && releaseSighting.phase == BowlingPhase.RELEASE) {
+                "PASS — detected ${releaseSighting.bowlingArm} release at ${releaseSighting.timestampMs}ms (angle: ${releaseSighting.armAngleDegrees.toInt()}°)"
+            } else {
+                "FAIL — state: ${releaseSighting.phase}, isRelease: ${releaseSighting.isReleaseMoment}"
+            }
+        }.getOrElse { "FAIL — ${it::class.java.simpleName}: ${it.message}" }
+        out += "Bowler Tracker" to bowlerResult
+
+        val ok = opResult.startsWith("PASS") && trackerResult.startsWith("PASS") && bowlerResult.startsWith("PASS")
+        out += "Verdict" to if (ok) "PASS — Vision & Bowler Tracking operational" else "FAIL"
 
         return out
     }

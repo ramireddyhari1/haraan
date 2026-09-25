@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\FeatureFlag;
 use App\Models\MemberPlanPrice;
 use App\Models\MemberSubscription;
 use App\Models\User;
@@ -12,6 +13,7 @@ use App\Services\Membership\MembershipException;
 use App\Services\Membership\MembershipPresenter;
 use App\Services\Membership\MemberSubscriptions;
 use App\Services\Membership\SportInsightsAccess;
+use App\Support\Membership\MembershipSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -26,10 +28,25 @@ final class MembershipController extends Controller
         private readonly MembershipPresenter $presenter,
     ) {}
 
-    /** GET /api/membership/plans — public catalogue, tailored to the caller when signed in. */
+    /**
+     * GET /api/membership/plans — public catalogue, tailored to the caller when signed in.
+     *
+     * `checkout` tells the app whether it may sell plans itself (admin feature flag, off by
+     * default) or should show the admin's note instead; plans are always sold on the website.
+     */
     public function plans(Request $request): JsonResponse
     {
-        return response()->json(['data' => $this->presenter->catalogue($this->member($request))]);
+        $member = $this->member($request);
+        $flag = FeatureFlag::query()->where('key', MembershipSettings::IN_APP_CHECKOUT_FLAG)->first();
+        $appVersion = $request->header('X-App-Version') ?? $request->query('app_version');
+
+        return response()->json(['data' => $this->presenter->catalogue($member) + [
+            'checkout' => [
+                'in_app' => (bool) $flag?->isEnabledFor($member, is_string($appVersion) ? $appVersion : null),
+                'note' => MembershipSettings::text('app_store_note'),
+                'web_url' => route('site.membership'),
+            ],
+        ]]);
     }
 
     /** GET /api/membership */

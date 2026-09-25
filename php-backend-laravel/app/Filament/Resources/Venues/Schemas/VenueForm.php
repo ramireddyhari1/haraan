@@ -4,6 +4,8 @@ namespace App\Filament\Resources\Venues\Schemas;
 
 use App\Filament\Forms\OrganizationSelect;
 use App\Models\User;
+use App\Models\Venue;
+use App\Support\Membership\MembershipSettings;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
@@ -87,10 +89,52 @@ class VenueForm
                     ->visibleOn('create')
                     ->content(new HtmlString(
                         '<div style="padding:12px 14px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:13px;line-height:1.5">'
-                        .'<strong>2-step setup.</strong> Fill this form and press <strong>Create</strong>. '
-                        .'Then, on the edit screen, add <strong>Courts</strong> (each with its sports &amp; price) and <strong>Time slots</strong> from the tabs — that\'s what powers booking.'
+                        .'<strong>2-step setup (Draft by default).</strong> Fill this form and press <strong>Create</strong>. '
+                        .'The new venue will be saved as <strong>Draft</strong> (hidden from users). '
+                        .'You will be taken to the edit screen where you can add <strong>Courts</strong> and <strong>Time slots</strong>, add a photo, then set <strong>Status</strong> to <strong>Live</strong>.'
                         .'</div>'
                     ))
+                    ->columnSpanFull(),
+
+                Placeholder::make('lifecycle_banner')
+                    ->hiddenLabel()
+                    ->visibleOn('edit')
+                    ->content(function (?Venue $record): ?HtmlString {
+                        if (! $record) {
+                            return null;
+                        }
+                        $status = $record->lifecycleStatus();
+                        if ($status === 'published') {
+                            return new HtmlString(
+                                '<div style="padding:12px 16px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;font-size:13px;line-height:1.5;display:flex;align-items:center;gap:8px;">'
+                                .'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;"></span>'
+                                .($record->is_bookable
+                                    ? '<strong>Status: Live.</strong> Visible to customers and taking bookings.'
+                                    : '<strong>Status: Live — bookings paused.</strong> Visible to customers, but no new bookings until Status is set back to Live.')
+                                .'</div>'
+                            );
+                        }
+                        if ($status === 'ready') {
+                            return new HtmlString(
+                                '<div style="padding:12px 16px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:13px;line-height:1.5;display:flex;align-items:center;gap:8px;">'
+                                .'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b;"></span>'
+                                .'<strong>Status: Ready to Publish.</strong> Everything a customer needs is set up. Set <strong>Status</strong> (under Visibility &amp; ownership) to <strong>Live</strong> and save.'
+                                .'</div>'
+                            );
+                        }
+                        $errors = $record->readinessErrors();
+                        $list = implode('', array_map(fn ($e) => '<li style="margin-left:18px;">' . htmlspecialchars($e) . '</li>', $errors));
+                        return new HtmlString(
+                            '<div style="padding:12px 16px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:13px;line-height:1.5;">'
+                            .'<div style="font-weight:bold;margin-bottom:4px;display:flex;align-items:center;gap:6px;">'
+                            .'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;"></span>'
+                            .'Setup Incomplete (Draft) — Cannot Go Live Yet'
+                            .'</div>'
+                            .'<div style="font-size:12px;color:#7f1d1d;">Complete these remaining items before publishing:</div>'
+                            .'<ul style="margin:6px 0 0 0;padding:0;font-size:12px;">' . $list . '</ul>'
+                            .'</div>'
+                        );
+                    })
                     ->columnSpanFull(),
 
                 Section::make('Basics')
@@ -130,6 +174,12 @@ class VenueForm
                             ->required()
                             ->label('Area / locality')
                             ->helperText('Short label on the card (e.g. "Bandra").'),
+                        TextInput::make('city')
+                            ->label('City')
+                            ->required()
+                            ->maxLength(100)
+                            ->placeholder('e.g. Chennai, Hyderabad, Bengaluru')
+                            ->helperText('City where the venue is located — auto-filled by the place picker or typed manually.'),
                         TextInput::make('distance')
                             ->label('Fallback distance')
                             ->helperText('Only used when coordinates are missing. Leave blank once lat/lng are set.'),
@@ -174,7 +224,7 @@ class VenueForm
                     ]),
 
                 Section::make('Operating hours')
-                    ->description('Add a row per open day. Days you don\'t list are treated as closed. Bookable start-times are generated from these hours.')
+                    ->description('Add a row per open day. Days you don\'t list are treated as closed. Bookable start-times are generated from these hours. Open past midnight? Set the real closing time (e.g. Mon 6:00 PM → 1:00 AM): the hours after 12 AM are sold on the next day\'s date, so a customer books Monday night\'s last hour as Tuesday 12 AM.')
                     ->schema([
                         Repeater::make('hours_rows')
                             ->hiddenLabel()
@@ -193,7 +243,16 @@ class VenueForm
                                 TimePicker::make('close')
                                     ->label('Closes')
                                     ->seconds(false)->format('H:i')->displayFormat('h:i A')
-                                    ->required(),
+                                    ->required()
+                                    ->helperText('Earlier than “Opens” = closes after midnight.')
+                                    // Equal times used to save and then silently produce no slots.
+                                    ->rules([
+                                        fn ($get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get): void {
+                                            if ($value !== null && substr((string) $value, 0, 5) === substr((string) $get('open'), 0, 5)) {
+                                                $fail('Closing time can’t be the same as opening time.');
+                                            }
+                                        },
+                                    ]),
                             ])
                             ->columns(3)
                             ->addActionLabel('Add a day')
@@ -239,6 +298,42 @@ class VenueForm
                             ->label('Pricing note')
                             ->placeholder('Pricing is subject to change and is controlled by the venue')
                             ->helperText('Small disclaimer shown near the price.'),
+                        // Charged on top of the slot price at checkout (app + website), via
+                        // Venue::convenienceFeeFor(). Haraan sets it: the inputs exist only in
+                        // /control, and a partner sees what is charged, read-only. Hidden
+                        // fields aren't saved, so a partner's save can never change it.
+                        Placeholder::make('convenience_fee_readonly')
+                            ->label('Convenience fee')
+                            ->visible(fn (): bool => self::isPartnerPanel())
+                            ->content(fn (?Venue $record): string => match ($record?->convenience_fee_type) {
+                                'flat'    => '₹' . number_format((float) $record->convenience_fee_value, 2) . ' per booking — set by Haraan',
+                                'percent' => rtrim(rtrim(number_format((float) $record->convenience_fee_value, 2), '0'), '.') . '% of the slot price — set by Haraan',
+                                default   => 'None — set by Haraan',
+                            }),
+                        Select::make('convenience_fee_type')
+                            ->visible(fn (): bool => ! self::isPartnerPanel())
+                            ->label('Convenience fee')
+                            ->options([
+                                'none'    => 'No fee',
+                                'flat'    => 'Flat ₹ per booking',
+                                'percent' => '% of the slot price',
+                            ])
+                            ->default('none')
+                            ->required()
+                            ->native(false)
+                            ->live()
+                            ->helperText('Added to the customer’s total at checkout, on the app and the website. Paid to the venue.'),
+                        TextInput::make('convenience_fee_value')
+                            ->label(fn ($get): string => $get('convenience_fee_type') === 'percent' ? 'Fee (%)' : 'Fee (₹)')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(fn ($get): int => $get('convenience_fee_type') === 'percent' ? 50 : 5000)
+                            ->prefix(fn ($get): ?string => $get('convenience_fee_type') === 'flat' ? '₹' : null)
+                            ->suffix(fn ($get): ?string => $get('convenience_fee_type') === 'percent' ? '%' : null)
+                            ->default(0)
+                            ->required(fn ($get): bool => in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
+                            ->visible(fn ($get): bool => ! self::isPartnerPanel()
+                                && in_array($get('convenience_fee_type'), ['flat', 'percent'], true)),
                     ]),
 
                 Section::make('Photos')
@@ -303,12 +398,28 @@ class VenueForm
                 Section::make('Visibility & ownership')
                     ->columns(2)
                     ->schema([
-                        Toggle::make('is_active')
-                            ->label('Active (visible in the app)')
-                            ->default(true),
-                        Toggle::make('is_bookable')
-                            ->label('Open for booking')
-                            ->default(true),
+                        // One status instead of three switches (status / is_active / is_bookable)
+                        // that could contradict each other. Applied by EditVenue::afterSave via
+                        // Venue::applyVisibilityState(), which writes all three together and
+                        // refuses to go live until the venue is ready. New venues start as Draft.
+                        Select::make('visibility_state')
+                            ->label('Status')
+                            ->options(Venue::STATES)
+                            ->visibleOn('edit')
+                            ->native(false)
+                            ->required()
+                            ->dehydrated(false)
+                            ->formatStateUsing(fn (?Venue $record): string => $record?->visibilityState() ?? Venue::STATE_DRAFT)
+                            ->helperText('Live needs at least one active court, a time slot, a price and a photo — if anything is missing, the venue stays as it was and you’re told what to add. “Bookings paused” keeps the venue visible but stops new bookings (existing ones stand).')
+                            ->columnSpanFull(),
+                        TextInput::make('booking_window_days')
+                            ->label('Booking window (days ahead)')
+                            ->numeric()
+                            ->integer()
+                            ->minValue(1)
+                            ->maxValue(365)
+                            ->placeholder((string) MembershipSettings::int('venue_booking_window_days'))
+                            ->helperText('How far ahead customers can book. Leave blank for the default in Finance → Membership settings. Pro and Hero members get their priority days on top.'),
                         Toggle::make('is_featured')
                             ->label('Featured')
                             ->default(false)
@@ -344,21 +455,19 @@ class VenueForm
                             ->visible(fn (): bool => ! self::isPartnerPanel()),
                     ]),
 
-                Section::make('Ratings (starter values)')
-                    ->description('Optional seed numbers shown until real reviews arrive — real customer reviews override these on the venue page.')
-                    ->collapsed()
-                    ->columns(3)
+                // Read-only: the rating is worked out from real customer reviews
+                // (Venue::refreshRating()). It used to be typed in here, which is how a venue
+                // with no reviews showed 4.2 ★ from 120 ratings.
+                Section::make('Ratings & Reviews')
+                    ->visibleOn('edit')
                     ->schema([
-                        TextInput::make('rating')
-                            ->numeric()
-                            ->step('0.1')
-                            ->default('4.5'),
-                        TextInput::make('ratings_count')
-                            ->numeric()
-                            ->default(0),
-                        TextInput::make('reviews_count')
-                            ->numeric()
-                            ->default(0),
+                        Placeholder::make('rating_summary')
+                            ->hiddenLabel()
+                            ->content(fn (?Venue $record): string => $record !== null && (int) $record->ratings_count > 0
+                                ? number_format((float) $record->rating, 1) . ' ★ from ' . (int) $record->ratings_count
+                                    . ' review' . ((int) $record->ratings_count === 1 ? '' : 's')
+                                    . ' — worked out from customer reviews (Reviews tab).'
+                                : 'No reviews yet — customers see no rating until the first review arrives.'),
                     ]),
             ]);
     }

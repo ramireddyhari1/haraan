@@ -46,6 +46,62 @@ class MessageTemplateSeeder extends Seeder
                 ],
             ],
             [
+                // To the VENUE OWNER, not the customer. Owners almost never have a
+                // 24-hour window open with us, so without this approved template the
+                // alert is free text WhatsApp refuses to deliver.
+                'key' => 'booking.partner_alert',
+                'name' => 'New venue booking (owner)',
+                'category' => 'utility',
+                'provider_template_id' => 'venue_booking_alert',
+                // Longer than the free-text fallback on purpose: WhatsApp rejects a
+                // template with "too many variables for its length", and seven slots
+                // need this much fixed copy around them (submitted 2026-09-25).
+                'body' => "You have a new court booking on Haraan.\n\nVenue: *{{1}}*\nDate: {{2}}\nSlots: {{3}}\n\n"
+                    . "Customer name: {{4}}\nCustomer phone: {{5}}\nAmount: {{6}}\nBooking ID: {{7}}\n\n"
+                    . "The booking is already on your day grid in the Haraan partner app. "
+                    . "Please keep the court ready for the customer at the booked time.",
+                'variables' => [
+                    '1' => 'venue name',
+                    '2' => 'date',
+                    '3' => 'court and time of each slot',
+                    '4' => 'customer name',
+                    '5' => 'customer phone',
+                    '6' => 'amount, and whether it is paid or due at the desk',
+                    '7' => 'booking code',
+                ],
+            ],
+            [
+                // To the CUSTOMER. Promises no refund by itself — whether one is due
+                // is the cancellation policy's call, not this message's.
+                'key' => 'booking.cancelled',
+                'name' => 'Booking cancelled (customer)',
+                'category' => 'utility',
+                'provider_template_id' => 'booking_cancelled',
+                'body' => "Your booking has been cancelled.\n\n*{{1}}*\n{{2}}\nBooking ID: {{3}}\nReason: {{4}}\n\n"
+                    . "Refunds, where applicable, go back to your original payment method as per the "
+                    . "cancellation policy. Thank you for using Haraan.",
+                'variables' => [
+                    '1' => 'event or venue name',
+                    '2' => 'date and time',
+                    '3' => 'booking / ticket code',
+                    '4' => 'cancellation reason',
+                ],
+            ],
+            [
+                'key' => 'booking.partner_cancellation',
+                'name' => 'Venue booking cancelled (owner)',
+                'category' => 'utility',
+                'provider_template_id' => 'venue_booking_cancelled',
+                'body' => "Booking cancelled at *{{1}}*\n\n{{2}}\nCustomer: {{3}}\nReason: {{4}}\n\n"
+                    . "The slot is open again on your grid.",
+                'variables' => [
+                    '1' => 'venue name',
+                    '2' => 'date, court and time',
+                    '3' => 'customer name',
+                    '4' => 'cancellation reason',
+                ],
+            ],
+            [
                 'key' => 'payment.success',
                 'name' => 'Payment received',
                 'category' => 'utility',

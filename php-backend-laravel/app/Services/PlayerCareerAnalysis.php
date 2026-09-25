@@ -8,6 +8,7 @@ use App\Models\PlayerCareerBatting;
 use App\Models\PlayerCareerBowling;
 use App\Models\PlayerCareerFielding;
 use App\Models\User;
+use App\Support\AiGate;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -188,6 +189,10 @@ final class PlayerCareerAnalysis
 
         [$url, $headers] = $this->endpoint($model);
         if ($url === null) {
+            return [];
+        }
+
+        if (! AiGate::attempt(AiGate::CAREER_READ)) {
             return [];
         }
 

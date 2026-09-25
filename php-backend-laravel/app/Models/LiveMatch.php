@@ -88,6 +88,12 @@ class LiveMatch extends Model
         return $this->belongsTo(OrganizationUnit::class, 'organization_id');
     }
 
+    /** The user who created/hosted this match. */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
     /**
      * The single source of truth for "who may see which match".
      *

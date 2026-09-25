@@ -26,7 +26,7 @@ async function loadCoupons(q=''){
 	const body = document.getElementById('coupons-body'); body.innerHTML='';
 	rows.forEach(c=>{
 		const tr = document.createElement('tr');
-		tr.innerHTML = `<td>${c.id}</td><td>${c.code}</td><td>${c.discount}</td><td>${c.uses||0}</td><td>${c.active? 'Yes':'No'}</td><td><button onclick="delCoupon(${c.id})">Delete</button></td>`;
+		tr.innerHTML = `<td>${esc(c.id)}</td><td>${esc(c.code)}</td><td>${esc(c.discount)}</td><td>${esc(c.uses)||0}</td><td>${c.active? 'Yes':'No'}</td><td><button onclick="delCoupon(${Number(c.id)})">Delete</button></td>`;
 		body.appendChild(tr);
 	});
 }

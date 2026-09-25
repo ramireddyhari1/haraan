@@ -5,18 +5,23 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Models\Venue;
+use App\Services\VenueBookingWindow;
+use App\Services\VenueSlotAvailability;
+use App\Support\MediaUrl;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 final class VenuesController extends Controller
 {
     /** GET /api/venues — list active venues for the GameHub browse screen. */
     public function index(): JsonResponse
     {
-        $venues = Venue::query()
+        $venues = Venue::published()
             ->with('partner.hostProfile')
-            ->where('is_active', true)
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->get()
@@ -28,8 +33,8 @@ final class VenuesController extends Controller
     /** GET /api/venues/{id} — full detail incl. slots, reviews, amenities. */
     public function show(int $id): JsonResponse
     {
-        $venue = Venue::with(['slots', 'courts' => fn ($q) => $q->where('is_active', true), 'reviews' => fn ($q) => $q->where('is_active', true), 'partner.hostProfile'])
-            ->where('is_active', true)
+        $venue = Venue::published()
+            ->with(['slots', 'courts' => fn ($q) => $q->where('is_active', true), 'reviews' => fn ($q) => $q->where('is_active', true), 'partner.hostProfile'])
             ->findOrFail($id);
 
         return response()->json(['data' => [
@@ -51,6 +56,11 @@ final class VenuesController extends Controller
             // Same two fields the model prices from — none | flat | percent.
             'convenience_fee_type' => $venue->convenience_fee_type ?? 'none',
             'convenience_fee_value' => (float) ($venue->convenience_fee_value ?? 0),
+            // Pulse tax (/control → Platform rules → Fees), same shape: none | flat | percent,
+            // on (subtotal − discount). Platform-wide, so every venue quotes the same rule.
+            'tax_type' => PlatformRules::string('fees.venue_tax_type'),
+            'tax_value' => PlatformRules::float('fees.venue_tax_value'),
+            'tax_label' => Venue::taxLabel(),
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
             // Courts are physical bookable units, each carrying the sports it can host and its
@@ -68,7 +78,7 @@ final class VenuesController extends Controller
                 'peak_start' => $c->peak_start,
                 'peak_end' => $c->peak_end,
             ])->values(),
-            'images' => \App\Support\MediaUrl::resolveMany($venue->images),
+            'images' => MediaUrl::resolveMany($venue->images),
             'latitude' => $venue->latitude,
             'longitude' => $venue->longitude,
             'map_link' => $venue->map_link,
@@ -100,27 +110,48 @@ final class VenuesController extends Controller
      *
      * Computed against real bookings, live payment holds and court blocks (see
      * VenueSlotAvailability), unlike the detail payload's `slots[].available`, which is only
-     * the venue's template switch. Dates outside today…+60 days are refused so the endpoint
-     * can't be used to sweep a venue's whole history.
+     * the venue's template switch. Dates before yesterday or past the caller's booking window
+     * (the venue's window plus any priority days on their plan) are refused, so the endpoint
+     * can't sweep a venue's history and never offers a day checkout would refuse.
      */
-    public function availability(Request $request, int $id, \App\Services\VenueSlotAvailability $availability): JsonResponse
-    {
-        $venue = Venue::query()->where('is_active', true)->findOrFail($id);
+    public function availability(
+        Request $request,
+        int $id,
+        VenueSlotAvailability $availability,
+        VenueBookingWindow $window,
+    ): JsonResponse {
+        $venue = Venue::published()->findOrFail($id);
 
         $validated = $request->validate([
             'date' => ['nullable', 'date_format:Y-m-d'],
+            'duration' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'court_id' => ['nullable', 'integer'],
         ]);
         $date = isset($validated['date'])
-            ? \Illuminate\Support\Carbon::createFromFormat('Y-m-d', $validated['date'])->startOfDay()
+            ? Carbon::createFromFormat('Y-m-d', $validated['date'])->startOfDay()
             : now()->startOfDay();
+        $duration = isset($validated['duration']) ? (int) $validated['duration'] : 1;
+        $courtId = isset($validated['court_id']) ? (int) $validated['court_id'] : null;
 
-        if ($date->lt(now()->startOfDay()->subDay()) || $date->gt(now()->startOfDay()->addDays(60))) {
+        $viewer = $request->attributes->get('auth_user');
+        $viewer = $viewer instanceof User ? $viewer : null;
+
+        if ($date->lt(now()->startOfDay()->subDay())) {
             return response()->json(['message' => 'Date out of range'], 422);
+        }
+
+        if (! $window->allows($venue, $viewer, $date)) {
+            return response()->json([
+                'message' => $window->refusal($venue, $viewer),
+                'code' => 'outside_booking_window',
+                'booking_window' => $window->describe($venue, $viewer),
+            ], 422);
         }
 
         return response()->json(['data' => [
             'date' => $date->toDateString(),
-            'slots' => $availability->forDate($venue, $date),
+            'slots' => $availability->forDate($venue, $date, $duration, $courtId),
+            'booking_window' => $window->describe($venue, $viewer),
         ]]);
     }
 
@@ -140,14 +171,14 @@ final class VenuesController extends Controller
             'latitude' => $v->latitude,
             'longitude' => $v->longitude,
             'price' => $v->price,
-            'rating' => $v->rating,
+            'rating' => ($v->ratings_count > 0 && $v->rating) ? $v->rating : null,
             'ratings_count' => $v->ratings_count,
             'reviews_count' => $v->reviews_count,
             'tagline' => $v->tagline,
-            'image' => \App\Support\MediaUrl::resolve(is_array($v->images) ? ($v->images[0] ?? null) : null),
+            'image' => MediaUrl::resolve(is_array($v->images) ? ($v->images[0] ?? null) : null),
             // Every photo, so list cards can swipe through the gallery without opening the
             // venue. Additive: `image` above stays for older app builds.
-            'images' => \App\Support\MediaUrl::resolveMany(is_array($v->images) ? $v->images : null),
+            'images' => MediaUrl::resolveMany(is_array($v->images) ? $v->images : null),
             'is_bookable' => $v->is_bookable,
             'is_featured' => $v->is_featured,
             // The owner's public page, when they have a live one (host-profile twin).
@@ -173,7 +204,7 @@ final class VenuesController extends Controller
             'slug' => $profile->slug,
             'logo' => $profile->logoUrl(),
             'verified' => $profile->isVerified(),
-            'url' => url('/host/' . $profile->slug),
+            'url' => url('/host/'.$profile->slug),
         ];
     }
 }

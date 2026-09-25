@@ -44,7 +44,7 @@ class PricesRelationManager extends RelationManager
     {
         return $schema->components([
             Select::make('interval')
-                ->options([MemberPlanPrice::INTERVAL_MONTH => 'Monthly', MemberPlanPrice::INTERVAL_YEAR => 'Yearly'])
+                ->options(MemberPlanPrice::intervalOptions())
                 ->required()
                 ->native(false)
                 ->disabled(fn (?MemberPlanPrice $record): bool => filled($record?->razorpay_plan_id)),
@@ -74,7 +74,7 @@ class PricesRelationManager extends RelationManager
             ->defaultSort('interval')
             ->columns([
                 TextColumn::make('interval')
-                    ->formatStateUsing(fn (string $state): string => $state === MemberPlanPrice::INTERVAL_YEAR ? 'Yearly' : 'Monthly')
+                    ->formatStateUsing(fn (string $state): string => MemberPlanPrice::intervalLabel($state))
                     ->badge()
                     ->color('info'),
                 TextColumn::make('amount_paise')

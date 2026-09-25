@@ -8,6 +8,10 @@ use App\Http\Controllers\Controller;
 use App\Models\AppSetting;
 use App\Models\FeatureFlag;
 use App\Models\User;
+use App\Services\Membership\MemberEntitlements;
+use App\Services\Rewards\RewardEngine;
+use App\Support\Membership\MemberFeature;
+use App\Support\Operations;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -36,6 +40,19 @@ final class ConfigController extends Controller
             'features' => $features,
             'theme' => $this->theme(),
             'realtime' => $this->realtime(),
+            // /control → Operations: maintenance, forced/optional update, paused bookings,
+            // payments, match creation, AI. The server enforces all of these regardless; this
+            // lets the app explain them instead of failing request by request. A change is
+            // broadcast as a `config` content event, so clients refetch within seconds.
+            'operations' => Operations::clientState(is_string($appVersion) ? $appVersion : null),
+            // Post-match rewards. `rewarded_ads` is false for a member whose plan hides ads, so the
+            // app never even initialises the ad SDK for them.
+            'rewards' => [
+                'enabled' => RewardEngine::enabled(),
+                'rewarded_ads' => RewardEngine::enabled()
+                    && RewardEngine::rewardedAdsAvailable()
+                    && ! app(MemberEntitlements::class)->allows($user, MemberFeature::ADS_HIDDEN),
+            ],
             'server_time' => now()->toIso8601String(),
         ]);
     }

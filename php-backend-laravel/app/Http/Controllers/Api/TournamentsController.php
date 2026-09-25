@@ -10,6 +10,8 @@ use App\Models\User;
 use App\Services\Membership\MemberEntitlements;
 use App\Services\ReputationService;
 use App\Support\Membership\MemberFeature;
+use App\Support\Operations;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -23,7 +25,6 @@ use Illuminate\Validation\ValidationException;
 final class TournamentsController extends Controller
 {
     /** A host making more than this many in a day is spamming the directory, not organising. */
-    private const DAILY_CREATE_LIMIT = 10;
 
     /**
      * POST /api/tournaments — multipart, so the banner and logo travel with the details and
@@ -36,6 +37,9 @@ final class TournamentsController extends Controller
         if (! $user instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
+
+        // Emergency switch (/control → Operations).
+        Operations::assertTournamentCreationOpen();
 
         if (! ReputationService::canCreateRankedTournament($user)) {
             return response()->json([
@@ -148,7 +152,7 @@ final class TournamentsController extends Controller
             ->where('user_id', $user->id)
             ->where('created_at', '>=', now()->subDay())
             ->count();
-        if ($createdToday >= self::DAILY_CREATE_LIMIT) {
+        if ($createdToday >= PlatformRules::int('creation.tournaments_per_day')) {
             return response()->json([
                 'error' => 'You have created a lot of tournaments today. Try again tomorrow.',
             ], 429);

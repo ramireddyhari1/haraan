@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AuditsAdminChanges;
 use App\Support\MediaUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -11,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 final class Ad extends Model
 {
+    // Sponsored placements are paid inventory: every /control change is logged field by field.
+    use AuditsAdminChanges;
+
     /**
      * Every slot a client actually renders, and what it is called in the console. A placement
      * outside this list is a slot nothing reads — the ad would be live and never seen — so the

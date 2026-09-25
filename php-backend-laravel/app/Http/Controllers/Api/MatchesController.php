@@ -4,19 +4,35 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\MatchUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Match\StoreMatchRequest;
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
+use App\Models\MatchGround;
+use App\Models\ReputationEvent;
 use App\Models\User;
+use App\Services\CricketCommentary;
+use App\Services\GroundInsightsService;
+use App\Services\GroundResolver;
+use App\Services\MatchCompletion;
 use App\Services\MatchEventRecorder;
 use App\Services\MatchVerificationService;
+use App\Services\Membership\SportInsightsAccess;
+use App\Services\PlayerInningsIQ;
 use App\Services\ReputationService;
+use App\Services\Scoring\EventGuard;
 use App\Services\VenueVerificationService;
 use App\Support\ActionboardXp;
+use App\Support\CricketRules;
+use App\Support\Operations;
+use App\Support\SportRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * ActionBoard matches — create + verification lifecycle.
@@ -30,9 +46,12 @@ final class MatchesController extends Controller
     public function store(StoreMatchRequest $request): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser instanceof User) {
+        if (! $authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
+
+        // Emergency switch (/control → Operations).
+        Operations::assertMatchCreationOpen();
 
         $v = $request->validated();
         $type = $v['matchType'];
@@ -40,7 +59,7 @@ final class MatchesController extends Controller
 
         // Serial abusers (low trust) cannot create ranked-tier tournaments. Private
         // matches earn no XP/rank, so the trust gate doesn't apply to them.
-        if (!$isPrivate && $type === 'tournament' && !ReputationService::canCreateRankedTournament($authUser)) {
+        if (! $isPrivate && $type === 'tournament' && ! ReputationService::canCreateRankedTournament($authUser)) {
             return response()->json([
                 'error' => 'Your trust score is too low to create tournament matches.',
             ], 403);
@@ -49,7 +68,7 @@ final class MatchesController extends Controller
         // Attach a Haraan turf booking (auto-verifies on completion). Must be a
         // CONFIRMED booking owned by the creator.
         $venueBookingId = null;
-        if (!empty($v['venueBookingId'])) {
+        if (! empty($v['venueBookingId'])) {
             $booking = VenueVerificationService::findValidBooking((int) $v['venueBookingId'], (int) $authUser->id);
             if ($booking === null) {
                 return response()->json([
@@ -60,94 +79,94 @@ final class MatchesController extends Controller
         }
 
         $match = LiveMatch::query()->create([
-            'title'        => $v['teamA'] . ' vs ' . $v['teamB'],
+            'title' => $v['teamA'].' vs '.$v['teamB'],
             // Stamp the sport so the feed/detail can branch and the match is never
             // mislabelled as cricket. Defaults to cricket when the client omits it.
-            'sport'        => $v['sport'] ?? 'cricket',
+            'sport' => $v['sport'] ?? 'cricket',
             // What ends the match, in that sport's own terms — overs, halves × length,
             // or games × points. Lives alongside the live score under `sport_state`
             // (the scorer's own writes array_merge over this, so it survives).
             // rules_version stamps the scoring-rules generation this match is played under,
             // so later rule fixes never re-read a finished result (see SportRules::version).
             // Cricket keeps its own pipeline and has no rules generation to stamp.
-            'sport_state'  => array_filter([
+            'sport_state' => array_filter([
                 'format' => $v['format'] ?? null,
                 'rules_version' => strtolower((string) ($v['sport'] ?? 'cricket')) === 'cricket'
-                    ? null : \App\Support\SportRules::CURRENT_VERSION,
+                    ? null : SportRules::CURRENT_VERSION,
             ], static fn ($x) => $x !== null) ?: null,
             // Short code for compact displays (hero monogram, live list); full name kept for headers.
-            'home'         => self::shortName($v['teamA']),
-            'away'         => self::shortName($v['teamB']),
-            'home_full'    => $v['teamA'],
-            'away_full'    => $v['teamB'],
-            'home_emblem'  => $v['teamAEmblem'] ?? null,
-            'away_emblem'  => $v['teamBEmblem'] ?? null,
+            'home' => self::shortName($v['teamA']),
+            'away' => self::shortName($v['teamB']),
+            'home_full' => $v['teamA'],
+            'away_full' => $v['teamB'],
+            'home_emblem' => $v['teamAEmblem'] ?? null,
+            'away_emblem' => $v['teamBEmblem'] ?? null,
             // Reads in the sport's own terms. This was unconditionally
             // "{overs} Over Match", so a football match announced itself as a 20-over game.
-            'competition'  => self::competitionLabel($v),
-            'venue'        => $v['venue'] ?? 'Custom Match',
-            'status'       => 'Scheduled',
+            'competition' => self::competitionLabel($v),
+            'venue' => $v['venue'] ?? 'Custom Match',
+            'status' => 'Scheduled',
             // Future kick-off, when the creator scheduled one; NULL = play now. Status
             // stays 'Scheduled' either way until the toss takes it Live.
-            'scheduled_at' => isset($v['scheduledAt']) ? \Illuminate\Support\Carbon::parse($v['scheduledAt']) : null,
+            'scheduled_at' => isset($v['scheduledAt']) ? Carbon::parse($v['scheduledAt']) : null,
             // A human label for compact rows. A scheduled match shows its date; a
             // play-now match keeps the plain "Scheduled" marker until it goes Live.
-            'time'         => isset($v['scheduledAt'])
-                ? \Illuminate\Support\Carbon::parse($v['scheduledAt'])->format('D, d M · g:i A')
+            'time' => isset($v['scheduledAt'])
+                ? Carbon::parse($v['scheduledAt'])->format('D, d M · g:i A')
                 : 'Scheduled',
-            'home_score'   => 0,
-            'away_score'   => 0,
-            'overs'        => '0.0',
-            'crr'          => '0.00',
-            'batters'      => [],
-            'bowler'       => [],
-            'timeline'     => [],
+            'home_score' => 0,
+            'away_score' => 0,
+            'overs' => '0.0',
+            'crr' => '0.00',
+            'batters' => [],
+            'bowler' => [],
+            'timeline' => [],
             'over_summary' => [],
-            'home_squad'   => self::normalizeSquad($v['squadA'] ?? []),
-            'away_squad'   => self::normalizeSquad($v['squadB'] ?? []),
-            'user_id'      => $authUser->id,
+            'home_squad' => self::normalizeSquad($v['squadA'] ?? []),
+            'away_squad' => self::normalizeSquad($v['squadB'] ?? []),
+            'user_id' => $authUser->id,
 
             // ActionBoard ranking
-            'match_type'          => $type,
-            'base_xp'             => ActionboardXp::baseXpForType($type),
-            'trust_level'         => 'low',
+            'match_type' => $type,
+            'base_xp' => ActionboardXp::baseXpForType($type),
+            'trust_level' => 'low',
             'verification_status' => 'none',
-            'is_ranked'           => false,
-            'venue_booking_id'    => $venueBookingId,
+            'is_ranked' => false,
+            'venue_booking_id' => $venueBookingId,
 
             // Private mode: a closed scoreboard reachable only by share code. No XP,
             // never ranked, hidden from feeds. Immutable once created.
-            'is_private'          => $isPrivate,
-            'join_code'           => $isPrivate ? self::generateJoinCode() : null,
+            'is_private' => $isPrivate,
+            'join_code' => $isPrivate ? self::generateJoinCode() : null,
 
             // "Looking for players": open to join-requests from nearby players. Private
             // matches are never open (they're closed by definition).
-            'open_to_join'        => !$isPrivate && $request->boolean('openToJoin'),
-            'slots_needed'        => (!$isPrivate && $request->boolean('openToJoin'))
+            'open_to_join' => ! $isPrivate && $request->boolean('openToJoin'),
+            'slots_needed' => (! $isPrivate && $request->boolean('openToJoin'))
                 ? (int) ($v['slotsNeeded'] ?? 0)
                 : 0,
 
             // Geo-scoped visibility: born LOCAL, stamped with the creator's district
             // (and state, for the future STATE tier). Reach beyond the district is
             // granted by an admin — never chosen at creation.
-            'visibility'          => LiveMatch::VIS_LOCAL,
+            'visibility' => LiveMatch::VIS_LOCAL,
             // District comes from the GPS fix taken at creation when we have one —
             // that's where the match actually is. The creator's profile district is
             // only a fallback (it's where they signed up, not necessarily where they
             // are playing today).
-            'district'            => $v['district'] ?? $authUser->district,
-            'state'               => $authUser->state,
-            'locality'            => $v['locality'] ?? null,
+            'district' => $v['district'] ?? $authUser->district,
+            'state' => $authUser->state,
+            'locality' => $v['locality'] ?? null,
 
             // The GPS fix itself — mandatory for public matches. Powers distance
             // sorting in the near-me feed; a place name alone can't be measured.
-            'latitude'            => $v['latitude'] ?? null,
-            'longitude'           => $v['longitude'] ?? null,
+            'latitude' => $v['latitude'] ?? null,
+            'longitude' => $v['longitude'] ?? null,
         ]);
 
         return response()->json([
             'message' => 'Match created',
-            'data'    => $match,
+            'data' => $match,
         ], 201);
     }
 
@@ -166,7 +185,7 @@ final class MatchesController extends Controller
     public function scheduled(Request $request): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser instanceof User) {
+        if (! $authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -193,26 +212,27 @@ final class MatchesController extends Controller
                         $out[] = ['id' => null, 'name' => $p];
                     }
                 }
+
                 return $out;
             };
             $format = is_array($m->sport_state) ? ($m->sport_state['format'] ?? null) : null;
 
             return [
-                'id'          => (string) $m->id,
-                'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
-                'teamA'       => (string) ($m->home_full ?: $m->home),
-                'teamB'       => (string) ($m->away_full ?: $m->away),
+                'id' => (string) $m->id,
+                'sport' => strtolower((string) ($m->sport ?: 'cricket')),
+                'teamA' => (string) ($m->home_full ?: $m->home),
+                'teamB' => (string) ($m->away_full ?: $m->away),
                 'teamAEmblem' => (string) ($m->home_emblem ?? ''),
                 'teamBEmblem' => (string) ($m->away_emblem ?? ''),
-                'squadA'      => $squad($m->home_squad),
-                'squadB'      => $squad($m->away_squad),
-                'isPrivate'   => (bool) $m->is_private,
-                'joinCode'    => (string) ($m->join_code ?? ''),
-                'venue'       => (string) ($m->venue ?? ''),
-                'locality'    => (string) ($m->locality ?? ''),
+                'squadA' => $squad($m->home_squad),
+                'squadB' => $squad($m->away_squad),
+                'isPrivate' => (bool) $m->is_private,
+                'joinCode' => (string) ($m->join_code ?? ''),
+                'venue' => (string) ($m->venue ?? ''),
+                'locality' => (string) ($m->locality ?? ''),
                 // ISO-8601 kick-off, or null for a "play now" match awaiting its toss.
                 'scheduledAt' => $m->scheduled_at?->toIso8601String(),
-                'format'      => is_array($format) ? $format : null,
+                'format' => is_array($format) ? $format : null,
             ];
         })->all();
 
@@ -231,7 +251,7 @@ final class MatchesController extends Controller
             for ($i = 0; $i < 4; $i++) {
                 $suffix .= $alphabet[random_int(0, strlen($alphabet) - 1)];
             }
-            $code = 'HRN-' . $suffix;
+            $code = 'HRN-'.$suffix;
         } while (LiveMatch::where('join_code', $code)->exists());
 
         return $code;
@@ -246,7 +266,7 @@ final class MatchesController extends Controller
     public function uploadTeamLogo(Request $request, string $id): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser instanceof User) {
+        if (! $authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -269,19 +289,19 @@ final class MatchesController extends Controller
         // Replace any previous upload for this side.
         $previous = $match->{$column};
         if (is_string($previous) && str_starts_with($previous, '/storage/')) {
-            \Illuminate\Support\Facades\Storage::disk('public')
+            Storage::disk('public')
                 ->delete(substr($previous, strlen('/storage/')));
         }
 
         $path = $request->file('logo')->store('team-logos', 'public');
-        $url = '/storage/' . $path;
+        $url = '/storage/'.$path;
 
         $match->update([$column => $url]);
 
         return response()->json([
             'message' => 'Team logo updated',
-            'side'    => $side,
-            'url'     => $url,
+            'side' => $side,
+            'url' => $url,
         ]);
     }
 
@@ -301,7 +321,7 @@ final class MatchesController extends Controller
         // Per-player stats, careers, rankings, the ground's record and verification all
         // follow — after the response, so this tap returns at once. A result line cricket
         // already wrote ("KDW won by 3 wickets") is kept rather than replaced by "Completed".
-        app(\App\Services\MatchCompletion::class)->finish($match);
+        app(MatchCompletion::class)->finish($match);
 
         return response()->json(['message' => 'Match completed', 'data' => $match->fresh()]);
     }
@@ -325,7 +345,7 @@ final class MatchesController extends Controller
         }
 
         $side = (string) $request->input('side');
-        if (!in_array($side, ['home', 'away'], true)) {
+        if (! in_array($side, ['home', 'away'], true)) {
             return response()->json(['error' => 'side must be home or away'], 422);
         }
 
@@ -352,7 +372,7 @@ final class MatchesController extends Controller
     public function verify(Request $request, string $id): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser instanceof User) {
+        if (! $authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -364,7 +384,7 @@ final class MatchesController extends Controller
         $method = (string) $request->input('method', 'organizer');
 
         if ($method === 'organizer') {
-            if (!ReputationService::canVerifyResults($authUser)) {
+            if (! ReputationService::canVerifyResults($authUser)) {
                 return response()->json([
                     'error' => 'You are not an authorized organizer, or your trust score is too low to verify results.',
                 ], 403);
@@ -378,7 +398,7 @@ final class MatchesController extends Controller
             if ($booking === null) {
                 return response()->json(['error' => 'No valid Haraan booking for this match'], 422);
             }
-            if ((int) $booking->user_id !== (int) $authUser->id && !ReputationService::canOrganize($authUser)) {
+            if ((int) $booking->user_id !== (int) $authUser->id && ! ReputationService::canOrganize($authUser)) {
                 return response()->json(['error' => 'You cannot verify this venue booking'], 403);
             }
             $match = MatchVerificationService::verifyByVenue($match, (int) $booking->id);
@@ -396,7 +416,7 @@ final class MatchesController extends Controller
     public function dispute(Request $request, string $id): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser instanceof User) {
+        if (! $authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -411,7 +431,7 @@ final class MatchesController extends Controller
         }
 
         $type = (string) $request->input('type', 'match_dispute');
-        if (!ActionboardXp::isValidPenalty($type)) {
+        if (! ActionboardXp::isValidPenalty($type)) {
             return response()->json(['error' => 'Invalid penalty type'], 422);
         }
 
@@ -428,7 +448,7 @@ final class MatchesController extends Controller
         if ($target === null || $match->sideOf($target) === null) {
             return response()->json(['error' => 'That player is not in this match.'], 422);
         }
-        $already = \App\Models\ReputationEvent::query()
+        $already = ReputationEvent::query()
             ->where('match_id', $match->id)
             ->where('player_id', $targetPlayerId)
             ->where('reported_by', $authUser->id)
@@ -452,9 +472,9 @@ final class MatchesController extends Controller
         $target = User::where('player_id', $targetPlayerId)->first();
 
         return response()->json([
-            'message'         => 'Dispute recorded',
-            'player_id'       => $targetPlayerId,
-            'penalty'         => $event->amount,
+            'message' => 'Dispute recorded',
+            'player_id' => $targetPlayerId,
+            'penalty' => $event->amount,
             'new_trust_score' => $target?->trust_score,
         ]);
     }
@@ -479,20 +499,20 @@ final class MatchesController extends Controller
                 $halves = (int) ($format['halves'] ?? 2);
                 $length = (int) ($format['halfLengthMin'] ?? 45);
 
-                return $halves . ' x ' . $length . ' min';
+                return $halves.' x '.$length.' min';
 
             case 'badminton':
                 $bestOf = (int) ($format['bestOf'] ?? 3);
                 $points = (int) ($format['pointsTo'] ?? 21);
                 $side = ($format['doubles'] ?? false) ? 'Doubles' : 'Singles';
-                $games = $bestOf === 1 ? 'one game' : 'best of ' . $bestOf;
+                $games = $bestOf === 1 ? 'one game' : 'best of '.$bestOf;
 
-                return $side . ' - ' . $games . ' to ' . $points;
+                return $side.' - '.$games.' to '.$points;
 
             default:
                 $overs = (int) ($format['overs'] ?? $v['overs'] ?? 0);
 
-                return $overs > 0 ? $overs . ' Over Match' : 'Custom Match';
+                return $overs > 0 ? $overs.' Over Match' : 'Custom Match';
         }
     }
 
@@ -524,6 +544,7 @@ final class MatchesController extends Controller
             }
         }
         $clean = preg_replace('/[^a-zA-Z0-9]/', '', $name);
+
         return strtoupper(substr($clean, 0, 3));
     }
 
@@ -601,6 +622,7 @@ final class MatchesController extends Controller
                 } else {
                     $captain = true;
                     unset($squad[$i]['isViceCaptain']);
+
                     continue;
                 }
             }
@@ -646,10 +668,10 @@ final class MatchesController extends Controller
         // service is touched, so its after-response model call never runs for a viewer who
         // isn't entitled. Throws EntitlementDenied (403).
         $viewer = $request->attributes->get('auth_user');
-        app(\App\Services\Membership\SportInsightsAccess::class)
-            ->authorizeMatch($viewer instanceof \App\Models\User ? $viewer : null, $match);
+        app(SportInsightsAccess::class)
+            ->authorizeMatch($viewer instanceof User ? $viewer : null, $match);
 
-        $service = app(\App\Services\PlayerInningsIQ::class);
+        $service = app(PlayerInningsIQ::class);
         $facts = $service->forMatch($match, $request->query('player') ?: null);
         if ($facts === null) {
             return response()->json(['available' => false]);
@@ -670,8 +692,8 @@ final class MatchesController extends Controller
         }
 
         $ground = $match->ground_id !== null
-            ? \App\Models\MatchGround::find($match->ground_id)
-            : app(\App\Services\GroundResolver::class)->resolve($match);
+            ? MatchGround::find($match->ground_id)
+            : app(GroundResolver::class)->resolve($match);
 
         if ($ground === null) {
             return response()->json(['data' => null]);
@@ -680,7 +702,7 @@ final class MatchesController extends Controller
         // A ground whose stats have never been computed gets them now — the first view
         // of a card should not be empty because nothing has completed since deploy.
         if ($ground->stats_at === null) {
-            $ground = app(\App\Services\GroundInsightsService::class)->refresh($ground);
+            $ground = app(GroundInsightsService::class)->refresh($ground);
         }
 
         $stats = [];
@@ -702,7 +724,7 @@ final class MatchesController extends Controller
                 ];
             }
             if ($ground->boundary_percent > 0) {
-                $stats[] = ['label' => 'Runs in boundaries', 'value' => $ground->boundary_percent . '%'];
+                $stats[] = ['label' => 'Runs in boundaries', 'value' => $ground->boundary_percent.'%'];
             }
             if ($ground->run_rate !== null) {
                 $stats[] = ['label' => 'Run rate', 'value' => (string) $ground->run_rate];
@@ -712,7 +734,7 @@ final class MatchesController extends Controller
                     'label' => 'Batting first won',
                     // The sample IS the figure. "4 of 7" cannot be misread as a rate
                     // measured over a season, which is exactly how "57%" would read.
-                    'value' => $ground->batting_first_wins . ' of ' . $ground->decided_matches,
+                    'value' => $ground->batting_first_wins.' of '.$ground->decided_matches,
                 ];
             }
         }
@@ -737,14 +759,14 @@ final class MatchesController extends Controller
         $bullets = [];
         if ($ground->hasTrends()) {
             if ($ground->boundary_percent > 0) {
-                $bullets[] = $ground->boundary_percent . '% of the runs here come in boundaries.';
+                $bullets[] = $ground->boundary_percent.'% of the runs here come in boundaries.';
             }
             if ($ground->decided_matches > 0) {
-                $bullets[] = 'Teams batting first have won ' . $ground->batting_first_wins
-                    . ' of the last ' . $ground->decided_matches . ' matches.';
+                $bullets[] = 'Teams batting first have won '.$ground->batting_first_wins
+                    .' of the last '.$ground->decided_matches.' matches.';
             }
             if ($ground->first_innings_avg > 0) {
-                $bullets[] = 'A first innings here averages ' . $ground->first_innings_avg . '.';
+                $bullets[] = 'A first innings here averages '.$ground->first_innings_avg.'.';
             }
         }
 
@@ -778,15 +800,15 @@ final class MatchesController extends Controller
     }
 
     /** Google Static Maps, satellite, centred on the ground. Null with no key. */
-    private function groundMapUrl(\App\Models\MatchGround $ground): ?string
+    private function groundMapUrl(MatchGround $ground): ?string
     {
         $key = trim((string) config('services.google_maps.server_key'));
         if ($key === '' || $ground->latitude === null || $ground->longitude === null) {
             return null;
         }
 
-        return 'https://maps.googleapis.com/maps/api/staticmap?' . http_build_query([
-            'center' => $ground->latitude . ',' . $ground->longitude,
+        return 'https://maps.googleapis.com/maps/api/staticmap?'.http_build_query([
+            'center' => $ground->latitude.','.$ground->longitude,
             // 17 frames a cricket ground without losing the surroundings that make it
             // recognisable to someone who has played there.
             'zoom' => 17,
@@ -800,7 +822,7 @@ final class MatchesController extends Controller
     public function scoreAction(Request $request, string $id): JsonResponse
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser instanceof User) {
+        if (! $authUser instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -873,7 +895,7 @@ final class MatchesController extends Controller
             $innings = (int) DB::table('match_actions')->where('match_id', $match->id)
                 ->where('action_type', 'start')->count();
             self::maybeCompleteMatch($match, max(1, $innings));
-            $completion = app(\App\Services\MatchCompletion::class);
+            $completion = app(MatchCompletion::class);
             if (LiveMatch::statusMeansFinished($match->status)) {
                 $match->save();
                 $completion->refreshAfterCorrection($match);
@@ -902,7 +924,7 @@ final class MatchesController extends Controller
             if (! $wasFinished && LiveMatch::statusMeansFinished($match->status)) {
                 // The same completion path the Finish button takes: stats, careers,
                 // rankings, the ground's record and verification all follow.
-                app(\App\Services\MatchCompletion::class)->finish($match, (string) $match->status);
+                app(MatchCompletion::class)->finish($match, (string) $match->status);
             } else {
                 $match->save();
             }
@@ -915,7 +937,7 @@ final class MatchesController extends Controller
         // once the response is flushed, which keeps tapping FOUR instant and needs no
         // queue worker. Everything inside is best-effort — the ball is already saved, and
         // the feed falls back to the scorer's shorthand if no line is ever written.
-        if (app(\App\Services\CricketCommentary::class)->isConfigured()) {
+        if (app(CricketCommentary::class)->isConfigured()) {
             $matchId = (int) $match->id;
             dispatch(function () use ($matchId): void {
                 try {
@@ -926,7 +948,7 @@ final class MatchesController extends Controller
                     // The line for THIS delivery comes from the same replay the board
                     // reads, so the written sentence can never describe a different ball
                     // than the one on screen.
-                    $feed = app(\App\Http\Controllers\Api\LiveMatchController::class)->commentaryFeed($m);
+                    $feed = app(LiveMatchController::class)->commentaryFeed($m);
                     $balls = array_values(array_filter($feed, fn (array $e): bool => ($e['kind'] ?? '') === 'ball'));
                     // FIRST, not last: buildCommentary ends with array_reverse, so the feed
                     // is newest-first. Taking end() here wrote the line onto the OLDEST ball
@@ -938,12 +960,12 @@ final class MatchesController extends Controller
                     }
                     // Already written (a retried request, a replayed log): never pay twice
                     // for the same ball, and never let the words change under the reader.
-                    $existing = \Illuminate\Support\Facades\DB::table('match_actions')
+                    $existing = DB::table('match_actions')
                         ->where('id', $last['actionId'])->value('commentary');
                     if (trim((string) $existing) !== '') {
                         return;
                     }
-                    app(\App\Services\CricketCommentary::class)->writeFor((int) $last['actionId'], $m, [
+                    app(CricketCommentary::class)->writeFor((int) $last['actionId'], $m, [
                         'line' => (string) ($last['shorthand'] ?? $last['text'] ?? ''),
                         // Roles labelled, never parsed out of the collapsed shorthand.
                         'bowler' => (string) ($last['bowler'] ?? ''),
@@ -955,17 +977,17 @@ final class MatchesController extends Controller
                         'format' => (string) ($m->competition ?? ''),
                     ]);
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('commentary write skipped: ' . $e->getMessage());
+                    Log::warning('commentary write skipped: '.$e->getMessage());
                 }
             })->afterResponse();
         }
 
         // Push "this match changed" so watchers refetch instantly (cricket per-ball).
-        \App\Events\MatchUpdated::dispatch($match->id);
+        MatchUpdated::dispatch($match->id);
 
         return response()->json([
             'message' => 'Score updated successfully',
-            'data'    => $match->fresh(),
+            'data' => $match->fresh(),
         ]);
     }
 
@@ -985,7 +1007,7 @@ final class MatchesController extends Controller
 
         $overSummary = is_array($match->over_summary) ? $match->over_summary : [];
         $battingTeam = 1;
-        if (!empty($overSummary)) {
+        if (! empty($overSummary)) {
             $last = end($overSummary);
             $battingTeam = (($last['batting'] ?? 'home') === 'away') ? 2 : 1;
         }
@@ -1005,7 +1027,8 @@ final class MatchesController extends Controller
 
         if ($chasing > $defending) {
             $wktsLeft = max(0, $allOut - $wickets);
-            $match->status = "$chasingName won by $wktsLeft " . ($wktsLeft === 1 ? 'wicket' : 'wickets');
+            $match->status = "$chasingName won by $wktsLeft ".($wktsLeft === 1 ? 'wicket' : 'wickets');
+
             return;
         }
 
@@ -1013,7 +1036,7 @@ final class MatchesController extends Controller
         if ($inningsDone) {
             $match->status = match (true) {
                 $chasing === $defending => 'Match tied',
-                default => "$defendingName won by " . ($defending - $chasing) . ' runs',
+                default => "$defendingName won by ".($defending - $chasing).' runs',
             };
         }
     }
@@ -1026,6 +1049,7 @@ final class MatchesController extends Controller
     private static function allOutWicketsFor($squad): int
     {
         $n = is_array($squad) ? count($squad) : 0;
+
         return $n >= 2 ? max(1, min(10, $n - 1)) : 10;
     }
 
@@ -1038,7 +1062,7 @@ final class MatchesController extends Controller
             ->where('innings', $innings)
             ->where('action_type', 'wicket')
             ->pluck('payload')
-            ->filter(fn ($p) => \App\Support\CricketRules::countsAsWicket(json_decode((string) $p, true) ?: []))
+            ->filter(fn ($p) => CricketRules::countsAsWicket(json_decode((string) $p, true) ?: []))
             ->count();
     }
 
@@ -1082,12 +1106,12 @@ final class MatchesController extends Controller
 
             $match->status = 'Live';
             // Persist the toss outcome (e.g. "Team A • Bat") so the hero/info show it.
-            if (!empty($payload['decision'])) {
+            if (! empty($payload['decision'])) {
                 $match->decision = (string) $payload['decision'];
             }
             $match->batters = [
                 ['id' => $strikerId, 'name' => $strikerName, 'runs' => 0, 'balls' => 0],
-                ['id' => $nonStrikerId, 'name' => $nonStrikerName, 'runs' => 0, 'balls' => 0]
+                ['id' => $nonStrikerId, 'name' => $nonStrikerName, 'runs' => 0, 'balls' => 0],
             ];
             $match->bowler = [
                 'id' => $bowlerId,
@@ -1096,18 +1120,19 @@ final class MatchesController extends Controller
                 'wickets' => 0,
                 'overs' => '0.0',
                 'maidens' => 0,
-                'figures' => '0-0'
+                'figures' => '0-0',
             ];
             $match->over_summary = [
                 [
                     'over' => 1,
                     'runs' => 0,
                     'balls' => [],
-                    'batting' => $battingTeam === 2 ? 'away' : 'home'
-                ]
+                    'batting' => $battingTeam === 2 ? 'away' : 'home',
+                ],
             ];
             $match->overs = '0.0';
             $match->crr = '0.00';
+
             return;
         }
 
@@ -1128,7 +1153,7 @@ final class MatchesController extends Controller
             ];
 
             $overSummary = $match->over_summary ?? [];
-            if (!empty($overSummary)) {
+            if (! empty($overSummary)) {
                 $lastOver = end($overSummary);
                 $legalBalls = self::countLegalBalls($lastOver['balls'] ?? []);
                 if ($legalBalls >= 6) {
@@ -1138,11 +1163,12 @@ final class MatchesController extends Controller
                         'over' => $newOverNum,
                         'runs' => 0,
                         'balls' => [],
-                        'batting' => $batting
+                        'batting' => $batting,
                     ];
                     $match->over_summary = $overSummary;
                 }
             }
+
             return;
         }
 
@@ -1158,6 +1184,7 @@ final class MatchesController extends Controller
                 $batters[1] = ['id' => $batsmanId, 'name' => $batsmanName, 'runs' => 0, 'balls' => 0];
             }
             $match->batters = $batters;
+
             return;
         }
 
@@ -1192,7 +1219,7 @@ final class MatchesController extends Controller
 
         $overSummary = $match->over_summary ?? [];
         $battingTeam = 1;
-        if (!empty($overSummary)) {
+        if (! empty($overSummary)) {
             $lastOver = end($overSummary);
             $battingTeam = ($lastOver['batting'] ?? 'home') === 'away' ? 2 : 1;
         }
@@ -1206,7 +1233,7 @@ final class MatchesController extends Controller
         }
 
         $batters = $match->batters ?? [];
-        if (!empty($batters)) {
+        if (! empty($batters)) {
             $striker = $batters[0] ?? null;
             if ($striker) {
                 if ($type !== 'wide') {
@@ -1218,21 +1245,21 @@ final class MatchesController extends Controller
         }
 
         $bowler = $match->bowler ?? [];
-        if (!empty($bowler)) {
+        if (! empty($bowler)) {
             if ($type !== 'bye' && $type !== 'legbye') {
                 $bowler['runs'] += $totalRuns;
             }
             if ($isLegal) {
                 $bowler['overs'] = self::addBallToOvers((string) ($bowler['overs'] ?? '0.0'));
             }
-            if ($wicket && \App\Support\CricketRules::bowlerCredited($payload)) {
+            if ($wicket && CricketRules::bowlerCredited($payload)) {
                 $bowler['wickets'] += 1;
             }
-            $bowler['figures'] = $bowler['wickets'] . '-' . $bowler['runs'];
+            $bowler['figures'] = $bowler['wickets'].'-'.$bowler['runs'];
             $match->bowler = $bowler;
         }
 
-        if (!empty($overSummary)) {
+        if (! empty($overSummary)) {
             $lastIdx = count($overSummary) - 1;
             $balls = $overSummary[$lastIdx]['balls'] ?? [];
             $balls[] = $ballLabel;
@@ -1249,7 +1276,7 @@ final class MatchesController extends Controller
         if ($type === 'bye' || $type === 'legbye') {
             $runsToSwap = $extras;
         }
-        if ($runsToSwap % 2 !== 0 && !empty($batters) && count($batters) >= 2) {
+        if ($runsToSwap % 2 !== 0 && ! empty($batters) && count($batters) >= 2) {
             $temp = $batters[0];
             $batters[0] = $batters[1];
             $batters[1] = $temp;
@@ -1260,11 +1287,11 @@ final class MatchesController extends Controller
             $newBatsmanName = self::findPlayerName($match, $newBatsmanId);
             // A run-out at the bowler's end removes the non-striker; the new batter takes
             // that end and the striker stays on strike.
-            $slot = \App\Support\CricketRules::nonStrikerOut($payload) && count($batters) >= 2 ? 1 : 0;
+            $slot = CricketRules::nonStrikerOut($payload) && count($batters) >= 2 ? 1 : 0;
             $batters[$slot] = ['id' => $newBatsmanId, 'name' => $newBatsmanName, 'runs' => 0, 'balls' => 0];
         }
 
-        if ($isLegal && !empty($overSummary)) {
+        if ($isLegal && ! empty($overSummary)) {
             $lastOver = end($overSummary);
             $legalBalls = self::countLegalBalls($lastOver['balls'] ?? []);
             if ($legalBalls >= 6 && count($batters) >= 2) {
@@ -1279,7 +1306,7 @@ final class MatchesController extends Controller
         $oversFloat = self::oversToBalls($match->overs) / 6.0;
         if ($oversFloat > 0) {
             $currentScore = $battingTeam === 2 ? $match->away_score : $match->home_score;
-            $match->crr = sprintf("%.2f", $currentScore / $oversFloat);
+            $match->crr = sprintf('%.2f', $currentScore / $oversFloat);
         } else {
             $match->crr = '0.00';
         }
@@ -1302,6 +1329,7 @@ final class MatchesController extends Controller
                 return $p['name'] ?? '';
             }
         }
+
         return (string) $id;
     }
 
@@ -1314,6 +1342,7 @@ final class MatchesController extends Controller
                 $count++;
             }
         }
+
         return $count;
     }
 
@@ -1323,9 +1352,9 @@ final class MatchesController extends Controller
         $ov = (int) ($parts[0] ?? 0);
         $ball = (int) ($parts[1] ?? 0);
         if ($ball >= 5) {
-            return ($ov + 1) . '.0';
+            return ($ov + 1).'.0';
         } else {
-            return $ov . '.' . ($ball + 1);
+            return $ov.'.'.($ball + 1);
         }
     }
 
@@ -1334,6 +1363,7 @@ final class MatchesController extends Controller
         $parts = explode('.', $overs);
         $ov = (int) ($parts[0] ?? 0);
         $ball = (int) ($parts[1] ?? 0);
+
         return ($ov * 6) + $ball;
     }
 
@@ -1346,6 +1376,7 @@ final class MatchesController extends Controller
         if (preg_match('/(\d+)/', (string) ($match->competition ?? ''), $m)) {
             return (int) $m[1];
         }
+
         return 0;
     }
 
@@ -1386,7 +1417,7 @@ final class MatchesController extends Controller
             // can't be used to move the score.
             'kind' => ['required', 'string', 'in:shot,shot_on,shot_off,shot_blocked,corner,foul,offside,save,free_kick'],
             'side' => ['required', 'in:home,away'],
-            'op'   => ['required', 'in:inc,dec'],
+            'op' => ['required', 'in:inc,dec'],
         ]);
 
         if ($data['op'] === 'inc') {
@@ -1442,13 +1473,13 @@ final class MatchesController extends Controller
             ->where('client_event_id', $data['client_event_id'])
             ->exists();
 
-        if (! $isRetry && ($reason = app(\App\Services\Scoring\EventGuard::class)->refusal($match, $data)) !== null) {
+        if (! $isRetry && ($reason = app(EventGuard::class)->refusal($match, $data)) !== null) {
             return response()->json(['error' => $reason, 'code' => 'rule_violation'], 422);
         }
 
         $recorder->record($match, $data, $request->attributes->get('auth_user'));
         // A correction to a finished match's log moves its stats and careers too.
-        app(\App\Services\MatchCompletion::class)->refreshAfterCorrection($match->fresh() ?? $match);
+        app(MatchCompletion::class)->refreshAfterCorrection($match->fresh() ?? $match);
 
         return response()->json($this->eventState($match->fresh(), $recorder), 201);
     }
@@ -1485,7 +1516,7 @@ final class MatchesController extends Controller
         if ($recorder->undoLast($match, $side, $sequence, $authUser instanceof User ? $authUser : null) === null) {
             return response()->json(['error' => 'Nothing to undo'], 422);
         }
-        app(\App\Services\MatchCompletion::class)->refreshAfterCorrection($match->fresh() ?? $match);
+        app(MatchCompletion::class)->refreshAfterCorrection($match->fresh() ?? $match);
 
         return response()->json($this->eventState($match->fresh(), $recorder));
     }
@@ -1533,7 +1564,7 @@ final class MatchesController extends Controller
         }
 
         $recorder->restore($gate, $event);
-        app(\App\Services\MatchCompletion::class)->refreshAfterCorrection($gate->fresh() ?? $gate);
+        app(MatchCompletion::class)->refreshAfterCorrection($gate->fresh() ?? $gate);
 
         return response()->json($this->eventState($gate->fresh(), $recorder));
     }
@@ -1574,7 +1605,7 @@ final class MatchesController extends Controller
         }
 
         // A clock started or stopped is news to everyone watching, same as a goal.
-        \App\Events\MatchUpdated::dispatch($match->id);
+        MatchUpdated::dispatch($match->id);
 
         return response()->json(['sport_state' => $match->fresh()?->sport_state]);
     }
@@ -1594,7 +1625,7 @@ final class MatchesController extends Controller
     /**
      * Creator-only scoring gate, shared by every event route.
      *
-     * @return LiveMatch|JsonResponse  the match, or the refusal to return
+     * @return LiveMatch|JsonResponse the match, or the refusal to return
      */
     private function gateScorer(Request $request, string $id): LiveMatch|JsonResponse
     {

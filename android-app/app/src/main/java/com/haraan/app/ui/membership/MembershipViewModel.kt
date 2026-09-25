@@ -99,8 +99,16 @@ class MembershipViewModel(app: Application) : AndroidViewModel(app) {
                         catalogue = c,
                         membership = m,
                         payments = paid,
-                        // Start on the interval they already pay, so their own plan reads "Your plan".
-                        interval = if (s.catalogue == null) (m?.subscription?.interval ?: s.interval) else s.interval,
+                        // Start on the term they already pay, so their own plan reads "Your plan";
+                        // otherwise the shortest term on sale. Keep a term the member picked while
+                        // it's still offered.
+                        interval = MembershipFormat.terms(c.plans).let { offered ->
+                            when {
+                                s.catalogue != null && s.interval in offered -> s.interval
+                                m?.subscription?.interval in offered -> m!!.subscription!!.interval!!
+                                else -> offered.firstOrNull() ?: s.interval
+                            }
+                        },
                         selectedPlan = s.selectedPlan ?: defaultSelection(c, m),
                     )
                 }
@@ -128,6 +136,9 @@ class MembershipViewModel(app: Application) : AndroidViewModel(app) {
         val s = _state.value
         val token = token() ?: return
         if (s.checkout != CheckoutPhase.Idle && s.checkout !is CheckoutPhase.Succeeded && s.checkout != CheckoutPhase.StillConfirming) return
+        // The server decides whether this app may sell plans (an admin switch); never start a
+        // payment when it hasn't said yes, whatever the UI is showing.
+        if (s.catalogue?.checkout?.inApp != true) return
         val plan = s.plans.firstOrNull { it.code == s.selectedPlan } ?: return
         val cta = MembershipFormat.ctaFor(plan, s.membership, s.interval, signedIn = true)
         if (cta !is MembershipFormat.Cta.Buy) return

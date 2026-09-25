@@ -62,7 +62,7 @@ class MemberCatalog
         }
 
         $id = $this->razorpay->createPlan(
-            name: 'Haraan ' . $price->plan->name . ' (' . ($price->interval === MemberPlanPrice::INTERVAL_YEAR ? 'yearly' : 'monthly') . ')',
+            name: 'Haraan '.$price->plan->name.' ('.strtolower(MemberPlanPrice::intervalLabel($price->interval)).')',
             interval: $price->interval,
             amountPaise: $price->amount_paise,
             currency: $price->currency,

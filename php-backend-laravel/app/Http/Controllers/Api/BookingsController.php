@@ -14,6 +14,7 @@ use App\Models\Venue;
 use App\Services\BookingNotifier;
 use App\Services\BookingService;
 use App\Services\RazorpayGateway;
+use App\Support\Operations;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -81,16 +82,31 @@ final class BookingsController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        // Legacy path for clients that don't understand payment — immediate confirmed booking.
+        // Legacy path for app builds that predate payment (no `pay` flag). It used to confirm
+        // ANY order on the spot — paid tiers included, with no money taken. Now the order is
+        // priced first: a free order still confirms in one step; a paid one is released and
+        // the client is told to update, so a ticket is never issued without payment.
         if (! $request->boolean('pay')) {
-            $legacy = $this->bookings->createOrder(
+            $held = $this->bookings->createOrder(
                 $authUser,
                 (int) $request->validated('eventId'),
                 $request->orderLines(),
                 $request->validated('couponCode'),
                 $request->contact(),
                 eventSlotId: $request->eventSlotId(),
-            )->load('ticketType');
+                reserve: true,
+            );
+
+            if (Booking::orderGrandTotal($held) > 0) {
+                $this->bookings->releaseReservation($held->pluck('id')->all());
+
+                return response()->json([
+                    'error' => 'update_required',
+                    'message' => 'Update the Haraan app to pay for tickets.',
+                ], 426);
+            }
+
+            $legacy = $this->bookings->confirmReservation($held->pluck('id')->all(), null)->load('ticketType');
 
             BookingNotifier::dispatch($legacy->first());
 
@@ -160,6 +176,7 @@ final class BookingsController extends Controller
      * POST /api/bookings/confirm — finalise a reserved order after checkout.
      * Body: { razorpayOrderId, razorpayPaymentId, razorpaySignature }.
      * Verifies the signature server-side, then flips the reservation to CONFIRMED.
+     * Idempotent: returns existing confirmed booking if already confirmed.
      */
     public function confirm(Request $request): JsonResponse
     {
@@ -176,6 +193,21 @@ final class BookingsController extends Controller
         ]);
 
         if (! $this->razorpay->verifySignature($data['razorpayOrderId'], $data['razorpayPaymentId'], $data['razorpaySignature'])) {
+            // If already confirmed (e.g. webhook won the race or retry), return confirmed data gracefully
+            $existing = Booking::query()
+                ->with(['event', 'venue', 'ticketType'])
+                ->where('razorpay_order_id', $data['razorpayOrderId'])
+                ->where('user_id', $authUser->id)
+                ->where('status', 'CONFIRMED')
+                ->get();
+
+            if ($existing->isNotEmpty()) {
+                return response()->json([
+                    'message' => 'Booking confirmed',
+                    'data'    => $this->envelope($existing, 'CONFIRMED'),
+                ]);
+            }
+
             // Leave the reservation PENDING (it will expire) rather than confirm on a bad
             // signature — never mark paid without a verified payment.
             return response()->json(['error' => 'Payment verification failed'], 400);
@@ -190,6 +222,89 @@ final class BookingsController extends Controller
         return response()->json([
             'message' => 'Booking confirmed',
             'data'    => $this->envelope($confirmed, 'CONFIRMED'),
+        ]);
+    }
+
+    /**
+     * POST /api/bookings/status — reconcile payment and retrieve status for a reserved order.
+     * Body: { razorpayOrderId: string }.
+     *
+     * Handles network drops and client timeouts:
+     * 1. If already CONFIRMED (by webhook or prior confirm), returns confirmed details immediately.
+     * 2. If PENDING or EXPIRED, queries Razorpay directly to check if a captured payment exists.
+     *    If captured: authoritatively confirms the reservation and credits the ledger.
+     *    If not captured: returns PENDING status.
+     */
+    public function status(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $data = $request->validate([
+            'razorpayOrderId' => ['required', 'string'],
+        ]);
+
+        $orderId = trim($data['razorpayOrderId']);
+
+        /** @var Collection<int, Booking> $bookings */
+        $bookings = Booking::query()
+            ->with(['event', 'venue', 'ticketType'])
+            ->where('razorpay_order_id', $orderId)
+            ->where('user_id', $authUser->id)
+            ->get();
+
+        if ($bookings->isEmpty()) {
+            return response()->json(['error' => 'Reservation not found'], 404);
+        }
+
+        $first = $bookings->first();
+        $currentStatus = strtoupper((string) $first->status);
+
+        if ($currentStatus === 'CONFIRMED') {
+            return response()->json([
+                'status'  => 'CONFIRMED',
+                'message' => 'Booking is confirmed',
+                'data'    => $this->envelope($bookings, 'CONFIRMED'),
+            ]);
+        }
+
+        if (in_array($currentStatus, ['CANCELLED', 'REFUNDED'], true)) {
+            return response()->json([
+                'status'  => $currentStatus,
+                'message' => 'Booking is ' . strtolower($currentStatus),
+                'data'    => $this->envelope($bookings, $currentStatus),
+            ]);
+        }
+
+        // Reconcile with Razorpay authoritative REST API
+        try {
+            $capturedPaymentId = $this->razorpay->capturedPaymentFor($orderId);
+        } catch (\Throwable) {
+            $capturedPaymentId = null;
+        }
+
+        if ($capturedPaymentId !== null && $capturedPaymentId !== '') {
+            $confirmed = $this->bookings
+                ->confirmReservedOrder($authUser, $orderId, $capturedPaymentId)
+                ->load(['event', 'venue', 'ticketType']);
+
+            BookingNotifier::dispatch($confirmed->first());
+
+            return response()->json([
+                'status'     => 'CONFIRMED',
+                'reconciled' => true,
+                'message'    => 'Payment verified and booking confirmed',
+                'data'       => $this->envelope($confirmed, 'CONFIRMED'),
+            ]);
+        }
+
+        return response()->json([
+            'status'  => 'PENDING',
+            'message' => 'Payment awaiting confirmation from bank',
+            'data'    => $this->envelope($bookings, 'PENDING'),
         ]);
     }
 
@@ -212,14 +327,10 @@ final class BookingsController extends Controller
         return response()->json(['message' => 'Reservation released']);
     }
 
-    /** Grand total charged for an order: ticket subtotal + convenience fee − discount. */
+    /** Grand total charged for an order — the one definition, on Booking. */
     private function grandTotal(Collection $bookings): float
     {
-        $subtotal = round((float) $bookings->sum('total_amount'), 2);
-        $fee      = round((float) $bookings->sum('convenience_fee'), 2);
-        $discount = round((float) $bookings->sum('discount'), 2);
-
-        return round($subtotal + $fee - $discount, 2);
+        return Booking::orderGrandTotal($bookings);
     }
 
     /**
@@ -240,8 +351,11 @@ final class BookingsController extends Controller
             'quantity'       => (int) $bookings->sum('quantity'),
             'subtotal'       => (string) $subtotal,
             'convenienceFee' => (string) $fee,
+            'platformFee' => (string) round((float) $bookings->sum('platform_fee'), 2),
+            'gatewayFee' => (string) round((float) $bookings->sum('gateway_fee'), 2),
+            'taxAmount' => (string) round((float) $bookings->sum('tax_amount'), 2),
             'discount'       => (string) $discount,
-            'totalAmount'    => (string) round($subtotal + $fee - $discount, 2),
+            'totalAmount' => (string) Booking::orderGrandTotal($bookings),
             'status'         => $status,
             'ticketCode'     => $primary->ticket_code,
             'bookings'       => BookingResource::collection($bookings),
@@ -299,13 +413,14 @@ final class BookingsController extends Controller
                         // The fee is quoted back so the summary's arithmetic is the
                         // server's, not a second copy computed in the app.
                         'fee'      => $venueFee,
+                        'tax'      => Venue::taxFor($subtotal, (float) $resolved['discount']),
                         'message'  => $resolved['message'],
                     ]
             );
         }
 
         $event = $eventId > 0 ? Event::query()->find($eventId) : null;
-        $fee   = $event !== null ? $event->convenienceFeeFor($subtotal) : 0.0;
+        $fee = $event !== null ? $event->orderCharges($subtotal)['charges_before_discount'] : 0.0;
 
         $resolved = $this->bookings->resolveCoupon($authUser, $eventId, $code, $subtotal, $fee, $tickets);
 
@@ -322,6 +437,65 @@ final class BookingsController extends Controller
             'type'     => $resolved['coupon']->type,
             'discount' => $resolved['discount'],
             'message'  => $resolved['message'],
+        ]);
+    }
+
+    /**
+     * POST /api/bookings/quote — the bill for a cart, exactly as checkout will charge it:
+     * every fee line (host fees, platform and gateway fees, tax), the coupon discount, and the
+     * total. Display only — nothing is held, no coupon use is counted. Same body as a booking.
+     *
+     * The app's order summary shows these lines instead of recomputing fees on the device, so
+     * a fee or tax change in /control reaches the summary without an app release.
+     */
+    public function quote(StoreBookingRequest $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $event = Event::query()->with('ticketTypes')->findOrFail((int) $request->validated('eventId'));
+        $tiers = $event->ticketTypes->keyBy('id');
+        $subtotal = 0.0;
+        $tickets = 0;
+
+        foreach ($request->orderLines() as $line) {
+            $qty = max(0, (int) $line['quantity']);
+            $tier = $line['ticketTypeId'] !== null ? $tiers->get($line['ticketTypeId']) : null;
+            $unit = $tier !== null ? $tier->effectivePrice() : (float) $event->price;
+            $subtotal += $unit * $qty;
+            $tickets += $qty;
+        }
+
+        $subtotal = round($subtotal, 2);
+        $code = trim((string) $request->validated('couponCode'));
+        $coupon = ['applied' => false, 'code' => null, 'message' => null];
+        $discount = 0.0;
+
+        if ($code !== '') {
+            $resolved = $this->bookings->resolveCoupon(
+                $authUser, $event->id, $code, $subtotal, $event->orderCharges($subtotal)['charges_before_discount'], $tickets,
+            );
+            $discount = $resolved['discount'];
+            $coupon = [
+                'applied' => $resolved['coupon'] !== null,
+                'code' => $resolved['coupon']?->code,
+                'message' => $resolved['message'],
+            ];
+        }
+
+        $charges = $event->orderCharges($subtotal, $discount);
+
+        return response()->json([
+            'subtotal' => $charges['subtotal'],
+            'lines' => $charges['lines'],
+            'discount' => $charges['discount'],
+            'total' => $charges['total'],
+            'coupon' => $coupon,
+            'paymentsEnabled' => ! Operations::paymentsDisabled(),
+            'bookingsPaused' => Operations::bookingsPaused(Operations::EVENTS),
         ]);
     }
 
@@ -359,7 +533,8 @@ final class BookingsController extends Controller
             couponCode: $data['couponCode'] ?? null,
         );
 
-        $amountPaise = (int) round(((float) $booking->total_amount) * 100);
+        // amountCharged(), not total_amount: Pulse tax sits beside the venue's share.
+        $amountPaise = (int) round($booking->amountCharged() * 100);
 
         // Free slot (₹0 rate): nothing to charge, so confirm on the spot rather than
         // sending the user to a checkout for zero rupees.
@@ -418,6 +593,37 @@ final class BookingsController extends Controller
 
         return response()->json([
             'message' => 'Booking cancelled',
+            'data'    => new BookingResource($booking),
+        ]);
+    }
+
+    /**
+     * POST /api/bookings/{id}/reschedule — reschedule a confirmed venue booking.
+     */
+    public function reschedule(Request $request, string $id): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $data = $request->validate([
+            'date'    => ['required', 'date'],
+            'slotId'  => ['nullable', 'integer'],
+            'courtId' => ['nullable', 'integer'],
+        ]);
+
+        $booking = $this->bookings->rescheduleVenueBooking(
+            $authUser,
+            $id,
+            (string) $data['date'],
+            isset($data['slotId']) ? (int) $data['slotId'] : null,
+            isset($data['courtId']) ? (int) $data['courtId'] : null,
+        );
+
+        return response()->json([
+            'message' => 'Booking rescheduled successfully',
             'data'    => new BookingResource($booking),
         ]);
     }

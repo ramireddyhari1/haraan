@@ -4,47 +4,57 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use Carbon\Carbon;
+use App\Models\Concerns\AuditsAdminChanges;
 use App\Models\Concerns\BroadcastsContentChanges;
+use App\Support\MediaUrl;
+use App\Support\PlacePhotos;
+use App\Support\PlatformRules;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
- * @property int         $id
- * @property string      $title
+ * @property int $id
+ * @property string $title
  * @property string|null $description
- * @property string      $category
- * @property string      $booking_format
- * @property string      $visibility
+ * @property string $category
+ * @property string $booking_format
+ * @property string $visibility
  * @property string|null $access_code
- * @property string      $location
- * @property string      $venue
- * @property \Carbon\Carbon|null $date
- * @property string      $time
- * @property float       $price
- * @property int         $total_slots
- * @property int         $available_slots
- * @property array       $images
- * @property string      $status
- * @property int         $views
- * @property float|null  $rating
- * @property int         $ratings_count
- * @property int|null    $partner_id
- * @property int|null    $seat_rows
- * @property int|null    $seats_per_row
- * @property bool        $seat_selection
- * @property \Carbon\Carbon $created_at
- * @property \Carbon\Carbon $updated_at
- *
+ * @property string $location
+ * @property string $venue
+ * @property Carbon|null $date
+ * @property string $time
+ * @property float $price
+ * @property int $total_slots
+ * @property int $available_slots
+ * @property array $images
+ * @property string $status
+ * @property int $views
+ * @property float|null $rating
+ * @property int $ratings_count
+ * @property int|null $partner_id
+ * @property int|null $seat_rows
+ * @property int|null $seats_per_row
+ * @property bool $seat_selection
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  * @property-read User|null               $partner
  * @property-read \Illuminate\Database\Eloquent\Collection<Booking> $bookings
  */
 final class Event extends Model
 {
+    use AuditsAdminChanges;
+
+    /** Only changes to these fields are audit-logged (see AuditsAdminChanges). */
+    protected array $auditedAttributes = ['price', 'status', 'is_sold_out', 'partner_id', 'fees', 'tax_type', 'tax_value', 'gateway_fee_payer', 'gateway_fee_type', 'gateway_fee_value', 'platform_fee_payer', 'platform_fee_type', 'platform_fee_value', 'convenience_fee_type', 'convenience_fee_value'];
+
     use BroadcastsContentChanges;
     use HasFactory;
 
@@ -117,37 +127,37 @@ final class Event extends Model
     protected function casts(): array
     {
         return [
-            'date'           => 'datetime',
-            'latitude'       => 'float',
-            'longitude'      => 'float',
-            'price'          => 'float',
+            'date' => 'datetime',
+            'latitude' => 'float',
+            'longitude' => 'float',
+            'price' => 'float',
             'convenience_fee_value' => 'float',
-            'fees'           => 'array',
-            'tax_value'      => 'float',
-            'total_slots'    => 'integer',
+            'fees' => 'array',
+            'tax_value' => 'float',
+            'total_slots' => 'integer',
             'tickets_per_slot' => 'boolean',
             'release_phases' => 'array',
-            'gateway_fee_value'  => 'float',
+            'gateway_fee_value' => 'float',
             'platform_fee_value' => 'float',
-            'available_slots'=> 'integer',
-            'is_sold_out'    => 'boolean',
-            'views'          => 'integer',
-            'rating'         => 'float',
-            'ratings_count'  => 'integer',
-            'images'         => 'array',
-            'gallery'        => 'array',
-            'placements'     => 'array',
+            'available_slots' => 'integer',
+            'is_sold_out' => 'boolean',
+            'views' => 'integer',
+            'rating' => 'float',
+            'ratings_count' => 'integer',
+            'images' => 'array',
+            'gallery' => 'array',
+            'placements' => 'array',
             'seat_selection' => 'boolean',
-            'seat_rows'      => 'integer',
-            'seats_per_row'  => 'integer',
-            'languages'      => 'array',
-            'kid_friendly'   => 'boolean',
-            'pet_friendly'   => 'boolean',
-            'info_notes'     => 'array',
-            'good_to_know'   => 'array',
-            'schedule'       => 'array',
-            'lineup'         => 'array',
-            'faqs'           => 'array',
+            'seat_rows' => 'integer',
+            'seats_per_row' => 'integer',
+            'languages' => 'array',
+            'kid_friendly' => 'boolean',
+            'pet_friendly' => 'boolean',
+            'info_notes' => 'array',
+            'good_to_know' => 'array',
+            'schedule' => 'array',
+            'lineup' => 'array',
+            'faqs' => 'array',
             'followers_notified_at' => 'datetime',
         ];
     }
@@ -155,7 +165,7 @@ final class Event extends Model
     protected static function booted(): void
     {
         // Phase 2: the first time an event goes published, ping the host's followers.
-        static::saved(static function (self $event): void {
+        self::saved(static function (self $event): void {
             $event->maybeNotifyFollowers();
         });
     }
@@ -173,7 +183,7 @@ final class Event extends Model
         }
 
         try {
-            $followerIds = \Illuminate\Support\Facades\DB::table('host_followers')
+            $followerIds = DB::table('host_followers')
                 ->where('host_id', $this->partner_id)
                 ->pluck('user_id');
 
@@ -181,10 +191,10 @@ final class Event extends Model
                 $profile = $this->partner?->hostProfile;
                 $hostName = $profile?->display_name ?? $this->partner?->name ?? 'An organiser';
 
-                $notification = \App\Models\Notification::create([
-                    'title' => 'New event from ' . $hostName,
+                $notification = Notification::create([
+                    'title' => 'New event from '.$hostName,
                     'body' => $this->title,
-                    'deep_link' => $profile?->slug ? url('/host/' . $profile->slug) : url('/events/' . $this->id),
+                    'deep_link' => $profile?->slug ? url('/host/'.$profile->slug) : url('/events/'.$this->id),
                     'audience_type' => 'host_followers',
                     'audience_value' => (string) $this->partner_id,
                     'status' => 'sent',
@@ -192,7 +202,7 @@ final class Event extends Model
                     'created_by' => $this->partner_id,
                 ]);
 
-                \Illuminate\Support\Facades\DB::table('notification_recipients')->insert(
+                DB::table('notification_recipients')->insert(
                     $followerIds->map(fn ($uid): array => [
                         'notification_id' => $notification->id,
                         'user_id' => $uid,
@@ -242,7 +252,7 @@ final class Event extends Model
      */
     public function imageUrls(): array
     {
-        return \App\Support\MediaUrl::resolveMany(is_array($this->images) ? $this->images : []);
+        return MediaUrl::resolveMany(is_array($this->images) ? $this->images : []);
     }
 
     /** First browser-loadable image, or null when the event has none. */
@@ -265,7 +275,7 @@ final class Event extends Model
     public function mapsQuery(): string
     {
         if ($this->hasCoordinates()) {
-            return $this->latitude . ',' . $this->longitude;
+            return $this->latitude.','.$this->longitude;
         }
 
         $bits = array_filter([trim((string) $this->venue), trim((string) ($this->location ?: $this->city))]);
@@ -282,13 +292,13 @@ final class Event extends Model
     public function timeRangeLabel(): ?string
     {
         $start = trim((string) ($this->time ?? ''));
-        $end   = trim((string) ($this->end_time ?? ''));
+        $end = trim((string) ($this->end_time ?? ''));
 
         if ($start === '') {
-            return $end !== '' ? 'Ends ' . $end : null;
+            return $end !== '' ? 'Ends '.$end : null;
         }
 
-        return $end !== '' && $end !== $start ? $start . ' – ' . $end : $start;
+        return $end !== '' && $end !== $start ? $start.' – '.$end : $start;
     }
 
     /**
@@ -334,7 +344,7 @@ final class Event extends Model
     /** A "Directions" deep link — precise when coordinates exist, text search otherwise. */
     public function directionsUrl(): string
     {
-        return 'https://www.google.com/maps/dir/?api=1&destination=' . rawurlencode($this->mapsQuery());
+        return 'https://www.google.com/maps/dir/?api=1&destination='.rawurlencode($this->mapsQuery());
     }
 
     /**
@@ -356,7 +366,7 @@ final class Event extends Model
             $params['zoom'] = '16';
         }
 
-        return 'https://www.google.com/maps/embed/v1/place?' . http_build_query($params);
+        return 'https://www.google.com/maps/embed/v1/place?'.http_build_query($params);
     }
 
     /**
@@ -393,7 +403,7 @@ final class Event extends Model
         // they are — "1 event" on the page you're already looking at says nothing.
         $events = 0;
         if ($this->partner_id !== null) {
-            $events = static::query()
+            $events = self::query()
                 ->where('partner_id', $this->partner_id)
                 ->whereKeyNot($this->getKey())
                 ->whereRaw('lower(status) = ?', ['published'])
@@ -401,15 +411,15 @@ final class Event extends Model
         }
 
         return $this->organiserCardMemo = [
-            'name'      => $name,
-            'initial'   => mb_strtoupper(mb_substr($name, 0, 1)),
-            'logo'      => $profile?->logoUrl(),
-            'verified'  => (bool) $profile?->isVerified(),
-            'tagline'   => trim((string) ($profile?->tagline ?? '')) ?: null,
-            'slug'      => $profile?->slug,
-            'url'       => $profile ? url('/host/' . $profile->slug) : null,
+            'name' => $name,
+            'initial' => mb_strtoupper(mb_substr($name, 0, 1)),
+            'logo' => $profile?->logoUrl(),
+            'verified' => (bool) $profile?->isVerified(),
+            'tagline' => trim((string) ($profile?->tagline ?? '')) ?: null,
+            'slug' => $profile?->slug,
+            'url' => $profile ? url('/host/'.$profile->slug) : null,
             'followers' => $profile ? $profile->followersCount() : 0,
-            'events'    => $events,
+            'events' => $events,
             // Drives the Follow button's state. The follow feature already existed
             // on the organiser's own page; the event page — where people actually
             // discover a host — never offered it.
@@ -450,10 +460,10 @@ final class Event extends Model
         }
 
         return $this->venuePhotosMemo = array_map(fn (array $p): array => [
-            'url'        => route('site.event.venuephoto', ['id' => $this->id, 'index' => $p['index']]),
-            'credit'     => $p['credit'],
+            'url' => route('site.event.venuephoto', ['id' => $this->id, 'index' => $p['index']]),
+            'credit' => $p['credit'],
             'credit_uri' => $p['credit_uri'],
-        ], \App\Support\PlacePhotos::forEvent($this));
+        ], PlacePhotos::forEvent($this));
     }
 
     /** @var list<array{url:string, credit:string, credit_uri:string}>|null */
@@ -468,7 +478,7 @@ final class Event extends Model
      */
     public function galleryUrls(): array
     {
-        return \App\Support\MediaUrl::resolveMany(is_array($this->gallery) ? $this->gallery : []);
+        return MediaUrl::resolveMany(is_array($this->gallery) ? $this->gallery : []);
     }
 
     /**
@@ -486,12 +496,12 @@ final class Event extends Model
             ->map(function ($r) {
                 $upload = is_array($r['image'] ?? null) ? ($r['image'][0] ?? '') : ($r['image'] ?? '');
                 $upload = trim((string) $upload);
-                $image  = $upload !== '' ? $upload : trim((string) ($r['image_url'] ?? ''));
+                $image = $upload !== '' ? $upload : trim((string) ($r['image_url'] ?? ''));
 
                 return [
-                    'name'     => trim((string) ($r['name'] ?? '')),
+                    'name' => trim((string) ($r['name'] ?? '')),
                     'subtitle' => trim((string) ($r['subtitle'] ?? '')),
-                    'image'    => \App\Support\MediaUrl::resolve($image !== '' ? $image : null) ?? '',
+                    'image' => MediaUrl::resolve($image !== '' ? $image : null) ?? '',
                 ];
             })
             ->values()
@@ -510,9 +520,9 @@ final class Event extends Model
         return collect((array) ($this->schedule ?? []))
             ->filter(fn ($r) => is_array($r) && trim((string) ($r['time'] ?? '')) !== '')
             ->map(fn ($r) => [
-                'time'  => trim((string) ($r['time'] ?? '')),
+                'time' => trim((string) ($r['time'] ?? '')),
                 'title' => trim((string) ($r['title'] ?? '')),
-                'note'  => trim((string) ($r['note'] ?? '')),
+                'note' => trim((string) ($r['note'] ?? '')),
             ])
             ->values()
             ->all();
@@ -723,7 +733,7 @@ final class Event extends Model
     public function phaseName(int $phaseIndex): ?string
     {
         $phase = ((array) ($this->release_phases ?? []))[$phaseIndex] ?? null;
-        $name  = is_array($phase) ? trim((string) ($phase['name'] ?? '')) : '';
+        $name = is_array($phase) ? trim((string) ($phase['name'] ?? '')) : '';
 
         return $name !== '' ? $name : null;
     }
@@ -734,13 +744,13 @@ final class Event extends Model
      * (website sheet, checkout, API) reads this one rule — a hidden tier or an
      * unopened phase must never be purchasable.
      *
-     * @return \Illuminate\Support\Collection<int, TicketType>
+     * @return Collection<int, TicketType>
      */
-    public function saleableTicketTypes(): \Illuminate\Support\Collection
+    public function saleableTicketTypes(int $earlyAccessHours = 0): Collection
     {
         return $this->ticketTypes
             ->filter(fn (TicketType $t): bool => $t->isVisible()
-                && $t->isOnSale()
+                && $t->isOnSale($earlyAccessHours)
                 && $this->phaseReleased((int) $t->release_phase))
             ->values();
     }
@@ -750,13 +760,13 @@ final class Event extends Model
      * show them as "opens later" instead of pretending they don't exist — that
      * anticipation is the whole point of releasing in phases.
      *
-     * @return \Illuminate\Support\Collection<int, TicketType>
+     * @return Collection<int, TicketType>
      */
-    public function lockedTicketTypes(): \Illuminate\Support\Collection
+    public function lockedTicketTypes(int $earlyAccessHours = 0): Collection
     {
         return $this->ticketTypes
             ->filter(fn (TicketType $t): bool => $t->isVisible()
-                && $t->isOnSale()
+                && $t->isOnSale($earlyAccessHours)
                 && ! $this->phaseReleased((int) $t->release_phase))
             ->values();
     }
@@ -770,7 +780,7 @@ final class Event extends Model
         $previous = $this->phaseName($phaseIndex - 1);
 
         return $previous !== null
-            ? 'Opens when ' . $previous . ' sells out'
+            ? 'Opens when '.$previous.' sells out'
             : 'Opens in a later release';
     }
 
@@ -913,16 +923,16 @@ final class Event extends Model
         $lines = [];
 
         foreach ((array) ($this->fees ?? []) as $fee) {
-            $value  = max(0.0, (float) ($fee['value'] ?? 0));
+            $value = max(0.0, (float) ($fee['value'] ?? 0));
             $amount = match ($fee['type'] ?? null) {
-                'flat'    => round($value, 2),
+                'flat' => round($value, 2),
                 'percent' => round($subtotal * $value / 100, 2),
-                default   => 0.0,
+                default => 0.0,
             };
 
             if ($amount > 0) {
                 $lines[] = [
-                    'label'  => ($fee['label'] ?? 'Fee') ?: 'Fee',
+                    'label' => ($fee['label'] ?? 'Fee') ?: 'Fee',
                     'amount' => $amount,
                 ];
             }
@@ -947,22 +957,121 @@ final class Event extends Model
     }
 
     /**
-     * The admin-set tax for an order of the given ticket subtotal, mirroring
-     * {@see convenienceFeeFor()}. NOT yet charged at checkout — provided so the
-     * later "collect tax" step has a single, tested place to compute it.
+     * The tax on an order. The base is the ticket subtotal AFTER discount (never negative).
+     * `inherit` (or an event created before tax existed with no choice) uses the platform
+     * default from /control → Platform rules.
      */
-    public function taxFor(float $subtotal): float
+    public function taxFor(float $subtotal, float $discount = 0.0): float
     {
-        if ($subtotal <= 0) {
+        ['type' => $type, 'value' => $value] = $this->resolvedCharge('tax');
+        $base = max(0.0, $subtotal - $discount);
+
+        if ($subtotal <= 0 || $base <= 0) {
             return 0.0;
         }
 
-        $value = max(0.0, (float) $this->tax_value);
+        return self::chargeAmount($type, $value, $base);
+    }
 
-        return match ($this->tax_type) {
-            'flat'    => round($value, 2),
-            'percent' => round($subtotal * $value / 100, 2),
-            default   => 0.0,
+    /**
+     * Everything an order for [$subtotal] (after [$discount]) costs, in one place. Checkout
+     * (API, website, desk), the quote endpoints and the pass all read this, so the summary a
+     * buyer sees is the amount Razorpay charges.
+     *
+     * Order of operations:
+     *   subtotal → host fees list → platform fee (if customer pays) → gateway fee (if customer
+     *   pays) → coupon discount → tax on (subtotal − discount).
+     * Host-paid platform/gateway fees are not added to the order; they come off the payout
+     * (`host_deduction`).
+     *
+     * @return array{
+     *     subtotal: float, fees: float, fee_lines: list<array{label: string, amount: float}>,
+     *     platform_fee: float, gateway_fee: float, charges_before_discount: float,
+     *     discount: float, tax: float, tax_label: string, host_deduction: float,
+     *     lines: list<array{label: string, amount: float, kind: string}>, total: float
+     * }
+     */
+    public function orderCharges(float $subtotal, float $discount = 0.0): array
+    {
+        $subtotal = round(max(0.0, $subtotal), 2);
+        $feeLines = $this->feeLinesFor($subtotal);
+        $fees = round(array_sum(array_column($feeLines, 'amount')), 2);
+
+        $platform = $this->resolvedCharge('platform_fee');
+        $gateway = $this->resolvedCharge('gateway_fee');
+        $platformAmount = $subtotal > 0 ? self::chargeAmount($platform['type'], $platform['value'], $subtotal) : 0.0;
+        $gatewayAmount = $subtotal > 0 ? self::chargeAmount($gateway['type'], $gateway['value'], $subtotal) : 0.0;
+
+        $customerPlatform = $platform['payer'] === 'host' ? 0.0 : $platformAmount;
+        $customerGateway = $gateway['payer'] === 'host' ? 0.0 : $gatewayAmount;
+        $hostDeduction = round(($platform['payer'] === 'host' ? $platformAmount : 0.0) + ($gateway['payer'] === 'host' ? $gatewayAmount : 0.0), 2);
+
+        $beforeDiscount = round($subtotal + $fees + $customerPlatform + $customerGateway, 2);
+        $discount = round(min(max(0.0, $discount), $beforeDiscount), 2);
+        $tax = $this->taxFor($subtotal, $discount);
+        $taxLabel = PlatformRules::string('fees.event_tax_label');
+
+        $lines = [];
+        foreach ($feeLines as $line) {
+            $lines[] = $line + ['kind' => 'fee'];
+        }
+        if ($customerPlatform > 0) {
+            $lines[] = ['label' => 'Platform fee', 'amount' => $customerPlatform, 'kind' => 'platform_fee'];
+        }
+        if ($customerGateway > 0) {
+            $lines[] = ['label' => 'Payment gateway fee', 'amount' => $customerGateway, 'kind' => 'gateway_fee'];
+        }
+        if ($tax > 0) {
+            $lines[] = ['label' => $taxLabel, 'amount' => $tax, 'kind' => 'tax'];
+        }
+
+        return [
+            'subtotal' => $subtotal,
+            'fees' => $fees,
+            'fee_lines' => $feeLines,
+            'platform_fee' => $customerPlatform,
+            'gateway_fee' => $customerGateway,
+            'charges_before_discount' => round($fees + $customerPlatform + $customerGateway, 2),
+            'discount' => $discount,
+            'tax' => $tax,
+            'tax_label' => $taxLabel,
+            'host_deduction' => $hostDeduction,
+            'lines' => $lines,
+            'total' => max(0.0, round($beforeDiscount - $discount + $tax, 2)),
+        ];
+    }
+
+    /**
+     * The effective type/value/payer of one platform-controlled charge on this event —
+     * `platform_fee`, `gateway_fee` or `tax`. An event set to `inherit` reads the platform
+     * default from /control → Platform rules at the moment of the order.
+     *
+     * @return array{type: string, value: float, payer: string}
+     */
+    public function resolvedCharge(string $charge): array
+    {
+        $type = (string) ($this->{$charge.'_type'} ?? 'none');
+        $value = (float) ($this->{$charge.'_value'} ?? 0);
+        $payer = $charge === 'tax' ? 'customer' : (string) ($this->{$charge.'_payer'} ?? 'customer');
+
+        if ($type === 'inherit') {
+            $rule = 'fees.event_'.$charge;
+            $type = PlatformRules::string($rule.'_type');
+            $value = PlatformRules::float($rule.'_value');
+            if ($charge !== 'tax') {
+                $payer = PlatformRules::string($rule.'_payer');
+            }
+        }
+
+        return ['type' => $type, 'value' => max(0.0, $value), 'payer' => $payer === 'host' ? 'host' : 'customer'];
+    }
+
+    private static function chargeAmount(string $type, float $value, float $base): float
+    {
+        return match ($type) {
+            'flat' => round(max(0.0, $value), 2),
+            'percent' => round($base * max(0.0, $value) / 100, 2),
+            default => 0.0,
         };
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\AiGate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -218,6 +219,13 @@ class DeliveryReview
                 'responseSchema' => $this->schema($kind),
             ],
         ];
+
+        // /control → Platform rules → AI. The caller releases the member's quota on null.
+        if (! AiGate::attempt(AiGate::DELIVERY_REVIEW)) {
+            $this->failure = 'AI review is switched off right now. Please try again later.';
+
+            return null;
+        }
 
         try {
             $response = Http::timeout(self::TIMEOUT_SECONDS)->withHeaders($headers)->post($url, $body);

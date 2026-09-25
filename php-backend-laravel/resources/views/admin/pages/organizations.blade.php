@@ -29,7 +29,7 @@ async function loadOrgs(){
     const sel = document.getElementById('org-select'); sel.innerHTML = '';
     orgs.forEach(o=>{
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${o.id}</td><td>${o.name}</td><td>${o.type}</td>`;
+        tr.innerHTML = `<td>${esc(o.id)}</td><td>${esc(o.name)}</td><td>${esc(o.type)}</td>`;
         body.appendChild(tr);
         const opt = document.createElement('option'); opt.value = o.id; opt.text = o.name; sel.appendChild(opt);
     });

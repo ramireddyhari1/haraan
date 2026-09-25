@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exceptions\PaymentsPaused;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -42,6 +43,9 @@ final class RazorpayGateway
      */
     public function createOrder(int $amountPaise, string $receipt, string $currency = 'INR'): array
     {
+        // /control → Operations → Stop taking payments.
+        PaymentsPaused::guard();
+
         if (! $this->isConfigured()) {
             throw new RuntimeException('Payments are not configured.', 500);
         }
@@ -95,6 +99,8 @@ final class RazorpayGateway
         ?string $customerPhone = null,
         array $notes = [],
     ): array {
+        PaymentsPaused::guard();
+
         if (! $this->isConfigured()) {
             throw new RuntimeException('Payments are not configured.', 500);
         }
@@ -251,6 +257,44 @@ final class RazorpayGateway
         }
 
         return null;
+    }
+
+    /**
+     * Issue a refund against a captured Razorpay payment.
+     *
+     * @param int|null $amountPaise Amount in paise. If null, a full refund is processed.
+     * @return array<string, mixed>
+     *
+     * @throws RuntimeException On API failure or connection error.
+     */
+    public function refund(string $paymentId, ?int $amountPaise = null, array $notes = []): array
+    {
+        if (! $this->isConfigured()) {
+            throw new RuntimeException('Payments are not configured.', 500);
+        }
+
+        $payload = [];
+        if ($amountPaise !== null && $amountPaise > 0) {
+            $payload['amount'] = $amountPaise;
+        }
+        if (! empty($notes)) {
+            $payload['notes'] = $notes;
+        }
+
+        try {
+            $response = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()
+                ->timeout(15)
+                ->post('https://api.razorpay.com/v1/payments/' . trim($paymentId) . '/refund', $payload);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('Could not reach the payment provider for refund.', 502);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Refund request failed: ' . $response->body(), $response->status());
+        }
+
+        return (array) $response->json();
     }
 
     /**

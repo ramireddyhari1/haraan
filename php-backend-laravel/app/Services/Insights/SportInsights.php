@@ -7,6 +7,10 @@ namespace App\Services\Insights;
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\User;
+use App\Services\Scoring\KabaddiMachine;
+use App\Services\Scoring\TennisMachine;
+use App\Services\SportScoreEngine;
+use App\Services\Stats\MatchPlayerStatsService;
 use App\Support\MediaUrl;
 use App\Support\SportRules;
 use Illuminate\Support\Collection;
@@ -87,19 +91,21 @@ class SportInsights
             'untracked' => $built['untracked'] ?? [],
             // The same per-player figures the careers are built from — one calculator, so a
             // player's line on this tab is the line their profile will add up.
-            'playerStats' => app(\App\Services\Stats\MatchPlayerStatsService::class)->forMatch($match),
+            'playerStats' => app(MatchPlayerStatsService::class)->forMatch($match),
         ];
     }
 
     private function builderFor(string $sport): SportInsightBuilder
     {
         return match ($sport) {
-            'football' => new FootballInsights(),
-            'basketball' => new BasketballInsights(),
-            'kabaddi' => new KabaddiInsights(),
-            'tennis' => new TennisInsights(),
-            // volleyball, table tennis, badminton — and any future rally sport
-            default => new RallyInsights(),
+            'football' => new FootballInsights,
+            'basketball' => new BasketballInsights,
+            'kabaddi' => new KabaddiInsights,
+            'tennis' => new TennisInsights,
+            // Badminton's serve, interval and game points are its own reading, not a set's.
+            'badminton' => new BadmintonInsights,
+            // volleyball, table tennis — and any future rally sport
+            default => new RallyInsights,
         };
     }
 
@@ -141,6 +147,7 @@ class SportInsights
                 $half++;
                 $segHome = 0;
                 $segAway = 0;
+
                 continue;
             }
             $own = $e->kind === MatchEvent::OWN_GOAL;
@@ -181,6 +188,7 @@ class SportInsights
                 $period++;
                 $segHome = 0;
                 $segAway = 0;
+
                 continue;
             }
             if ($e->kind !== MatchEvent::POINT || ! in_array($e->side, ['home', 'away'], true)) {
@@ -240,6 +248,9 @@ class SportInsights
             }
             $m = $this->moment($e, $e->side, 1, (string) $e->player_name, $index, $setHome, $setAway, $totalHome, $totalAway);
             $m['deuce'] = $deuce;
+            // The optional tag a rally scorer may add — 'ace' or 'error'. Badminton reads it;
+            // the other rally sports ignore it, and an untagged rally carries an empty string.
+            $m['detail'] = strtolower(trim((string) $e->detail));
             $m['sets_home'] = $setsHome;
             $m['sets_away'] = $setsAway;
 
@@ -272,7 +283,7 @@ class SportInsights
         if ($first !== null && $first->match !== null) {
             $state = is_array($first->match->sport_state) ? $first->match->sport_state : [];
         }
-        $machine = new \App\Services\Scoring\KabaddiMachine($format, \App\Services\SportScoreEngine::kabaddiTracksMat($state), \App\Support\SportRules::version($state));
+        $machine = new KabaddiMachine($format, SportScoreEngine::kabaddiTracksMat($state), SportRules::version($state));
         $out = [];
         $period = 0;
         $segHome = 0;
@@ -285,10 +296,12 @@ class SportInsights
                 $segHome = 0;
                 $segAway = 0;
                 $machine->period();
+
                 continue;
             }
             if ($e->kind === 'serve' && $side !== null) {
                 $machine->setRaiding($side);
+
                 continue;
             }
             if ($side === null || ! in_array($e->kind, [MatchEvent::POINT, 'raid'], true)) {
@@ -355,7 +368,7 @@ class SportInsights
      */
     private function replayTennis(Collection $events, array $format): array
     {
-        $machine = new \App\Services\Scoring\TennisMachine($format);
+        $machine = new TennisMachine($format);
         $out = [];
         $totalHome = 0;
         $totalAway = 0;
@@ -363,6 +376,7 @@ class SportInsights
         foreach ($events as $e) {
             if ($e->kind === 'serve' && in_array($e->side, ['home', 'away'], true)) {
                 $machine->setServer($e->side);
+
                 continue;
             }
             if ($e->kind !== MatchEvent::POINT || ! in_array($e->side, ['home', 'away'], true)) {
@@ -478,6 +492,7 @@ class SportInsights
                 $cur['count']++;
                 $cur['end_home'] = $m[$bySegment ? 'seg_home' : 'total_home'];
                 $cur['end_away'] = $m[$bySegment ? 'seg_away' : 'total_away'];
+
                 continue;
             }
             if ($cur !== null) {
@@ -643,6 +658,7 @@ class SportInsights
                 $unattributed[$m['side']] += $m['value'];
                 $runKey = null;
                 $runLen = 0;
+
                 continue;
             }
             $key = $m['side'].'|'.mb_strtolower($m['player']);

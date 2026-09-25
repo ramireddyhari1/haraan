@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\BonusXpEntry;
 use App\Models\LiveMatch;
 use App\Models\MatchEvent;
 use App\Models\MatchXpLedger;
@@ -12,18 +13,26 @@ use App\Models\PlayerCareerBatting;
 use App\Models\PlayerCareerBowling;
 use App\Models\PlayerCareerFielding;
 use App\Models\PlayerPost;
+use App\Models\PlayerReport;
+use App\Models\PlayerSportCareer;
 use App\Models\PostComment;
-use App\Models\PostImage;
 use App\Models\PostLike;
 use App\Models\PostSave;
 use App\Models\User;
 use App\Services\CareerBattingService;
 use App\Services\Membership\MemberEntitlements;
 use App\Services\PlayerCareerAnalysis;
+use App\Services\PlayerFormService;
+use App\Services\Rewards\BadgeService;
 use App\Support\Membership\MemberFeature;
+use App\Support\OrganizationResolver;
+use App\Support\SportRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -38,7 +47,7 @@ final class PlayersController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->attributes->get('auth_user');
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -58,7 +67,7 @@ final class PlayersController extends Controller
             ->where('is_guest', false)
             ->first();
 
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             return response()->json(['error' => 'No player with that ID'], 404);
         }
 
@@ -93,16 +102,16 @@ final class PlayersController extends Controller
                 'l.xp', 'l.trust_level', 'l.is_ranked', 'l.won', 'l.mom', 'l.awarded_at',
             ])
             ->map(fn ($r) => [
-                'match_id'   => (int) $r->match_id,
-                'title'      => $r->title ?: ($r->home . ' vs ' . $r->away),
-                'home'       => $r->home,
-                'away'       => $r->away,
+                'match_id' => (int) $r->match_id,
+                'title' => $r->title ?: ($r->home.' vs '.$r->away),
+                'home' => $r->home,
+                'away' => $r->away,
                 'match_type' => $r->match_type,
-                'xp'         => (int) $r->xp,
-                'trust_level'=> $r->trust_level,
-                'is_ranked'  => (bool) $r->is_ranked,
-                'won'        => (bool) $r->won,
-                'mom'        => (bool) $r->mom,
+                'xp' => (int) $r->xp,
+                'trust_level' => $r->trust_level,
+                'is_ranked' => (bool) $r->is_ranked,
+                'won' => (bool) $r->won,
+                'mom' => (bool) $r->mom,
                 'awarded_at' => $r->awarded_at,
             ])
             ->all();
@@ -114,50 +123,50 @@ final class PlayersController extends Controller
         $recent = $this->attachMatchCards($recent);
 
         return [
-            'id'               => $user->id,
-            'player_id'        => $pid,
-            'username'         => $user->username,
-            'name'             => $user->name,
-            'bio'              => $user->bio,
-            'avatar'           => $user->avatar,
-            'district'         => $user->district,
-            'state'            => $user->state,
-            'player_role'      => $user->player_role,
-            'batting_style'    => $user->batting_style,
-            'bowling_style'    => $user->bowling_style,
-            'primary_sport'    => $user->primary_sport,
+            'id' => $user->id,
+            'player_id' => $pid,
+            'username' => $user->username,
+            'name' => $user->name,
+            'bio' => $user->bio,
+            'avatar' => $user->avatar,
+            'district' => $user->district,
+            'state' => $user->state,
+            'player_role' => $user->player_role,
+            'batting_style' => $user->batting_style,
+            'bowling_style' => $user->bowling_style,
+            'primary_sport' => $user->primary_sport,
             'sport_attributes' => $user->sport_attributes,
-            'is_organizer'     => (bool) ($user->is_organizer ?? false),
+            'is_organizer' => (bool) ($user->is_organizer ?? false),
             // Blue tick. Admin-granted in /control — the app only ever reads it, so a
             // profile can't award itself one.
-            'is_verified'      => (bool) ($user->is_verified ?? false),
+            'is_verified' => (bool) ($user->is_verified ?? false),
             // Pro / Hero mark — the plan code when the owner's plan includes the badge,
             // otherwise null. Resolved by the one entitlement engine, never by plan name here.
-            'member_badge'     => app(MemberEntitlements::class)->allows($user, MemberFeature::PROFILE_MEMBER_BADGE)
+            'member_badge' => app(MemberEntitlements::class)->allows($user, MemberFeature::PROFILE_MEMBER_BADGE)
                 ? app(MemberEntitlements::class)->for($user)->plan->code
                 : null,
             'profile_complete' => $user->isActionboardProfileComplete(),
             // Account privacy (Instagram-style). Private accounts are hidden from the Home feed.
-            'is_private'       => ! $user->privacy_public_profile,
-            'about'            => $this->aboutPayload($user),
+            'is_private' => ! $user->privacy_public_profile,
+            'about' => $this->aboutPayload($user),
 
-            'ranked_xp'       => (int) ($user->ranked_xp ?? 0),
-            'casual_xp'       => (int) ($user->casual_xp ?? 0),
-            'trust_score'     => (int) ($user->trust_score ?? 100),
+            'ranked_xp' => (int) ($user->ranked_xp ?? 0),
+            'casual_xp' => (int) ($user->casual_xp ?? 0),
+            'trust_score' => (int) ($user->trust_score ?? 100),
             'month_ranked_xp' => $monthRankedXp,
 
-            'rank_district'   => $user->rank_district,
-            'rank_state'      => $user->rank_state,
-            'rank_country'    => $user->rank_country,
+            'rank_district' => $user->rank_district,
+            'rank_state' => $user->rank_state,
+            'rank_country' => $user->rank_country,
 
             // Cricket's career, kept at this key unchanged so older app builds that read
             // career.runs / career.wickets keep working.
             'career' => [
-                'matches'       => (int) ($user->career_matches ?? 0),
-                'runs'          => (int) ($user->career_runs ?? 0),
-                'balls'         => (int) ($user->career_balls ?? 0),
-                'wickets'       => (int) ($user->career_wickets ?? 0),
-                'overs_bowled'  => $user->career_overs_bowled ?? '0.0',
+                'matches' => (int) ($user->career_matches ?? 0),
+                'runs' => (int) ($user->career_runs ?? 0),
+                'balls' => (int) ($user->career_balls ?? 0),
+                'wickets' => (int) ($user->career_wickets ?? 0),
+                'overs_bowled' => $user->career_overs_bowled ?? '0.0',
             ],
 
             // The same question asked in the player's OWN sport. `career` above is
@@ -184,8 +193,10 @@ final class PlayersController extends Controller
             // their profile actually was.
             'profile_completion' => $this->profileCompletion($user),
 
-            'recent_matches'  => $recent,
-            'achievements'    => $this->buildAchievements($pid, $user),
+            'recent_matches' => $recent,
+            'achievements' => $this->buildAchievements($pid, $user),
+            // Reward currency — deliberately separate from ranked/casual XP and never ranked.
+            'bonus_xp' => BonusXpEntry::totalFor((int) $user->id),
         ];
     }
 
@@ -209,9 +220,9 @@ final class PlayersController extends Controller
 
         // Ordered: identity first, then the sport's own attributes.
         $checks = [
-            'state'    => filled($user->state),
+            'state' => filled($user->state),
             'district' => filled($user->district),
-            'avatar'   => filled($user->avatar),
+            'avatar' => filled($user->avatar),
         ];
 
         foreach (User::SPORT_REQUIRED_ATTRS[$user->primary_sport] ?? [] as $key) {
@@ -246,18 +257,18 @@ final class PlayersController extends Controller
             'following_count' => $user->following()->count(),
             // Never true for your own profile: you cannot follow yourself, and the
             // button slot becomes Share there instead.
-            'is_following'    => $viewer instanceof User && ! $isSelf && $viewer->isFollowing($user),
+            'is_following' => $viewer instanceof User && ! $isSelf && $viewer->isFollowing($user),
             // The other half of "mutual". Messaging requires both directions, and the
             // client cannot work that out from is_following alone.
-            'follows_me'      => $viewer instanceof User && ! $isSelf && $user->isFollowing($viewer),
-            'is_self'         => $isSelf,
+            'follows_me' => $viewer instanceof User && ! $isSelf && $user->isFollowing($viewer),
+            'is_self' => $isSelf,
             // A signed-out viewer has no follow state to act on at all, and neither has
             // anyone looking at a profile they've blocked — the button becomes Unblock.
-            'can_follow'      => $viewer instanceof User && ! $isSelf && ! $blocked,
+            'can_follow' => $viewer instanceof User && ! $isSelf && ! $blocked,
             // Only the viewer's OWN block is reported. Telling someone they have been
             // blocked hands them the information a block exists to withhold, so
             // `is_blocked_by` is deliberately absent from every payload.
-            'is_blocked'      => $blocked,
+            'is_blocked' => $blocked,
         ];
     }
 
@@ -282,7 +293,7 @@ final class PlayersController extends Controller
      */
     public function form(string $playerId): JsonResponse
     {
-        $service = app(\App\Services\PlayerFormService::class);
+        $service = app(PlayerFormService::class);
         $form = $service->forPlayer($playerId);
         $style = $service->styleLine($playerId);
 
@@ -363,27 +374,27 @@ final class PlayersController extends Controller
         $overs = (string) ($m->overs ?? '');
 
         return [
-            'team1'       => (string) $m->home,
-            'team2'       => (string) $m->away,
-            'team1Full'   => (string) ($m->home_full ?? ''),
-            'team2Full'   => (string) ($m->away_full ?? ''),
-            'team1Logo'   => $this->absoluteMatchLogo($m->home_logo),
-            'team2Logo'   => $this->absoluteMatchLogo($m->away_logo),
+            'team1' => (string) $m->home,
+            'team2' => (string) $m->away,
+            'team1Full' => (string) ($m->home_full ?? ''),
+            'team2Full' => (string) ($m->away_full ?? ''),
+            'team1Logo' => $this->absoluteMatchLogo($m->home_logo),
+            'team2Logo' => $this->absoluteMatchLogo($m->away_logo),
             'team1Emblem' => (string) ($m->home_emblem ?? ''),
             'team2Emblem' => (string) ($m->away_emblem ?? ''),
-            'score1'      => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
-            'score2'      => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
-            'overs1'      => $isCricket && $battingTeam !== 2 ? $overs : '',
-            'overs2'      => $isCricket && $battingTeam === 2 ? $overs : '',
+            'score1' => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
+            'score2' => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
+            'overs1' => $isCricket && $battingTeam !== 2 ? $overs : '',
+            'overs2' => $isCricket && $battingTeam === 2 ? $overs : '',
             'battingTeam' => $battingTeam,
-            'sport'       => strtolower((string) ($m->sport ?: 'cricket')),
-            'status'      => (string) ($m->status ?? ''),
-            'isLive'      => strtolower((string) $m->status) === 'live',
-            'result'      => (string) ($m->result ?? ''),
+            'sport' => strtolower((string) ($m->sport ?: 'cricket')),
+            'status' => (string) ($m->status ?? ''),
+            'isLive' => strtolower((string) $m->status) === 'live',
+            'result' => (string) ($m->result ?? ''),
             'competition' => (string) ($m->competition ?? ''),
-            'venue'       => (string) ($m->venue ?? ''),
-            'district'    => (string) ($m->district ?? ''),
-            'locality'    => (string) ($m->locality ?? ''),
+            'venue' => (string) ($m->venue ?? ''),
+            'district' => (string) ($m->district ?? ''),
+            'locality' => (string) ($m->locality ?? ''),
         ];
     }
 
@@ -394,7 +405,8 @@ final class PlayersController extends Controller
         if ($p === '' || str_starts_with($p, 'http')) {
             return $p;
         }
-        return rtrim(config('app.url', ''), '/') . '/' . ltrim($p, '/');
+
+        return rtrim(config('app.url', ''), '/').'/'.ltrim($p, '/');
     }
 
     private function careerBook(User $user): array
@@ -411,8 +423,8 @@ final class PlayersController extends Controller
                 ->selectRaw('lower(sport) as sport, count(*) as played')
                 ->finished()
                 ->where(function ($q) use ($pid): void {
-                    $q->where('home_squad', 'like', '%"' . $pid . '"%')
-                      ->orWhere('away_squad', 'like', '%"' . $pid . '"%');
+                    $q->where('home_squad', 'like', '%"'.$pid.'"%')
+                        ->orWhere('away_squad', 'like', '%"'.$pid.'"%');
                 })
                 ->groupBy(DB::raw('lower(sport)'))
                 ->get();
@@ -421,7 +433,7 @@ final class PlayersController extends Controller
                 $played[$key] = (int) $row->played;
             }
         }
-        if (!isset($played[$primary])) {
+        if (! isset($played[$primary])) {
             $played[$primary] = 0;
         }
 
@@ -433,6 +445,7 @@ final class PlayersController extends Controller
             if ($b === $primary) {
                 return 1;
             }
+
             return $played[$b] <=> $played[$a];
         });
 
@@ -478,7 +491,7 @@ final class PlayersController extends Controller
                     'kind' => 'split',
                     'title' => 'How the runs came',
                     'caption' => $boundaryRuns > 0
-                        ? round($boundaryRuns * 100 / max(1, $runs)) . '% of your runs in boundaries'
+                        ? round($boundaryRuns * 100 / max(1, $runs)).'% of your runs in boundaries'
                         : null,
                     'segments' => [
                         ['label' => 'Sixes', 'value' => $sixes * 6],
@@ -497,7 +510,7 @@ final class PlayersController extends Controller
                     ['label' => 'Sixes', 'value' => (string) (int) ($bat->sixes ?? 0)],
                     [
                         'label' => '50s / 100s',
-                        'value' => (int) ($bat->fifties ?? 0) . ' / ' . (int) ($bat->hundreds ?? 0),
+                        'value' => (int) ($bat->fifties ?? 0).' / '.(int) ($bat->hundreds ?? 0),
                     ],
                 ],
             ];
@@ -517,7 +530,7 @@ final class PlayersController extends Controller
                     'title' => 'Economy',
                     'value' => $economy,
                     'max' => 15,
-                    'caption' => $economy . ' runs per over — ' . match (true) {
+                    'caption' => $economy.' runs per over — '.match (true) {
                         $economy < 5 => 'tight',
                         $economy < 7 => 'steady',
                         $economy < 9 => 'gettable',
@@ -535,7 +548,7 @@ final class PlayersController extends Controller
                     ['label' => 'Maidens', 'value' => (string) (int) ($bowl->maidens ?? 0)],
                     [
                         'label' => '3w / 5w',
-                        'value' => (int) ($bowl->three_fers ?? 0) . ' / ' . (int) ($bowl->five_fers ?? 0),
+                        'value' => (int) ($bowl->three_fers ?? 0).' / '.(int) ($bowl->five_fers ?? 0),
                     ],
                 ],
             ];
@@ -650,8 +663,8 @@ final class PlayersController extends Controller
             'total' => $total,
             'shots' => $shots,
             'zones' => $out,
-            'caption' => $best['runs'] . ' of these runs went ' . strtolower($best['label'])
-                . ' — ' . (int) round($best['runs'] * 100 / $total) . '% of the placed boundaries.',
+            'caption' => $best['runs'].' of these runs went '.strtolower($best['label'])
+                .' — '.(int) round($best['runs'] * 100 / $total).'% of the placed boundaries.',
         ];
     }
 
@@ -691,7 +704,7 @@ final class PlayersController extends Controller
     {
         $label = ucwords(str_replace('_', ' ', $sport));
         $pid = (string) $user->player_id;
-        $career = $pid === '' ? null : \App\Models\PlayerSportCareer::query()
+        $career = $pid === '' ? null : PlayerSportCareer::query()
             ->where('player_id', $pid)->where('sport', $sport)->first();
 
         // The rollup is the truth once a match in this sport has finished; before that the
@@ -793,7 +806,7 @@ final class PlayersController extends Controller
 
             case 'tennis':
                 $headline[] = ['label' => 'Sets won', 'value' => (string) $n('sets_won')];
-                $held = $n('service_games') > 0 ? (int) round($n('service_games_held') * 100 / $n('service_games')) . '%' : '-';
+                $held = $n('service_games') > 0 ? (int) round($n('service_games_held') * 100 / $n('service_games')).'%' : '-';
                 $groups[] = [
                     'title' => 'Match play',
                     'lead' => ['label' => 'Games won', 'value' => (string) $n('games_won')],
@@ -809,8 +822,8 @@ final class PlayersController extends Controller
 
             default: // volleyball, badminton, table tennis
                 if ($n('points_won') + $n('games_won') > 0) {
-                    $noun = \App\Support\SportRules::setNoun($sport) === 'Game' ? 'Games' : 'Sets';
-                    $headline[] = ['label' => $noun . ' won', 'value' => (string) $n('games_won')];
+                    $noun = SportRules::setNoun($sport) === 'Game' ? 'Games' : 'Sets';
+                    $headline[] = ['label' => $noun.' won', 'value' => (string) $n('games_won')];
                     $groups[] = [
                         'title' => 'Rallies',
                         'lead' => ['label' => 'Points won', 'value' => (string) $n('points_won')],
@@ -827,7 +840,7 @@ final class PlayersController extends Controller
         $note = null;
         if ($groups === []) {
             $note = $matches === 0
-                ? 'No finished ' . strtolower($label) . ' matches yet.'
+                ? 'No finished '.strtolower($label).' matches yet.'
                 : 'No individual figures recorded in these matches — only results.';
         }
 
@@ -847,19 +860,20 @@ final class PlayersController extends Controller
         if ($value === null) {
             return '-';
         }
+
         return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.') ?: '0';
     }
 
     private function sportCareer(User $user): array
     {
         $sport = strtolower((string) ($user->primary_sport ?? 'cricket'));
-        $pid   = (string) $user->player_id;
+        $pid = (string) $user->player_id;
 
         if ($sport === 'cricket' || $sport === '') {
             return [
-                'sport'   => 'cricket',
+                'sport' => 'cricket',
                 'matches' => (int) ($user->career_matches ?? 0),
-                'runs'    => (int) ($user->career_runs ?? 0),
+                'runs' => (int) ($user->career_runs ?? 0),
                 'wickets' => (int) ($user->career_wickets ?? 0),
             ];
         }
@@ -870,8 +884,8 @@ final class PlayersController extends Controller
             ->whereRaw('lower(sport) = ?', [$sport])
             ->finished()
             ->where(function ($q) use ($pid): void {
-                $q->where('home_squad', 'like', '%"' . $pid . '"%')
-                  ->orWhere('away_squad', 'like', '%"' . $pid . '"%');
+                $q->where('home_squad', 'like', '%"'.$pid.'"%')
+                    ->orWhere('away_squad', 'like', '%"'.$pid.'"%');
             })
             ->count();
 
@@ -884,11 +898,11 @@ final class PlayersController extends Controller
             };
 
             return [
-                'sport'   => 'football',
+                'sport' => 'football',
                 'matches' => $matches,
                 // Own goals deliberately excluded — they move the opposition's score and
                 // are not the player's goal tally.
-                'goals'   => $tally(MatchEvent::GOAL),
+                'goals' => $tally(MatchEvent::GOAL),
                 'assists' => $tally(MatchEvent::ASSIST),
             ];
         }
@@ -896,52 +910,19 @@ final class PlayersController extends Controller
         // Badminton (and anything newer): points are recorded per side, so there is no
         // honest per-player figure to show yet.
         return [
-            'sport'   => $sport,
+            'sport' => $sport,
             'matches' => $matches,
         ];
     }
 
     /**
-     * Real, earned achievements — computed from the full match ledger, career batting
-     * (high score) and rankings. Locked ones carry a "progress" hint. No invented data.
+     * Real, earned achievements — now persisted badges (player_badges), so each carries the
+     * moment it unlocked. Definitions come from /control → Rewards → Badges; the ten original
+     * keys, icons and tiers are kept, and locked ones still carry a "progress" hint.
      */
     private function buildAchievements(?string $pid, User $user): array
     {
-        $pid = (string) $pid;
-        $ledger = $pid === '' ? collect() : DB::table('match_xp_ledger')
-            ->where('player_id', $pid)->orderBy('awarded_at')->get(['won', 'mom']);
-
-        $matches = $ledger->count();
-        $wins = $ledger->filter(fn ($r) => (bool) $r->won)->count();
-        $moms = $ledger->filter(fn ($r) => (bool) $r->mom)->count();
-        $bestStreak = 0; $run = 0;
-        foreach ($ledger as $r) {
-            if ((bool) $r->won) { $run++; $bestStreak = max($bestStreak, $run); } else { $run = 0; }
-        }
-
-        $hs = 0;
-        if ($pid !== '') {
-            $cb = DB::table('player_career_batting')->where('player_id', $pid)->first();
-            $hs = (int) ($cb->high_score ?? 0);
-        }
-        $wickets = (int) ($user->career_wickets ?? 0);
-        $rankD = $user->rank_district;
-
-        $mk = fn (string $key, string $icon, string $label, string $tier, bool $unlocked, ?string $progress = null): array =>
-            compact('key', 'icon', 'label', 'tier', 'unlocked', 'progress');
-
-        return [
-            $mk('first_match', 'SportsCricket', 'First Match', 'bronze', $matches >= 1, $matches >= 1 ? null : '0/1'),
-            $mk('first_win', 'EmojiEvents', 'First Win', 'bronze', $wins >= 1),
-            $mk('fifty', 'Star', 'Half Century', 'silver', $hs >= 50, $hs >= 50 ? null : "$hs/50"),
-            $mk('century', 'WorkspacePremium', 'First Century', 'gold', $hs >= 100, $hs >= 100 ? null : "$hs/100"),
-            $mk('mom', 'MilitaryTech', 'Man of the Match', 'silver', $moms >= 1),
-            $mk('mvp5', 'MilitaryTech', 'MVP x5', 'gold', $moms >= 5, $moms >= 5 ? null : "$moms/5"),
-            $mk('streak5', 'Whatshot', '5-Win Streak', 'gold', $bestStreak >= 5, $bestStreak >= 5 ? null : "$bestStreak/5"),
-            $mk('veteran', 'Shield', '10 Matches', 'silver', $matches >= 10, $matches >= 10 ? null : "$matches/10"),
-            $mk('top100', 'TrendingUp', 'District Top 100', 'bronze', $rankD !== null && $rankD <= 100),
-            $mk('wkts50', 'SportsCricket', '50 Wickets', 'gold', $wickets >= 50, $wickets >= 50 ? null : "$wickets/50"),
-        ];
+        return app(BadgeService::class)->forProfile($user);
     }
 
     /**
@@ -952,32 +933,32 @@ final class PlayersController extends Controller
     public function saveProfile(Request $request): JsonResponse
     {
         $user = $request->attributes->get('auth_user');
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
         $sports = array_keys(User::SPORT_REQUIRED_ATTRS);
 
         $validated = $request->validate([
-            'name'             => ['required', 'string', 'max:255'],
+            'name' => ['required', 'string', 'max:255'],
             // Nullable so older clients (and existing accounts) keep saving fine — the
             // app asks for one, but a profile without a handle is still valid.
-            'username'         => ['nullable', 'string', 'max:30'],
-            'state'            => ['required', 'string', 'max:255'],
-            'district'         => ['required', 'string', 'max:255'],
+            'username' => ['nullable', 'string', 'max:30'],
+            'state' => ['required', 'string', 'max:255'],
+            'district' => ['required', 'string', 'max:255'],
             // Multi-sport: the chosen sport drives which attributes are required (below).
-            'primary_sport'    => ['required', 'string', 'in:' . implode(',', $sports)],
+            'primary_sport' => ['required', 'string', 'in:'.implode(',', $sports)],
             'sport_attributes' => ['required', 'array'],
             // Crex-style "About" fields — optional so older clients still work.
-            'gender'        => ['nullable', 'string', 'in:Male,Female,Other'],
+            'gender' => ['nullable', 'string', 'in:Male,Female,Other'],
             'date_of_birth' => ['nullable', 'date'],
-            'birth_place'   => ['nullable', 'string', 'max:255'],
-            'height'        => ['nullable', 'string', 'max:50'],
-            'nationality'   => ['nullable', 'string', 'max:100'],
+            'birth_place' => ['nullable', 'string', 'max:255'],
+            'height' => ['nullable', 'string', 'max:50'],
+            'nationality' => ['nullable', 'string', 'max:100'],
             // Instagram-style account privacy, chosen at profile creation. Private hides the
             // player's posts from the public Home feed (and their profile from the public).
             // Nullable so older clients that never send it keep their current setting.
-            'is_private'    => ['nullable', 'boolean'],
+            'is_private' => ['nullable', 'boolean'],
         ]);
 
         // Handle: validated here rather than via a `unique:` rule so the shape complaint
@@ -990,7 +971,7 @@ final class PlayersController extends Controller
             if ($reason = User::usernameRejection($username)) {
                 throw ValidationException::withMessages(['username' => $reason]);
             }
-            if (!User::usernameIsFree($username, (int) $user->id)) {
+            if (! User::usernameIsFree($username, (int) $user->id)) {
                 throw ValidationException::withMessages(['username' => 'That username is already taken.']);
             }
         }
@@ -1012,32 +993,32 @@ final class PlayersController extends Controller
 
         // Map the chosen state/district onto the canonical org tree so the user
         // gets a home organization (drives district leaderboards + future scoping).
-        $orgId = \App\Support\OrganizationResolver::districtUnitId($validated['state'], $validated['district']);
+        $orgId = OrganizationResolver::districtUnitId($validated['state'], $validated['district']);
 
         $user->update([
-            'name'             => $validated['name'],
+            'name' => $validated['name'],
             // Never clear an existing handle just because a client omitted the field.
-            'username'         => $username !== '' ? $username : $user->username,
-            'state'            => $validated['state'],
-            'district'         => $validated['district'],
-            'organization_id'  => $orgId,
-            'primary_sport'    => $sport,
+            'username' => $username !== '' ? $username : $user->username,
+            'state' => $validated['state'],
+            'district' => $validated['district'],
+            'organization_id' => $orgId,
+            'primary_sport' => $sport,
             'sport_attributes' => $attrs,
             // Mirror cricket into the legacy columns so existing screens/leaderboards keep working.
-            'player_role'   => $sport === 'Cricket' ? $attrs['role'] : $user->player_role,
+            'player_role' => $sport === 'Cricket' ? $attrs['role'] : $user->player_role,
             'batting_style' => $sport === 'Cricket' ? $attrs['batting'] : $user->batting_style,
             'bowling_style' => $sport === 'Cricket' ? $attrs['bowling'] : $user->bowling_style,
-            'gender'        => $validated['gender'] ?? $user->gender,
+            'gender' => $validated['gender'] ?? $user->gender,
             'date_of_birth' => $validated['date_of_birth'] ?? $user->date_of_birth,
-            'birth_place'   => $validated['birth_place'] ?? $user->birth_place,
-            'height'        => $validated['height'] ?? $user->height,
-            'nationality'   => $validated['nationality'] ?? $user->nationality,
+            'birth_place' => $validated['birth_place'] ?? $user->birth_place,
+            'height' => $validated['height'] ?? $user->height,
+            'nationality' => $validated['nationality'] ?? $user->nationality,
             // Public account = posts eligible for the Home feed. Only touched when the
             // client actually sends the choice, so an omitted field never flips privacy.
             'privacy_public_profile' => $request->has('is_private')
                 ? ! $request->boolean('is_private')
                 : $user->privacy_public_profile,
-            'is_guest'      => false,
+            'is_guest' => false,
         ]);
 
         // Mirror the home org into the membership pivot as the primary unit.
@@ -1047,17 +1028,17 @@ final class PlayersController extends Controller
         $user->refresh();
 
         return response()->json([
-            'message'          => 'Player profile saved',
-            'player_id'        => $user->player_id,
-            'username'         => $user->username,
+            'message' => 'Player profile saved',
+            'player_id' => $user->player_id,
+            'username' => $user->username,
             'profile_complete' => $user->isActionboardProfileComplete(),
-            'name'             => $user->name,
-            'state'            => $user->state,
-            'district'         => $user->district,
-            'primary_sport'    => $user->primary_sport,
+            'name' => $user->name,
+            'state' => $user->state,
+            'district' => $user->district,
+            'primary_sport' => $user->primary_sport,
             'sport_attributes' => $user->sport_attributes,
-            'is_private'       => ! $user->privacy_public_profile,
-            'about'            => $this->aboutPayload($user),
+            'is_private' => ! $user->privacy_public_profile,
+            'about' => $this->aboutPayload($user),
         ]);
     }
 
@@ -1096,7 +1077,7 @@ final class PlayersController extends Controller
     public function uploadAvatar(Request $request): JsonResponse
     {
         $user = $request->attributes->get('auth_user');
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -1107,19 +1088,19 @@ final class PlayersController extends Controller
         // Replace any previous upload so we don't orphan files on the public disk.
         $previous = $user->avatar;
         if (is_string($previous) && str_starts_with($previous, '/storage/')) {
-            \Illuminate\Support\Facades\Storage::disk('public')
+            Storage::disk('public')
                 ->delete(substr($previous, strlen('/storage/')));
         }
 
         $path = $request->file('avatar')->store('avatars', 'public');
-        $url = '/storage/' . $path;
+        $url = '/storage/'.$path;
 
         $user->update(['avatar' => $url]);
 
         return response()->json([
             'message' => 'Profile photo updated',
-            'avatar'  => $url,
-            'url'     => $url,
+            'avatar' => $url,
+            'url' => $url,
         ]);
     }
 
@@ -1129,11 +1110,11 @@ final class PlayersController extends Controller
     private function aboutPayload(User $user): array
     {
         return [
-            'gender'        => $user->gender,
+            'gender' => $user->gender,
             'date_of_birth' => $user->date_of_birth?->format('Y-m-d'),
-            'birth_place'   => $user->birth_place,
-            'height'        => $user->height,
-            'nationality'   => $user->nationality,
+            'birth_place' => $user->birth_place,
+            'height' => $user->height,
+            'nationality' => $user->nationality,
         ];
     }
 
@@ -1192,8 +1173,8 @@ final class PlayersController extends Controller
 
         return response()->json([
             'available' => $free,
-            'username'  => $normalized,
-            'reason'    => $free ? null : 'That username is already taken.',
+            'username' => $normalized,
+            'reason' => $free ? null : 'That username is already taken.',
         ]);
     }
 
@@ -1216,14 +1197,14 @@ final class PlayersController extends Controller
         }
 
         $handle = User::normalizeUsername(ltrim($q, '@'));
-        $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $handle) . '%';
-        $prefix = str_replace(['%', '_'], ['\%', '\_'], $handle) . '%';
+        $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $handle).'%';
+        $prefix = str_replace(['%', '_'], ['\%', '\_'], $handle).'%';
 
         $me = $request->attributes->get('auth_user');
 
         $rows = User::query()
             ->where('is_guest', false)
-            ->where(function ($sub) use ($q): void {
+            ->where(function ($sub): void {
                 // Opted-out players are excluded, but the column is nullable on every
                 // account created before the privacy toggles shipped — treat null as
                 // discoverable so the directory isn't empty.
@@ -1324,11 +1305,11 @@ final class PlayersController extends Controller
         }
 
         return response()->json([
-            'player_id'  => $target->player_id,
+            'player_id' => $target->player_id,
             'is_blocked' => true,
             // Both sides were severed, so the client's cached follow state is now wrong.
             'is_following' => false,
-            'follows_me'   => false,
+            'follows_me' => false,
             'followers_count' => $target->followers()->count(),
         ]);
     }
@@ -1351,10 +1332,10 @@ final class PlayersController extends Controller
         $me->unblock($target);
 
         return response()->json([
-            'player_id'  => $target->player_id,
+            'player_id' => $target->player_id,
             'is_blocked' => false,
             'is_following' => $me->isFollowing($target),
-            'follows_me'   => $target->isFollowing($me),
+            'follows_me' => $target->isFollowing($me),
             'followers_count' => $target->followers()->count(),
         ]);
     }
@@ -1386,18 +1367,18 @@ final class PlayersController extends Controller
         }
 
         $data = $request->validate([
-            'reason'  => ['required', 'string', \Illuminate\Validation\Rule::in(\App\Models\PlayerReport::REASONS)],
+            'reason' => ['required', 'string', Rule::in(PlayerReport::REASONS)],
             'details' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        \App\Models\PlayerReport::updateOrCreate(
+        PlayerReport::updateOrCreate(
             [
                 'reporter_id' => $me->id,
                 'reported_id' => $target->id,
-                'status'      => 'open',
+                'status' => 'open',
             ],
             [
-                'reason'  => $data['reason'],
+                'reason' => $data['reason'],
                 'details' => $data['details'] ?? null,
             ],
         );
@@ -1499,7 +1480,7 @@ final class PlayersController extends Controller
 
         $paths = [];
         foreach ($files as $file) {
-            $paths[] = '/storage/' . $file->store('posts', 'public');
+            $paths[] = '/storage/'.$file->store('posts', 'public');
         }
 
         $post = PlayerPost::create([
@@ -1574,7 +1555,7 @@ final class PlayersController extends Controller
         }
         foreach ($paths as $path) {
             if (is_string($path) && str_starts_with($path, '/storage/')) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete(substr($path, strlen('/storage/')));
+                Storage::disk('public')->delete(substr($path, strlen('/storage/')));
             }
         }
         $post->delete();
@@ -1893,7 +1874,7 @@ final class PlayersController extends Controller
      * "am I following this one?" twenty times is the classic N+1 that makes a
      * search feel sluggish on a phone.
      *
-     * @param  \Illuminate\Support\Collection<int, User>  $players
+     * @param  Collection<int, User>  $players
      * @return array<int, array<string, mixed>>
      */
     private function playerCards($players, ?User $viewer): array
@@ -1916,17 +1897,17 @@ final class PlayersController extends Controller
     {
         return [
             'player_id' => $user->player_id,
-            'username'  => $user->username,
-            'name'      => $user->name,
-            'district'  => $user->district,
-            'state'     => $user->state,
-            'avatar'    => $user->avatar,
+            'username' => $user->username,
+            'name' => $user->name,
+            'district' => $user->district,
+            'state' => $user->state,
+            'avatar' => $user->avatar,
             // Social signal — a search result with nothing but a name reads dead.
             // These are already on the row, so they cost nothing to include.
             'primary_sport' => $user->primary_sport,
-            'matches'       => (int) ($user->career_matches ?? 0),
-            'xp'            => (int) ($user->ranked_xp ?? 0),
-            'is_following'  => $isFollowing,
+            'matches' => (int) ($user->career_matches ?? 0),
+            'xp' => (int) ($user->ranked_xp ?? 0),
+            'is_following' => $isFollowing,
         ];
     }
 }

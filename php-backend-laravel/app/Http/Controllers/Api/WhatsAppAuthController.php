@@ -11,6 +11,7 @@ use App\Services\TemplateResolver;
 use App\Services\WhatsAppService;
 use App\Support\JwtService;
 use App\Support\MessageContext;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -19,7 +20,7 @@ use Illuminate\Support\Str;
 
 final class WhatsAppAuthController extends Controller
 {
-    private const OTP_TTL_SECONDS = 300;
+    // Code lifetime and wrong-try limit: /control → Platform rules → Sign-in codes.
 
     public function __construct(
         private readonly WhatsAppService $whatsappService,
@@ -59,7 +60,7 @@ final class WhatsAppAuthController extends Controller
             // with APP_KEY is instant and still safe against cache inspection.
             'otp' => $this->hashOtp($otp),
             'user_id' => $user->id,
-        ], self::OTP_TTL_SECONDS);
+        ], PlatformRules::int('otp.ttl_seconds'));
 
         $sent = $this->sendOtp($phone, $otp);
 
@@ -76,7 +77,7 @@ final class WhatsAppAuthController extends Controller
         return response()->json([
             'message' => 'OTP sent to WhatsApp.',
             'verificationToken' => $verificationToken,
-            'expiresIn' => self::OTP_TTL_SECONDS,
+            'expiresIn' => PlatformRules::int('otp.ttl_seconds'),
             'phone' => $phone,
         ]);
     }
@@ -145,7 +146,7 @@ final class WhatsAppAuthController extends Controller
 
         return $this->whatsappService->sendMessage(
             $phone,
-            "Your Haraan login code is: *{$otp}*\n\nThis code will expire in 5 minutes.",
+            "Your Haraan login code is: *{$otp}*\n\nThis code will expire in ".max(1, intdiv(PlatformRules::int('otp.ttl_seconds') + 59, 60)).' minutes.',
             $context,
         );
     }

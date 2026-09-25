@@ -77,6 +77,12 @@ final class Booking extends Model
         'quantity',
         'total_amount',
         'convenience_fee',
+        // Platform charges (see the add_platform_charges migration): customer-paid platform and
+        // gateway fees, tax, and what comes off the host's payout. Stored on the order's first row.
+        'platform_fee',
+        'gateway_fee',
+        'tax_amount',
+        'host_deduction',
         'status',
         // Razorpay reserve→confirm: order id links the rows of one payment, payment id
         // is stamped once the signature verifies, reserved_until bounds the PENDING hold.
@@ -120,6 +126,10 @@ final class Booking extends Model
             'total_amount'    => 'float',
             'amount_paid'     => 'float',
             'convenience_fee' => 'float',
+            'platform_fee' => 'float',
+            'gateway_fee' => 'float',
+            'tax_amount' => 'float',
+            'host_deduction' => 'float',
             'discount'        => 'float',
             'seat_numbers' => 'array',
             'slot_date'    => 'date',
@@ -152,17 +162,46 @@ final class Booking extends Model
      * while an event row holds the ticket subtotal with the fee and discount beside
      * it. Adding the fee to a venue row would bill it twice; ignoring it on an event
      * row would under-record the sale.
+     *
+     * Pulse tax is the one charge kept OUTSIDE a venue row's `total_amount` (as on events):
+     * partner payouts sum `total_amount`, and the tax is Haraan's to remit, not the venue's.
      */
     public function amountCharged(): float
     {
         if ($this->booking_type === 'venue') {
-            return max(0.0, round((float) $this->total_amount, 2));
+            return max(0.0, round((float) $this->total_amount + (float) $this->tax_amount, 2));
         }
 
         return max(0.0, round(
-            (float) $this->total_amount + (float) $this->convenience_fee - (float) $this->discount,
+            (float) $this->total_amount + $this->customerCharges() - (float) $this->discount,
             2,
         ));
+    }
+
+    /** Fees and tax the customer paid on top of the ticket subtotal (event rows). */
+    public function customerCharges(): float
+    {
+        return round(
+            (float) $this->convenience_fee + (float) $this->platform_fee + (float) $this->gateway_fee + (float) $this->tax_amount,
+            2,
+        );
+    }
+
+    /**
+     * Grand total of one EVENT order (its rows share a Razorpay order): ticket subtotal + fees +
+     * customer-paid platform/gateway fees + tax − discount. Summed before clamping, because the
+     * discount sits on the first row and may exceed that row alone.
+     *
+     * @param  iterable<Booking>  $rows
+     */
+    public static function orderGrandTotal(iterable $rows): float
+    {
+        $sum = 0.0;
+        foreach ($rows as $row) {
+            $sum += (float) $row->total_amount + $row->customerCharges() - (float) $row->discount;
+        }
+
+        return max(0.0, round($sum, 2));
     }
 
     /** What the customer still owes. Zero once settled, never negative. */

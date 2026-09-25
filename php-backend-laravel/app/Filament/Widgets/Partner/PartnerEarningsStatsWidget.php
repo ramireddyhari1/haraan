@@ -65,8 +65,11 @@ class PartnerEarningsStatsWidget extends Widget
     {
         $paid = fn (): Builder => $this->partnerBookings()->whereIn(DB::raw('lower(status)'), self::PAID);
 
-        $collected = (float) $paid()->sum('total_amount');
-        $collectedMonth = (float) (clone $paid())->where('created_at', '>=', now()->startOfMonth())->sum('total_amount');
+        // Net of what the platform keeps (host-paid fees, Pulse commission) — the same figure
+        // PartnerSettlement pays out against, so "pending" here matches the Payouts page.
+        $net = fn (Builder $q): float => max(0.0, (float) (clone $q)->sum('total_amount') - (float) (clone $q)->sum('host_deduction'));
+        $collected = $net($paid());
+        $collectedMonth = $net($paid()->where('created_at', '>=', now()->startOfMonth()));
 
         $settled = (float) Payout::query()
             ->whereIn('booking_id', $this->partnerBookings()->select('bookings.id'))

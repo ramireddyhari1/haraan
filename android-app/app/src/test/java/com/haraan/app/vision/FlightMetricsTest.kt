@@ -28,15 +28,58 @@ class FlightMetricsTest {
 
     // ---- the refusals -------------------------------------------------------
 
+    /**
+     * THIS TEST USED TO SAY "NEVER", AND THAT WAS TRUE UNTIL [WicketTracker] EXISTED.
+     *
+     * A km/h reading needs a real-world distance, and the only one a phone can get on a
+     * ground with no painted creases is the wicket: 0.2286 m outside to outside, by the
+     * Laws. So the contract is no longer "never" - it is "not without a measurable stumps
+     * lock", which is a condition a reader can go and satisfy. What has NOT changed is
+     * that a track on its own gets nothing.
+     */
     @Test
-    fun `ground speed is never offered, however good the track`() {
+    fun `ground speed is not offered without a wicket lock`() {
         val metrics = FlightMetrics.of(straight(30), aspect)
 
         val ground = metrics.groundSpeed
-        assertTrue("a km/h reading must not appear without calibration", ground is MetricValue.Unavailable)
+        assertTrue("a km/h reading must not appear without a scale", ground is MetricValue.Unavailable)
         assertTrue(
-            "the reason must say what is missing",
-            (ground as MetricValue.Unavailable).reason.contains("calibration"),
+            "the reason must name what is missing",
+            (ground as MetricValue.Unavailable).reason.contains("wicket"),
+        )
+    }
+
+    @Test
+    fun `ground speed is offered once a measurable wicket is locked and the camera is square`() {
+        val tracker = WicketTracker()
+        // The stump line laid ACROSS the picture, the same way this flight runs: the
+        // square-on case, and the only one where the wicket's scale describes the ball's
+        // own motion rather than a foreshortened slice of it.
+        tracker.lockManually(Point2(0.45, 0.55), Point2(0.55, 0.55), frameAspect = aspect)
+
+        val ground = FlightMetrics.of(straight(30), aspect, wicket = tracker.lock()).groundSpeed
+        assertTrue("with a lock and a square camera this must be a number", ground is MetricValue.Measured)
+        assertEquals("km/h", (ground as MetricValue.Measured).unit)
+        assertTrue("and a positive one", ground.value > 0.0)
+    }
+
+    /**
+     * The refusal that keeps the number honest. A ball bowled straight up the picture is
+     * travelling in depth, which one camera cannot see, and scaling almost no movement by
+     * a large number produces a speed that looks entirely reasonable and is wrong.
+     */
+    @Test
+    fun `ground speed is refused when the ball is travelling away from the camera`() {
+        val tracker = WicketTracker()
+        tracker.lockManually(Point2(0.45, 0.30), Point2(0.55, 0.30), frameAspect = aspect)
+
+        val downPitch = (0 until 20).map { sighting(it * 33L, 0.5f, 0.9f - 0.03f * it) }
+        val ground = FlightMetrics.of(downPitch, aspect, wicket = tracker.lock()).groundSpeed
+
+        assertTrue(ground is MetricValue.Unavailable)
+        assertTrue(
+            "the refusal must name the fix",
+            (ground as MetricValue.Unavailable).reason.contains("side-on"),
         )
     }
 

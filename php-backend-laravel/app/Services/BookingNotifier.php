@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\DeviceToken;
+use App\Models\MessageTemplate;
 use App\Services\Fcm\FcmClient;
 use App\Support\ContactPrefill;
 use App\Support\MessageContext;
@@ -95,6 +96,16 @@ final class BookingNotifier
         // their pocket with the app on it.
         $this->push($booking, $title, $when, $where, $code, $passUrl);
 
+        // The venue owner hears about it whether or not the CUSTOMER left a way to
+        // be reached — a booking with no contact on it is still a court taken.
+        if ($booking->booking_type === 'venue') {
+            try {
+                $this->notifyPartnerOnNewBooking($booking);
+            } catch (Throwable $e) {
+                Log::warning("Booking {$booking->id}: partner alert failed: " . $e->getMessage());
+            }
+        }
+
         if ($email === null && $phone === null) {
             return;
         }
@@ -131,12 +142,271 @@ final class BookingNotifier
                 $where,
                 $code,
             );
+        }
+    }
 
-            if (! $whatsappOk) {
-                Log::warning("Booking {$booking->id}: WhatsApp ticket delivery failed"
-                    . ($email !== null ? '; the emailed ticket is the customer\'s copy.' : ' AND there is no email on file.'));
+    /**
+     * Dispatch cancellation notice to customer and partner after response flushes.
+     */
+    public static function dispatchCancellation(?Booking $booking, string $reason = '', bool $byPartner = false): void
+    {
+        if ($booking === null) {
+            return;
+        }
+
+        $id = (int) $booking->id;
+
+        \Illuminate\Support\defer(function () use ($id, $reason, $byPartner): void {
+            $fresh = Booking::query()->find($id);
+            if ($fresh !== null) {
+                app(self::class)->notifyCancellation($fresh, $reason, $byPartner);
+            }
+        });
+    }
+
+    /**
+     * @param  bool  $byPartner  the venue's own desk cancelled it — telling them what they
+     *                           just did is noise, so only the customer hears about it
+     */
+    public function notifyCancellation(Booking $booking, string $reason = '', bool $byPartner = false): void
+    {
+        $booking->loadMissing(['user', 'venue.partner', 'venueCourt', 'event']);
+
+        $title = $this->title($booking);
+        $when = $this->when($booking);
+        $where = $this->where($booking);
+
+        // Notify customer
+        $phone = $this->recipientPhone($booking);
+        if ($phone !== null) {
+            try {
+                $this->whatsappCustomerCancellation($booking, $phone, $title, $when, $reason);
+            } catch (Throwable $e) {
+                Log::warning("Booking {$booking->id}: cancellation notice failed: " . $e->getMessage());
             }
         }
+
+        // Notify venue partner
+        if ($booking->booking_type === 'venue' && ! $byPartner && ! $this->isDeskWalkIn($booking)
+            && $booking->venue?->partner !== null) {
+            $whatsappOn = $this->partnerAlertEnabled('booking.partner_cancellation');
+
+            foreach ($this->venueTeam($booking->venue->partner, (int) $booking->venue_id) as [$member, $phone]) {
+                $this->pushCancellationToPartner($booking, (int) $member->id, $reason);
+
+                if ($phone !== null && $whatsappOn) {
+                    $this->whatsappPartnerCancellation($booking, $phone, $reason);
+                }
+            }
+        }
+    }
+
+    /**
+     * The customer's cancellation notice. Nobody who just had a booking cancelled has a
+     * 24-hour window open with us, so the approved template is the only send that lands;
+     * free text is the fallback for before it's approved.
+     *
+     * The copy promises no refund of its own: whether one is due is the venue's/event's
+     * cancellation policy, not something this message can know.
+     *
+     * Approved variable order: 1 event/venue  2 when  3 booking code  4 reason
+     */
+    private function whatsappCustomerCancellation(Booking $booking, string $phone, string $title, string $when, string $reason): void
+    {
+        $ctx = MessageContext::forBooking($booking, MessageContext::UTILITY, 'booking.cancelled');
+        $code = (string) $booking->ticket_code;
+        // A template parameter may not be empty — WhatsApp rejects the whole message.
+        $reasonText = trim($reason) !== '' ? trim($reason) : 'Not given';
+
+        $route = $this->templates->resolve('booking.cancelled', 'whatsapp', $phone);
+
+        if ($route['mode'] === TemplateResolver::MODE_TEMPLATE) {
+            $this->whatsapp->sendTemplate(
+                $phone,
+                (string) $route['name'],
+                [$title, $when, $code, $reasonText],
+                $ctx,
+                (string) $route['language'],
+            );
+
+            return;
+        }
+
+        $this->whatsapp->sendMessage(
+            $phone,
+            "Your booking has been cancelled.\n\n*{$title}*\n{$when}\nBooking ID: {$code}\nReason: {$reasonText}\n\n"
+                . 'Refunds, where applicable, go back to your original payment method as per the cancellation policy.',
+            $ctx,
+        );
+    }
+
+    /**
+     * Tell the venue owner and their desk team a court was just booked — WhatsApp + push.
+     *
+     * Skips desk walk-ins: the desk made that booking, so the owner already knows. A
+     * multi-slot checkout is ONE message listing every slot, not one per row, because
+     * the rows share a Razorpay order and arrive together.
+     */
+    public function notifyPartnerOnNewBooking(Booking $booking): void
+    {
+        if ($this->isDeskWalkIn($booking)) {
+            return;
+        }
+
+        $booking->loadMissing(['venue.partner', 'venueCourt', 'user']);
+        $partner = $booking->venue?->partner;
+
+        if ($partner === null) {
+            return;
+        }
+
+        $rows = $this->venueOrderRows($booking);
+        $whatsappOn = $this->partnerAlertEnabled('booking.partner_alert');
+
+        foreach ($this->venueTeam($partner, (int) $booking->venue_id) as [$member, $phone]) {
+            $this->pushToPartner($booking, (int) $member->id, $rows);
+
+            if ($phone !== null && $whatsappOn) {
+                $this->whatsappPartnerNewBooking($booking, $rows, $phone);
+            }
+        }
+    }
+
+    /**
+     * Who at the venue hears about a booking: the owner, plus every desk staff member who
+     * works bookings or check-in AT THIS VENUE — the same access the owner already set in
+     * Staff & team, so there's no second list to keep in step. Finance-only staff (reports)
+     * and suspended accounts are left out, and a staff member assigned to other branches
+     * doesn't hear about this one.
+     *
+     * Phones are de-duplicated: a small turf often puts the owner's own number on the desk
+     * login too, and one booking must not buzz the same phone twice.
+     *
+     * @return list<array{0: \App\Models\User, 1: string|null}> [member, whatsapp phone or null]
+     */
+    private function venueTeam(\App\Models\User $owner, int $venueId): array
+    {
+        $staff = \App\Models\User::query()
+            ->where('parent_partner_id', $owner->id)
+            ->whereRaw('UPPER(COALESCE(status, ?)) <> ?', ['ACTIVE', 'SUSPENDED'])
+            ->get()
+            ->filter(fn (\App\Models\User $u): bool => ($u->hasPartnerPermission('bookings') || $u->hasPartnerPermission('checkin'))
+                && (($scope = $u->scopedVenueIds()) === null || in_array($venueId, $scope, true)));
+
+        $team = [];
+        $seenPhones = [];
+
+        foreach ([$owner, ...$staff->all()] as $member) {
+            $phone = $this->partnerPhone($member);
+            // Compare on the last ten digits so "+91 98…" and "98…" are one phone.
+            $key = $phone !== null ? substr($phone, -10) : null;
+
+            if ($key !== null && isset($seenPhones[$key])) {
+                $phone = null;
+            } elseif ($key !== null) {
+                $seenPhones[$key] = true;
+            }
+
+            $team[] = [$member, $phone];
+        }
+
+        return $team;
+    }
+
+    /**
+     * Every confirmed row of the same checkout at the same venue, primary first.
+     *
+     * @return list<Booking>
+     */
+    private function venueOrderRows(Booking $booking): array
+    {
+        $orderId = trim((string) $booking->razorpay_order_id);
+
+        if ($orderId === '') {
+            return [$booking];
+        }
+
+        $rows = Booking::query()
+            ->with('venueCourt')
+            ->where('razorpay_order_id', $orderId)
+            ->where('venue_id', $booking->venue_id)
+            ->whereRaw('UPPER(status) = ?', ['CONFIRMED'])
+            ->orderBy('slot_date')
+            ->orderBy('start_time')
+            ->get()
+            ->all();
+
+        return $rows !== [] ? $rows : [$booking];
+    }
+
+    /** The owner's phone as bare digits, or null when there's nothing routable on file. */
+    private function partnerPhone(\App\Models\User $partner): ?string
+    {
+        $digits = preg_replace('/[^0-9]/', '', (string) $partner->phone);
+
+        return $digits !== null && strlen($digits) >= 10 ? $digits : null;
+    }
+
+    /**
+     * The admin's off switch. Deactivating the template row in /control → Platform →
+     * Templates stops the owner WhatsApp outright — without this, an inactive row just
+     * looks unregistered to the resolver and the free-text fallback still fires.
+     */
+    private function partnerAlertEnabled(string $key): bool
+    {
+        return ! MessageTemplate::query()
+            ->where('key', $key)
+            ->where('channel', 'whatsapp')
+            ->where('is_active', false)
+            ->exists();
+    }
+
+    /** "Court 1 · 06:00 – 07:00" — one slot, as the owner's day grid names it. */
+    private function slotLine(Booking $row): string
+    {
+        $window = trim(($row->start_time ? substr((string) $row->start_time, 0, 5) : '')
+            . ($row->end_time ? ' – ' . substr((string) $row->end_time, 0, 5) : ''), ' –');
+
+        return implode(' · ', array_filter([$row->venueCourt?->name ?? 'Court', $window !== '' ? $window : null]));
+    }
+
+    /**
+     * The slots of an order for one template parameter. A parameter can't hold a line
+     * break, so slots are comma-joined; different dates carry their own date.
+     *
+     * @param  list<Booking>  $rows
+     */
+    private function slotsSummary(array $rows): string
+    {
+        $dates = array_unique(array_map(fn (Booking $r): string => (string) $r->slot_date?->format('Y-m-d'), $rows));
+        $mixedDates = count($dates) > 1;
+
+        return implode(', ', array_map(
+            fn (Booking $r): string => ($mixedDates && $r->slot_date !== null ? $r->slot_date->format('d M') . ' ' : '') . $this->slotLine($r),
+            $rows,
+        ));
+    }
+
+    /** "Rs.1,200 paid online" or "Rs.1,200 · Rs.800 due at the desk". @param list<Booking> $rows */
+    private function amountSummary(array $rows): string
+    {
+        $charged = array_sum(array_map(fn (Booking $r): float => $r->amountCharged(), $rows));
+        $due = array_sum(array_map(fn (Booking $r): float => $r->balanceDue(), $rows));
+
+        $money = fn (float $v): string => 'Rs.' . number_format($v, fmod($v, 1.0) === 0.0 ? 0 : 2);
+
+        if ($charged <= 0) {
+            return 'Free booking';
+        }
+
+        return $due > 0
+            ? $money($charged) . ' · ' . $money($due) . ' due at the desk'
+            : $money($charged) . ' paid online';
+    }
+
+    private function customerName(Booking $booking): string
+    {
+        return trim((string) ($booking->attendee_name ?: ($booking->guest_name ?: ($booking->user?->name ?: '')))) ?: 'Guest';
     }
 
     /**
@@ -242,6 +512,165 @@ final class BookingNotifier
         } catch (Throwable $e) {
             // Same contract as every other channel: a push problem is never a booking problem.
             Log::warning("Booking {$booking->id}: ticket push failed: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * The owner's WhatsApp. Template first — the owner almost never has a 24-hour window
+     * open with us, so free text is only tried when the template isn't approved yet (it
+     * lands if they messaged us recently, and otherwise leaves an honest failure row in
+     * the ledger instead of a silent skip).
+     *
+     * Approved variable order — changing it without re-approving the template reorders
+     * what the owner reads:
+     *   1 venue  2 date  3 slot(s)  4 customer  5 customer phone  6 amount  7 booking code
+     *
+     * @param  list<Booking>  $rows
+     */
+    private function whatsappPartnerNewBooking(Booking $booking, array $rows, string $partnerPhone): void
+    {
+        $venue = $booking->venue;
+        if ($venue === null) {
+            return;
+        }
+
+        $date = $booking->slot_date?->format('D, d M Y') ?? 'Date on your grid';
+        $slots = $this->slotsSummary($rows);
+        $customer = $this->customerName($booking);
+        $customerPhone = trim((string) ($booking->attendee_phone ?: ($booking->guest_phone ?: ($booking->user?->phone ?: '')))) ?: 'Not given';
+        $amount = $this->amountSummary($rows);
+        $code = (string) $booking->ticket_code;
+
+        $ctx = MessageContext::forBooking($booking, MessageContext::UTILITY, 'booking.partner_alert');
+
+        $route = $this->templates->resolve('booking.partner_alert', 'whatsapp', $partnerPhone);
+
+        if ($route['mode'] === TemplateResolver::MODE_TEMPLATE) {
+            $this->whatsapp->sendTemplate(
+                $partnerPhone,
+                (string) $route['name'],
+                [(string) $venue->name, $date, $slots, $customer, $customerPhone, $amount, $code],
+                $ctx,
+                (string) $route['language'],
+            );
+
+            return;
+        }
+
+        $text = "New booking at *{$venue->name}*\n\n"
+            . "{$date}\n"
+            . implode("\n", array_map(fn (Booking $r): string => $this->slotLine($r), $rows)) . "\n\n"
+            . "Customer: {$customer} ({$customerPhone})\n"
+            . "Amount: {$amount}\n"
+            . "Booking ID: {$code}\n\n"
+            . 'It is on your Haraan partner app.';
+
+        $this->whatsapp->sendMessage($partnerPhone, $text, $ctx);
+    }
+
+    /**
+     * Approved variable order: 1 venue  2 slot (date · court · time)  3 customer  4 reason
+     */
+    private function whatsappPartnerCancellation(Booking $booking, string $partnerPhone, string $reason = ''): void
+    {
+        $venue = $booking->venue;
+        if ($venue === null) {
+            return;
+        }
+
+        $slot = implode(' · ', array_filter([$booking->slot_date?->format('D, d M'), $this->slotLine($booking)]));
+        $customer = $this->customerName($booking);
+        // A template parameter may not be empty — WhatsApp rejects the whole message.
+        $reasonText = trim($reason) !== '' ? trim($reason) : 'Not given';
+
+        $ctx = MessageContext::forBooking($booking, MessageContext::UTILITY, 'booking.partner_cancellation');
+
+        $route = $this->templates->resolve('booking.partner_cancellation', 'whatsapp', $partnerPhone);
+
+        if ($route['mode'] === TemplateResolver::MODE_TEMPLATE) {
+            $this->whatsapp->sendTemplate(
+                $partnerPhone,
+                (string) $route['name'],
+                [(string) $venue->name, $slot, $customer, $reasonText],
+                $ctx,
+                (string) $route['language'],
+            );
+
+            return;
+        }
+
+        $text = "Booking cancelled at *{$venue->name}*\n\n"
+            . "{$slot}\n"
+            . "Customer: {$customer}\n"
+            . "Reason: {$reasonText}\n\n"
+            . 'The slot is open again on your grid.';
+
+        $this->whatsapp->sendMessage($partnerPhone, $text, $ctx);
+    }
+
+    /** @param list<Booking> $rows */
+    private function pushToPartner(Booking $booking, int $partnerId, array $rows): void
+    {
+        if ($partnerId <= 0 || ! $this->fcm->isConfigured()) {
+            return;
+        }
+
+        $title = 'New booking · ' . ($booking->venue?->name ?? 'your venue');
+        $body = $this->customerName($booking) . ' · '
+            . implode(' · ', array_filter([$booking->slot_date?->format('d M'), $this->slotsSummary($rows)]))
+            . ' · ' . $this->amountSummary($rows);
+
+        $data = [
+            'type' => 'partner_booking_received',
+            'venue_id' => (string) $booking->venue_id,
+            'booking_id' => (string) $booking->id,
+            'ticket_code' => (string) $booking->ticket_code,
+        ];
+
+        try {
+            DeviceToken::query()
+                ->where('user_id', $partnerId)
+                ->chunkById(100, function ($tokens) use ($title, $body, $data): void {
+                    foreach ($tokens as $device) {
+                        if ($this->fcm->send($device->token, $title, $body, $data) === FcmClient::INVALID) {
+                            $device->delete();
+                        }
+                    }
+                });
+        } catch (\Throwable $e) {
+            Log::warning("Partner push notification failed for booking {$booking->id}: " . $e->getMessage());
+        }
+    }
+
+    private function pushCancellationToPartner(Booking $booking, int $partnerId, string $reason = ''): void
+    {
+        if ($partnerId <= 0 || ! $this->fcm->isConfigured()) {
+            return;
+        }
+
+        $court = $booking->venueCourt?->name ?? 'Court';
+        $when = $this->when($booking);
+        $title = "Booking Cancelled: {$court}";
+        $body = "Slot {$when} has been cancelled" . ($reason !== '' ? " ({$reason})" : '') . ". Court is now open.";
+
+        $data = [
+            'type' => 'partner_booking_cancelled',
+            'venue_id' => (string) $booking->venue_id,
+            'booking_id' => (string) $booking->id,
+        ];
+
+        try {
+            DeviceToken::query()
+                ->where('user_id', $partnerId)
+                ->chunkById(100, function ($tokens) use ($title, $body, $data): void {
+                    foreach ($tokens as $device) {
+                        if ($this->fcm->send($device->token, $title, $body, $data) === FcmClient::INVALID) {
+                            $device->delete();
+                        }
+                    }
+                });
+        } catch (\Throwable $e) {
+            Log::warning("Partner cancellation push failed for booking {$booking->id}: " . $e->getMessage());
         }
     }
 

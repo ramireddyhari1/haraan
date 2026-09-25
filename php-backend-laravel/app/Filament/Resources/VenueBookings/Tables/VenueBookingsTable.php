@@ -126,6 +126,17 @@ class VenueBookingsTable
                     ->toggleable(),
             ])
             ->filters([
+                // Lets the Venue 360's "Open in Bookings & payments" land on one
+                // venue rather than the whole book.
+                SelectFilter::make('venue_id')
+                    ->label('Venue')
+                    ->options(fn (): array => \App\Filament\Resources\Venues\VenueResource::getEloquentQuery()
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all())
+                    ->searchable()
+                    ->preload(),
+
                 Filter::make('balance_due')
                     ->label('Balance due')
                     ->query(fn (Builder $query): Builder => $query
