@@ -481,6 +481,23 @@ class VenueBookingUserToPartnerTest extends TestCase
         $this->assertSame([], $data['next']);
     }
 
+    /**
+     * The day turns over at the venue's midnight, not the server's.
+     *
+     * 20:00 UTC on the 25th is 01:30 IST on the 26th. Home used to answer with
+     * the 25th until 05:30 IST, so a partner opening the app before dawn saw
+     * yesterday's sheet under "TODAY".
+     */
+    public function test_home_today_is_the_venue_day_not_the_utc_day(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-25 20:00:00', 'UTC'));
+
+        $data = $this->as($this->owner)->getJson('/api/partner/today')->assertOk()->json('data');
+
+        $this->assertSame('2026-09-26', $data['date']);
+        $this->assertSame('Sat, 26 Sep', $data['day_label']);
+    }
+
     public function test_a_desk_walk_in_blocks_the_same_court_in_the_app(): void
     {
         $this->as($this->owner)->postJson("/api/partner/venues/{$this->venue->id}/bookings", [

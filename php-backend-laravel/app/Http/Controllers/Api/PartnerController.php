@@ -27,6 +27,7 @@ use App\Services\BookingNotifier;
 use App\Services\BookingService;
 use App\Services\PartnerSettlement;
 use App\Services\RazorpayGateway;
+use App\Support\BusinessClock;
 use App\Support\BookingReport;
 use App\Support\PartnerCapabilities;
 use App\Support\PartnerLane;
@@ -178,7 +179,6 @@ class PartnerController extends Controller
     public function overview(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
-        $today = now()->toDateString();
 
         $venueIds = $this->branchIds($request);
         $onOneBranch = $this->branchFilter($request) !== null;
@@ -203,11 +203,14 @@ class PartnerController extends Controller
 
         // 14-day revenue trend across everything in scope, for the home hero
         // sparkline. Gaps filled with 0.
-        $start = now()->startOfDay()->subDays(13);
-        $rows = (clone $paid())->where('created_at', '>=', $start)->get(['total_amount', 'created_at']);
+        // Fourteen LOCAL days: a booking at 1 AM IST belongs to that morning,
+        // not to the previous UTC date.
+        $start = BusinessClock::now()->startOfDay()->subDays(13);
+        $rows = (clone $paid())->where('created_at', '>=', $start->copy()->utc())->get(['total_amount', 'created_at']);
         $byDay = [];
         foreach ($rows as $row) {
-            $byDay[$row->created_at->format('Y-m-d')] = ($byDay[$row->created_at->format('Y-m-d')] ?? 0) + (float) $row->total_amount;
+            $k = BusinessClock::local($row->created_at)->format('Y-m-d');
+            $byDay[$k] = ($byDay[$k] ?? 0) + (float) $row->total_amount;
         }
         $trend = [];
         for ($i = 0; $i < 14; $i++) {
@@ -229,7 +232,7 @@ class PartnerController extends Controller
             'events' => [
                 'total'    => $eventIds->count(),
                 'upcoming' => $onOneBranch ? 0 : Event::query()->where('partner_id', $partnerId)
-                    ->whereDate('date', '>=', $today)->count(),
+                    ->whereDate('date', '>=', BusinessClock::today())->count(),
             ],
             'venues' => [
                 'total' => $venueIds->count(),
@@ -238,7 +241,8 @@ class PartnerController extends Controller
                 'revenue'        => round((float) (clone $paid())->sum('total_amount'), 2),
                 'tickets_sold'   => (int) (clone $paid())->sum('quantity'),
                 'bookings_total' => (clone $paid())->count(),
-                'bookings_today' => (clone $paid())->whereDate('created_at', $today)->count(),
+                // Today at the venue, not the server's UTC day.
+                'bookings_today' => (clone $paid())->whereBetween('created_at', BusinessClock::dayBoundsUtc())->count(),
                 'online'         => (clone $paid())->where('channel', 'online')->count(),
                 'offline'        => (clone $paid())->where('channel', 'offline')->count(),
                 'cancelled'      => Booking::query()
@@ -389,7 +393,9 @@ class PartnerController extends Controller
             ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
             ->get(['id', 'name', 'branch_label']);
 
-        $date = now()->toDateString();
+        // The venue's today. In UTC this flipped at 05:30 IST, so from midnight
+        // until then Home showed yesterday's sheet under "TODAY".
+        $date = BusinessClock::today();
 
         if ($venues->isEmpty()) {
             return response()->json(['data' => $this->emptyDay($date)]);
@@ -446,7 +452,7 @@ class PartnerController extends Controller
         };
         $venueName = fn (Booking $b): string => (string) ($venues->firstWhere('id', $b->venue_id)?->name ?? '');
 
-        $now = now();
+        $now = BusinessClock::now();
         $rows = $live->map(function (Booking $b) use ($slotById, $date, $now, $courtName, $venueName): array {
             $time = (string) ($slotById->get($b->venue_slot_id)?->time ?? '');
             $start = $this->startOf($date, $time);
@@ -476,7 +482,7 @@ class PartnerController extends Controller
         return response()->json([
             'data' => [
                 'date'      => $date,
-                'day_label' => now()->format('D, j M'),
+                'day_label' => BusinessClock::now()->format('D, j M'),
                 'capacity'  => [
                     'total'  => $capacity,
                     'booked' => $live->count(),
@@ -501,7 +507,7 @@ class PartnerController extends Controller
     {
         return [
             'date'      => $date,
-            'day_label' => now()->format('D, j M'),
+            'day_label' => BusinessClock::now()->format('D, j M'),
             'capacity'  => ['total' => 0, 'booked' => 0, 'done' => 0],
             'money'     => ['expected' => 0.0, 'collected' => 0.0, 'due' => 0.0],
             'chase'     => ['count' => 0, 'amount' => 0.0],
@@ -568,11 +574,10 @@ class PartnerController extends Controller
             return null;
         }
 
-        try {
-            return Carbon::parse($date.' '.$time);
-        } catch (\Throwable) {
-            return null;
-        }
+        // A slot's "6:00 AM" is venue wall-clock time, so it is read in the
+        // business zone; parsed in UTC it was 5½ hours late, and "on court" lit up
+        // for the wrong booking.
+        return BusinessClock::at($date, $time);
     }
 
     /**
@@ -878,7 +883,7 @@ class PartnerController extends Controller
         $venue = $this->branch($request, $id);
 
         $date = $request->query('date');
-        $date = is_string($date) && strtotime($date) ? date('Y-m-d', strtotime($date)) : now()->toDateString();
+        $date = is_string($date) && strtotime($date) ? date('Y-m-d', strtotime($date)) : BusinessClock::today();
 
         $isBlocked = VenueBlockedDate::query()
             ->where('venue_id', $venue->id)->whereDate('date', $date)->exists();
@@ -1305,8 +1310,8 @@ class PartnerController extends Controller
             'format' => ['nullable', 'in:csv,json'],
         ]);
 
-        $from = isset($data['from']) ? date('Y-m-d', strtotime($data['from'])) : now()->subDays(30)->toDateString();
-        $to = isset($data['to']) ? date('Y-m-d', strtotime($data['to'])) : now()->toDateString();
+        $from = isset($data['from']) ? date('Y-m-d', strtotime($data['from'])) : BusinessClock::now()->subDays(30)->toDateString();
+        $to = isset($data['to']) ? date('Y-m-d', strtotime($data['to'])) : BusinessClock::today();
 
         if (($data['format'] ?? 'csv') === 'json') {
             return response()->json([
@@ -1330,7 +1335,7 @@ class PartnerController extends Controller
     public function academy(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
-        $today = Carbon::today();
+        $today = BusinessClock::todayDate();
 
         $batches = VenueBatch::query()
             ->where('partner_id', $partnerId)
@@ -1443,7 +1448,7 @@ class PartnerController extends Controller
         // Extend from whichever is later: today, or the date they're already paid to.
         $base = $existing !== null && $existing->paid_until !== null && $existing->paid_until->isFuture()
             ? $existing->paid_until->copy()
-            : Carbon::today();
+            : BusinessClock::todayDate();
 
         $enrollment = BatchEnrollment::query()->updateOrCreate(
             ['venue_batch_id' => $batch->id, 'student_phone' => $phone],
@@ -1456,7 +1461,7 @@ class PartnerController extends Controller
             ],
         );
 
-        return response()->json(['status' => 'ok', 'enrollment' => $this->enrollmentRow($enrollment, Carbon::today())], 201);
+        return response()->json(['status' => 'ok', 'enrollment' => $this->enrollmentRow($enrollment, BusinessClock::todayDate())], 201);
     }
 
     /** GET /api/partner/academy/{id}/roster?date= — students + who's marked present. */
@@ -1466,7 +1471,7 @@ class PartnerController extends Controller
         $batch = VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id);
 
         $date = $request->query('date');
-        $date = is_string($date) && strtotime($date) ? Carbon::parse($date) : Carbon::today();
+        $date = is_string($date) && strtotime($date) ? Carbon::parse($date) : BusinessClock::todayDate();
 
         $rows = BatchEnrollment::query()
             ->where('venue_batch_id', $batch->id)->where('is_active', true)
@@ -2211,12 +2216,14 @@ class PartnerController extends Controller
         $views     = max((int) $event->views, 0);
 
         // 14-day sales series (revenue + tickets per day), gaps filled with 0.
-        $start = now()->startOfDay()->subDays(13);
-        $rows = (clone $paid())->where('created_at', '>=', $start)
+        // Fourteen LOCAL days: a booking at 1 AM IST belongs to that morning,
+        // not to the previous UTC date.
+        $start = BusinessClock::now()->startOfDay()->subDays(13);
+        $rows = (clone $paid())->where('created_at', '>=', $start->copy()->utc())
             ->get(['total_amount', 'quantity', 'created_at']);
         $byDay = [];
         foreach ($rows as $row) {
-            $k = $row->created_at->format('Y-m-d');
+            $k = BusinessClock::local($row->created_at)->format('Y-m-d');
             $byDay[$k]['rev'] = ($byDay[$k]['rev'] ?? 0) + (float) $row->total_amount;
             $byDay[$k]['qty'] = ($byDay[$k]['qty'] ?? 0) + (int) $row->quantity;
         }
@@ -2293,7 +2300,7 @@ class PartnerController extends Controller
         $upcoming = (int) Booking::query()->where('booking_type', 'venue')
             ->where('venue_id', $venue->id)
             ->whereIn(DB::raw('lower(status)'), self::PAID_STATUSES)
-            ->whereDate('slot_date', '>=', now()->toDateString())->count();
+            ->whereDate('slot_date', '>=', BusinessClock::today())->count();
 
         $distinctUsers = (int) $paid()->distinct('user_id')->count('user_id');
         $repeatUsers = (int) Booking::query()->where('booking_type', 'venue')
@@ -2303,12 +2310,14 @@ class PartnerController extends Controller
             ->havingRaw('COUNT(*) > 1')->get()->count();
 
         // 14-day bookings series.
-        $start = now()->startOfDay()->subDays(13);
-        $rows = (clone $paid())->where('created_at', '>=', $start)
+        // Fourteen LOCAL days: a booking at 1 AM IST belongs to that morning,
+        // not to the previous UTC date.
+        $start = BusinessClock::now()->startOfDay()->subDays(13);
+        $rows = (clone $paid())->where('created_at', '>=', $start->copy()->utc())
             ->get(['total_amount', 'created_at']);
         $byDay = [];
         foreach ($rows as $row) {
-            $k = $row->created_at->format('Y-m-d');
+            $k = BusinessClock::local($row->created_at)->format('Y-m-d');
             $byDay[$k]['rev'] = ($byDay[$k]['rev'] ?? 0) + (float) $row->total_amount;
             $byDay[$k]['cnt'] = ($byDay[$k]['cnt'] ?? 0) + 1;
         }
