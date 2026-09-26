@@ -589,15 +589,16 @@ class PartnerController extends Controller
      * booked" — seven days of capacity stacked on a Saturday — and why the desk
      * grid drew every weekday's rows under a single date.
      *
-     * Rows tagged with a weekday match that weekday. Rows tagged "Today",
-     * "Everyday"/"Daily", or left blank belong to every day.
+     * Rows tagged with a weekday match that weekday. Rows tagged "Every day" (what
+     * VenueSlot now saves), or the older "Today"/"Everyday"/"Daily"/blank, belong to
+     * every day.
      */
     private function runsOnDay($query, string $date)
     {
         $weekday = strtolower(Carbon::parse($date)->format('l'));
 
         return $query->where(function ($q) use ($weekday): void {
-            $q->whereRaw('lower(trim(coalesce(day, ?))) in (?, ?, ?, ?)', ['', $weekday, 'today', 'everyday', 'daily'])
+            $q->whereRaw('lower(trim(coalesce(day, ?))) in (?, ?, ?, ?, ?)', ['', $weekday, 'today', 'everyday', 'every day', 'daily'])
                 ->orWhereNull('day')
                 ->orWhere('day', '');
         });

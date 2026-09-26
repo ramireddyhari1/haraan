@@ -141,10 +141,8 @@ class VenueCommandHeroWidget extends Widget
             return 0;
         }
 
-        $slots = (int) $venue->slots()
-            ->where('is_available', true)
-            ->where('day', $date->format('l'))
-            ->count();
+        // Same day rule the website and app sell by: that weekday's rows, else every-day rows.
+        $slots = $venue->slotsOn($date)->where('is_available', true)->count();
 
         return $courts * $slots;
     }

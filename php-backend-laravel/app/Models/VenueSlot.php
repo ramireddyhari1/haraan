@@ -37,6 +37,41 @@ final class VenueSlot extends Model
         'sports'       => 'array',
     ];
 
+    /** The label for a slot that runs every day — what the app and web fall back to. */
+    public const EVERY_DAY = 'Every day';
+
+    public const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+    /**
+     * The column defaults to "Today", a label no date ever matches, so a slot added
+     * without a day showed on no day at all. New rows start as every day instead.
+     */
+    protected $attributes = [
+        'day' => self::EVERY_DAY,
+    ];
+
+    protected static function booted(): void
+    {
+        // A slot's day is a weekday name or "Every day". Anything else ("Today", "Daily",
+        // blank, "mon") is normalised here so the website and the app, which match the
+        // label exactly, both find it.
+        static::saving(function (VenueSlot $slot): void {
+            $slot->day = self::normaliseDay($slot->day);
+        });
+    }
+
+    public static function normaliseDay(?string $day): string
+    {
+        $d = strtolower(trim((string) $day));
+        foreach (self::WEEKDAYS as $name) {
+            if ($d === strtolower($name) || $d === strtolower(substr($name, 0, 3))) {
+                return $name;
+            }
+        }
+
+        return self::EVERY_DAY;
+    }
+
     public function venue(): BelongsTo
     {
         return $this->belongsTo(Venue::class);

@@ -782,13 +782,7 @@ private fun TodaySlotRail(
   sheetOpen: Boolean,
   onPickSlot: (VenueSlotItem, LocalDate) -> Unit,
 ) {
-  // Slot rows are keyed by a free-text day label, so match the day's, then fall back to
-  // the venue's everyday template rather than showing nothing.
-  fun slotsFor(date: LocalDate): List<VenueSlotItem> {
-    val label = dayLabelFor(date)
-    return venue.slots.filter { it.day.equals(label, ignoreCase = true) }
-      .ifEmpty { venue.slots.filter { it.day.equals("Every day", ignoreCase = true) } }
-  }
+  fun slotsFor(date: LocalDate): List<VenueSlotItem> = slotsForDay(venue.slots, date)
 
   // Drop the hours that have already gone. A rail headed "today" that opens on 6:00 AM
   // at midday reads as canned sample data. Slots whose time can't be parsed are kept:
@@ -1567,6 +1561,9 @@ internal fun BookingSheet(
   // so a single-sport venue sees exactly what it saw before.
   val startTimes = remember(venue, selectedDayLabel, selectedCourt, sheetAvailability) {
     val courtSports = selectedCourt?.sports.orEmpty()
+    // Same day rule as the slot rail and the website: that weekday's rows, else the
+    // every-day rows. Matching the weekday alone made "Every day" slots unbookable here.
+    val dayRows = slotsForDay(venue.slots, selectedDate).toSet()
     venue.slots.filter { slot ->
       val slotState = sheetAvailability?.get(slot.id)
       val isAvailable = if (slotState != null) {
@@ -1574,7 +1571,7 @@ internal fun BookingSheet(
       } else {
         slot.available
       }
-      slot.day.equals(selectedDayLabel, ignoreCase = true) && isAvailable &&
+      slot in dayRows && isAvailable &&
         (slot.sports.isEmpty() || courtSports.isEmpty() || slot.sports.any { it in courtSports })
     }
   }
@@ -2526,6 +2523,19 @@ private fun FormDropdown(
     }
   }
 }
+
+/**
+ * The slot rows that run on [date]: rows labelled with its weekday, else the venue's
+ * every-day rows. The server saves a slot's day as a weekday name or "Every day"
+ * (VenueSlot::normaliseDay); "Daily"/"Today" are older spellings of every day.
+ */
+private fun slotsForDay(slots: List<VenueSlotItem>, date: LocalDate): List<VenueSlotItem> {
+  val label = dayLabelFor(date)
+  return slots.filter { it.day.equals(label, ignoreCase = true) }
+    .ifEmpty { slots.filter { it.day.trim().lowercase() in EVERY_DAY_LABELS } }
+}
+
+private val EVERY_DAY_LABELS = setOf("every day", "everyday", "daily", "today", "")
 
 /** Human label for a date relative to today, matched against the slot rows' free-text "day". */
 // Slots are generated per weekday (Monday…Sunday) from the venue's structured hours, so we
