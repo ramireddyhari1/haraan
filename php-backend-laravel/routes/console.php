@@ -32,6 +32,16 @@ Artisan::command('bookings:release-expired', function (BookingService $bookings)
 
 Schedule::command('bookings:release-expired')->everyMinute();
 
+// WhatsApp Desk holds: a lapsed hold whose payment link was paid is confirmed, the rest
+// expire and their chats go back to "active". Its own sweep because the money arrives by
+// payment link, which only this one knows how to ask Razorpay about.
+Artisan::command('whatsapp:expire-holds', function (\App\Services\WhatsAppReservationService $desk) {
+    $r = $desk->expireLapsedHolds();
+    $this->info("WhatsApp desk holds: {$r['expired']} expired, {$r['paid']} paid, {$r['unknown']} left for the next pass.");
+})->purpose('Expire lapsed WhatsApp Desk holds (settling any that were paid)');
+
+Schedule::command('whatsapp:expire-holds')->everyMinute()->withoutOverlapping();
+
 // Tickets that were paid for but never confirmed — the buyer's client died between Razorpay
 // capturing the money and our confirm call, so the order sits PENDING or was written off as
 // EXPIRED while the charge stands. Asks Razorpay which of those orders actually holds a

@@ -72,6 +72,10 @@ class InboundMessageTest extends TestCase
         ]);
 
         Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.' . uniqid()]]], 200));
+
+        // These tests are about auto-reply rules; the booking bot's turn in the same
+        // pipeline is covered by WhatsAppBookingBotTest.
+        \App\Support\PlatformRules::save(['whatsapp_bot.enabled' => false]);
     }
 
     /** @param array<string, mixed> $payload */

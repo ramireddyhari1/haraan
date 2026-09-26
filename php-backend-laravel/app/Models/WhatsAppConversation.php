@@ -49,6 +49,9 @@ final class WhatsAppConversation extends Model
         'active_booking_id',
     ];
 
+    /** The desk needs to know, per chat, whether a free-text reply can still go out. */
+    protected $appends = ['is_window_active'];
+
     protected function casts(): array
     {
         return [
@@ -56,6 +59,11 @@ final class WhatsAppConversation extends Model
             'window_expires_at' => 'datetime',
             'unread_count'      => 'integer',
         ];
+    }
+
+    public function getIsWindowActiveAttribute(): bool
+    {
+        return $this->isWindowActive();
     }
 
     public function venue(): BelongsTo

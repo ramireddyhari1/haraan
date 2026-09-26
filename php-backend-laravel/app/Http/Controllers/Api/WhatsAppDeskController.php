@@ -11,16 +11,23 @@ use App\Models\Venue;
 use App\Models\VenueCourt;
 use App\Models\WhatsAppConversation;
 use App\Models\WhatsAppInternalNote;
+use App\Models\WhatsAppPaymentLink;
 use App\Models\WhatsAppQuickReply;
-use App\Models\WhatsAppTag;
+use App\Services\BookingService;
 use App\Services\WhatsAppDeskService;
 use App\Services\WhatsAppIntentEngine;
 use App\Services\WhatsAppReservationService;
+use App\Support\BusinessClock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * The partner app's WhatsApp Desk: one venue's customer chats, and the hold → pay →
+ * confirm loop that turns a chat into a booking. Every route is scoped to the
+ * caller's own branches and gated on the `bookings` permission (see routes/api.php).
+ */
 final class WhatsAppDeskController extends Controller
 {
     public function __construct(
@@ -39,31 +46,28 @@ final class WhatsAppDeskController extends Controller
         return $request->user()->branches()->findOrFail($id);
     }
 
-    /**
-     * Desk Dashboard metrics summary.
-     */
+    private function conversation(Venue $venue, int $convId): WhatsAppConversation
+    {
+        return WhatsAppConversation::query()->where('venue_id', $venue->id)->findOrFail($convId);
+    }
+
     public function dashboard(Request $request, int $id): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $metrics = $this->deskService->getDashboardMetrics($venue);
 
-        return response()->json([
-            'status' => 'success',
-            'data'   => $metrics,
-        ]);
+        return response()->json(['status' => 'success', 'data' => $this->deskService->getDashboardMetrics($venue)]);
     }
 
-    /**
-     * List conversations with search and tab filter.
-     */
     public function index(Request $request, int $id): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $status = $request->query('status'); // all, needs_action, holds, converted, archived
-        $search = $request->query('q');
-        $page = (int) $request->query('page', 1);
 
-        $paginator = $this->deskService->getConversations($venue, $status, $search, $page);
+        $paginator = $this->deskService->getConversations(
+            $venue,
+            $request->query('status'),
+            $request->query('q'),
+            max(1, (int) $request->query('page', 1)),
+        );
 
         return response()->json([
             'status' => 'success',
@@ -76,33 +80,22 @@ final class WhatsAppDeskController extends Controller
         ]);
     }
 
-    /**
-     * Conversation detail with message timeline and active hold info.
-     */
+    /** One chat: its latest messages, and the hold (if any) with its clock. */
     public function show(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)
-            ->where('id', $convId)
-            ->with(['assignedStaff', 'tags', 'activeBooking.venueCourt', 'latestIntent.resolvedCourt'])
-            ->firstOrFail();
+        $conversation = WhatsAppConversation::query()
+            ->where('venue_id', $venue->id)
+            ->with(['assignedStaff:id,name', 'activeBooking.venueCourt', 'latestIntent.resolvedCourt'])
+            ->findOrFail($convId);
 
-        // Mark as read when opened
         if ($conversation->unread_count > 0) {
             $conversation->update(['unread_count' => 0]);
         }
 
-        $messages = $conversation->messages()->take(100)->get();
-        $notes = $conversation->notes()->with('author')->get();
-
-        // Calculate seconds remaining in active hold if any
-        $activeHoldSeconds = 0;
-        if ($conversation->activeBooking && $conversation->activeBooking->status === 'hold') {
-            $until = $conversation->activeBooking->reserved_until;
-            if ($until !== null && $until->isFuture()) {
-                $activeHoldSeconds = max(0, (int) now()->diffInSeconds($until, false));
-            }
-        }
+        // The latest 100, oldest first — not the first 100 the chat ever had.
+        $messages = $conversation->messages()->reorder()->latest('id')->take(100)->get()->reverse()->values();
+        $notes = $conversation->notes()->with('author:id,name')->get();
 
         return response()->json([
             'status' => 'success',
@@ -110,172 +103,170 @@ final class WhatsAppDeskController extends Controller
                 'conversation'             => $conversation,
                 'messages'                 => $messages,
                 'notes'                    => $notes,
-                'active_hold_seconds_left' => $activeHoldSeconds,
+                'hold'                     => $this->holdPayload($conversation->activeBooking),
+                'active_hold_seconds_left' => $this->secondsLeft($conversation->activeBooking),
+                'hold_total_seconds'       => WhatsAppReservationService::holdMinutes() * 60,
                 'window_seconds_left'      => $conversation->secondsRemainingInWindow(),
                 'is_window_active'         => $conversation->isWindowActive(),
             ],
         ]);
     }
 
-    /**
-     * Send an outbound chat message.
-     */
     public function sendMessage(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user();
+        $conversation = $this->conversation($venue, $convId);
 
         $validated = $request->validate([
-            'body'         => 'required|string|max:4000',
-            'message_type' => 'nullable|string|in:text,template,image',
-            'media_url'    => 'nullable|string|url',
+            'body'      => 'required|string|max:4000',
+            'media_url' => 'nullable|url|max:500',
         ]);
 
-        $msg = $this->deskService->sendOutboundMessage(
-            $conversation,
-            $validated['body'],
-            $user,
-            $validated['message_type'] ?? 'text',
-            $validated['media_url'] ?? null
-        );
+        $message = $this->deskService->sendOutboundMessage($conversation, $validated['body'], $request->user(), $validated['media_url'] ?? null);
 
-        return response()->json([
-            'status'  => 'success',
-            'message' => 'Message sent successfully',
-            'data'    => $msg,
-        ]);
+        return response()->json(['status' => 'success', 'data' => $message]);
     }
 
-    /**
-     * Run or re-run Intent Engine on conversation.
-     */
+    /** Re-read the chat for a booking — the given text, or the customer's last message. */
     public function extractIntent(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
+        $conversation = $this->conversation($venue, $convId);
 
-        $textToAnalyze = $request->input('text') ?: $conversation->last_message_preview ?: 'Can I book a court today at 6pm?';
+        $text = trim((string) $request->input('text', ''));
+        if ($text === '') {
+            $text = (string) $conversation->messages()->reorder()->where('direction', 'inbound')->latest('id')->value('body');
+        }
 
-        $analysis = $this->intentEngine->analyze($venue, $textToAnalyze, $conversation->customer_name);
+        if ($text === '') {
+            throw ValidationException::withMessages(['text' => ['The customer hasn’t sent a message to read yet.']]);
+        }
 
-        return response()->json([
-            'status' => 'success',
-            'data'   => $analysis,
-        ]);
+        return response()->json(['status' => 'success', 'data' => $this->intentEngine->analyze($venue, $text, $conversation->customer_name)]);
     }
 
     /**
-     * 1-Tap Hold Slot (Strictly 2 minutes TTL).
+     * Hold a court for this chat's customer. The price is the court's own rate for that
+     * time, computed by the booking engine — the client doesn't set it.
      */
     public function holdSlot(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user();
+        $conversation = $this->conversation($venue, $convId);
 
         $validated = $request->validate([
-            'court_id'   => 'required|integer|exists:venue_courts,id',
-            'slot_date'  => 'required|date',
-            'start_time' => 'required|date_format:H:i:s',
-            'end_time'   => 'required|date_format:H:i:s',
-            'price'      => 'required|numeric|min:0',
+            'court_id'   => 'required|integer',
+            'slot_date'  => 'required|date_format:Y-m-d',
+            'start_time' => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
+            'end_time'   => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
         ]);
 
-        $court = VenueCourt::where('venue_id', $venue->id)->findOrFail($validated['court_id']);
-        $date = Carbon::parse($validated['slot_date']);
+        $court = VenueCourt::query()->where('venue_id', $venue->id)->where('is_active', true)->find($validated['court_id']);
+        if ($court === null) {
+            throw ValidationException::withMessages(['court_id' => ['That court isn’t one of this venue’s active courts.']]);
+        }
 
         $booking = $this->reservationService->holdSlot(
             $venue,
             $conversation,
             $court,
-            $date,
+            Carbon::parse($validated['slot_date']),
             $validated['start_time'],
             $validated['end_time'],
-            (float) $validated['price'],
-            $user
+            $request->user(),
         );
 
         return response()->json([
             'status'  => 'success',
-            'message' => 'Slot held for 2 minutes',
+            'message' => 'Slot held for '.WhatsAppReservationService::holdMinutes().' minutes',
+            'data'    => $this->holdPayload($booking->load('venueCourt')) + [
+                'booking_id'         => $booking->id,
+                'reserved_until'     => $booking->reserved_until?->toIso8601String(),
+                'seconds_remaining'  => $this->secondsLeft($booking),
+                'hold_total_seconds' => WhatsAppReservationService::holdMinutes() * 60,
+            ],
+        ]);
+    }
+
+    public function releaseHold(Request $request, int $id, int $convId): JsonResponse
+    {
+        $venue = $this->branch($request, $id);
+        $conversation = $this->conversation($venue, $convId);
+
+        $outcome = $this->reservationService->releaseHold($venue, $conversation, $request->user());
+
+        return response()->json([
+            'status'  => 'success',
+            'outcome' => $outcome,
+            'message' => $outcome === 'paid'
+                ? 'The customer had already paid — the booking is confirmed.'
+                : 'Hold released',
+        ]);
+    }
+
+    /** Send the held booking's Razorpay payment link in the chat. */
+    public function sendPaymentLink(Request $request, int $id, int $convId): JsonResponse
+    {
+        $venue = $this->branch($request, $id);
+        $conversation = $this->conversation($venue, $convId);
+
+        $link = $this->reservationService->sendPaymentLink($venue, $conversation, $this->activeBooking($venue, $conversation), $request->user());
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Payment link sent on WhatsApp',
             'data'    => [
-                'booking_id'           => $booking->id,
-                'reserved_until'       => $booking->reserved_until->toIso8601String(),
-                'seconds_remaining' => WhatsAppReservationService::holdMinutes() * 60,
-                'ticket_code'          => $booking->ticket_code,
+                'short_url'          => $link->short_url,
+                'amount'             => $link->amount,
+                'seconds_remaining'  => $this->secondsLeft($link->booking),
+                'hold_total_seconds' => WhatsAppReservationService::holdMinutes() * 60,
             ],
         ]);
     }
 
     /**
-     * Release active temporary hold.
+     * Has the customer paid the link yet? Asks Razorpay directly, so the desk sees the
+     * payment land without waiting on the webhook (or without one configured at all).
      */
-    public function releaseHold(Request $request, int $id, int $convId): JsonResponse
+    public function paymentStatus(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user();
+        $conversation = $this->conversation($venue, $convId);
 
-        $this->reservationService->releaseHold($venue, $conversation, $user);
+        $bookingId = $conversation->active_booking_id
+            ?? WhatsAppPaymentLink::query()->where('conversation_id', $conversation->id)->latest('id')->value('booking_id');
 
-        return response()->json([
-            'status'  => 'success',
-            'message' => 'Hold released',
-        ]);
-    }
+        $booking = $bookingId !== null ? Booking::query()->where('venue_id', $venue->id)->find($bookingId) : null;
 
-    /**
-     * 1-Tap Send Razorpay Payment Link.
-     */
-    public function sendPaymentLink(Request $request, int $id, int $convId): JsonResponse
-    {
-        $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user();
-
-        if ($conversation->active_booking_id === null) {
-            throw ValidationException::withMessages([
-                'booking' => ['No active hold exists for this conversation. Please hold a slot first.'],
-            ]);
+        if ($booking === null) {
+            return response()->json(['status' => 'success', 'paid' => false, 'state' => 'no_link']);
         }
 
-        $booking = Booking::where('venue_id', $venue->id)->findOrFail($conversation->active_booking_id);
-        $validated = $request->validate(['amount' => 'nullable|numeric|min:1|max:1000000']);
-        $amount = (float) ($validated['amount'] ?? $booking->total_amount);
+        if (in_array(strtoupper((string) $booking->status), ['CONFIRMED', 'CHECKED_IN', 'COMPLETED'], true)) {
+            return response()->json(['status' => 'success', 'paid' => true, 'state' => 'paid']);
+        }
 
-        $link = $this->reservationService->sendPaymentLink($venue, $conversation, $booking, $amount, $user);
+        $paid = $this->reservationService->checkLinks($booking);
 
         return response()->json([
-            'status'  => 'success',
-            'message' => 'Payment link dispatched via WhatsApp',
-            'data'    => $link,
+            'status' => 'success',
+            'paid'   => $paid === true,
+            'state'  => match ($paid) { true => 'paid', false => 'unpaid', null => 'unknown' },
         ]);
     }
 
-    /**
-     * Manual Paid confirmation (Cash / Counter UPI) with Shift Register reconciliation.
-     */
+    /** The desk took the money in person. */
     public function markPaid(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user();
-
-        if ($conversation->active_booking_id === null) {
-            throw ValidationException::withMessages([
-                'booking' => ['No active hold exists for this conversation.'],
-            ]);
-        }
-
-        $booking = Booking::where('venue_id', $venue->id)->findOrFail($conversation->active_booking_id);
+        $conversation = $this->conversation($venue, $convId);
         $method = $request->validate(['method' => 'nullable|in:cash,upi'])['method'] ?? 'cash';
 
-        $this->reservationService->markPaidManual($venue, $conversation, $booking, $method, $user);
+        $booking = $this->reservationService->markPaidManual($venue, $conversation, $this->activeBooking($venue, $conversation), $method, $request->user());
 
         return response()->json([
             'status'  => 'success',
-            'message' => 'Booking marked as paid and confirmed. Ticket dispatched.',
+            'message' => 'Paid and confirmed. The customer has their booking code on WhatsApp.',
             'data'    => [
                 'booking_id'  => $booking->id,
                 'status'      => 'confirmed',
@@ -284,37 +275,26 @@ final class WhatsAppDeskController extends Controller
         ]);
     }
 
-    /**
-     * Add an internal team note.
-     */
     public function addNote(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
-        $user = $request->user();
+        $conversation = $this->conversation($venue, $convId);
 
         $validated = $request->validate(['note' => 'required|string|max:1000']);
 
-        $note = WhatsAppInternalNote::create([
+        $note = WhatsAppInternalNote::query()->create([
             'conversation_id' => $conversation->id,
-            'user_id'         => $user->id,
+            'user_id'         => $request->user()->id,
             'note'            => $validated['note'],
         ]);
 
-        return response()->json([
-            'status'  => 'success',
-            'message' => 'Internal note added',
-            'data'    => $note->load('author'),
-        ]);
+        return response()->json(['status' => 'success', 'data' => $note->load('author:id,name')]);
     }
 
-    /**
-     * Assign staff member to conversation.
-     */
     public function assignStaff(Request $request, int $id, int $convId): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $conversation = WhatsAppConversation::where('venue_id', $venue->id)->findOrFail($convId);
+        $conversation = $this->conversation($venue, $convId);
 
         $validated = $request->validate(['staff_id' => 'nullable|integer|exists:users,id']);
 
@@ -332,88 +312,207 @@ final class WhatsAppDeskController extends Controller
 
         $conversation->update(['assigned_staff_id' => $validated['staff_id'] ?? null]);
 
-        return response()->json([
-            'status'  => 'success',
-            'message' => 'Staff assigned',
-            'data'    => $conversation->load('assignedStaff'),
-        ]);
+        return response()->json(['status' => 'success', 'data' => $conversation->load('assignedStaff:id,name')]);
     }
 
     /**
-     * List canned quick replies.
+     * Canned replies, written in /control → WhatsApp Desk replies, filled in with this
+     * venue's real details. A reply that needs a detail the venue hasn't set (no
+     * address, no rules) is left out rather than sent with a blank in it.
+     * `{{customer_name}}` is left for the app to fill per chat.
      */
     public function quickReplies(Request $request, int $id): JsonResponse
     {
         $venue = $this->branch($request, $id);
+        $tokens = $this->venueTokens($venue);
 
-        $replies = WhatsAppQuickReply::where(function ($q) use ($venue) {
-            $q->whereNull('venue_id')->orWhere('venue_id', $venue->id);
-        })->get();
+        $replies = WhatsAppQuickReply::query()
+            ->where(fn ($q) => $q->whereNull('venue_id')->orWhere('venue_id', $venue->id))
+            ->orderByRaw('case when venue_id is null then 1 else 0 end')
+            ->orderBy('category')
+            ->orderBy('id')
+            ->get()
+            // A venue's own reply replaces the platform one with the same shortcut.
+            ->unique('shortcut')
+            ->map(function (WhatsAppQuickReply $reply) use ($tokens): ?array {
+                preg_match_all('/\{\{\s*(\w+)\s*\}\}/', $reply->body, $m);
+                foreach (array_unique($m[1]) as $token) {
+                    if ($token !== 'customer_name' && trim((string) ($tokens[$token] ?? '')) === '') {
+                        return null;
+                    }
+                }
 
-        if ($replies->isEmpty()) {
-            // Seed system default quick replies
-            $defaults = [
-                ['shortcut' => '/pricing', 'category' => 'Pricing', 'title' => 'Standard Rate Card', 'body' => "Hi {{customer_name}}! Here are our turf rates for {{venue_name}}:\n- Mon to Thu: ₹800/hr\n- Fri to Sun (Peak): ₹1,200/hr\nAll slots include balls and drinking water!"],
-                ['shortcut' => '/rules', 'category' => 'Rules', 'title' => 'Venue Turf Rules', 'body' => "Venue Rules at {{venue_name}}:\n1. Non-marking turf shoes only (no metal studs).\n2. Arrive 10 mins prior to slot.\n3. Outside food not permitted."],
-                ['shortcut' => '/location', 'category' => 'Directions', 'title' => 'Venue Location & Map', 'body' => "📍 {{venue_name}} is located at: 124 Main Sports Hub, Near Metro Pillar 84.\nGoogle Maps Link: https://maps.google.com/?q={{venue_name}}"],
-                ['shortcut' => '/confirm', 'category' => 'Booking', 'title' => 'Confirm Hold Reminder', 'body' => "Hi {{customer_name}}, your 2-minute slot hold for {{court_name}} is active. Please complete payment at {{payment_url}} to lock your slot!"],
-            ];
+                return [
+                    'id'       => $reply->id,
+                    'shortcut' => $reply->shortcut,
+                    'category' => $reply->category,
+                    'title'    => $reply->title,
+                    'body'     => $reply->render($tokens),
+                ];
+            })
+            ->filter()
+            ->values();
 
-            foreach ($defaults as $d) {
-                WhatsAppQuickReply::create(array_merge($d, ['venue_id' => $venue->id]));
-            }
-
-            $replies = WhatsAppQuickReply::where('venue_id', $venue->id)->get();
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'data'   => $replies,
-        ]);
+        return response()->json(['status' => 'success', 'data' => $replies]);
     }
 
     /**
-     * Check court availability grid for a date.
+     * Which courts are free when, on a date — the grid the desk picks a hold from. Times
+     * follow the venue's opening hours at its slot length; a venue with no hours set
+     * falls back to its slot templates, and with neither the grid is empty and says so.
      */
     public function availability(Request $request, int $id): JsonResponse
     {
         $venue = $this->branch($request, $id);
-        $dateStr = $request->query('date', now()->toDateString());
-        $date = Carbon::parse($dateStr);
+        $date = Carbon::parse((string) $request->query('date', BusinessClock::today()))->startOfDay();
+        $step = max(30, (int) ($venue->slot_minutes ?: 60));
 
-        $courts = VenueCourt::where('venue_id', $venue->id)->where('is_active', true)->get();
-
-        $result = [];
-        foreach ($courts as $court) {
-            $hourlySlots = [];
-            for ($hour = 6; $hour <= 23; $hour++) {
-                $start = sprintf('%02d:00:00', $hour);
-                $end = sprintf('%02d:00:00', $hour + 1);
-
-                $isAvailable = $this->intentEngine->checkCourtAvailability($venue, $court, $date, $start, $end);
-                $hourlySlots[] = [
-                    'hour'         => $hour,
-                    'time_label'   => sprintf('%02d:00 - %02d:00', $hour, $hour + 1),
-                    'start_time'   => $start,
-                    'end_time'     => $end,
-                    'is_available' => $isAvailable,
-                ];
+        $starts = [];
+        foreach ($venue->windowsForWeekday($date->format('D')) as [$open, $close]) {
+            for ($m = $open; $m + $step <= $close; $m += $step) {
+                $starts[] = $m;
             }
+        }
 
-            $result[] = [
+        $hoursMissing = ! is_array($venue->hours_json) || $venue->hours_json === [];
+        if ($hoursMissing) {
+            $starts = $venue->slotsOn($date)
+                ->map(fn ($slot) => BookingService::timeToMinutes($slot->time))
+                ->filter(fn ($m) => $m !== null && $m + $step <= 24 * 60)
+                ->values()
+                ->all();
+        }
+
+        $starts = array_values(array_unique($starts));
+        sort($starts);
+
+        $now = BusinessClock::now();
+        $isToday = $date->toDateString() === $now->toDateString();
+        $nowMin = $now->hour * 60 + $now->minute;
+
+        $courts = VenueCourt::query()->where('venue_id', $venue->id)->where('is_active', true)->orderBy('sort_order')->orderBy('id')->get();
+
+        $result = $courts->map(function (VenueCourt $court) use ($venue, $date, $starts, $step, $isToday, $nowMin): array {
+            $slots = array_map(function (int $m) use ($venue, $court, $date, $step, $isToday, $nowMin): array {
+                $start = sprintf('%02d:%02d:00', intdiv($m, 60), $m % 60);
+                $end = sprintf('%02d:%02d:00', intdiv($m + $step, 60) % 24, ($m + $step) % 60);
+                $past = $isToday && $m <= $nowMin;
+
+                return [
+                    'start_time'   => $start,
+                    'end_time'     => $m + $step >= 24 * 60 ? '24:00:00' : $end,
+                    'time_label'   => Carbon::createFromTime(intdiv($m, 60), $m % 60)->format('g:i A'),
+                    'is_available' => ! $past && $this->intentEngine->checkCourtAvailability($venue, $court, $date, $start, $m + $step >= 24 * 60 ? '24:00:00' : $end),
+                    'is_past'      => $past,
+                    'price'        => round($court->rateFor($date, substr($start, 0, 5), (int) ($venue->price ?? 0)) * $step / 60, 2),
+                ];
+            }, $starts);
+
+            return [
                 'court_id'   => $court->id,
                 'court_name' => $court->name,
-                'price'      => $court->price ?: $venue->price_per_hour,
-                'slots'      => $hourlySlots,
+                'sports'     => $court->sportsList(),
+                'slots'      => $slots,
             ];
-        }
+        })->values();
 
         return response()->json([
             'status' => 'success',
             'data'   => [
-                'date'   => $date->toDateString(),
-                'courts' => $result,
+                'date'          => $date->toDateString(),
+                'slot_minutes'  => $step,
+                'hours_missing' => $hoursMissing && $starts === [],
+                'courts'        => $result,
             ],
         ]);
+    }
+
+    /** The chat's live hold — sending a link or taking payment needs one. */
+    private function activeBooking(Venue $venue, WhatsAppConversation $conversation): Booking
+    {
+        if ($conversation->active_booking_id === null) {
+            throw ValidationException::withMessages(['booking' => ['Hold a slot for this customer first.']]);
+        }
+
+        return Booking::query()->with('venueCourt')->where('venue_id', $venue->id)->findOrFail($conversation->active_booking_id);
+    }
+
+    private function secondsLeft(?Booking $booking): int
+    {
+        if ($booking === null
+            || strtoupper((string) $booking->status) !== 'PENDING'
+            || $booking->reserved_until === null
+            || $booking->reserved_until->isPast()) {
+            return 0;
+        }
+
+        return max(0, (int) now()->diffInSeconds($booking->reserved_until, false));
+    }
+
+    /** @return array<string, mixed>|null */
+    private function holdPayload(?Booking $booking): ?array
+    {
+        if ($booking === null) {
+            return null;
+        }
+
+        $link = WhatsAppPaymentLink::query()->where('booking_id', $booking->id)->latest('id')->first();
+
+        return [
+            'booking_id'   => $booking->id,
+            'status'       => strtoupper((string) $booking->status),
+            'court_id'     => $booking->venue_court_id,
+            'court_name'   => $booking->venueCourt?->name,
+            'slot_date'    => (string) Carbon::parse($booking->slot_date)->toDateString(),
+            'start_time'   => $booking->start_time,
+            'end_time'     => $booking->end_time,
+            'amount'       => $booking->amountCharged(),
+            'link_status'  => $link?->status,
+            'link_url'     => $link?->short_url,
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function venueTokens(Venue $venue): array
+    {
+        $courts = VenueCourt::query()->where('venue_id', $venue->id)->where('is_active', true)->orderBy('sort_order')->orderBy('id')->get();
+
+        $rateCard = $courts
+            ->map(function (VenueCourt $c) use ($venue): ?string {
+                $rate = (int) ($c->price ?? $venue->price ?? 0);
+
+                return $rate > 0 ? "{$c->name}: ₹".number_format($rate).'/hr' : null;
+            })
+            ->filter()
+            ->implode("\n");
+
+        if ($rateCard === '' && (int) $venue->price > 0) {
+            $rateCard = '₹'.number_format((int) $venue->price).'/hr';
+        }
+
+        if ($rateCard !== '' && trim((string) $venue->price_note) !== '') {
+            $rateCard .= "\n".trim((string) $venue->price_note);
+        }
+
+        $mapsUrl = trim((string) $venue->map_link);
+        if ($mapsUrl === '' && $venue->latitude !== null && $venue->longitude !== null) {
+            $mapsUrl = 'https://maps.google.com/?q='.$venue->latitude.','.$venue->longitude;
+        }
+
+        $rules = collect(is_array($venue->rules) ? $venue->rules : [])
+            ->map(fn ($r) => is_array($r) ? ($r['text'] ?? $r['rule'] ?? null) : $r)
+            ->filter(fn ($r) => is_string($r) && trim($r) !== '')
+            ->map(fn ($r) => '• '.trim($r))
+            ->implode("\n");
+
+        return [
+            'venue_name'    => (string) $venue->name,
+            'venue_address' => trim((string) ($venue->address ?: $venue->location)),
+            'maps_url'      => $mapsUrl,
+            'rate_card'     => $rateCard,
+            'venue_hours'   => $venue->displayHours(),
+            'venue_rules'   => $rules,
+            'hold_minutes'  => (string) WhatsAppReservationService::holdMinutes(),
+        ];
     }
 }

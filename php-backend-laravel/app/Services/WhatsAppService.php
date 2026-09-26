@@ -139,6 +139,57 @@ class WhatsAppService
         ]);
     }
 
+    /**
+     * Ask the customer to share their location — WhatsApp shows a "Send location"
+     * button. Only inside the 24-hour window the customer opened.
+     */
+    public function sendLocationRequest(string $phone, string $body, ?MessageContext $context = null): bool
+    {
+        return $this->dispatch($phone, $context, ['kind' => 'interactive', 'interactive' => [
+            'type' => 'location_request_message',
+            'body' => ['text' => mb_substr($body, 0, 1024)],
+            'action' => ['name' => 'send_location'],
+        ]]);
+    }
+
+    /**
+     * A tappable list: up to 10 rows, each `['id' => …, 'title' => ≤24 chars,
+     * 'description' => ≤72 chars]`. The reply comes back with the row's id.
+     *
+     * @param  list<array{id: string, title: string, description?: string}>  $rows
+     */
+    public function sendList(string $phone, string $body, string $button, array $rows, ?MessageContext $context = null): bool
+    {
+        $rows = array_map(fn (array $r): array => array_filter([
+            'id' => mb_substr($r['id'], 0, 200),
+            'title' => mb_substr($r['title'], 0, 24),
+            'description' => isset($r['description']) && $r['description'] !== '' ? mb_substr($r['description'], 0, 72) : null,
+        ], fn ($v) => $v !== null), array_slice($rows, 0, 10));
+
+        return $this->dispatch($phone, $context, ['kind' => 'interactive', 'interactive' => [
+            'type' => 'list',
+            'body' => ['text' => mb_substr($body, 0, 1024)],
+            'action' => ['button' => mb_substr($button, 0, 20), 'sections' => [['title' => mb_substr($button, 0, 24), 'rows' => $rows]]],
+        ]]);
+    }
+
+    /**
+     * Up to three reply buttons (title ≤20 chars). The reply comes back with the id.
+     *
+     * @param  list<array{id: string, title: string}>  $buttons
+     */
+    public function sendButtons(string $phone, string $body, array $buttons, ?MessageContext $context = null): bool
+    {
+        return $this->dispatch($phone, $context, ['kind' => 'interactive', 'interactive' => [
+            'type' => 'button',
+            'body' => ['text' => mb_substr($body, 0, 1024)],
+            'action' => ['buttons' => array_map(fn (array $b): array => [
+                'type' => 'reply',
+                'reply' => ['id' => mb_substr($b['id'], 0, 256), 'title' => mb_substr($b['title'], 0, 20)],
+            ], array_slice($buttons, 0, 3))],
+        ]]);
+    }
+
     /** Which transport is carrying WhatsApp right now: 'meta' or 'msg91'. */
     public function driver(): string
     {
@@ -243,6 +294,7 @@ class WhatsAppService
             'text' => ['type' => 'text', 'text' => ['body' => $intent['body'], 'preview_url' => false]],
             'image' => ['type' => 'image', 'image' => ['link' => $intent['url'], 'caption' => $intent['caption']]],
             'template' => ['type' => 'template', 'template' => $this->metaTemplate($intent)],
+            'interactive' => ['type' => 'interactive', 'interactive' => $intent['interactive']],
             default => [],
         };
 
@@ -395,6 +447,19 @@ class WhatsAppService
                         'url' => $intent['url'],
                         'caption' => $intent['caption'],
                     ],
+                ],
+            ],
+            // Interactive (lists, reply buttons, location request) — same flat
+            // convention, with Meta's own `interactive` object inside. NOT confirmed
+            // against the live API; the booking bot falls back to a numbered text
+            // menu whenever this send fails, so a wrong shape degrades, not breaks.
+            'interactive' => [
+                '/whatsapp/whatsapp-outbound-message/',
+                [
+                    'integrated_number' => $number,
+                    'content_type' => 'interactive',
+                    'recipient_number' => $recipient,
+                    'interactive' => $intent['interactive'],
                 ],
             ],
             default => ['', []],

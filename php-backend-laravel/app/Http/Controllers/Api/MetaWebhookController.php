@@ -103,17 +103,28 @@ class MetaWebhookController extends Controller
     private function handleWhatsApp(array $value, InboundMessages $inbound): void
     {
         foreach ($value['messages'] ?? [] as $message) {
-            $text = trim((string) ($message['text']['body'] ?? ''));
+            // Text, a tapped list row / button, or a shared location (the booking bot
+            // needs the last two).
+            ['text' => $text, 'extra' => $extra] = \App\Support\WhatsAppInbound::fromMeta($message);
             $from = (string) ($message['from'] ?? '');
 
-            if ($from === '' || $text === '') {
-                // A sticker, image, reaction or location — no keyword to match.
+            if ($from === '' || ($text === '' && $extra === [])) {
+                // A sticker, image or reaction — nothing to act on.
                 continue;
+            }
+
+            // The sender's WhatsApp profile name rides beside the message, keyed by
+            // wa_id — the desk shows it instead of a bare number.
+            $name = null;
+            foreach ($value['contacts'] ?? [] as $contact) {
+                if ((string) ($contact['wa_id'] ?? '') === ltrim($from, '+')) {
+                    $name = trim((string) ($contact['profile']['name'] ?? '')) ?: null;
+                }
             }
 
             // Meta reports `from` without a plus; the ledger keys on E.164, and
             // WhatsAppService normalises the same way, so they must agree.
-            $inbound->handle('whatsapp', '+' . ltrim($from, '+'), $text, $message['id'] ?? null);
+            $inbound->handle('whatsapp', '+' . ltrim($from, '+'), $text, $message['id'] ?? null, null, $name, $extra);
         }
     }
 

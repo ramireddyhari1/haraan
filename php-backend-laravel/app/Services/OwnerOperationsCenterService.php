@@ -312,13 +312,13 @@ final class OwnerOperationsCenterService
 
         $convertedBookings = Booking::where('venue_id', $venue->id)
             ->where('channel', 'whatsapp')
-            ->where('status', 'confirmed')
+            ->whereIn(DB::raw('upper(status)'), ['CONFIRMED', 'CHECKED_IN', 'COMPLETED'])
             ->where('created_at', '>=', $startOfMonth)
             ->count();
 
         $totalRevenue = (float) Booking::where('venue_id', $venue->id)
             ->where('channel', 'whatsapp')
-            ->where('status', 'confirmed')
+            ->whereIn(DB::raw('upper(status)'), ['CONFIRMED', 'CHECKED_IN', 'COMPLETED'])
             ->where('created_at', '>=', $startOfMonth)
             ->sum('total_amount');
 
@@ -334,7 +334,7 @@ final class OwnerOperationsCenterService
                 'drop_off_pct'=> $totalInquiries > 0 ? round((($totalInquiries - $intentDetected) / $totalInquiries) * 100, 1) : 0.0,
             ],
             [
-                'stage'       => 'Holds Issued (2m TTL)',
+                'stage'       => 'Holds issued',
                 'count'       => $holdsCreated,
                 'drop_off_pct'=> $intentDetected > 0 ? round((($intentDetected - $holdsCreated) / $intentDetected) * 100, 1) : 0.0,
             ],
@@ -387,15 +387,18 @@ final class OwnerOperationsCenterService
     {
         $now = now();
 
-        // 1. Expired Holds without re-engagement
-        $expiredHoldsCount = Booking::where('venue_id', $venue->id)
+        // 1. WhatsApp Desk holds that lapsed unpaid in the last 24h — real rows, real money.
+        $expiredHolds = Booking::where('venue_id', $venue->id)
             ->where('channel', 'whatsapp')
-            ->where('status', 'hold')
-            ->where('reserved_until', '<', $now)
-            ->where('created_at', '>=', $now->copy()->subHours(24))
-            ->count();
+            // Lapsed desk holds are EXPIRED by `whatsapp:expire-holds`.
+            ->whereRaw('upper(status) = ?', ['EXPIRED'])
+            ->where('created_at', '>=', $now->copy()->subHours(24));
+
+        $expiredHoldsCount = (clone $expiredHolds)->count();
 
         if ($expiredHoldsCount > 0) {
+            $lapsedValue = round((float) (clone $expiredHolds)->sum('total_amount'), 2);
+
             VenueOperationsAlert::firstOrCreate(
                 [
                     'venue_id'   => $venue->id,
@@ -404,9 +407,9 @@ final class OwnerOperationsCenterService
                 ],
                 [
                     'severity'    => 'medium',
-                    'title'       => "{$expiredHoldsCount} Unconverted 2-Min Holds",
-                    'description' => "Customers abandoned checkout after receiving 2-minute temporary holds in the last 24h. Re-engaging via WhatsApp can recover up to 40% of abandoned leads.",
-                    'metrics_payload' => ['count' => $expiredHoldsCount, 'estimated_leakage' => $expiredHoldsCount * 1000],
+                    'title'       => $expiredHoldsCount === 1 ? '1 WhatsApp hold lapsed unpaid' : "{$expiredHoldsCount} WhatsApp holds lapsed unpaid",
+                    'description' => 'Worth ₹'.number_format($lapsedValue).' in the last 24 hours. Their chats are in the WhatsApp Desk if you want to follow up.',
+                    'metrics_payload' => ['count' => $expiredHoldsCount, 'estimated_leakage' => $lapsedValue],
                 ]
             );
         }

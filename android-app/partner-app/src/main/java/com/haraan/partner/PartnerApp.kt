@@ -1104,7 +1104,8 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     if (showWhatsAppDesk) {
         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
             ?: ctx?.branches?.firstOrNull()
-        val venueId = targetVenue?.id ?: 1L
+        // No fallback id: guessing venue 1 would open some other business's inbox (404).
+        val venueId = targetVenue?.id
         val context = LocalContext.current
         val localDs = remember { com.haraan.partner.whatsapp.data.WhatsAppLocalDataSource(context) }
         val remoteDs = remember { com.haraan.partner.whatsapp.data.WhatsAppRemoteDataSource() }
@@ -2427,13 +2428,15 @@ private fun deskDoors(
         ) { onReports() }
     }
     if (focus != null && courtsLane && onWhatsApp != null) {
-        val waiting = whatsapp?.unreadConversations ?: 0
+        // Chats waiting on a reply — not unread messages, which one chatty customer inflates.
+        val waiting = whatsapp?.needsActionCount ?: 0
         doors += DeskDoor(
             Icons.Filled.Forum, "WhatsApp",
             when {
                 waiting == 1 -> "1 chat waiting"
                 waiting > 1 -> "$waiting chats waiting"
-                (whatsapp?.activeHoldsCount ?: 0) > 0 -> "${whatsapp!!.activeHoldsCount} slot on hold"
+                (whatsapp?.activeHoldsCount ?: 0) == 1 -> "1 slot on hold"
+                (whatsapp?.activeHoldsCount ?: 0) > 1 -> "${whatsapp!!.activeHoldsCount} slots on hold"
                 else -> "Chats & pay links"
             },
             factTone = if (waiting > 0) DoorTone.Attention else DoorTone.Quiet,

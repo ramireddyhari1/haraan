@@ -12,6 +12,7 @@ use App\Models\PartnerCredit;
 use App\Models\PartnerPlan;
 use App\Models\PartnerSubscription;
 use App\Models\User;
+use App\Models\WhatsAppPaymentLink;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
@@ -157,6 +158,12 @@ final class RazorpayBilling
 
         if ($booking === null) {
             return 'booking_missing';
+        }
+
+        // A WhatsApp Desk link pays for a HOLD, not a confirmed walk-in: the hold has to be
+        // confirmed (or, if it lapsed and the court went, refunded) as well as paid.
+        if (WhatsAppPaymentLink::query()->where('booking_id', $booking->id)->exists()) {
+            return 'whatsapp_desk:'.app(WhatsAppReservationService::class)->settlePaidLink($booking, $paymentId ?: null);
         }
 
         if ($paymentId !== '' && BookingPayment::query()

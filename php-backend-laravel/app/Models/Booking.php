@@ -38,6 +38,19 @@ final class Booking extends Model
     use BroadcastsVenueAvailability;
     use HasFactory;
 
+    /**
+     * Channels where the partner's desk created the booking for a customer with no app
+     * account: a counter walk-in ('offline') and a WhatsApp Desk hold ('whatsapp').
+     * On these rows `user_id` is the PARTNER — the FK needs somewhere to point — so the
+     * customer lives in guest_name / guest_phone and nothing may be sent to `user`.
+     */
+    public const DESK_CHANNELS = ['offline', 'whatsapp'];
+
+    public function isDeskBooking(): bool
+    {
+        return in_array(strtolower((string) $this->channel), self::DESK_CHANNELS, true);
+    }
+
     /** Only venue bookings hold a court-hour; event tickets never touch slot availability. */
     public function affectsVenueAvailability(): bool
     {

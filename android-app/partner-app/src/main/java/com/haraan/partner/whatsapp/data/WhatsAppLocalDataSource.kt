@@ -79,7 +79,8 @@ class WhatsAppLocalDataSource(context: Context) {
                             lastMessageSender = obj.optString("last_message_sender", "customer"),
                             unreadCount = obj.optInt("unread_count", 0),
                             windowExpiresAt = obj.optString("window_expires_at").takeIf { s -> s.isNotEmpty() },
-                            isWindowActive = obj.optBoolean("is_window_active", true),
+                            // A cached list is stale: never let it claim a reply can go out.
+                            isWindowActive = false,
                             activeBookingId = if (obj.isNull("active_booking_id")) null else obj.getLong("active_booking_id")
                         )
                     )
@@ -104,9 +105,6 @@ class WhatsAppLocalDataSource(context: Context) {
                 put("media_url", m.mediaUrl ?: "")
                 put("delivery_status", m.deliveryStatus)
                 put("created_at", m.createdAt)
-                put("ticket_code", m.ticketCode ?: "")
-                put("ticket_url", m.ticketUrl ?: "")
-                put("payment_url", m.paymentUrl ?: "")
             }
             arr.put(obj)
         }
@@ -151,10 +149,7 @@ class WhatsAppLocalDataSource(context: Context) {
                             body = obj.getString("body"),
                             mediaUrl = obj.optString("media_url").takeIf { s -> s.isNotEmpty() },
                             deliveryStatus = obj.optString("delivery_status", "sent"),
-                            createdAt = obj.optString("created_at", ""),
-                            ticketCode = obj.optString("ticket_code").takeIf { s -> s.isNotEmpty() },
-                            ticketUrl = obj.optString("ticket_url").takeIf { s -> s.isNotEmpty() },
-                            paymentUrl = obj.optString("payment_url").takeIf { s -> s.isNotEmpty() }
+                            createdAt = obj.optString("created_at", "")
                         )
                     )
                 }
@@ -162,16 +157,5 @@ class WhatsAppLocalDataSource(context: Context) {
             }
         }
         return null
-    }
-
-    fun enqueuePendingAction(actionType: String, conversationId: Long, payloadJson: String) {
-        val db = dbHelper.writableDatabase
-        val values = ContentValues().apply {
-            put("action_type", actionType)
-            put("conversation_id", conversationId)
-            put("payload_json", payloadJson)
-            put("created_at", System.currentTimeMillis())
-        }
-        db.insert(WhatsAppDatabaseHelper.TABLE_PENDING_ACTIONS, null, values)
     }
 }

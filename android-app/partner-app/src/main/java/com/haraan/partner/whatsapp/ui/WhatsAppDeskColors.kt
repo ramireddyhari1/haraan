@@ -13,14 +13,21 @@ object WhatsAppDeskColors {
     val TextPrimary = Color(0xFF0F172A)
     val TextSecondary = Color(0xFF64748B)
 
+    /** Every tappable action is brand blue; green is only ever a state (booked, paid). */
+    val Action = Color(0xFF2563EB)
+    val ActionTint = Color(0xFFEFF6FF)
+    val ActionBorder = Color(0xFFBFDBFE)
+
     val AmberHold = Color(0xFFD97706)
-    val AmberHoldBg = Color(0xFFFEF3C7)
+    val AmberHoldBg = Color(0xFFFFFBEB)
     val AmberHoldBorder = Color(0xFFFDE68A)
 
     val ConvertedGreen = Color(0xFF059669)
     val ConvertedGreenBg = Color(0xFFD1FAE5)
 
-    val ChatBubbleCustomer = Color(0xFFF1F5F9)
+    val Danger = Color(0xFFDC2626)
+
+    val ChatBubbleCustomer = Color(0xFFFFFFFF)
     val ChatBubblePartner = Color(0xFFDCF8C6)
-    val ChatBubbleSystem = Color(0xFFFFFBEB)
+    val ChatBubbleSystem = Color(0xFFF1F5F9)
 }

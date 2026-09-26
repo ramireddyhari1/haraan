@@ -169,7 +169,13 @@ class Msg91WebhookController extends Controller
         $from = $this->number($event);
         $text = $this->text($event);
 
-        if ($from === null || $text === '') {
+        // A shared location or a tapped list row / button (the booking bot's replies).
+        ['text' => $richText, 'extra' => $extra] = \App\Support\WhatsAppInbound::fromAny($event);
+        if ($extra !== []) {
+            $text = $richText !== '' ? $richText : $text;
+        }
+
+        if ($from === null || ($text === '' && $extra === [])) {
             // A sticker, image, reaction or location — no keyword to match, and
             // InboundMessages has nothing to do with it.
             return;
@@ -181,7 +187,11 @@ class Msg91WebhookController extends Controller
 
         // MSG91 reports the customer without a plus; the ledger keys on E.164 and
         // WhatsAppService normalises the same way, so they must agree.
-        $inbound->handle('whatsapp', $from, $text, $this->eventId($event));
+        // The sender's WhatsApp profile name, when MSG91 includes it, so the venue's
+        // desk shows a name rather than a bare number.
+        $name = trim((string) ($event['customerName'] ?? $event['customer_name'] ?? '')) ?: null;
+
+        $inbound->handle('whatsapp', $from, $text, $this->eventId($event), null, $name, $extra);
     }
 
     /**

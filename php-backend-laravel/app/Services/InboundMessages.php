@@ -44,6 +44,8 @@ final class InboundMessages
         private readonly WhatsAppService $whatsapp,
         private readonly PlanEntitlements $entitlements,
         private readonly InstagramMessenger $instagram,
+        private readonly WhatsAppDeskService $desk,
+        private readonly WhatsAppBookingBot $bot,
     ) {}
 
     /**
@@ -74,7 +76,12 @@ final class InboundMessages
      *
      * @return array{action: string, partner_id: int|null, reply: string|null}
      */
-    public function handle(string $channel, string $from, string $body, ?string $providerMessageId = null, ?int $knownPartnerId = null): array
+    /**
+     * @param  array{reply_id?: ?string, location?: ?array{lat: float, lng: float}}  $extra
+     *         what a WhatsApp message carries besides text: the id of a tapped list row or
+     *         button, or a shared location
+     */
+    public function handle(string $channel, string $from, string $body, ?string $providerMessageId = null, ?int $knownPartnerId = null, ?string $customerName = null, array $extra = []): array
     {
         // Instagram knows exactly whose account was messaged; WhatsApp's shared
         // sender has to infer it.
@@ -119,32 +126,82 @@ final class InboundMessages
                 force: true);
         }
 
-        // --- 2. Someone who opted out gets silence, not a rule ---------------
+        // --- The venue's WhatsApp Desk ----------------------------------------
+        // After the compliance words (a STOP is not a chat), before the opt-out gate:
+        // someone who opted out of updates and then writes in to book is asking to
+        // talk, and the venue's staff must see it. Never allowed to break the rest.
+        if ($channel === 'whatsapp') {
+            try {
+                $this->desk->routeInbound($from, $body, $providerMessageId, $customerName, $partnerId);
+            } catch (\Throwable $e) {
+                Log::error('WhatsApp desk intake failed: '.$e->getMessage());
+            }
+        }
+
+        // --- 2. Someone who opted out gets silence, not a rule or the bot -------
         if (MessagingOptOut::blocks($channel, $from, $partnerId)) {
             return ['action' => 'ignored_opted_out', 'partner_id' => $partnerId, 'reply' => null];
         }
 
-        // --- 3. Auto-reply rules (a paid feature; compliance replies above are not)
-        $entitlement = $this->entitlements->canAutomate($partnerId, PartnerPlan::FEATURE_INBOUND, $channel);
-
-        if (! $entitlement['allowed']) {
-            return ['action' => 'not_entitled:' . $entitlement['reason'], 'partner_id' => $partnerId, 'reply' => null];
+        // --- 3. Mid-booking with the WhatsApp bot: it answers, nothing else does.
+        if ($channel === 'whatsapp' && $this->bot->isMidFlow($from) && $this->botAnswers($from, $body, $extra)) {
+            return ['action' => 'bot', 'partner_id' => $partnerId, 'reply' => null];
         }
 
-        foreach (AutomationRule::forPartner($partnerId, $channel) as $rule) {
-            // Comment rules belong to the comment-to-DM flow, not to DMs. A
-            // keyword-less comment rule matches everything, so leaking one in
-            // here would answer every DM with it.
-            if ($rule->trigger_type === AutomationRule::TRIGGER_COMMENT) {
-                continue;
-            }
+        // --- 4. The partner's keyword auto-replies (a paid feature), then the
+        // booking bot for anything they don't cover, then their away message.
+        // A keyword rule is a specific answer the partner wrote and beats the bot;
+        // a catch-all fallback is not, and would otherwise silence the bot for every
+        // customer attributed to that partner.
+        $entitlement = $this->entitlements->canAutomate($partnerId, PartnerPlan::FEATURE_INBOUND, $channel);
 
+        $rules = $entitlement['allowed']
+            ? collect(AutomationRule::forPartner($partnerId, $channel))
+                // Comment rules belong to the comment-to-DM flow, not to DMs. A
+                // keyword-less comment rule matches everything, so leaking one in
+                // here would answer every DM with it.
+                ->reject(fn (AutomationRule $r) => $r->trigger_type === AutomationRule::TRIGGER_COMMENT)
+            : collect();
+
+        [$fallbacks, $keywords] = $rules->partition(fn (AutomationRule $r) => $r->trigger_type === AutomationRule::TRIGGER_FALLBACK);
+
+        foreach ($keywords as $rule) {
             if ($rule->matches($text)) {
                 return $this->finish($channel, $from, $partnerId, 'rule:' . $rule->id, $rule->reply_body);
             }
         }
 
+        if ($channel === 'whatsapp' && $this->botAnswers($from, $body, $extra)) {
+            return ['action' => 'bot', 'partner_id' => $partnerId, 'reply' => null];
+        }
+
+        foreach ($fallbacks as $rule) {
+            if ($rule->matches($text)) {
+                return $this->finish($channel, $from, $partnerId, 'rule:' . $rule->id, $rule->reply_body);
+            }
+        }
+
+        if (! $entitlement['allowed']) {
+            return ['action' => 'not_entitled:' . $entitlement['reason'], 'partner_id' => $partnerId, 'reply' => null];
+        }
+
         return ['action' => 'no_match', 'partner_id' => $partnerId, 'reply' => null];
+    }
+
+    /**
+     * The WhatsApp booking bot's turn. Never allowed to break inbound handling.
+     *
+     * @param  array<string, mixed>  $extra
+     */
+    private function botAnswers(string $from, string $body, array $extra): bool
+    {
+        try {
+            return $this->bot->handle($from, $body, $extra);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp booking bot failed: '.$e->getMessage());
+
+            return false;
+        }
     }
 
     /**

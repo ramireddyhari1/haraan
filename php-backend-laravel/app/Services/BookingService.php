@@ -648,6 +648,11 @@ final class BookingService
                 ->whereRaw('upper(status) = ?', ['PENDING'])
                 ->whereNotNull('reserved_until')
                 ->where('reserved_until', '<', now())
+                // WhatsApp holds (desk or booking bot) are settled by `whatsapp:expire-holds`:
+                // their money arrives by payment link, not by a Razorpay order this sweep
+                // could ask about, so only that sweep can tell a lapsed hold from a paid one.
+                ->where(fn ($q) => $q->whereNull('channel')->orWhere('channel', '!=', 'whatsapp'))
+                ->whereNotIn('id', DB::table('whatsapp_payment_links')->select('booking_id'))
                 ->pluck('id')
                 ->all(),
         );
@@ -1067,6 +1072,133 @@ final class BookingService
     }
 
     /**
+     * Hold a court for a customer the partner is talking to on WhatsApp.
+     *
+     * Same engine as every other venue booking — a PENDING row with `reserved_until`,
+     * so {@see occupyingStatuses()} counts it while it's live and forgets it the moment it
+     * lapses, and the app, the web checkout and the desk grid all see the same court as
+     * taken. Like a walk-in, `user_id` is the partner (the customer has no account) and the
+     * price is the court's own rate for that time; no platform commission or tax, because
+     * the partner found this customer on their own chat.
+     *
+     * @throws NotFoundHttpException  When the venue or court does not exist.
+     * @throws ConflictHttpException  When the venue is closed or the window is taken.
+     */
+    public function createDeskHold(
+        User $partner,
+        int $venueId,
+        int $courtId,
+        string $date,
+        int $startMin,
+        int $durationMin,
+        ?string $guestName,
+        ?string $guestPhone,
+        int $holdMinutes,
+    ): Booking {
+        return $this->reserveVenue($venueId, null, $courtId, $date, 1, [
+            'user_id'      => $partner->id,
+            'channel'      => 'whatsapp',
+            'guest_name'   => $guestName,
+            'guest_phone'  => $guestPhone,
+            'user'         => null,
+            'coupon_code'  => null,
+            'start_min'    => $startMin,
+            'duration_min' => $durationMin,
+            'hold_minutes' => $holdMinutes,
+        ], reserve: true);
+    }
+
+    /**
+     * Hold a court for a customer booking through the WhatsApp bot. Everything the app
+     * checkout applies applies here — published venue, booking window, Operations
+     * switches, Pulse commission and tax — because it IS an online booking; only the
+     * start time is free rather than a slot template, and the hold runs as long as the
+     * bot's own setting says.
+     *
+     * @throws NotFoundHttpException  When the venue or court does not exist.
+     * @throws ConflictHttpException  When the venue isn't bookable or the window is taken.
+     */
+    public function createOnlineHoldAt(User $user, int $venueId, int $courtId, string $date, int $startMin, int $durationMin, int $holdMinutes): Booking
+    {
+        Operations::assertBookingsOpen(Operations::VENUES);
+
+        return $this->reserveVenue($venueId, null, $courtId, $date, 1, [
+            'user_id'      => $user->id,
+            'channel'      => 'online',
+            'guest_name'   => null,
+            'guest_phone'  => null,
+            'user'         => $user,
+            'coupon_code'  => null,
+            'start_min'    => $startMin,
+            'duration_min' => $durationMin,
+            'hold_minutes' => $holdMinutes,
+        ], reserve: true);
+    }
+
+    /**
+     * Is this court free for this window — no live booking or hold on it or on a court
+     * sharing its ground, and no block covering it? The same rule the booking engine
+     * enforces, for screens that need to show availability before anyone books.
+     */
+    public function isCourtHourFree(int $venueId, int $courtId, string $date, int $startMin, int $endMin, ?int $excludeBookingId = null): bool
+    {
+        try {
+            $this->assertCourtHourFree($venueId, $courtId, null, $date, $startMin, $endMin, $excludeBookingId);
+
+            return true;
+        } catch (ConflictHttpException) {
+            return false;
+        }
+    }
+
+    /**
+     * Turn a desk hold into a booking once the desk has the money in hand (cash / UPI at
+     * the counter). The ledger row is the caller's to write — this only settles the state.
+     *
+     * A hold that already lapsed is re-checked first: if someone else took the court in
+     * the meantime this refuses, and the desk has not taken any money yet to hand back.
+     *
+     * @throws ConflictHttpException  When the lapsed hold's court has since been taken,
+     *                                or the booking is not a hold at all.
+     */
+    public function confirmDeskHold(Booking $booking): Booking
+    {
+        return DB::transaction(function () use ($booking): Booking {
+            /** @var Booking $row */
+            $row = Booking::query()->lockForUpdate()->findOrFail($booking->id);
+            $status = strtoupper((string) $row->status);
+
+            if ($status === 'CONFIRMED') {
+                return $row;
+            }
+
+            if (! in_array($status, ['PENDING', 'EXPIRED'], true)) {
+                throw new ConflictHttpException('This booking is '.strtolower($status).' and can’t be confirmed.');
+            }
+
+            $live = $status === 'PENDING' && $row->reserved_until !== null && $row->reserved_until->isFuture();
+
+            if (! $live) {
+                $this->assertCourtHourFree(
+                    (int) $row->venue_id,
+                    $row->venue_court_id !== null ? (int) $row->venue_court_id : null,
+                    $row->venue_slot_id !== null ? (int) $row->venue_slot_id : null,
+                    (string) Carbon::parse($row->slot_date)->toDateString(),
+                    self::timeToMinutes($row->start_time),
+                    self::endMinutes($row->end_time),
+                    (int) $row->id,
+                );
+            }
+
+            $row->status = 'CONFIRMED';
+            $row->reserved_until = null;
+            $row->save();
+
+            return $row;
+        });
+    }
+
+    /**
      * Shared reservation routine behind the online and offline venue-booking paths.
      * Validates the venue/slot/court, rejects blocked dates, refuses a court whose sports
      * the slot doesn't run for, enforces the court+window overlap rule, and writes the
@@ -1146,6 +1278,14 @@ final class BookingService
             $dayLabel = null;
             $timeLabel = null;
 
+            // A desk booking a free time rather than a slot template (the WhatsApp Desk:
+            // "Court 2, 6:30 to 8") names the start in minutes. Without it a court-only
+            // booking has no window, and a windowless booking blocks the court all day.
+            if ($slotId === null && isset($meta['start_min'])) {
+                $startMin = (int) $meta['start_min'];
+                $timeLabel = $this->minutesToHm($startMin);
+            }
+
             if ($slotId !== null) {
                 $slot = VenueSlot::query()->where('venue_id', $venueId)->find($slotId);
 
@@ -1187,7 +1327,10 @@ final class BookingService
                 $perHour = $court->rateFor(Carbon::parse($date), $timeLabel, (int) ($venue->price ?? 0));
             }
 
-            $endMin = $startMin !== null ? $startMin + $duration * 60 : null;
+            // Length in minutes: whole hours for slot bookings, or exactly what the desk
+            // asked for (90 minutes is a normal turf booking).
+            $lengthMin = isset($meta['duration_min']) ? max(30, (int) $meta['duration_min']) : $duration * 60;
+            $endMin = $startMin !== null ? $startMin + $lengthMin : null;
 
             // Every booking lives inside one calendar date (slot_date + HH:MM). A venue open
             // past midnight lists its after-midnight hours on the next day's date instead.
@@ -1211,7 +1354,7 @@ final class BookingService
             // customer actually pays. The Razorpay order is built from this number, so the
             // arithmetic lives here and nowhere else — a second copy in the controller is
             // how a summary and a charge drift apart.
-            $subtotal = (float) ($perHour * $duration);
+            $subtotal = round($perHour * $lengthMin / 60, 2);
             $fee      = $venue->convenienceFeeFor($subtotal);
 
             $applied  = $meta['coupon_code'] !== null && $meta['user'] instanceof User
@@ -1228,8 +1371,9 @@ final class BookingService
             $tax = $meta['channel'] === 'online' ? Venue::taxFor($subtotal, $discount) : 0.0;
 
             // Payments paused (/control → Operations): a paid online slot is refused before
-            // the court is held; free slots and desk walk-ins go through.
-            if ($reserve && $payable + $tax > 0) {
+            // the court is held; free slots and desk bookings go through (a desk hold can
+            // still be settled in cash, and its payment link checks the switch itself).
+            if ($reserve && $meta['channel'] === 'online' && $payable + $tax > 0) {
                 Operations::assertPaymentsOn();
             }
 
@@ -1258,7 +1402,7 @@ final class BookingService
                 // by itself instead of blocking it forever. Desk/offline bookings and free
                 // slots skip the hold and confirm outright.
                 'status'         => $reserve ? 'PENDING' : 'CONFIRMED',
-                'reserved_until' => $reserve ? now()->addMinutes(self::holdMinutes()) : null,
+                'reserved_until' => $reserve ? now()->addMinutes((int) ($meta['hold_minutes'] ?? self::holdMinutes())) : null,
                 'booking_type'   => 'venue',
                 'user_id'        => $meta['user_id'],
                 'event_id'       => null,

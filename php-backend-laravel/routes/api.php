@@ -669,6 +669,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::post('/venues/{id}/whatsapp/conversations/{convId}/hold-slot', 'holdSlot')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
         Route::post('/venues/{id}/whatsapp/conversations/{convId}/release-hold', 'releaseHold')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
         Route::post('/venues/{id}/whatsapp/conversations/{convId}/send-payment-link', 'sendPaymentLink')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
+        Route::post('/venues/{id}/whatsapp/conversations/{convId}/payment-status', 'paymentStatus')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
         Route::post('/venues/{id}/whatsapp/conversations/{convId}/mark-paid', 'markPaid')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
         Route::post('/venues/{id}/whatsapp/conversations/{convId}/notes', 'addNote')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');
         Route::post('/venues/{id}/whatsapp/conversations/{convId}/assign', 'assignStaff')->whereNumber('id')->whereNumber('convId')->middleware('partner.can:bookings');

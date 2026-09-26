@@ -4,24 +4,33 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\Booking;
 use App\Models\StandingContract;
 use App\Models\Venue;
+use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
-use App\Models\VenueSlot;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
+/**
+ * Reads a customer's WhatsApp message for a booking: what they want (book, price,
+ * cancel…), and — when they said it — the sport, day, time and court.
+ *
+ * It only reports what the message actually contains. A detail the customer didn't
+ * give comes back null, never a guess: a suggestion card that says "today, 6 PM" for
+ * a message that said "hi" is a card staff learn to ignore, or worse, hold from.
+ * The desk shows what's missing and staff fill it in.
+ *
+ * Prices and availability come from the same places the booking engine uses
+ * ({@see VenueCourt::rateFor()} and {@see BookingService::isCourtHourFree()}), so the
+ * rate on the card is the rate the hold will charge.
+ */
 final class WhatsAppIntentEngine
 {
     public function __construct(
-        private readonly PricingMatrixService $pricingService,
+        private readonly BookingService $bookings,
     ) {}
 
     /**
-     * Parse inbound message and resolve booking intent, availability and dynamic price.
-     *
      * @return array{
      *   intent_type: string,
      *   confidence: float,
@@ -35,8 +44,7 @@ final class WhatsAppIntentEngine
      *   resolved_court_name: ?string,
      *   resolved_slot_id: ?int,
      *   is_available: bool,
-     *   calculated_rate: float,
-     *   pricing_rule_applied: ?string,
+     *   calculated_rate: ?float,
      *   suggested_message: string
      * }
      */
@@ -44,10 +52,7 @@ final class WhatsAppIntentEngine
     {
         $normalized = mb_strtolower(trim($text));
 
-        // 1. Detect Intent Type
         $intentType = $this->detectIntentType($normalized);
-
-        // 2. Extract Entities
         $sport = $this->extractSport($normalized);
         $date = $this->extractDate($normalized);
         $times = $this->extractTimeRange($normalized);
@@ -57,111 +62,119 @@ final class WhatsAppIntentEngine
         $endTime = $times['end'];
         $durationMinutes = $times['duration'];
 
-        // 3. Resolve Court
-        $resolvedCourt = $this->resolveCourt($venue, $sport, $courtName);
+        $court = $this->resolveCourt($venue, $sport, $courtName);
 
-        // 4. Resolve Slot & Availability
         $isAvailable = false;
-        $resolvedSlotId = null;
-        $calculatedRate = 0.0;
-        $pricingRuleName = null;
+        $rate = null;
 
-        if ($resolvedCourt !== null && $date !== null && $startTime !== null) {
-            $dateCarbon = Carbon::parse($date);
-            $isAvailable = $this->checkCourtAvailability($venue, $resolvedCourt, $dateCarbon, $startTime, $endTime);
-
-            // Find matching slot if exists
-            $slot = VenueSlot::where('venue_id', $venue->id)
-                ->where('venue_court_id', $resolvedCourt->id)
-                ->where('start_time', '<=', $startTime)
-                ->where('end_time', '>=', $endTime)
-                ->first();
-            $resolvedSlotId = $slot?->id;
-
-            // Compute dynamic pricing
-            $hours = max(1.0, $durationMinutes / 60.0);
-            $pricing = $this->pricingService->resolveRate(
-                $resolvedCourt,
-                $dateCarbon,
-                $startTime,
-                (int) ($venue->price_per_hour ?? 800)
-            );
-            $calculatedRate = (float) round($pricing['amount'] * $hours);
-            $pricingRuleName = $pricing['rule_name'];
+        if ($court !== null && $date !== null && $startTime !== null && $endTime !== null) {
+            $day = Carbon::parse($date);
+            $isAvailable = $this->checkCourtAvailability($venue, $court, $day, $startTime, $endTime);
+            $perHour = $court->rateFor($day, substr($startTime, 0, 5), (int) ($venue->price ?? 0));
+            $rate = round($perHour * $durationMinutes / 60, 2);
         }
 
-        // Calculate confidence score
-        $confidence = 0.0;
-        if ($intentType === 'booking_enquiry') {
-            $confidence = 0.4;
-            if ($date !== null) $confidence += 0.25;
-            if ($startTime !== null) $confidence += 0.25;
-            if ($resolvedCourt !== null) $confidence += 0.1;
-        } elseif ($intentType === 'pricing_query') {
-            $confidence = 0.85;
-        } else {
-            $confidence = 0.6;
-        }
-        $confidence = min(1.0, $confidence);
-
-        // Generate suggested reply
-        $nameGreeting = $customerName ? "Hi {$customerName}!" : "Hello!";
-        $courtLabel = $resolvedCourt ? $resolvedCourt->name : ($venue->name . " court");
-        $dateFormatted = $date ? Carbon::parse($date)->format('D, d M') : 'your requested date';
-        $timeFormatted = $startTime ? Carbon::parse($startTime)->format('h:i A') . ' - ' . Carbon::parse($endTime)->format('h:i A') : 'the requested time';
-
-        if ($isAvailable) {
-            $suggestedMessage = "{$nameGreeting} {$courtLabel} is available on {$dateFormatted} ({$timeFormatted}) for ₹" . number_format($calculatedRate) . ". Would you like me to hold this slot for 2 minutes and send the payment link?";
-        } elseif ($resolvedCourt !== null && $date !== null && $startTime !== null) {
-            $suggestedMessage = "{$nameGreeting} Unfortunately {$courtLabel} is booked on {$dateFormatted} at {$timeFormatted}. Would you like me to check the next available slot?";
-        } else {
-            $suggestedMessage = "{$nameGreeting} Thanks for reaching out to {$venue->name}! Could you please share your preferred date and time so we can check court availability?";
-        }
+        $confidence = match ($intentType) {
+            'booking_enquiry' => 0.4 + ($date !== null ? 0.2 : 0) + ($startTime !== null ? 0.25 : 0) + ($court !== null ? 0.15 : 0),
+            'pricing_query'   => 0.85,
+            default           => 0.6,
+        };
 
         return [
             'intent_type'               => $intentType,
-            'confidence'                => $confidence,
+            'confidence'                => min(1.0, $confidence),
             'detected_sport'            => $sport,
             'detected_date'             => $date,
             'detected_start_time'       => $startTime,
             'detected_end_time'         => $endTime,
             'detected_duration_minutes' => $durationMinutes,
             'detected_court_name'       => $courtName,
-            'resolved_court_id'         => $resolvedCourt?->id,
-            'resolved_court_name'       => $resolvedCourt?->name,
-            'resolved_slot_id'          => $resolvedSlotId,
+            'resolved_court_id'         => $court?->id,
+            'resolved_court_name'       => $court?->name,
+            // Desk holds book a court and a time, not a slot template.
+            'resolved_slot_id'          => null,
             'is_available'              => $isAvailable,
-            'calculated_rate'           => $calculatedRate,
-            'pricing_rule_applied'      => $pricingRuleName,
-            'suggested_message'         => $suggestedMessage,
+            'calculated_rate'           => $rate,
+            'suggested_message'         => $this->suggestedReply($venue, $customerName, $court, $date, $startTime, $endTime, $isAvailable, $rate),
         ];
+    }
+
+    /**
+     * Can this court be held for this window? Venue open that day, no closed date, no
+     * live booking or hold on the court (or a court sharing its ground), no block, and
+     * no standing booking that hasn't been written out as a row yet.
+     */
+    public function checkCourtAvailability(Venue $venue, VenueCourt $court, Carbon $date, string $startTime, string $endTime): bool
+    {
+        $startMin = BookingService::timeToMinutes(substr($startTime, 0, 5));
+        $endMin = BookingService::endMinutes(substr($endTime, 0, 5));
+
+        if ($startMin === null || $endMin === null || $endMin <= $startMin) {
+            return false;
+        }
+
+        if (! $venue->isOpenOn($date)) {
+            return false;
+        }
+
+        if (VenueBlockedDate::query()->where('venue_id', $venue->id)->whereDate('date', $date->toDateString())->exists()) {
+            return false;
+        }
+
+        if (! $this->bookings->isCourtHourFree((int) $venue->id, (int) $court->id, $date->toDateString(), $startMin, $endMin)) {
+            return false;
+        }
+
+        return ! StandingContract::query()
+            ->where('venue_id', $venue->id)
+            ->where('venue_court_id', $court->id)
+            ->where('day_of_week', $date->dayOfWeekIso)
+            ->where('status', 'active')
+            ->where('start_date', '<=', $date->toDateString())
+            ->where(fn ($q) => $q->whereNull('end_date')->orWhere('end_date', '>=', $date->toDateString()))
+            ->where('start_time', '<', $endTime)
+            ->where('end_time', '>', $startTime)
+            ->exists();
+    }
+
+    private function suggestedReply(Venue $venue, ?string $name, ?VenueCourt $court, ?string $date, ?string $start, ?string $end, bool $available, ?float $rate): string
+    {
+        $hello = $name ? "Hi {$name}!" : 'Hello!';
+
+        if ($court === null || $date === null || $start === null || $end === null) {
+            return "{$hello} Thanks for messaging {$venue->name}. Which day and time would you like to play?";
+        }
+
+        $when = Carbon::parse($date)->format('D, d M').', '
+            .Carbon::parse($start)->format('g:i A').' – '.Carbon::parse($end)->format('g:i A');
+
+        if (! $available) {
+            return "{$hello} {$court->name} is already booked on {$when}. Shall I check another time?";
+        }
+
+        return "{$hello} {$court->name} is free on {$when} for ₹".number_format((float) $rate)
+            .'. Shall I hold it for you and send the payment link?';
     }
 
     private function detectIntentType(string $text): string
     {
-        if (preg_match('/\b(book|slot|court|turf|available|play|reserve|pitch|ground)\b/i', $text)) {
-            return 'booking_enquiry';
-        }
-        if (preg_match('/\b(price|rate|cost|charges|fee|pricing|how much)\b/i', $text)) {
-            return 'pricing_query';
-        }
-        if (preg_match('/\b(cancel|refund|drop)\b/i', $text)) {
-            return 'cancellation';
-        }
-        if (preg_match('/\b(reschedule|postpone|change time|shift slot)\b/i', $text)) {
-            return 'reschedule';
-        }
-        return 'general_faq';
+        return match (true) {
+            (bool) preg_match('/\b(cancel|refund)\b/i', $text) => 'cancellation',
+            (bool) preg_match('/\b(reschedule|postpone|change (the )?time|shift (my )?slot)\b/i', $text) => 'reschedule',
+            (bool) preg_match('/\b(book|slot|court|turf|available|availability|play|reserve|pitch|ground|free)\b/i', $text) => 'booking_enquiry',
+            (bool) preg_match('/\b(price|prices|rate|rates|cost|charges|fee|pricing|how much)\b/i', $text) => 'pricing_query',
+            default => 'general_faq',
+        };
     }
 
     private function extractSport(string $text): ?string
     {
         $sports = [
-            'cricket'    => ['cricket', 'box cricket', 'turf cricket', 'nets'],
+            'cricket'    => ['cricket', 'nets'],
             'football'   => ['football', 'futsal', 'soccer'],
             'badminton'  => ['badminton', 'shuttle'],
-            'tennis'     => ['tennis', 'lawn tennis'],
-            'basketball' => ['basketball', 'hoop'],
+            'tennis'     => ['tennis'],
+            'basketball' => ['basketball'],
             'pickleball' => ['pickleball'],
             'volleyball' => ['volleyball'],
         ];
@@ -177,44 +190,49 @@ final class WhatsAppIntentEngine
         return null;
     }
 
+    /** The day the customer named, on the venue's calendar — or null if they named none. */
     private function extractDate(string $text): ?string
     {
-        $today = Carbon::today();
+        $today = BusinessClock::todayDate();
 
-        if (str_contains($text, 'today') || str_contains($text, 'tonight')) {
-            return $today->toDateString();
-        }
-        if (str_contains($text, 'tomorrow')) {
-            return $today->copy()->addDay()->toDateString();
-        }
+        // Longest phrase first: "day after tomorrow" also contains "tomorrow".
         if (str_contains($text, 'day after tomorrow')) {
             return $today->copy()->addDays(2)->toDateString();
         }
+        if (str_contains($text, 'tomorrow') || str_contains($text, 'tmrw') || str_contains($text, 'tmr')) {
+            return $today->copy()->addDay()->toDateString();
+        }
+        if (str_contains($text, 'today') || str_contains($text, 'tonight')) {
+            return $today->toDateString();
+        }
 
-        // Check for days of week: monday, tuesday, etc.
         $days = [
-            'monday'    => Carbon::MONDAY,
-            'tuesday'   => Carbon::TUESDAY,
-            'wednesday' => Carbon::WEDNESDAY,
-            'thursday'  => Carbon::THURSDAY,
-            'friday'    => Carbon::FRIDAY,
-            'saturday'  => Carbon::SATURDAY,
-            'sunday'    => Carbon::SUNDAY,
+            'monday' => Carbon::MONDAY, 'tuesday' => Carbon::TUESDAY, 'wednesday' => Carbon::WEDNESDAY,
+            'thursday' => Carbon::THURSDAY, 'friday' => Carbon::FRIDAY, 'saturday' => Carbon::SATURDAY,
+            'sunday' => Carbon::SUNDAY,
         ];
 
-        foreach ($days as $dayName => $carbonDay) {
-            if (preg_match('/\b(this|next)?\s*' . $dayName . '\b/i', $text)) {
-                $target = $today->copy()->next($carbonDay);
+        foreach ($days as $dayName => $weekday) {
+            if (preg_match('/\b(next\s+)?'.$dayName.'\b/i', $text, $m)) {
+                $target = $today->dayOfWeek === $weekday && empty($m[1])
+                    ? $today->copy()
+                    : $today->copy()->next($weekday);
+
                 return $target->toDateString();
             }
         }
 
-        // Check for date formats like "15th sep", "15 sep", "15 September", "2026-09-15"
         if (preg_match('/\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i', $text, $m)) {
-            $parsed = Carbon::parse("{$m[1]} {$m[2]} {$today->year}");
-            if ($parsed->isPast() && $parsed->diffInDays($today) > 30) {
+            try {
+                $parsed = Carbon::parse("{$m[1]} {$m[2]} {$today->year}");
+            } catch (\Throwable) {
+                return null;
+            }
+            // "5 Jan" said in December is next year.
+            if ($parsed->lt($today->copy()->subDays(30))) {
                 $parsed->addYear();
             }
+
             return $parsed->toDateString();
         }
 
@@ -222,7 +240,7 @@ final class WhatsAppIntentEngine
             return $m[1];
         }
 
-        return $today->toDateString(); // Default to today if booking enquiry without date
+        return null;
     }
 
     /**
@@ -230,152 +248,106 @@ final class WhatsAppIntentEngine
      */
     private function extractTimeRange(string $text): array
     {
-        $duration = 60; // default 1 hour in minutes
-        if (preg_match('/\b(\d+)\s*(?:hrs?|hours?)\b/i', $text, $dm)) {
-            $duration = (int) $dm[1] * 60;
-        } elseif (preg_match('/\b90\s*(?:mins?|minutes?)\b/i', $text)) {
-            $duration = 90;
+        $duration = 60;
+        if (preg_match('/\b(\d+(?:\.5)?)\s*(?:hrs?|hours?)\b/i', $text, $dm)) {
+            $duration = (int) round((float) $dm[1] * 60);
+        } elseif (preg_match('/\b(\d{2,3})\s*(?:mins?|minutes?)\b/i', $text, $dm)) {
+            $duration = (int) $dm[1];
+        }
+        $duration = max(30, min(12 * 60, $duration));
+
+        // "6pm to 7pm", "6-7 pm", "6:30 - 8 pm"
+        if (preg_match('/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-|–)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i', $text, $m)) {
+            $endMer = strtolower($m[6]);
+            $startMer = $m[3] !== '' ? strtolower($m[3]) : $endMer;
+            $startMin = $this->to24((int) $m[1], $startMer) * 60 + (int) ($m[2] ?: 0);
+            $endMin = $this->to24((int) $m[4], $endMer) * 60 + (int) ($m[5] ?: 0);
+
+            // "11-1 pm" means 11 AM to 1 PM.
+            if ($m[3] === '' && $endMin <= $startMin && $startMin >= 12 * 60) {
+                $startMin -= 12 * 60;
+            }
+
+            if ($endMin > $startMin) {
+                return ['start' => $this->hms($startMin), 'end' => $this->hms($endMin), 'duration' => $endMin - $startMin];
+            }
         }
 
-        // Match time patterns like: "6pm to 7pm", "6-7 pm", "6:00 pm", "18:00 - 19:00", "7 pm", "at 6"
-        if (preg_match('/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i', $text, $m)) {
-            $startH = (int) $m[1];
-            $startM = (int) ($m[2] ?? 0);
-            $startMeridian = $m[3] ? strtolower($m[3]) : strtolower($m[6]);
-            if ($startMeridian === 'pm' && $startH < 12) $startH += 12;
-            if ($startMeridian === 'am' && $startH === 12) $startH = 0;
-
-            $endH = (int) $m[4];
-            $endM = (int) ($m[5] ?? 0);
-            $endMeridian = strtolower($m[6]);
-            if ($endMeridian === 'pm' && $endH < 12) $endH += 12;
-            if ($endMeridian === 'am' && $endH === 12) $endH = 0;
-
-            $startFormatted = sprintf('%02d:%02d:00', $startH, $startM);
-            $endFormatted = sprintf('%02d:%02d:00', $endH, $endM);
-            $diffMins = ($endH * 60 + $endM) - ($startH * 60 + $startM);
-            if ($diffMins > 0) $duration = $diffMins;
-
-            return ['start' => $startFormatted, 'end' => $endFormatted, 'duration' => $duration];
-        }
-
-        // Single time match like "6pm", "6:30 pm", "18:00"
+        // "6pm", "6:30 pm"
         if (preg_match('/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i', $text, $m)) {
-            $h = (int) $m[1];
-            $min = (int) ($m[2] ?? 0);
-            $meridian = strtolower($m[3]);
-            if ($meridian === 'pm' && $h < 12) $h += 12;
-            if ($meridian === 'am' && $h === 12) $h = 0;
+            $startMin = $this->to24((int) $m[1], strtolower($m[3])) * 60 + (int) ($m[2] ?: 0);
 
-            $startFormatted = sprintf('%02d:%02d:00', $h, $min);
-            $endTimeObj = Carbon::createFromTime($h, $min, 0)->addMinutes($duration);
-            $endFormatted = $endTimeObj->format('H:i:s');
-
-            return ['start' => $startFormatted, 'end' => $endFormatted, 'duration' => $duration];
+            return $this->window($startMin, $duration);
         }
 
-        // Check for 24-hour pattern "18:00"
+        // "18:00"
         if (preg_match('/\b([01]?\d|2[0-3]):([0-5]\d)\b/', $text, $m)) {
-            $h = (int) $m[1];
-            $min = (int) $m[2];
-            $startFormatted = sprintf('%02d:%02d:00', $h, $min);
-            $endTimeObj = Carbon::createFromTime($h, $min, 0)->addMinutes($duration);
-            $endFormatted = $endTimeObj->format('H:i:s');
-
-            return ['start' => $startFormatted, 'end' => $endFormatted, 'duration' => $duration];
+            return $this->window((int) $m[1] * 60 + (int) $m[2], $duration);
         }
 
-        return ['start' => '18:00:00', 'end' => '19:00:00', 'duration' => 60]; // Sensible default evening slot
+        return ['start' => null, 'end' => null, 'duration' => $duration];
+    }
+
+    /** @return array{start: ?string, end: ?string, duration: int} */
+    private function window(int $startMin, int $duration): array
+    {
+        // A booking can't run past midnight; don't suggest one that would.
+        if ($startMin + $duration > 24 * 60) {
+            return ['start' => $this->hms($startMin), 'end' => null, 'duration' => $duration];
+        }
+
+        return ['start' => $this->hms($startMin), 'end' => $this->hms($startMin + $duration), 'duration' => $duration];
+    }
+
+    private function to24(int $hour, string $meridian): int
+    {
+        $hour %= 12;
+
+        return $meridian === 'pm' ? $hour + 12 : $hour;
+    }
+
+    private function hms(int $minutes): string
+    {
+        return sprintf('%02d:%02d:00', intdiv($minutes, 60) % 24, $minutes % 60);
     }
 
     private function extractCourtName(string $text): ?string
     {
-        if (preg_match('/\b(court|turf|pitch)\s*([a-z0-9]+)\b/i', $text, $m)) {
-            return ucfirst($m[1]) . ' ' . strtoupper($m[2]);
+        if (preg_match('/\b(court|turf|pitch|net)\s*(?:no\.?\s*)?([a-z]|\d{1,2})\b/i', $text, $m)) {
+            return ucfirst(strtolower($m[1])).' '.strtoupper($m[2]);
         }
+
         return null;
     }
 
+    /**
+     * The court the customer means: named outright, or the only one that runs their
+     * sport, or the only court the venue has. Anything more ambiguous is left for staff.
+     */
     private function resolveCourt(Venue $venue, ?string $sport, ?string $courtName): ?VenueCourt
     {
-        $query = VenueCourt::where('venue_id', $venue->id)->where('is_active', true);
+        $courts = VenueCourt::query()
+            ->where('venue_id', $venue->id)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
 
         if ($courtName !== null) {
-            $byName = (clone $query)->where('name', 'LIKE', '%' . $courtName . '%')->first();
-            if ($byName) return $byName;
-        }
-
-        if ($sport !== null) {
-            $courts = (clone $query)->get();
-            foreach ($courts as $court) {
-                if (in_array($sport, $court->sportsList(), true)) {
-                    return $court;
-                }
+            $needle = mb_strtolower($courtName);
+            $byName = $courts->first(fn (VenueCourt $c): bool => str_contains(mb_strtolower($c->name), $needle));
+            if ($byName !== null) {
+                return $byName;
             }
         }
 
-        return $query->orderBy('sort_order')->orderBy('id')->first();
-    }
-
-    public function checkCourtAvailability(
-        Venue $venue,
-        VenueCourt $court,
-        Carbon $date,
-        string $startTime,
-        string $endTime
-    ): bool {
-        // 1. Check existing confirmed bookings OR active holds (reserved_until in future)
-        $conflicts = Booking::where('venue_id', $venue->id)
-            ->where(function ($q) use ($court) {
-                $q->where('venue_court_id', $court->id);
-                // Also check parent/child court relationships
-                if ($court->parent_court_id !== null) {
-                    $q->orWhere('venue_court_id', $court->parent_court_id);
-                } else {
-                    $childIds = VenueCourt::where('parent_court_id', $court->id)->pluck('id')->all();
-                    if (! empty($childIds)) {
-                        $q->orWhereIn('venue_court_id', $childIds);
-                    }
-                }
-            })
-            ->whereDate('slot_date', $date->toDateString())
-            ->where(function ($q) {
-                // Confirmed or Checked In
-                $q->whereIn('status', ['confirmed', 'checked_in'])
-                  // OR Active temporary hold (reserved_until is still in the future)
-                  ->orWhere(function ($holdQ) {
-                      $holdQ->where('status', 'hold')
-                            ->where('reserved_until', '>', now());
-                  });
-            })
-            ->where(function ($timeQ) use ($startTime, $endTime) {
-                $timeQ->where(function ($overlap) use ($startTime, $endTime) {
-                    $overlap->where('start_time', '<', $endTime)
-                            ->where('end_time', '>', $startTime);
-                });
-            })
-            ->exists();
-
-        if ($conflicts) {
-            return false;
+        if ($sport !== null) {
+            $forSport = $courts->filter(fn (VenueCourt $c): bool => in_array($sport, $c->sportsList(), true));
+            if ($forSport->count() === 1) {
+                return $forSport->first();
+            }
         }
 
-        // 2. Check Standing Slot recurring contracts
-        $dayOfWeek = $date->dayOfWeekIso; // 1 (Mon) to 7 (Sun)
-        $contractConflict = StandingContract::where('venue_id', $venue->id)
-            ->where('venue_court_id', $court->id)
-            ->where('day_of_week', $dayOfWeek)
-            ->where('status', 'active')
-            ->where('start_date', '<=', $date->toDateString())
-            ->where(function ($q) use ($date) {
-                $q->whereNull('end_date')->orWhere('end_date', '>=', $date->toDateString());
-            })
-            ->where(function ($timeQ) use ($startTime, $endTime) {
-                $timeQ->where('start_time', '<', $endTime)
-                      ->where('end_time', '>', $startTime);
-            })
-            ->exists();
-
-        return ! $contractConflict;
+        return $courts->count() === 1 ? $courts->first() : null;
     }
 }

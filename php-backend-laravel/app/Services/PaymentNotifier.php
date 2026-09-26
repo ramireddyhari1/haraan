@@ -153,7 +153,13 @@ final class PaymentNotifier
     /** The same ladder the ticket uses, so the receipt reaches whoever the ticket did. */
     private function phone(Booking $booking): ?string
     {
-        foreach ([$booking->attendee_phone, $booking->user->phone ?? null, $booking->guest_phone] as $candidate) {
+        // A desk booking's `user` is the partner who took it — their phone must never
+        // receive the customer's receipt.
+        $ladder = $booking->isDeskBooking()
+            ? [$booking->attendee_phone, $booking->guest_phone]
+            : [$booking->attendee_phone, $booking->user->phone ?? null, $booking->guest_phone];
+
+        foreach ($ladder as $candidate) {
             $digits = (string) preg_replace('/[^0-9]/', '', (string) $candidate);
 
             if (strlen($digits) >= 10) {

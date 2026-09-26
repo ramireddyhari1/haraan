@@ -476,7 +476,7 @@ final class BookingNotifier
      */
     private function push(Booking $booking, string $title, string $when, string $where, string $code, ?string $passUrl): void
     {
-        if (strtolower((string) $booking->channel) === 'offline') {
+        if ($booking->isDeskBooking()) {
             return;
         }
 
@@ -682,7 +682,7 @@ final class BookingNotifier
      */
     private function isDeskWalkIn(Booking $booking): bool
     {
-        return strtolower((string) $booking->channel) === 'offline';
+        return $booking->isDeskBooking();
     }
 
     private function recipientEmail(Booking $booking): ?string

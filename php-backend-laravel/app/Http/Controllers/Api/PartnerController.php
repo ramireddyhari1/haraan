@@ -465,7 +465,7 @@ class PartnerController extends Controller
                 'sort'     => $start?->timestamp ?? PHP_INT_MAX,
                 'running'  => $start !== null && $end !== null && $now->betweenIncluded($start, $end),
                 'past'     => $end !== null && $now->greaterThan($end),
-                'customer' => strtolower((string) $b->channel) === 'offline'
+                'customer' => $b->isDeskBooking()
                     ? ($b->guest_name ?: 'Walk-in')
                     : ($b->attendee_name ?: $b->user?->name ?: 'Guest'),
                 'venue'    => $venueName($b),
@@ -1767,7 +1767,7 @@ class PartnerController extends Controller
         $anonymous = 0;
 
         foreach ($rows as $b) {
-            $isDesk = strtolower((string) $b->channel) === 'offline';
+            $isDesk = $b->isDeskBooking();
 
             $phone = $this->digits($isDesk ? $b->guest_phone : ($b->user->phone ?? $b->guest_phone));
             $name = trim((string) ($isDesk
@@ -2411,7 +2411,7 @@ class PartnerController extends Controller
             // Who it was for, and how it was taken — a desk feed of identical
             // venue names tells the owner nothing about which booking is which.
             // Guest fields first: an offline row's user_id is the PARTNER.
-            'customer'     => strtolower((string) $b->channel) === 'offline'
+            'customer'     => $b->isDeskBooking()
                 ? ($b->guest_name ?: 'Walk-in')
                 : ($b->attendee_name ?: $b->user?->name ?: 'Guest'),
             'channel'      => $b->channel ?? 'online',
