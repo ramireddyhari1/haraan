@@ -314,9 +314,34 @@ data class DayBooking(
 enum class PayMethod(val api: String, val label: String) {
     CASH("cash", "Cash"),
     UPI("upi", "UPI"),
+    /** A Razorpay UPI QR on the desk's screen, confirmed automatically when paid. */
+    UPI_QR("upi_qr", "UPI QR"),
     CARD("card", "Card"),
     LINK("link", "Payment link"),
     PACKAGE("package", "Use a session"),
+}
+
+/**
+ * What the desk shows while a walk-in pays online: a UPI QR (`kind = upi_qr`, [qr] is a
+ * `upi://pay` string any UPI app scans) or a payment link (`kind = link`, [qr] is the
+ * link's URL for the phone camera). [error] is set when neither could be made.
+ */
+data class DeskPayment(
+    val kind: String,
+    /** How to show it: `qr` draw the UPI QR, `page` open Razorpay's page in the app, `share` a link to send. */
+    val present: String,
+    val id: String?,
+    val qr: String?,
+    val url: String?,
+    val imageUrl: String?,
+    val amount: Double,
+    val expiresInSeconds: Int,
+    val error: String?,
+) {
+    val isQr: Boolean get() = kind == "upi_qr"
+    val isPage: Boolean get() = present == "page" && url != null
+    /** Something the desk can actually put in front of the customer. */
+    val isUsable: Boolean get() = error == null && id != null && (qr != null || imageUrl != null || url != null)
 }
 
 /** Outcome of creating a walk-in: the booking, plus a Razorpay link when asked for. */
@@ -326,7 +351,11 @@ data class WalkInResult(
     val paymentMethod: String,
     val paymentLink: String?,
     val paymentLinkId: String?,
+    val payment: DeskPayment? = null,
 )
+
+/** Reply to "make a fresh QR": either it was paid meanwhile, or here is the new one. */
+data class PaymentRequestResult(val paid: Boolean, val payment: DeskPayment?)
 
 /** Live payment state of a walk-in's link, straight from Razorpay. */
 data class PayState(val paid: Boolean, val status: String)
@@ -1348,8 +1377,55 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             paymentMethod = o.optString("payment_method", method.api),
             paymentLink = o.optStringOrNull("payment_link"),
             paymentLinkId = o.optStringOrNull("payment_link_id"),
+            payment = parseDeskPayment(o.optJSONObject("payment")),
         )
     }
+
+    private fun parseDeskPayment(p: JSONObject?): DeskPayment? = p?.let {
+        val kind = it.optString("kind", "link")
+        DeskPayment(
+            kind = kind,
+            present = it.optStringOrNull("present") ?: if (kind == "upi_qr") "qr" else "share",
+            id = it.optStringOrNull("id"),
+            qr = it.optStringOrNull("qr"),
+            url = it.optStringOrNull("url"),
+            imageUrl = it.optStringOrNull("image_url"),
+            amount = it.optDouble("amount", 0.0),
+            expiresInSeconds = it.optInt("expires_in", 300),
+            error = it.optStringOrNull("error"),
+        )
+    }
+
+    /**
+     * Has the desk's UPI QR or link been paid? [close] stops it taking money first (the
+     * timer ran out) and still reports a payment that landed just before.
+     */
+    suspend fun deskPaymentStatus(token: String, bookingId: Long, payment: DeskPayment, close: Boolean = false): PayState =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put(if (payment.isQr) "qrId" else "linkId", payment.id).put("close", close)
+            val o = JSONObject(post("/api/partner/bookings/$bookingId/payment-status", payload.toString(), token))
+            PayState(paid = o.optBoolean("paid", false), status = o.optString("status", "unknown"))
+        }
+
+    /** A fresh QR/link for the balance; the one it replaces is closed first. */
+    suspend fun deskPaymentRequest(token: String, bookingId: Long, kind: String, replacing: DeskPayment?): PaymentRequestResult =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put("kind", kind)
+            if (replacing?.id != null) payload.put("replaceKind", replacing.kind).put("replaceId", replacing.id)
+            val o = JSONObject(post("/api/partner/bookings/$bookingId/payment-request", payload.toString(), token))
+            PaymentRequestResult(paid = o.optBoolean("paid", false), payment = parseDeskPayment(o.optJSONObject("payment")))
+        }
+
+    /**
+     * The customer paid the balance at the desk after all. Closes the open QR/link first;
+     * returns "online" when it turns out they had already paid it.
+     */
+    suspend fun collectAtDesk(token: String, bookingId: Long, method: PayMethod, open: DeskPayment?): String =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put("method", method.api)
+            if (open?.id != null) payload.put("closeKind", open.kind).put("closeId", open.id)
+            JSONObject(post("/api/partner/bookings/$bookingId/collect", payload.toString(), token)).optString("via", method.api)
+        }
 
     /**
      * Ask whether the walk-in's payment link has been paid. The server checks Razorpay

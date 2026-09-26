@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.haraan.partner.DayGrid
+import com.haraan.partner.DeskPayment
 import com.haraan.partner.PayMethod
 import com.haraan.partner.daybookings.data.DayBookingsRepository
 import com.haraan.partner.daybookings.data.Resource
@@ -51,6 +52,34 @@ data class DayBookingsUiState(
      * plays the firm money buzz instead of the plain confirm.
      */
     val successIsMoney: Boolean = false,
+    /** A walk-in paying online right now: the QR/link sheet is open while this is set. */
+    val deskPay: DeskPayState? = null,
+)
+
+/** Where a walk-in's online payment stands while the desk watches it. */
+enum class DeskPayPhase { WAITING, PAID, EXPIRED, FAILED }
+
+data class DeskPayState(
+    val bookingId: Long,
+    val customer: String,
+    val amount: Double,
+    val payment: DeskPayment?,
+    val secondsLeft: Int,
+    val totalSeconds: Int,
+    val phase: DeskPayPhase,
+    /** A button's request is in flight — the sheet disables its actions. */
+    val busy: Boolean = false,
+    /** Checking with Razorpay right now (drives the live pulse). */
+    val checking: Boolean = false,
+    /** How it was settled once PAID: "online", "cash", "upi", "card". */
+    val paidVia: String? = null,
+    val message: String? = null,
+    /**
+     * Razorpay's payment page is on screen (in place of the sheet). It is a sibling of
+     * the sheet, never a window inside it: a dialog opened from a bottom sheet makes the
+     * sheet dismiss itself, which closed the payment the customer was about to make.
+     */
+    val pageOpen: Boolean = false,
 )
 
 class DayBookingsViewModel(
@@ -281,6 +310,14 @@ class DayBookingsViewModel(
 
             result.fold(
                 onSuccess = { walkInResult ->
+                    if ((method == PayMethod.UPI_QR || method == PayMethod.LINK) && walkInResult.bookingId > 0) {
+                        // Booked, but not paid: hand over to the QR sheet, which says
+                        // "paid" only when Razorpay does.
+                        _uiState.update { it.copy(walkInTarget = null, isSubmittingWalkIn = false) }
+                        startDeskPay(walkInResult.bookingId, name, walkInResult.amount, walkInResult.payment)
+                        loadData(forceRefresh = true)
+                        return@fold
+                    }
                     _uiState.update {
                         it.copy(
                             walkInTarget = null,
@@ -301,6 +338,163 @@ class DayBookingsViewModel(
                     }
                 }
             )
+        }
+    }
+
+    // ---- Online payment at the desk (UPI QR / payment link) ---------------------
+
+    private var deskPayJob: Job? = null
+
+    private fun startDeskPay(bookingId: Long, customer: String, amount: Double, payment: DeskPayment?) {
+        val usable = payment?.isUsable == true
+        val total = (payment?.expiresInSeconds ?: 300).coerceAtLeast(30)
+        _uiState.update {
+            it.copy(
+                deskPay = DeskPayState(
+                    bookingId = bookingId,
+                    customer = customer,
+                    amount = payment?.amount?.takeIf { a -> a > 0 } ?: amount,
+                    payment = payment,
+                    secondsLeft = total,
+                    totalSeconds = total,
+                    phase = if (usable) DeskPayPhase.WAITING else DeskPayPhase.FAILED,
+                    pageOpen = usable && payment?.isPage == true,
+                    message = if (usable) null else payment?.error ?: "Couldn't start an online payment. Take cash or try again.",
+                )
+            )
+        }
+        if (usable) watchDeskPay()
+    }
+
+    /** One-second countdown; asks Razorpay every third second; closes the QR at zero. */
+    private fun watchDeskPay() {
+        deskPayJob?.cancel()
+        deskPayJob = viewModelScope.launch {
+            var tick = 0
+            while (true) {
+                kotlinx.coroutines.delay(1_000)
+                val s = _uiState.value.deskPay ?: return@launch
+                if (s.phase != DeskPayPhase.WAITING) return@launch
+                val left = (s.secondsLeft - 1).coerceAtLeast(0)
+                _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(secondsLeft = left)) }
+                tick++
+                val expired = left == 0
+                if (tick % 3 != 0 && !expired) continue
+
+                val payment = s.payment ?: return@launch
+                _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(checking = true)) }
+                // At zero a QR (or the page link nobody was texted) is closed, and checked one last time.
+                val res = repository.deskPaymentStatus(token, s.bookingId, payment, close = expired && (payment.isQr || payment.isPage))
+                val paid = res.getOrNull()?.paid == true
+                _uiState.update { st ->
+                    val cur = st.deskPay ?: return@update st
+                    st.copy(
+                        deskPay = when {
+                            paid -> cur.copy(phase = DeskPayPhase.PAID, paidVia = "online", checking = false)
+                            expired -> cur.copy(phase = DeskPayPhase.EXPIRED, checking = false)
+                            else -> cur.copy(checking = false)
+                        }
+                    )
+                }
+                if (paid) {
+                    loadData(forceRefresh = true)
+                    return@launch
+                }
+                if (expired) return@launch
+            }
+        }
+    }
+
+    /** Show / hide Razorpay's page. Hiding it goes back to the sheet; nothing is cancelled. */
+    fun deskPayShowPage(show: Boolean) {
+        _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(pageOpen = show)) }
+    }
+
+    /** A fresh QR (or link) for the same booking; the old one is closed first. */
+    fun deskPayRetry(kind: String) {
+        val s = _uiState.value.deskPay ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(deskPay = s.copy(busy = true, message = null)) }
+            repository.deskPaymentRequest(token, s.bookingId, kind, s.payment).fold(
+                onSuccess = { r ->
+                    if (r.paid) {
+                        _uiState.update { it.copy(deskPay = s.copy(busy = false, phase = DeskPayPhase.PAID, paidVia = "online")) }
+                        loadData(forceRefresh = true)
+                    } else {
+                        startDeskPay(s.bookingId, s.customer, s.amount, r.payment)
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(deskPay = s.copy(busy = false, message = e.message ?: "Couldn't make a new QR")) }
+                },
+            )
+        }
+    }
+
+    /** The customer paid at the counter after all. The server closes the QR first. */
+    fun deskPayCollect(method: PayMethod) {
+        val s = _uiState.value.deskPay ?: return
+        deskPayJob?.cancel()
+        viewModelScope.launch {
+            _uiState.update { it.copy(deskPay = s.copy(busy = true, message = null)) }
+            repository.collectAtDesk(token, s.bookingId, method, s.payment).fold(
+                onSuccess = { via ->
+                    _uiState.update { it.copy(deskPay = s.copy(busy = false, phase = DeskPayPhase.PAID, paidVia = via)) }
+                    loadData(forceRefresh = true)
+                    checkPendingActions()
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(deskPay = s.copy(busy = false, message = e.message ?: "Couldn't record the payment")) }
+                    if (s.phase == DeskPayPhase.WAITING) watchDeskPay()
+                },
+            )
+        }
+    }
+
+    /** Drop the booking — the customer walked away. Closes the QR so it can't be paid. */
+    fun deskPayCancelBooking() {
+        val s = _uiState.value.deskPay ?: return
+        deskPayJob?.cancel()
+        viewModelScope.launch {
+            _uiState.update { it.copy(deskPay = s.copy(busy = true, message = null)) }
+            // Closing also checks once more, so a scan that just landed is not cancelled.
+            val paidMeanwhile = s.payment?.takeIf { it.id != null }
+                ?.let { repository.deskPaymentStatus(token, s.bookingId, it, close = true).getOrNull()?.paid } == true
+            if (paidMeanwhile) {
+                _uiState.update { it.copy(deskPay = s.copy(busy = false, phase = DeskPayPhase.PAID, paidVia = "online")) }
+                loadData(forceRefresh = true)
+                return@launch
+            }
+            val state = _uiState.value
+            repository.cancelBooking(token, s.bookingId, state.venueId, state.selectedDate)
+            _uiState.update { it.copy(deskPay = null, successSnackbarMessage = "Booking for ${s.customer} cancelled") }
+            loadData(forceRefresh = true)
+            checkPendingActions()
+        }
+    }
+
+    /**
+     * Close the sheet. A QR still on screen is closed on the server — nobody is watching
+     * it any more, so a scan after this would be money with no booking settled. A link
+     * stays valid: it was texted to the customer to pay from wherever they are.
+     */
+    fun deskPayDismiss() {
+        val s = _uiState.value.deskPay ?: return
+        deskPayJob?.cancel()
+        _uiState.update {
+            it.copy(
+                deskPay = null,
+                successSnackbarMessage = if (s.phase == DeskPayPhase.PAID) "₹${s.amount.toInt()} received from ${s.customer}" else null,
+                successIsMoney = s.phase == DeskPayPhase.PAID,
+            )
+        }
+        val p = s.payment
+        if (s.phase == DeskPayPhase.WAITING && p != null && (p.isQr || p.isPage) && p.id != null) {
+            viewModelScope.launch {
+                val paid = repository.deskPaymentStatus(token, s.bookingId, p, close = true).getOrNull()?.paid == true
+                if (paid) _uiState.update { it.copy(successSnackbarMessage = "₹${s.amount.toInt()} received from ${s.customer}", successIsMoney = true) }
+                loadData(forceRefresh = true)
+            }
         }
     }
 

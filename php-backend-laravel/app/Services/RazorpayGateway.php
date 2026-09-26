@@ -22,6 +22,8 @@ final class RazorpayGateway
 
     private const PAYMENT_LINKS_ENDPOINT = 'https://api.razorpay.com/v1/payment_links';
 
+    private const QR_CODES_ENDPOINT = 'https://api.razorpay.com/v1/payments/qr_codes';
+
     /** Whether both keys are configured — callers gate the whole payment path on this. */
     public function isConfigured(): bool
     {
@@ -98,6 +100,7 @@ final class RazorpayGateway
         ?string $customerName = null,
         ?string $customerPhone = null,
         array $notes = [],
+        bool $notifySms = true,
     ): array {
         PaymentsPaused::guard();
 
@@ -116,7 +119,9 @@ final class RazorpayGateway
             'description' => mb_substr($description, 0, 120),
             'notes'       => $notes,
             // Let Razorpay text the link too when we know the number.
-            'notify'      => ['sms' => $customerPhone !== null, 'email' => false],
+            // Off when the customer pays on the desk's own screen — a text of the same
+            // link would only be a second way to pay one booking.
+            'notify'      => ['sms' => $notifySms && $customerPhone !== null, 'email' => false],
             'reminder_enable' => true,
         ];
 
@@ -209,7 +214,175 @@ final class RazorpayGateway
             'paid'        => $paid,
             'payment_id'  => $paymentId ?: null,
             'amount_paid' => ((int) ($link['amount_paid'] ?? 0)) / 100,
+            // The booking this link was minted for. Callers must match it against the
+            // booking they are settling, or one paid link could settle any booking.
+            'booking_id'  => isset($link['notes']['booking_id']) ? (string) $link['notes']['booking_id'] : null,
         ];
+    }
+
+    /**
+     * Stop a payment link taking money. Used when the desk replaces or abandons a link,
+     * so a customer can't pay the old one and the new one both. Best-effort.
+     */
+    public function cancelPaymentLink(string $linkId): void
+    {
+        if (! $this->isConfigured() || trim($linkId) === '') {
+            return;
+        }
+
+        try {
+            Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()->timeout(15)
+                ->post(self::PAYMENT_LINKS_ENDPOINT.'/'.trim($linkId).'/cancel');
+        } catch (\Throwable) {
+            // A paid or expired link refuses cancel; either way it takes no new money.
+        }
+    }
+
+    /**
+     * Mint a single-use, fixed-amount **UPI QR** for the desk to show the customer.
+     *
+     * Any UPI app scans it and pays exactly this amount. Like a payment link, creating
+     * one is not money: the booking is settled only once {@see self::upiQrStatus()}
+     * reports a captured payment.
+     *
+     * `close_by` is where Razorpay stops accepting payments. The desk's own countdown is
+     * usually shorter and closes the QR itself ({@see self::closeUpiQr()}); this is only
+     * the backstop, kept past Razorpay's minimum window.
+     *
+     * @param  array<string, string>  $notes
+     * @return array{id: string, upi: string|null, image_url: string|null, close_by: int}
+     *
+     * @throws RuntimeException  On misconfiguration, a QR feature not enabled on the
+     *                           account, auth failure, or an unreachable API.
+     */
+    public function createUpiQr(int $amountPaise, string $name, string $description, int $minutes, array $notes = []): array
+    {
+        PaymentsPaused::guard();
+
+        if (! $this->isConfigured()) {
+            throw new RuntimeException('Payments are not configured.', 500);
+        }
+
+        if ($amountPaise < self::MIN_AMOUNT_PAISE) {
+            throw new RuntimeException('Amount is below the minimum.', 422);
+        }
+
+        // Razorpay refuses a close_by too close to now; 16 minutes clears its floor.
+        $closeBy = time() + max($minutes + 2, 16) * 60;
+
+        try {
+            $response = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()
+                ->timeout(20)
+                ->post(self::QR_CODES_ENDPOINT, [
+                    'type'           => 'upi_qr',
+                    'name'           => mb_substr($name, 0, 40),
+                    'usage'          => 'single_use',
+                    'fixed_amount'   => true,
+                    'payment_amount' => $amountPaise,
+                    'description'    => mb_substr($description, 0, 120),
+                    'close_by'       => $closeBy,
+                    'notes'          => $notes,
+                ]);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('Could not reach the payment provider.', 502);
+        }
+
+        if ($response->status() === 401) {
+            throw new RuntimeException('Payment authentication failed.', 401);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Could not create the UPI QR: '.mb_substr($response->body(), 0, 200), 500);
+        }
+
+        $qr = $response->json();
+        $upi = (string) ($qr['image_content'] ?? '');
+
+        return [
+            'id'        => (string) ($qr['id'] ?? ''),
+            // The raw upi://pay string, so the app draws a crisp QR itself.
+            'upi'       => str_starts_with($upi, 'upi://') ? $upi : null,
+            'image_url' => $qr['image_url'] ?? null,
+            'close_by'  => (int) ($qr['close_by'] ?? $closeBy),
+        ];
+    }
+
+    /**
+     * Has this UPI QR been paid? Same contract as {@see self::paymentLinkStatus()}: only a
+     * captured payment of the full fixed amount counts, and an unreachable gateway throws
+     * (callers treat that as "don't know", never "unpaid").
+     *
+     * @return array{status: string, paid: bool, payment_id: string|null, amount_paid: float, booking_id: string|null}
+     */
+    public function upiQrStatus(string $qrId): array
+    {
+        if (! $this->isConfigured()) {
+            throw new RuntimeException('Payments are not configured.', 500);
+        }
+
+        $qrId = trim($qrId);
+
+        if ($qrId === '') {
+            throw new RuntimeException('Missing QR id.', 422);
+        }
+
+        try {
+            $qrResponse = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()->timeout(15)
+                ->get(self::QR_CODES_ENDPOINT.'/'.$qrId);
+            $paymentsResponse = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()->timeout(15)
+                ->get(self::QR_CODES_ENDPOINT.'/'.$qrId.'/payments');
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('Could not reach the payment provider.', 502);
+        }
+
+        if (! $qrResponse->successful() || ! $paymentsResponse->successful()) {
+            throw new RuntimeException('Could not read the UPI QR.', 500);
+        }
+
+        $qr = $qrResponse->json();
+        $expected = (int) ($qr['payment_amount'] ?? 0);
+
+        $paymentId = null;
+        $amountPaid = 0;
+        foreach ((array) ($paymentsResponse->json('items') ?? []) as $p) {
+            if (is_array($p) && ($p['status'] ?? '') === 'captured') {
+                $paymentId = (string) ($p['id'] ?? '');
+                $amountPaid = (int) ($p['amount'] ?? 0);
+                break;
+            }
+        }
+
+        return [
+            'status'      => (string) ($qr['status'] ?? 'active'),
+            // A partial payment is not the fee; only the full fixed amount settles.
+            'paid'        => $paymentId !== null && $paymentId !== '' && $amountPaid >= $expected && $expected > 0,
+            'payment_id'  => $paymentId ?: null,
+            'amount_paid' => $amountPaid / 100,
+            'booking_id'  => isset($qr['notes']['booking_id']) ? (string) $qr['notes']['booking_id'] : null,
+        ];
+    }
+
+    /**
+     * Stop a UPI QR taking payments — the desk's countdown ran out or the booking was
+     * dropped. Best-effort: an already-closed QR is the outcome we wanted anyway.
+     */
+    public function closeUpiQr(string $qrId): void
+    {
+        if (! $this->isConfigured() || trim($qrId) === '') {
+            return;
+        }
+
+        try {
+            Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()->timeout(15)
+                ->post(self::QR_CODES_ENDPOINT.'/'.trim($qrId).'/close');
+        } catch (\Throwable) {
+            // Razorpay's own close_by closes it regardless.
+        }
     }
 
     /**

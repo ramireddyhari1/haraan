@@ -399,6 +399,29 @@ fun DayBookingsScreen(
         )
     }
 
+    // So the first Razorpay page opens in a moment rather than freezing the desk.
+    WarmUpWebEngine()
+
+    // A walk-in paying by UPI QR / payment link
+    state.deskPay?.let { pay ->
+        val pageUrl = pay.payment?.url
+        if (pay.pageOpen && pay.phase == com.haraan.partner.daybookings.viewmodel.DeskPayPhase.WAITING &&
+            pay.payment?.isPage == true && pageUrl != null
+        ) {
+            // Razorpay's page stands in for the sheet; closing it brings the sheet back.
+            RazorpayPaymentPage(url = pageUrl, state = pay, onClose = { viewModel.deskPayShowPage(false) })
+        } else {
+            DeskPaymentSheet(
+                state = pay,
+                onRetry = { kind -> viewModel.deskPayRetry(kind) },
+                onCollect = { method -> viewModel.deskPayCollect(method) },
+                onCancelBooking = { viewModel.deskPayCancelBooking() },
+                onDismiss = { viewModel.deskPayDismiss() },
+                onOpenPage = { viewModel.deskPayShowPage(true) },
+            )
+        }
+    }
+
     // Booking Details Sheet
     state.selectedBookingForDetails?.let { booking ->
         BookingDetailsSheet(

@@ -3,7 +3,10 @@ package com.haraan.partner.daybookings.data
 import com.haraan.partner.BookingSummary
 import com.haraan.partner.CheckInResult
 import com.haraan.partner.DayGrid
+import com.haraan.partner.DeskPayment
 import com.haraan.partner.PayMethod
+import com.haraan.partner.PayState
+import com.haraan.partner.PaymentRequestResult
 import com.haraan.partner.WalkInResult
 import com.haraan.partner.daybookings.model.DayBookingItem
 import com.haraan.partner.daybookings.model.DaySummaryStats
@@ -49,6 +52,9 @@ interface DayBookingsRepository {
     suspend fun setDateClosed(token: String, venueId: Long, date: String, closed: Boolean): Result<Unit>
     suspend fun syncOfflineQueue(token: String): SyncResult
     suspend fun getPendingActionCount(): Int
+    suspend fun deskPaymentStatus(token: String, bookingId: Long, payment: DeskPayment, close: Boolean = false): Result<PayState>
+    suspend fun deskPaymentRequest(token: String, bookingId: Long, kind: String, replacing: DeskPayment?): Result<PaymentRequestResult>
+    suspend fun collectAtDesk(token: String, bookingId: Long, method: PayMethod, open: DeskPayment?): Result<String>
 }
 
 class DayBookingsRepositoryImpl(
@@ -221,6 +227,11 @@ class DayBookingsRepositoryImpl(
             }
             Result.success(result)
         } catch (e: Exception) {
+            // Online payment needs the server there and then: a QR or link that was never
+            // minted can't be paid, so these fail honestly instead of queueing.
+            if (method == PayMethod.UPI_QR || method == PayMethod.LINK) {
+                return@withContext Result.failure(e)
+            }
             // Queue for offline sync
             val payload = JSONObject().apply {
                 put("slotId", slotId)
@@ -252,6 +263,15 @@ class DayBookingsRepositoryImpl(
             )
         }
     }
+
+    override suspend fun deskPaymentStatus(token: String, bookingId: Long, payment: DeskPayment, close: Boolean): Result<PayState> =
+        withContext(Dispatchers.IO) { runCatching { remoteDataSource.deskPaymentStatus(token, bookingId, payment, close) } }
+
+    override suspend fun deskPaymentRequest(token: String, bookingId: Long, kind: String, replacing: DeskPayment?): Result<PaymentRequestResult> =
+        withContext(Dispatchers.IO) { runCatching { remoteDataSource.deskPaymentRequest(token, bookingId, kind, replacing) } }
+
+    override suspend fun collectAtDesk(token: String, bookingId: Long, method: PayMethod, open: DeskPayment?): Result<String> =
+        withContext(Dispatchers.IO) { runCatching { remoteDataSource.collectAtDesk(token, bookingId, method, open) } }
 
     override suspend fun cancelBooking(
         token: String,

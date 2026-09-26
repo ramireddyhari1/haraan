@@ -3,6 +3,8 @@ package com.haraan.partner.daybookings.data
 import com.haraan.partner.BookingSummary
 import com.haraan.partner.CheckInResult
 import com.haraan.partner.DayGrid
+import com.haraan.partner.DeskPayment
+import com.haraan.partner.PaymentRequestResult
 import com.haraan.partner.PartnerApi
 import com.haraan.partner.PayMethod
 import com.haraan.partner.PayState
@@ -57,4 +59,13 @@ class DayBookingsRemoteDataSource(private val api: PartnerApi) {
     suspend fun checkPaymentStatus(token: String, bookingId: Long, linkId: String): PayState {
         return api.paymentStatus(token, bookingId, linkId)
     }
+
+    suspend fun deskPaymentStatus(token: String, bookingId: Long, payment: DeskPayment, close: Boolean): PayState =
+        api.deskPaymentStatus(token, bookingId, payment, close)
+
+    suspend fun deskPaymentRequest(token: String, bookingId: Long, kind: String, replacing: DeskPayment?): PaymentRequestResult =
+        api.deskPaymentRequest(token, bookingId, kind, replacing)
+
+    suspend fun collectAtDesk(token: String, bookingId: Long, method: PayMethod, open: DeskPayment?): String =
+        api.collectAtDesk(token, bookingId, method, open)
 }

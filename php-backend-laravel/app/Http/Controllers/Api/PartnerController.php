@@ -1005,7 +1005,10 @@ class PartnerController extends Controller
             // How the desk took the money. 'link' mints a Razorpay payment link and
             // leaves the booking unpaid until the payment webhook says otherwise;
             // 'later' records nothing at all.
-            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card,link,later,package'],
+            // 'upi_qr' mints a Razorpay UPI QR the desk shows on screen; like 'link' it
+            // leaves the booking unpaid until Razorpay reports the capture. Plain 'upi'
+            // still means "already paid to the venue's own UPI" (older app builds).
+            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,upi_qr,card,link,later,package'],
             // Which of the customer's passes to spend a session from.
             'customerPackageId' => ['nullable', 'integer'],
         ]);
@@ -1031,6 +1034,7 @@ class PartnerController extends Controller
         $amount = (float) $booking->total_amount;
         $payLink = null;
         $payLinkId = null;
+        $payment = null;
 
         // Money that physically changed hands at the desk is recorded straight away;
         // the ledger recomputes amount_paid/payment_status in the same transaction.
@@ -1075,21 +1079,13 @@ class PartnerController extends Controller
         } elseif (in_array($method, ['cash', 'upi', 'card'], true) && $amount > 0) {
             $this->ledger->collect($booking, $amount, $method, $request->user());
             $booking->refresh();
-        } elseif ($method === 'link' && $amount > 0) {
-            // Best-effort: a link that can't be minted must not lose the booking the
-            // partner just took — surface the failure and leave it payable at the desk.
-            try {
-                $link = $this->razorpay->createPaymentLink(
-                    (int) round($amount * 100),
-                    'Booking at '.$venue->name,
-                    $data['guestName'] ?? null,
-                    $data['guestPhone'] ?? null,
-                    ['booking_id' => (string) $booking->id],
-                );
-                $payLink = $link['short_url'];
-                $payLinkId = $link['id'] ?: null;
-            } catch (\Throwable $e) {
-                Log::warning("Booking {$booking->id}: payment link failed: ".$e->getMessage());
+        } elseif (in_array($method, ['link', 'upi_qr'], true) && $amount > 0) {
+            // Best-effort: a QR or link that can't be minted must not lose the booking
+            // the partner just took — the desk sheet says so and offers cash or cancel.
+            $payment = $this->mintDeskPayment($booking, $venue, $method);
+            if ($payment['kind'] === 'link') {
+                $payLink = $payment['url'];
+                $payLinkId = $payment['id'];
             }
         }
 
@@ -1116,8 +1112,227 @@ class PartnerController extends Controller
             'payment_method' => $method,
             'payment_link'   => $payLink,
             'payment_link_id' => $payLinkId,
+            // What the desk shows while it waits: a UPI QR or a link, with its timer.
+            'payment'        => $payment,
             'notified'       => $notified,
         ], 201);
+    }
+
+    /**
+     * Mint what the customer pays the booking's balance with: a Razorpay UPI QR, or a
+     * payment link.
+     *
+     * When Razorpay won't make a UPI QR (the QR product isn't enabled on the account),
+     * the desk gets a link with `present: page`: the app opens Razorpay's own payment
+     * page right there on the desk phone for the customer to pay on. It is never drawn
+     * as a QR — a URL QR is a web page UPI apps refuse as "external".
+     *
+     * `present` tells the app how to show it: `qr` (draw the UPI QR), `page` (open the
+     * payment page in the app), `share` (a link the desk chose to send).
+     *
+     * @return array{kind: string, present: string, id: string|null, qr: string|null, url: string|null, image_url: string|null, amount: float, expires_in: int, error: string|null}
+     */
+    private function mintDeskPayment(Booking $booking, Venue $venue, string $want): array
+    {
+        $amount = round(max((float) $booking->total_amount - (float) $booking->amount_paid, 0.0), 2);
+        $minutes = \App\Support\PlatformRules::int('bookings.desk_qr_minutes');
+        $paise = (int) round($amount * 100);
+        $notes = ['booking_id' => (string) $booking->id];
+        $result = [
+            'kind' => $want, 'present' => $want === 'upi_qr' ? 'qr' : 'share',
+            'id' => null, 'qr' => null, 'url' => null, 'image_url' => null,
+            'amount' => $amount, 'expires_in' => $minutes * 60, 'error' => null,
+        ];
+
+        if ($want === 'upi_qr') {
+            try {
+                $qr = $this->razorpay->createUpiQr($paise, $venue->name, 'Booking #'.$booking->id.' at '.$venue->name, $minutes, $notes);
+                if ($qr['id'] !== '' && ($qr['upi'] !== null || $qr['image_url'] !== null)) {
+                    return array_merge($result, ['id' => $qr['id'], 'qr' => $qr['upi'], 'image_url' => $qr['upi'] === null ? $qr['image_url'] : null]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Booking {$booking->id}: UPI QR unavailable, opening the payment page instead: ".$e->getMessage());
+            }
+        }
+
+        // The page the customer pays on at the desk needs no SMS; a link the desk chose
+        // to send does.
+        $onPage = $want === 'upi_qr';
+
+        try {
+            $link = $this->razorpay->createPaymentLink(
+                $paise,
+                'Booking at '.$venue->name,
+                $booking->guest_name ?: null,
+                $booking->guest_phone ?: null,
+                $notes,
+                notifySms: ! $onPage,
+            );
+
+            return array_merge($result, [
+                'kind' => 'link', 'present' => $onPage ? 'page' : 'share',
+                'id' => $link['id'] ?: null, 'url' => $link['short_url'],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning("Booking {$booking->id}: payment link failed: ".$e->getMessage());
+
+            return array_merge($result, [
+                'error' => $e->getCode() === 422
+                    ? 'Online payment needs at least ₹1. Take cash for this one.'
+                    : 'Could not start an online payment right now. Take cash or try again.',
+            ]);
+        }
+    }
+
+    /** A booking on a branch this caller may act on, or 404. */
+    private function deskBooking(Request $request, string $id): Booking
+    {
+        return Booking::query()
+            ->where('id', $id)
+            ->whereIn('venue_id', $request->user()->branches()->select('id'))
+            ->firstOrFail();
+    }
+
+    /**
+     * Ask Razorpay whether a desk QR or link has been paid, and settle it the first
+     * time it has. Refuses a QR/link minted for a different booking — otherwise one
+     * paid QR could settle every booking its id was replayed against.
+     *
+     * @return array{paid: bool, status: string}
+     */
+    private function settleDeskPayment(Booking $booking, string $kind, string $gatewayId): array
+    {
+        $state = $kind === 'upi_qr'
+            ? $this->razorpay->upiQrStatus($gatewayId)
+            : $this->razorpay->paymentLinkStatus($gatewayId);
+
+        // Every desk QR/link is minted with its booking id in the notes, so a missing
+        // or different one is never ours to settle.
+        if ($state['booking_id'] !== (string) $booking->id) {
+            abort(422, 'That payment belongs to a different booking.');
+        }
+
+        if (! $state['paid']) {
+            return ['paid' => false, 'status' => $state['status']];
+        }
+
+        $paymentId = $state['payment_id'];
+        $already = $paymentId !== null && BookingPayment::query()
+            ->where('booking_id', $booking->id)->where('reference', $paymentId)->exists();
+
+        if (! $already) {
+            $amount = $state['amount_paid'] > 0 ? $state['amount_paid'] : (float) $booking->total_amount;
+            $this->ledger->collect($booking, $amount, 'online', null, $paymentId, $kind === 'upi_qr' ? 'Razorpay UPI QR' : 'Razorpay payment link');
+            $booking->refresh();
+            // The money is real now, so the ticket may go out.
+            BookingNotifier::dispatch($booking);
+        }
+
+        return ['paid' => true, 'status' => 'paid'];
+    }
+
+    /** Stop a desk QR or link taking money (replaced, abandoned, or paid another way). */
+    private function closeDeskPayment(string $kind, string $gatewayId): void
+    {
+        $kind === 'upi_qr'
+            ? $this->razorpay->closeUpiQr($gatewayId)
+            : $this->razorpay->cancelPaymentLink($gatewayId);
+    }
+
+    /**
+     * POST /api/partner/bookings/{id}/payment-request { kind, replaceKind?, replaceId? }
+     * — a fresh UPI QR or link for the balance, after the last one's timer ran out. The
+     * old one is closed first, so the customer can't pay both.
+     */
+    public function paymentRequest(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'kind'        => ['required', 'string', 'in:upi_qr,link'],
+            'replaceKind' => ['nullable', 'string', 'in:upi_qr,link'],
+            'replaceId'   => ['nullable', 'string', 'max:64'],
+        ]);
+
+        $booking = $this->deskBooking($request, $id);
+
+        if (! empty($data['replaceId'])) {
+            $oldKind = $data['replaceKind'] ?? $data['kind'];
+            $this->closeDeskPayment($oldKind, $data['replaceId']);
+            // The old one may have been paid just before it closed.
+            try {
+                if ($this->settleDeskPayment($booking, $oldKind, $data['replaceId'])['paid']) {
+                    return response()->json(['paid' => true, 'booking' => $this->slotBooking($booking->refresh()), 'payment' => null]);
+                }
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                throw $e;
+            } catch (\Throwable) {
+                // Unknown — carry on; a later capture still settles by its own id.
+            }
+        }
+
+        $booking->refresh();
+        if (strtoupper((string) $booking->status) === 'CANCELLED') {
+            return response()->json(['error' => 'This booking was cancelled.'], 422);
+        }
+        if (strtolower((string) $booking->payment_status) === 'paid') {
+            return response()->json(['paid' => true, 'booking' => $this->slotBooking($booking), 'payment' => null]);
+        }
+
+        $venue = Venue::query()->findOrFail($booking->venue_id);
+
+        return response()->json([
+            'paid'    => false,
+            'booking' => $this->slotBooking($booking),
+            'payment' => $this->mintDeskPayment($booking, $venue, $data['kind']),
+        ]);
+    }
+
+    /**
+     * POST /api/partner/bookings/{id}/collect { method, closeKind?, closeId? } — the
+     * customer paid the balance at the desk after all (cash, their own UPI, card).
+     *
+     * Closes the open QR/link first and checks it once more: if the customer paid it
+     * in the meantime, that settles the booking and nothing is recorded twice.
+     */
+    public function collectAtDesk(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'method'    => ['required', 'string', 'in:cash,upi,card'],
+            'closeKind' => ['nullable', 'string', 'in:upi_qr,link'],
+            'closeId'   => ['nullable', 'string', 'max:64'],
+        ]);
+
+        $booking = $this->deskBooking($request, $id);
+
+        if (! empty($data['closeId'])) {
+            $kind = $data['closeKind'] ?? 'upi_qr';
+            $this->closeDeskPayment($kind, $data['closeId']);
+            try {
+                if ($this->settleDeskPayment($booking, $kind, $data['closeId'])['paid']) {
+                    return response()->json(['paid' => true, 'via' => 'online', 'booking' => $this->slotBooking($booking->refresh())]);
+                }
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                throw $e;
+            } catch (\Throwable) {
+                // Razorpay unreachable: the QR is closed (or closes itself), so taking
+                // cash now cannot be doubled by a later scan of it.
+            }
+        }
+
+        $booking->refresh();
+        if (strtoupper((string) $booking->status) === 'CANCELLED') {
+            return response()->json(['error' => 'This booking was cancelled.'], 422);
+        }
+
+        $due = round((float) $booking->total_amount - (float) $booking->amount_paid, 2);
+        if ($due > 0) {
+            $this->ledger->collect($booking, $due, $data['method'], $request->user());
+            $booking->refresh();
+            if (trim((string) $booking->guest_phone) !== '') {
+                BookingNotifier::dispatch($booking);
+            }
+        }
+
+        return response()->json(['paid' => true, 'via' => $data['method'], 'booking' => $this->slotBooking($booking)]);
     }
 
     /**
@@ -1134,47 +1349,41 @@ class PartnerController extends Controller
     public function paymentStatus(Request $request, string $id): JsonResponse
     {
         $data = $request->validate([
-            'linkId' => ['required', 'string', 'max:64'],
+            // A payment link (older builds send only this), or a desk UPI QR.
+            'linkId' => ['required_without:qrId', 'nullable', 'string', 'max:64'],
+            'qrId'   => ['required_without:linkId', 'nullable', 'string', 'max:64'],
+            // The desk's timer ran out: stop the QR/link taking money, then check once
+            // more so a payment that landed in the last second still counts.
+            'close'  => ['nullable', 'boolean'],
         ]);
 
         // Scope to the branches this caller may act on: a booking id alone must not
         // expose another tenant's — or another branch's — payment state.
-        $booking = Booking::query()
-            ->where('id', $id)
-            ->whereIn('venue_id', $request->user()->branches()->select('id'))
-            ->firstOrFail();
+        $booking = $this->deskBooking($request, $id);
+        $kind = ! empty($data['qrId']) ? 'upi_qr' : 'link';
+        $gatewayId = (string) ($data['qrId'] ?? $data['linkId']);
+
+        if (! empty($data['close'])) {
+            $this->closeDeskPayment($kind, $gatewayId);
+        }
 
         if (strtolower((string) $booking->payment_status) === 'paid') {
             return response()->json(['paid' => true, 'status' => 'paid', 'booking' => $this->slotBooking($booking)]);
         }
 
         try {
-            $link = $this->razorpay->paymentLinkStatus($data['linkId']);
+            $state = $this->settleDeskPayment($booking, $kind, $gatewayId);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             // "Don't know yet" — never report unpaid on an unreachable gateway.
             return response()->json(['paid' => false, 'status' => 'unknown', 'error' => 'Could not reach Razorpay'], 200);
         }
 
-        if (! $link['paid']) {
-            return response()->json(['paid' => false, 'status' => $link['status']]);
-        }
-
-        $paymentId = $link['payment_id'];
-        $already = $paymentId !== null && BookingPayment::query()
-            ->where('booking_id', $booking->id)->where('reference', $paymentId)->exists();
-
-        if (! $already) {
-            $amount = $link['amount_paid'] > 0 ? $link['amount_paid'] : (float) $booking->total_amount;
-            $this->ledger->collect($booking, $amount, 'online', null, $paymentId, 'Razorpay payment link');
-            $booking->refresh();
-            // The money is real now, so the ticket may go out.
-            BookingNotifier::dispatch($booking);
-        }
-
         return response()->json([
-            'paid'    => true,
-            'status'  => 'paid',
-            'booking' => $this->slotBooking($booking),
+            'paid'    => $state['paid'],
+            'status'  => $state['status'],
+            'booking' => $this->slotBooking($booking->refresh()),
         ]);
     }
 
