@@ -33,6 +33,21 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.Icons
@@ -174,6 +189,7 @@ import com.haraan.partner.ui.drawer.HaraanPartnerDrawer
 import com.haraan.partner.ui.Haptics
 import com.haraan.partner.ui.components.pressScale
 import com.haraan.partner.ui.components.pressShade
+import com.haraan.partner.ui.components.pressableTile
 import com.haraan.partner.ui.components.rememberMoneyMotion
 
 private sealed interface UiState<out T> {
@@ -939,6 +955,35 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showOperationsCenter by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    // The phone's Back closes whichever console screen is open, in the same order
+    // they take the screen below. There was no handler at all, so Back from
+    // Payouts, Reports, the venue desk — any of them — closed the whole app.
+    // Screens with their own inner steps register their own handler later in
+    // composition, which wins over this one.
+    val screenOpen = showNotifications || showSupport || showAcademy || showPackages ||
+        showCustomers || showPayouts || showReports || showStaff || showShiftRegister ||
+        showStandingSlots || showPricingMatrix || showWhatsAppDesk || showOperationsCenter ||
+        detail != null || manageVenue != null
+    BackHandler(enabled = screenOpen) {
+        when {
+            showNotifications -> showNotifications = false
+            showSupport -> showSupport = false
+            showAcademy -> showAcademy = false
+            showPackages -> showPackages = false
+            showCustomers -> showCustomers = false
+            showPayouts -> showPayouts = false
+            showReports -> showReports = false
+            showStaff -> showStaff = false
+            showShiftRegister -> showShiftRegister = false
+            showStandingSlots -> showStandingSlots = false
+            showPricingMatrix -> showPricingMatrix = false
+            showWhatsAppDesk -> showWhatsAppDesk = false
+            showOperationsCenter -> showOperationsCenter = false
+            detail != null -> detail = null
+            manageVenue != null -> { manageVenue = null; manageStartsInSlots = false }
+        }
+    }
+
     if (showNotifications) {
         NotificationsScreen(api, token, onBack = { showNotifications = false })
         return
@@ -1110,6 +1155,8 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         else tabs.toMutableList().apply { add(indexOf(Tab.Venues) + 1, Tab.Matches) }
     }
     var tab by remember { mutableStateOf(Tab.Home) }
+    // Back from any other tab returns Home first; only Back on Home leaves the app.
+    BackHandler(enabled = tab != Tab.Home) { tab = Tab.Home }
     // If the lane resolves and the current tab is no longer valid, fall back Home.
     LaunchedEffect(navTabs) { if (tab !in navTabs) tab = Tab.Home }
 
@@ -1214,9 +1261,10 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     ) {
     Scaffold(
         topBar = {
-            // Scan is full-screen camera: no header over it. The floating bar
-            // below is still there to leave it.
-            if (tab != Tab.Scan) TopAppBar(
+            // Scan is full-screen camera, and Home carries its own chrome inside
+            // its hero: neither gets the white header. The floating bar below is
+            // still there to leave them.
+            if (tab != Tab.Scan && tab != Tab.Home) TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.White,
                     scrolledContainerColor = Color.White,
@@ -1284,13 +1332,16 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(
-                // Scan draws its own status-bar space, under a camera that runs to the top.
-                top = if (tab == Tab.Scan) 0.dp else padding.calculateTopPadding(),
+                // Scan and Home draw their own status-bar space: the camera and the
+                // navy hero run to the top of the screen.
+                top = if (tab == Tab.Scan || tab == Tab.Home) 0.dp else padding.calculateTopPadding(),
                 bottom = if (tab == Tab.Scan) 0.dp else padding.calculateBottomPadding(),
             ),
         ) {
             bookingBanner?.let { msg ->
-                BookingBanner(msg) { bookingBanner = null; tab = Tab.Sales; unseenBookings = 0 }
+                LayoutBox(if (tab == Tab.Home || tab == Tab.Scan) Modifier.statusBarsPadding() else Modifier) {
+                    BookingBanner(msg) { bookingBanner = null; tab = Tab.Sales; unseenBookings = 0 }
+                }
             }
             when (tab) {
                 // Customers, Packages, Academy and Payouts are reached from the
@@ -1300,9 +1351,25 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     api, token, session.name ?: "Partner", lane, branchId,
                     venues = venues,
                     reloadSignal = moneyLanded,
+                    unseen = unseenBookings,
                     onBookings = { tab = Tab.Sales; unseenBookings = 0 },
                     onSetUpSlots = { id, name -> manageStartsInSlots = true; manageVenue = id to name },
+                    onOpenDesk = { id, name -> manageStartsInSlots = false; manageVenue = id to name },
+                    onScan = { tab = Tab.Scan },
                     onSupport = { showSupport = true },
+                    onReports = if (session.can("reports")) ({ showReports = true }) else null,
+                    onWhatsApp = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showWhatsAppDesk = true }) else null,
+                    onSettlement = if (session.can("reports")) ({ showPayouts = true }) else null,
+                    onMenu = { drawerScope.launch { drawerState.open() } },
+                    onBell = { tab = Tab.Sales; unseenBookings = 0 },
+                    branchSwitcher = ctx?.takeIf { it.isMultiBranch }?.let { known ->
+                        {
+                            BranchSwitcher(known, branchId, onDark = true) { picked ->
+                                branchId = picked
+                                session.branchId = picked
+                            }
+                        }
+                    },
                 ) { serverType ->
                     if (serverType != null) {
                         session.partnerType = serverType
@@ -1608,7 +1675,8 @@ private fun DrawerRow(
  * partners see no change at all.
  */
 @Composable
-private fun BranchSwitcher(ctx: PartnerContext, selected: Long?, onSelect: (Long?) -> Unit) {
+private fun BranchSwitcher(ctx: PartnerContext, selected: Long?, onDark: Boolean = false, onSelect: (Long?) -> Unit) {
+    val tint = if (onDark) Color.White else AuthAccentDeep
     var open by remember { mutableStateOf(false) }
 
     // LayoutBox, not Box: see CenteredPane — a bare `Box` here binds to a
@@ -1618,22 +1686,22 @@ private fun BranchSwitcher(ctx: PartnerContext, selected: Long?, onSelect: (Long
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .clip(RoundedCornerShape(999.dp))
-                .background(Color(0x142F6BFF))
+                .background(if (onDark) Color(0x1FFFFFFF) else Color(0x142F6BFF))
                 .clickable { open = true }
                 .padding(start = 9.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
         ) {
-            Icon(Icons.Filled.Place, null, tint = AuthAccentDeep, modifier = Modifier.size(13.dp))
+            Icon(Icons.Filled.Place, null, tint = tint, modifier = Modifier.size(13.dp))
             Spacer(Modifier.width(4.dp))
             Text(
                 ctx.branchName(selected),
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = AuthAccentDeep,
+                color = tint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 104.dp),
             )
-            Icon(Icons.Filled.ExpandMore, null, tint = AuthAccentDeep, modifier = Modifier.size(15.dp))
+            Icon(Icons.Filled.ExpandMore, null, tint = tint, modifier = Modifier.size(15.dp))
         }
 
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -1759,95 +1827,763 @@ private fun HomeTab(
     /** The partner's venues, loaded once by the scaffold. Null while that load is in flight. */
     venues: List<VenueSummary>? = null,
     reloadSignal: Int = 0,
+    /** New bookings since the partner last looked; drives the bell's badge. */
+    unseen: Int = 0,
     onBookings: () -> Unit,
     /** Opens a venue's slot editor: the one place a court becomes bookable. */
     onSetUpSlots: (Long, String) -> Unit = { _, _ -> },
+    /** Opens a venue's day desk (grid, walk-ins). */
+    onOpenDesk: (Long, String) -> Unit = { _, _ -> },
+    onScan: () -> Unit = {},
     onSupport: () -> Unit = {},
+    /** Each null when this partner may not open that screen; its door isn't drawn. */
+    onReports: (() -> Unit)? = null,
+    onWhatsApp: (() -> Unit)? = null,
+    onSettlement: (() -> Unit)? = null,
+    onMenu: () -> Unit = {},
+    onBell: () -> Unit = {},
+    /** The outlet picker for multi-branch partners; null when there is one venue. */
+    branchSwitcher: (@Composable () -> Unit)? = null,
     onLane: (String?) -> Unit,
 ) {
-    // Home is a shift board: what is happening on my courts today, and who owes me
-    // money. Every line on it is either real data or a way to get some — an empty
-    // account gets a setup path, not four cards reading ₹0.
+    // Home is the venue's day, told top to bottom: whose venue this is, what the
+    // day is worth, the four things the desk does most, the courts hour by hour,
+    // and who is next. Every line is real data or a real action — an empty
+    // account gets a setup path, not cards reading ₹0.
     val branch = venueId
     // The venue this screen is about: the picked branch, else the first one. Its
     // photo and name are what make the app feel like theirs, not a template's.
     val focus = venues?.let { list -> list.firstOrNull { it.id == branch } ?: list.firstOrNull() }
     val courtsLane = lane == Lane.VENUE || lane == Lane.CAFE || lane == Lane.BOTH
-    // Two calls, fetched together: the day's sheet and the long view. Run one
-    // after the other they double the wait on a phone at a turf gate.
+    // Three calls, fetched together: the day's sheet, the long view, and the
+    // venue's court grid for today's slot strip. The grid is optional: a failure
+    // there loses the strip, never the screen.
     RefreshableContent(
-        token to branch,
+        Triple(token, branch, focus?.id),
         reloadSignal = reloadSignal,
         load = {
             coroutineScope {
                 val overview = async { api.overview(token, branch) }
                 val sheet = async { api.today(token, branch) }
-                overview.await() to sheet.await()
+                val grid = async {
+                    if (focus != null && courtsLane) {
+                        runCatching { api.venueDay(token, focus.id, apiDate(todayMillis())) }.getOrNull()
+                    } else null
+                }
+                val payouts = async {
+                    if (onSettlement != null) runCatching { api.payouts(token) }.getOrNull() else null
+                }
+                val whatsapp = async {
+                    if (onWhatsApp != null && focus != null && courtsLane) {
+                        runCatching {
+                            com.haraan.partner.whatsapp.data.WhatsAppRemoteDataSource().fetchDashboard(token, focus.id)
+                        }.getOrNull()
+                    } else null
+                }
+                HomeData(overview.await(), sheet.await(), grid.await(), payouts.await(), whatsapp.await())
             }
         },
-    ) { (o, day) ->
+    ) { data ->
+        val o = data.overview
+        val day = data.day
         LaunchedEffect(o.type) { onLane(o.type) }
         val settingUp = courtsLane && !day.hasCapacity
+        val listState = rememberLazyListState()
+        val density = LocalDensity.current
+        // Past the hero the page grows a slim white bar, so the venue's name and
+        // the menu never scroll out of reach.
+        val collapsed by remember {
+            derivedStateOf {
+                listState.firstVisibleItemIndex > 0 ||
+                    listState.firstVisibleItemScrollOffset > with(density) { 190.dp.toPx() }
+            }
+        }
+        LightStatusBar(light = !collapsed)
 
-        LazyColumn(
-            Modifier.fillMaxSize().background(AuthPageBg).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 32.dp),
-        ) {
-            item { Rise(0) { HomeGreeting(name, placeLine(venues, focus, branch)) } }
-            item {
-                Rise(1) {
-                    if (settingUp) {
-                        SetupHero(
-                            venues = venues,
-                            focus = focus,
-                            firstBookingDone = o.bookingsTotal > 0,
-                            onSetUpSlots = onSetUpSlots,
-                            onSupport = onSupport,
-                        )
-                    } else {
-                        ShiftHero(day, memoryKey = "home.today.$branch", photo = focus?.image)
-                    }
-                }
-            }
-            if (day.hasCapacity) {
-                item { Rise(2) { TodayStrip(day) } }
-            }
-            if (day.chaseCount > 0) {
-                item { Rise(3) { ChaseStrip(day, onBookings) } }
-            }
-            day.closed.takeIf { it.isNotEmpty() }?.let { shut ->
-                item { Rise(3) { ClosedNotice(shut) } }
-            }
-            // While the courts aren't bookable the setup card is the whole story;
-            // a second empty card underneath would only say it again.
-            if (!settingUp) {
-                item {
-                    Rise(4) {
-                        HomeSectionHeader(
-                            icon = Icons.Filled.Today,
-                            title = if (day.next.isEmpty()) "Today" else "Next up",
-                            action = "All bookings",
-                            onAction = onBookings,
-                        )
-                    }
-                }
-                if (day.next.isEmpty()) {
-                    item { Rise(5) { EmptySheet(day) } }
-                } else {
-                    itemsIndexed(day.next) { i, booking ->
-                        Rise(5 + i.coerceAtMost(4)) {
-                            TimelineRow(booking, first = i == 0, last = i == day.next.lastIndex)
+        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
+            ) {
+                item(key = "hero") {
+                    Rise(0) {
+                        HomeHero(
+                            name = name,
+                            place = placeLine(venues, focus, branch),
+                            photo = focus?.image,
+                            initial = (focus?.name ?: name).trim().take(1).uppercase(),
+                            unseen = unseen,
+                            onMenu = onMenu,
+                            onBell = onBell,
+                            branchSwitcher = branchSwitcher,
+                        ) {
+                            if (settingUp) {
+                                HeroSetup(venues, focus, o.bookingsTotal > 0, onSetUpSlots, onSupport)
+                            } else {
+                                HeroMoney(day, memoryKey = "home.today.$branch", onDue = onBookings)
+                            }
                         }
                     }
                 }
+                item(key = "actions") {
+                    Rise(1) {
+                        DeskActions(
+                            doors = deskDoors(
+                                focus = focus,
+                                courtsLane = courtsLane,
+                                pips = data.grid?.let { slotPips(it) }.orEmpty(),
+                                bookingsTotal = o.bookingsTotal,
+                                payouts = data.payouts,
+                                whatsapp = data.whatsapp,
+                                onWalkIn = { v -> onOpenDesk(v.id, v.name) },
+                                onReports = onReports,
+                                onWhatsApp = onWhatsApp,
+                                onSettlement = onSettlement,
+                                onScan = onScan,
+                                onSupport = onSupport,
+                            ),
+                            modifier = Modifier.padding(horizontal = 16.dp).overlapUp(34.dp),
+                        )
+                    }
+                }
+                if (day.chaseCount > 0) {
+                    item(key = "chase") { Rise(2) { LayoutBox(Modifier.padding(horizontal = 16.dp)) { ChaseStrip(day, onBookings) } } }
+                }
+                day.closed.takeIf { it.isNotEmpty() }?.let { shut ->
+                    item(key = "closed") { Rise(2) { LayoutBox(Modifier.padding(horizontal = 16.dp)) { ClosedNotice(shut) } } }
+                }
+                val pips = data.grid?.let { slotPips(it) }.orEmpty()
+                if (!settingUp && pips.isNotEmpty() && focus != null) {
+                    item(key = "courts-head") {
+                        Rise(3) {
+                            LayoutBox(Modifier.padding(horizontal = 16.dp)) {
+                                HomeSectionHeader(
+                                    icon = Icons.Filled.Schedule,
+                                    title = "Today's courts",
+                                    action = "Open desk",
+                                    onAction = { onOpenDesk(focus.id, focus.name) },
+                                )
+                            }
+                        }
+                    }
+                    item(key = "courts") { Rise(4) { CourtsStrip(pips) { onOpenDesk(focus.id, focus.name) } } }
+                }
+                if (!settingUp) {
+                    if (day.next.isEmpty()) {
+                        item(key = "quiet") {
+                            Rise(5) {
+                                QuietLine(
+                                    text = if (day.slotsBooked > 0) "All of today's bookings are done" else "No bookings left today",
+                                    action = "All bookings",
+                                    onAction = onBookings,
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                            }
+                        }
+                    } else {
+                        item(key = "next-head") {
+                            Rise(5) {
+                                LayoutBox(Modifier.padding(horizontal = 16.dp)) {
+                                    HomeSectionHeader(icon = Icons.Filled.Today, title = "Next up", action = "All bookings", onAction = onBookings)
+                                }
+                            }
+                        }
+                        itemsIndexed(day.next, key = { i, _ -> "next-$i" }) { i, booking ->
+                            Rise(6 + i.coerceAtMost(4)) {
+                                LayoutBox(Modifier.padding(horizontal = 16.dp)) {
+                                    TimelineRow(booking, first = i == 0, last = i == day.next.lastIndex)
+                                }
+                            }
+                        }
+                    }
+                }
+                // All-time money only earns its place once there is some. A ₹0 card on
+                // the first screen reads as "this app doesn't work", not as a fact.
+                if (o.revenue > 0.0) {
+                    item(key = "revenue") {
+                        Rise(8) { LayoutBox(Modifier.padding(horizontal = 16.dp)) { RevenueCard(o, memoryKey = "home.revenue.$branch") } }
+                    }
+                }
             }
-            // All-time money only earns its place once there is some. A ₹0 card on
-            // the first screen reads as "this app doesn't work", not as a fact.
-            if (o.revenue > 0.0) {
-                item { Rise(6) { RevenueCard(o, memoryKey = "home.revenue.$branch") } }
+
+            CompactHomeBar(
+                visible = collapsed,
+                title = focus?.name ?: name,
+                unseen = unseen,
+                onMenu = onMenu,
+                onBell = onBell,
+            )
+        }
+    }
+}
+
+/** Everything Home loads in one refresh. */
+private data class HomeData(
+    val overview: Overview,
+    val day: ShiftBoard,
+    val grid: DayGrid?,
+    /** Settlement balance for the Settlement door; null when not allowed or not loaded. */
+    val payouts: PayoutsPage? = null,
+    /** WhatsApp desk summary for its door; null when not a venue or not loaded. */
+    val whatsapp: com.haraan.partner.whatsapp.model.WhatsAppMetrics? = null,
+)
+
+/**
+ * Pulls the next item up under the one before it by [by], without leaving the
+ * gap an offset would: the quick-actions card sits half on the hero's curve.
+ */
+private fun Modifier.overlapUp(by: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val lift = by.roundToPx()
+    layout(placeable.width, (placeable.height - lift).coerceAtLeast(0)) { placeable.place(0, -lift) }
+}
+
+/**
+ * Status-bar icons light over the navy hero, dark once the white bar takes the
+ * top — and back to dark when Home leaves, since every other tab is white.
+ */
+@Composable
+private fun LightStatusBar(light: Boolean) {
+    val view = LocalView.current
+    val controller = remember(view) {
+        (view.context as? android.app.Activity)?.window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+    }
+    LaunchedEffect(light, controller) { controller?.isAppearanceLightStatusBars = !light }
+    DisposableEffect(controller) { onDispose { controller?.isAppearanceLightStatusBars = true } }
+}
+
+/**
+ * The venue's hero: full-bleed navy under the status bar, the venue's own photo
+ * worked into the right side, and the chrome (menu, bell, avatar) living inside
+ * it rather than on a white strip above. [content] is the day's money, or the
+ * setup path when nothing is bookable yet.
+ */
+@Composable
+private fun HomeHero(
+    name: String,
+    place: String?,
+    photo: String?,
+    initial: String,
+    unseen: Int,
+    onMenu: () -> Unit,
+    onBell: () -> Unit,
+    branchSwitcher: (@Composable () -> Unit)?,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(bottomStart = 34.dp, bottomEnd = 34.dp)
+    LayoutBox(
+        Modifier
+            .fillMaxWidth()
+            .shadow(20.dp, shape, clip = false, spotColor = AuthInkTop)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
+    ) {
+        if (photo != null) {
+            LayoutBox(Modifier.matchParentSize()) {
+                AsyncImage(
+                    model = photo,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    alpha = 0.85f,
+                    modifier = Modifier.fillMaxHeight().fillMaxWidth(0.7f).align(Alignment.CenterEnd),
+                )
+                // Navy across the text, dissolving into the photo on the right, so
+                // the picture is atmosphere and never fights the figures.
+                LayoutBox(
+                    Modifier.matchParentSize().background(
+                        Brush.horizontalGradient(
+                            0f to AuthInkTop,
+                            0.38f to AuthInkTop,
+                            0.7f to AuthInkTop.copy(alpha = 0.7f),
+                            1f to AuthInkTop.copy(alpha = 0.3f),
+                        )
+                    )
+                )
+                // The figures and glass sit in the lower half, so the photo is gone
+                // by then: a partner's upload may be a poster full of small print,
+                // and it must never show through behind a number.
+                LayoutBox(
+                    Modifier.matchParentSize().background(
+                        Brush.verticalGradient(
+                            0f to AuthInkTop.copy(alpha = 0.5f),
+                            0.28f to Color.Transparent,
+                            0.5f to AuthInkMid.copy(alpha = 0.75f),
+                            0.66f to AuthInkBot,
+                            1f to AuthInkBot,
+                        )
+                    )
+                )
             }
         }
+        // A cool bloom top-left, where the eye lands first.
+        LayoutBox(
+            Modifier.matchParentSize().background(
+                Brush.radialGradient(listOf(Color(0x4D3B82F6), Color.Transparent), center = Offset(80f, 120f), radius = 700f)
+            )
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 8.dp, end = 12.dp, top = 2.dp, bottom = 54.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = onMenu) {
+                    Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(23.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                branchSwitcher?.let { it(); Spacer(Modifier.width(4.dp)) }
+                HeroBell(unseen, onBell)
+                Spacer(Modifier.width(6.dp))
+                VenueAvatar(photo = photo, initial = initial, onClick = onMenu)
+            }
+            Column(Modifier.padding(start = 12.dp, end = 8.dp)) {
+                Spacer(Modifier.height(10.dp))
+                Text(greeting().uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xB3CFE0FF), letterSpacing = 1.6.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    name, fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color.White, letterSpacing = (-0.7).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                place?.let {
+                    Spacer(Modifier.height(3.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Place, null, tint = Color(0x99CFE0FF), modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(it, fontSize = 13.sp, color = Color(0xCCE0E8FF), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                content()
+            }
+        }
+    }
+}
+
+/** The bell on navy: white glyph, red count. */
+@Composable
+private fun HeroBell(count: Int, onClick: () -> Unit) {
+    val view = LocalView.current
+    LayoutBox {
+        IconButton(onClick = { Haptics.tick(view); onClick() }) {
+            Icon(Icons.Filled.Notifications, contentDescription = "New bookings", tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        if (count > 0) {
+            LayoutBox(
+                Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 5.dp)
+                    .size(17.dp).clip(RoundedCornerShape(99.dp)).background(RED)
+                    .border(1.5.dp, AuthInkTop, RoundedCornerShape(99.dp)),
+                contentAlignment = Alignment.Center,
+            ) { Text(if (count > 9) "9+" else "$count", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+        }
+    }
+}
+
+/**
+ * The day's money inside the hero: what today is worth, how full the courts are,
+ * and three figures on frosted glass. Money that lands while the partner watches
+ * counts up and glows; the buzz came from the booking poll that found it.
+ */
+@Composable
+private fun HeroMoney(day: ShiftBoard, memoryKey: String, onDue: () -> Unit) {
+    val money = rememberMoneyMotion(day.expected, memoryKey)
+    Column(
+        Modifier.graphicsLayer {
+            val lift = 1f + 0.02f * money.pulse
+            scaleX = lift; scaleY = lift
+        },
+    ) {
+        Text(
+            "TODAY · " + day.dayLabel.uppercase(),
+            color = Color(0xB3CFE0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "₹" + formatInr(kotlin.math.round(money.shown)),
+                color = lerp(Color.White, Color(0xFFBFD6FF), money.pulse),
+                fontSize = 44.sp, lineHeight = 46.sp,
+                fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.6).sp,
+                style = TextStyle(fontFeatureSettings = "tnum, zero"),
+            )
+            Spacer(Modifier.width(9.dp))
+            Text("expected", color = Color(0xCCE0E8FF), fontSize = 14.sp, modifier = Modifier.padding(bottom = 9.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "${day.slotsBooked} of ${day.slotsTotal} slots booked" + if (day.slotsDone > 0) " · ${day.slotsDone} done" else "",
+            color = Color(0xE6E0E8FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(9.dp))
+        OccupancyBar(day.occupancy)
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            GlassStat(Modifier.weight(1f), "Booked", "${day.slotsBooked}/${day.slotsTotal}")
+            GlassStat(Modifier.weight(1f), "Collected", "₹" + formatInr(day.collected))
+            GlassStat(
+                Modifier.weight(1f), "Due", "₹" + formatInr(day.due),
+                alert = day.due > 0,
+                onClick = if (day.due > 0) onDue else null,
+            )
+        }
+    }
+}
+
+/** One figure on frosted glass. Presses only when there's somewhere to go. */
+@Composable
+private fun GlassStat(modifier: Modifier, label: String, value: String, alert: Boolean = false, onClick: (() -> Unit)? = null) {
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    Column(
+        modifier
+            .pressScale(interaction, pressedScale = 0.95f)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (alert) Color(0x33F87171) else Color(0x14FFFFFF))
+            .border(1.dp, if (alert) Color(0x55FCA5A5) else Color(0x1FFFFFFF), RoundedCornerShape(16.dp))
+            .pressShade(interaction, amount = 0.1f)
+            .then(
+                if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = null) {
+                    Haptics.tick(view); onClick()
+                } else Modifier
+            )
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+    ) {
+        Text(label, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = if (alert) Color(0xFFFCA5A5) else Color(0x99E0E8FF), letterSpacing = 0.4.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            value, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold,
+            color = if (alert) Color(0xFFFECACA) else Color.White,
+            maxLines = 1, style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/**
+ * What the hero says before a single court is bookable: what's missing, how far
+ * along they are, and the one action that moves them forward. The steps read
+ * the account; none is decoration.
+ */
+@Composable
+private fun HeroSetup(
+    venues: List<VenueSummary>?,
+    focus: VenueSummary?,
+    firstBookingDone: Boolean,
+    onSetUpSlots: (Long, String) -> Unit,
+    onSupport: () -> Unit,
+) {
+    val listed = !venues.isNullOrEmpty()
+    val stepsDone = listOf(listed, false, firstBookingDone).count { it }
+    Column {
+        Text("GET SET UP · $stepsDone OF 3", color = Color(0xB3CFE0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            when {
+                venues == null -> "Getting your venue…"
+                !listed -> "Your venue isn't on Haraan yet"
+                else -> "${focus?.name ?: "Your venue"} isn't bookable yet"
+            },
+            color = Color.White, fontSize = 22.sp, lineHeight = 27.sp,
+            fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (!listed) "Haraan lists venues for their owners. Message us and we'll put yours on the app."
+            else "Publish your time slots and players can book your courts straight away.",
+            color = Color(0xCCE0E8FF), fontSize = 13.sp, lineHeight = 19.sp,
+        )
+        Spacer(Modifier.height(18.dp))
+        SetupSteps(listed = listed, slots = false, firstBooking = firstBookingDone)
+        if (venues != null) {
+            Spacer(Modifier.height(18.dp))
+            if (listed && focus != null) {
+                NavyCta(text = "Add time slots") { onSetUpSlots(focus.id, focus.name) }
+            } else {
+                NavyCta(text = "Message Haraan") { onSupport() }
+            }
+        }
+    }
+}
+
+/**
+ * The desk's four doors — Walk-in, Reports, WhatsApp, Settlement — as a row of
+ * tiles on a card that sits half on the hero's curve. Each tile sinks under the
+ * thumb with a tick; WhatsApp carries a live count when chats are waiting.
+ *
+ * A door the partner can't use (no permission, no venue yet) isn't drawn, and
+ * the row spreads the rest evenly.
+ */
+@Composable
+private fun DeskActions(
+    doors: List<DeskDoor>,
+    modifier: Modifier,
+) {
+    if (doors.isEmpty()) return
+    Row(
+        modifier
+            .fillMaxWidth()
+            .shadow(18.dp, RoundedCornerShape(24.dp), clip = false, spotColor = Color(0x330F172A))
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White)
+            .padding(horizontal = 8.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
+        doors.forEach { door -> DoorTile(door, Modifier.weight(1f)) }
+    }
+}
+
+@Composable
+private fun DoorTile(door: DeskDoor, modifier: Modifier) {
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    Column(
+        modifier
+            .pressScale(interaction, pressedScale = 0.9f)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(interactionSource = interaction, indication = null) { Haptics.tick(view); door.onClick() }
+            // The live fact ("₹15 ready", "2 chats waiting") is what a screen
+            // reader says for the tile, so it isn't lost off the visible label.
+            .semantics(mergeDescendants = true) { contentDescription = "${door.label}. ${door.fact}" }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        LayoutBox {
+            LayoutBox(
+                Modifier.size(54.dp).clip(RoundedCornerShape(18.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFEEF4FF), Color(0xFFDCE7FF))))
+                    .border(1.dp, Color(0x142F6BFF), RoundedCornerShape(18.dp))
+                    .pressShade(interaction, amount = 0.08f),
+                contentAlignment = Alignment.Center,
+            ) { Icon(door.icon, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(24.dp)) }
+            if (door.badge > 0) {
+                LayoutBox(
+                    Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp)
+                        .size(19.dp).clip(RoundedCornerShape(99.dp)).background(RED)
+                        .border(2.dp, Color.White, RoundedCornerShape(99.dp)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (door.badge > 9) "9+" else "${door.badge}", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(door.label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = AuthInk, maxLines = 1)
+    }
+}
+
+/** One door: what it is, and one live fact about it. */
+private class DeskDoor(
+    val icon: ImageVector,
+    val label: String,
+    val fact: String,
+    /** The fact is good news worth colour (money ready) or needs attention (chats waiting). */
+    val factTone: DoorTone = DoorTone.Quiet,
+    val badge: Int = 0,
+    val onClick: () -> Unit,
+)
+
+private enum class DoorTone { Quiet, Good, Attention }
+
+/**
+ * The doors Home offers this partner, each with its live fact. Real numbers or
+ * plain words — never a placeholder count.
+ */
+private fun deskDoors(
+    focus: VenueSummary?,
+    courtsLane: Boolean,
+    pips: List<SlotPip>,
+    bookingsTotal: Int,
+    payouts: PayoutsPage?,
+    whatsapp: com.haraan.partner.whatsapp.model.WhatsAppMetrics?,
+    onWalkIn: ((VenueSummary) -> Unit)?,
+    onReports: (() -> Unit)?,
+    onWhatsApp: (() -> Unit)?,
+    onSettlement: (() -> Unit)?,
+    onScan: () -> Unit,
+    onSupport: () -> Unit,
+): List<DeskDoor> {
+    val doors = mutableListOf<DeskDoor>()
+    if (focus != null && courtsLane && onWalkIn != null) {
+        val now = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
+        val open = pips.count { (it.start == Int.MAX_VALUE || it.start + 60 > now) && it.booked < it.total }
+        doors += DeskDoor(
+            Icons.Filled.PersonAdd, "Walk-in",
+            when {
+                pips.isEmpty() -> "Book a court at the desk"
+                open == 0 -> "No slots left today"
+                open == 1 -> "1 slot open today"
+                else -> "$open slots open today"
+            },
+            factTone = if (open > 0) DoorTone.Attention else DoorTone.Quiet,
+        ) { onWalkIn(focus) }
+    }
+    if (onReports != null) {
+        doors += DeskDoor(
+            Icons.Filled.BarChart, "Reports",
+            when (bookingsTotal) {
+                0 -> "Export any date range"
+                1 -> "1 booking · CSV"
+                else -> "$bookingsTotal bookings · CSV"
+            },
+        ) { onReports() }
+    }
+    if (focus != null && courtsLane && onWhatsApp != null) {
+        val waiting = whatsapp?.unreadConversations ?: 0
+        doors += DeskDoor(
+            Icons.Filled.Forum, "WhatsApp",
+            when {
+                waiting == 1 -> "1 chat waiting"
+                waiting > 1 -> "$waiting chats waiting"
+                (whatsapp?.activeHoldsCount ?: 0) > 0 -> "${whatsapp!!.activeHoldsCount} slot on hold"
+                else -> "Chats & pay links"
+            },
+            factTone = if (waiting > 0) DoorTone.Attention else DoorTone.Quiet,
+            badge = waiting,
+        ) { onWhatsApp() }
+    }
+    if (onSettlement != null) {
+        doors += DeskDoor(
+            Icons.Filled.AccountBalance, "Settlement",
+            when {
+                payouts == null -> "Payouts to your bank"
+                payouts.available > 0 -> "₹" + formatInr(payouts.available) + " ready"
+                payouts.inFlight > 0 -> "₹" + formatInr(payouts.inFlight) + " on the way"
+                else -> "All settled"
+            },
+            factTone = if ((payouts?.available ?: 0.0) > 0) DoorTone.Good else DoorTone.Quiet,
+        ) { onSettlement() }
+    }
+    // A partner who can't use the venue doors still gets a useful card.
+    if (doors.size < 2) {
+        doors += DeskDoor(Icons.Filled.QrCodeScanner, "Scan", "Check guests in") { onScan() }
+        if (doors.size < 2) doors += DeskDoor(Icons.AutoMirrored.Filled.HelpOutline, "Help", "Talk to Haraan") { onSupport() }
+    }
+    return doors
+}
+
+/** One hour of the day at the venue, summed across its courts. */
+private data class SlotPip(val time: String, val start: Int, val booked: Int, val total: Int, val price: Double)
+
+private fun slotPips(grid: DayGrid): List<SlotPip> = grid.slots.map { s ->
+    val cells = s.courts.filter { it.allowed }
+    val total = if (cells.isNotEmpty()) cells.size else s.capacity
+    val booked = if (cells.isNotEmpty()) cells.count { it.isBooked || it.isHeld } else s.booked
+    SlotPip(
+        time = (s.time ?: s.label).trim(),
+        start = slotStartMinutes(s.time ?: s.label),
+        booked = booked,
+        total = total,
+        price = cells.minOfOrNull { it.price } ?: s.price,
+    )
+}
+
+/**
+ * Today's hours as a strip of chips: done, on now, full, part-booked or open.
+ * It scrolls itself to the current hour, so the first thing in view is what
+ * matters next. Any chip opens the desk.
+ */
+@Composable
+private fun CourtsStrip(pips: List<SlotPip>, onOpen: () -> Unit) {
+    val now = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
+    val rowState = rememberLazyListState()
+    val first = pips.indexOfFirst { it.start == Int.MAX_VALUE || it.start + 60 > now }.coerceAtLeast(0)
+    LaunchedEffect(first) { rowState.animateScrollToItem((first - 1).coerceAtLeast(0)) }
+    LazyRow(
+        state = rowState,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+    ) {
+        itemsIndexed(pips) { _, p ->
+            val live = p.start != Int.MAX_VALUE && now >= p.start && now < p.start + 60
+            val past = p.start != Int.MAX_VALUE && now >= p.start + 60
+            SlotChip(p, live = live, past = past, onClick = onOpen)
+        }
+    }
+}
+
+@Composable
+private fun SlotChip(p: SlotPip, live: Boolean, past: Boolean, onClick: () -> Unit) {
+    val full = p.total > 0 && p.booked >= p.total
+    val bg: Brush
+    val fg: Color
+    val sub: String
+    val subColor: Color
+    when {
+        live -> { bg = Brush.linearGradient(listOf(AuthInkTop, AuthInkMid)); fg = Color.White; sub = "Now"; subColor = Color(0xFF7DA9FF) }
+        past -> { bg = SolidColor(Color(0xFFF1F4F8)); fg = AuthMuted; sub = "Done"; subColor = AuthMuted }
+        full -> { bg = SolidColor(Color(0xFFEAF1FF)); fg = AuthAccentDeep; sub = "Full"; subColor = AuthAccentDeep }
+        p.booked > 0 -> { bg = SolidColor(Color.White); fg = AuthInk; sub = "${p.booked}/${p.total} booked"; subColor = AuthAccentDeep }
+        else -> { bg = SolidColor(Color(0xFFF2FBF5)); fg = AuthInk; sub = "Open"; subColor = Color(0xFF15803D) }
+    }
+    LayoutBox(
+        Modifier
+            .pressableTile(cornerRadius = 18.dp, pressedScale = 0.93f, onClick = onClick)
+            .width(92.dp)
+            .shadow(if (past) 0.dp else 6.dp, RoundedCornerShape(18.dp), clip = false, spotColor = Color(0x1A0F172A))
+            .clip(RoundedCornerShape(18.dp))
+            .background(bg)
+            .border(1.dp, if (live) Color(0x337DA9FF) else CardBorder, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+    ) {
+        Column {
+            Text(compactTime(p.time), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = fg, maxLines = 1, letterSpacing = (-0.2).sp)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (live) RailDot(live = true) else LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(subColor))
+                Spacer(Modifier.width(6.dp))
+                Text(sub, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = subColor, maxLines = 1)
+            }
+            if (!past && !full && p.price > 0) {
+                Spacer(Modifier.height(4.dp))
+                Text("₹" + formatInr(p.price), fontSize = 11.5.sp, color = if (live) Color(0xCCE0E8FF) else AuthMuted, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** "6:00 AM" → "6 AM"; anything else passes through. */
+private fun compactTime(raw: String): String = raw.replace(":00", "").trim()
+
+/** One quiet line where an empty card used to stand. */
+@Composable
+private fun QuietLine(text: String, action: String, onAction: () -> Unit, modifier: Modifier = Modifier) {
+    val view = LocalView.current
+    Row(
+        modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Check, null, tint = AuthMuted, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, fontSize = 13.sp, color = AuthMuted, modifier = Modifier.weight(1f))
+        Text(
+            action, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = AuthAccentDeep,
+            modifier = Modifier.clip(RoundedCornerShape(999.dp)).clickable { Haptics.tick(view); onAction() }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+    }
+}
+
+/**
+ * The slim white bar that takes the top once the hero scrolls away, so the
+ * venue's name, the menu and the bell stay in reach. Slides and fades, never pops.
+ */
+@Composable
+private fun CompactHomeBar(visible: Boolean, title: String, unseen: Int, onMenu: () -> Unit, onBell: () -> Unit) {
+    val shown by animateFloatAsState(if (visible) 1f else 0f, tween(220), label = "compact-bar")
+    if (shown <= 0.01f) return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = shown; translationY = (1f - shown) * -24.dp.toPx() }
+            .shadow(10.dp * shown, RectangleShape, clip = false, spotColor = Color(0x1A0F172A))
+            .background(Color.White)
+            .statusBarsPadding()
+            .height(56.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = AuthInk, modifier = Modifier.size(22.dp)) }
+        Text(title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        BellIcon(unseen, onBell)
     }
 }
 
@@ -1878,233 +2614,6 @@ private fun Rise(order: Int, content: @Composable () -> Unit) {
             translationY = (1f - shown.value) * 14.dp.toPx()
         },
     ) { content() }
-}
-
-@Composable
-private fun HomeGreeting(name: String, place: String?) {
-    Column(Modifier.padding(top = 2.dp, bottom = 2.dp)) {
-        Text(
-            greeting().uppercase(),
-            fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.4.sp,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(name, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk, letterSpacing = (-0.6).sp)
-        place?.let {
-            Spacer(Modifier.height(3.dp))
-            Text(it, fontSize = 13.5.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-/** The navy money surface, with the venue's own photo worked into its right side. */
-@Composable
-private fun NavySurface(
-    photo: String?,
-    modifier: Modifier = Modifier,
-    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
-) {
-    LayoutBox(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
-    ) {
-        if (photo != null) {
-            LayoutBox(Modifier.matchParentSize()) {
-                AsyncImage(
-                    model = photo,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxHeight().fillMaxWidth(0.62f).align(Alignment.CenterEnd),
-                )
-                // Navy solid across the text, dissolving into the photo on the
-                // right, so the picture is atmosphere and never fights the figure.
-                LayoutBox(
-                    Modifier.matchParentSize().background(
-                        Brush.horizontalGradient(
-                            0f to AuthInkTop,
-                            0.42f to AuthInkTop,
-                            0.72f to AuthInkTop.copy(alpha = 0.62f),
-                            1f to AuthInkTop.copy(alpha = 0.18f),
-                        )
-                    )
-                )
-                LayoutBox(
-                    Modifier.matchParentSize().background(
-                        Brush.verticalGradient(listOf(Color.Transparent, AuthInkBot.copy(alpha = 0.7f)))
-                    )
-                )
-            }
-        } else {
-            LayoutBox(
-                Modifier.matchParentSize().background(
-                    Brush.radialGradient(
-                        listOf(Color(0x553B82F6), Color(0x00000000)),
-                        center = Offset(120f, 40f), radius = 520f,
-                    )
-                )
-            )
-        }
-        content()
-    }
-}
-
-/**
- * The day, in the app's one navy money surface.
- *
- * Money the venue stands to take today leads, because that is the number the
- * owner can still change before closing. Underneath it, the honest fraction —
- * cells booked out of cells that exist — and a bar, so a thin day looks thin.
- */
-@Composable
-private fun ShiftHero(day: ShiftBoard, memoryKey: String, photo: String? = null) {
-    // Money that lands while the partner is watching counts up and lifts the card
-    // for a beat; the buzz came from the booking poll that found it.
-    val money = rememberMoneyMotion(day.expected, memoryKey)
-    NavySurface(
-        photo = photo,
-        modifier = Modifier
-            .graphicsLayer {
-                val lift = 1f + 0.022f * money.pulse
-                scaleX = lift; scaleY = lift
-            }
-            .shadow(18.dp + 10.dp * money.pulse, RoundedCornerShape(24.dp), clip = false, spotColor = AuthInkTop),
-    ) {
-        if (money.pulse > 0f) {
-            // The glow sits behind the figure, where the eye already is.
-            LayoutBox(
-                Modifier.matchParentSize().background(
-                    Brush.radialGradient(
-                        listOf(Color(0xFF7DA9FF).copy(alpha = 0.42f * money.pulse), Color(0x00000000)),
-                        center = Offset(220f, 190f), radius = 560f,
-                    )
-                )
-            )
-        }
-        Column(Modifier.fillMaxWidth().padding(22.dp)) {
-            Text(
-                "TODAY · " + day.dayLabel.uppercase(),
-                color = Color(0xB3CFE0FF), fontSize = 11.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
-            )
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "₹" + formatInr(kotlin.math.round(money.shown)),
-                    color = Color.White, fontSize = 38.sp,
-                    fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp,
-                    style = TextStyle(fontFeatureSettings = "tnum, zero"),
-                )
-                Spacer(Modifier.width(9.dp))
-                Text(
-                    "expected",
-                    color = Color(0xCCE0E8FF), fontSize = 13.sp,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-            if (day.hasCapacity) {
-                Text(
-                    "${day.slotsBooked} of ${day.slotsTotal} slots booked" +
-                        if (day.slotsDone > 0) " · ${day.slotsDone} done" else "",
-                    color = Color(0xE6E0E8FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(9.dp))
-                OccupancyBar(day.occupancy)
-            } else {
-                // Zero of zero is not an empty day, it is an unfinished setup —
-                // saying "0 of 0 booked" would read as a catastrophe instead.
-                Text(
-                    "No bookable slots set up yet",
-                    color = Color(0xE6E0E8FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                )
-            }
-
-            if (day.due > 0) {
-                Spacer(Modifier.height(14.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0x33F87171))
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                ) {
-                    LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFFFCA5A5)))
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        "₹" + formatInr(day.due) + " of today still unpaid",
-                        color = Color(0xFFFCA5A5), fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * What Home becomes before a single court is bookable.
- *
- * Replaces a hero reading "₹0 expected" stacked on a card reading "No slots to
- * sell yet": two ways of saying the same nothing. This says what's missing, shows
- * how far along they are, and offers the one action that moves them forward.
- * The steps are real — each tick reads the account, none is decoration.
- */
-@Composable
-private fun SetupHero(
-    venues: List<VenueSummary>?,
-    focus: VenueSummary?,
-    firstBookingDone: Boolean,
-    onSetUpSlots: (Long, String) -> Unit,
-    onSupport: () -> Unit,
-) {
-    val listed = !venues.isNullOrEmpty()
-    val stepsDone = listOf(listed, false, firstBookingDone).count { it }
-    NavySurface(
-        photo = focus?.image,
-        modifier = Modifier.shadow(18.dp, RoundedCornerShape(24.dp), clip = false, spotColor = AuthInkTop),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(22.dp)) {
-            Text(
-                "GET SET UP · $stepsDone OF 3",
-                color = Color(0xB3CFE0FF), fontSize = 11.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                when {
-                    venues == null -> "Getting your venue…"
-                    !listed -> "Your venue isn't on Haraan yet"
-                    else -> "${focus?.name ?: "Your venue"} isn't bookable yet"
-                },
-                color = Color.White, fontSize = 22.sp, lineHeight = 27.sp,
-                fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp,
-                modifier = Modifier.fillMaxWidth(0.82f),
-            )
-            Spacer(Modifier.height(7.dp))
-            Text(
-                if (!listed) {
-                    "Haraan lists venues for their owners. Message us and we'll put yours on the app."
-                } else {
-                    "Publish your time slots and players can book your courts straight away."
-                },
-                color = Color(0xCCE0E8FF), fontSize = 13.sp, lineHeight = 19.sp,
-                modifier = Modifier.fillMaxWidth(0.82f),
-            )
-
-            Spacer(Modifier.height(20.dp))
-            SetupSteps(listed = listed, slots = false, firstBooking = firstBookingDone)
-
-            if (venues != null) {
-                Spacer(Modifier.height(20.dp))
-                if (listed && focus != null) {
-                    NavyCta(text = "Add time slots") { onSetUpSlots(focus.id, focus.name) }
-                } else {
-                    NavyCta(text = "Message Haraan") { onSupport() }
-                }
-            }
-        }
-    }
 }
 
 /** Venue → slots → first booking, as a connected track rather than three tiles. */
@@ -2184,43 +2693,6 @@ private fun NavyCta(text: String, onClick: () -> Unit) {
         Text(text, color = Color.White, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(8.dp))
         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
-    }
-}
-
-/**
- * Today in three numbers, as one card split by hairlines — not three pastel tiles.
- * Only drawn once there are courts to count, so it never shows a row of zeros.
- */
-@Composable
-private fun TodayStrip(day: ShiftBoard) {
-    Row(
-        Modifier.fillMaxWidth().premiumSurface(18.dp).padding(vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StripCell(Modifier.weight(1f), "BOOKED", "${day.slotsBooked}", "of ${day.slotsTotal} slots", AuthInk)
-        LayoutBox(Modifier.width(1.dp).height(38.dp).background(Hairline))
-        StripCell(Modifier.weight(1f), "COLLECTED", "₹" + formatInr(day.collected), "paid so far", AuthInk)
-        LayoutBox(Modifier.width(1.dp).height(38.dp).background(Hairline))
-        StripCell(
-            Modifier.weight(1f), "DUE", "₹" + formatInr(day.due),
-            if (day.due > 0) "still to collect" else "all settled",
-            if (day.due > 0) RED else AuthInk,
-        )
-    }
-}
-
-@Composable
-private fun StripCell(modifier: Modifier, label: String, value: String, hint: String, valueColor: Color) {
-    Column(modifier.padding(horizontal = 14.dp)) {
-        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.1.sp)
-        Spacer(Modifier.height(5.dp))
-        Text(
-            value, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = valueColor,
-            letterSpacing = (-0.4).sp, maxLines = 1,
-            style = TextStyle(fontFeatureSettings = "tnum"),
-        )
-        Spacer(Modifier.height(1.dp))
-        Text(hint, fontSize = 11.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -2435,29 +2907,6 @@ private fun RailDot(live: Boolean) {
                 .clip(RoundedCornerShape(99.dp)).background(AuthAccent),
         )
         LayoutBox(Modifier.size(9.dp).clip(RoundedCornerShape(99.dp)).background(AuthAccent))
-    }
-}
-
-/** Nothing left today — which is a different statement from having no courts. */
-@Composable
-private fun EmptySheet(day: ShiftBoard) {
-    Column(
-        Modifier.fillMaxWidth().premiumSurface(16.dp).padding(vertical = 24.dp, horizontal = 18.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            if (!day.hasCapacity) "No slots to sell yet" else "Nothing left on today's sheet",
-            fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk,
-        )
-        Spacer(Modifier.height(5.dp))
-        Text(
-            when {
-                !day.hasCapacity -> "Add courts and time slots to a venue and today's bookings will appear here."
-                day.slotsBooked > 0 -> "All ${day.slotsBooked} of today's bookings have finished."
-                else -> "No bookings for today yet. Anything taken at the desk shows up here straight away."
-            },
-            fontSize = 12.5.sp, color = AuthMuted, textAlign = TextAlign.Center, lineHeight = 18.sp,
-        )
     }
 }
 

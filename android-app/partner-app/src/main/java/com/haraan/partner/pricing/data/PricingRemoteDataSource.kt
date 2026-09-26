@@ -11,7 +11,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 class PricingRemoteDataSource(
-    private val baseUrl: String = "http://10.0.2.2:8000"
+    // The app's one server address. This was "http://10.0.2.2:8000" — the emulator's
+    // alias for a developer laptop — so on every real phone this screen could
+    // never load; see ApiConfig.
+    private val baseUrl: String = com.haraan.partner.ApiConfig.BASE_URL
 ) {
 
     suspend fun fetchDashboard(token: String, venueId: Long): PricingDashboardMetrics = withContext(Dispatchers.IO) {
