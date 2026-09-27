@@ -1282,12 +1282,16 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             )
         },
     ) {
+    // Bookings on a venue is the day desk, which has its own header (back, venue name,
+    // view switches); the white app bar on top of it was a second header.
+    val deskTab = tab == Tab.Sales && (lane == Lane.VENUE || lane == Lane.CAFE) &&
+        ctx?.branches?.isNotEmpty() == true
     Scaffold(
         topBar = {
             // Scan is full-screen camera, and Home carries its own chrome inside
             // its hero: neither gets the white header. The floating bar below is
             // still there to leave them.
-            if (tab != Tab.Scan && tab != Tab.Home) TopAppBar(
+            if (tab != Tab.Scan && tab != Tab.Home && !deskTab) TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.White,
                     scrolledContainerColor = Color.White,
