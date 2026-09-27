@@ -95,6 +95,140 @@ final class PartnerInsights
             ],
             'heatmap'  => $this->heatmap($heatFrom, $heatTo, $heatWeeks),
             'tomorrow' => $this->tomorrow($tomorrow),
+            ...$this->lifetime($venues->pluck('id'), $today),
+        ];
+    }
+
+    /**
+     * The long view, told the way that's true AND encouraging for a small venue: what
+     * Haraan brought them, a running total that only climbs, and the next milestone.
+     * Every live booking the venue has ever had, placed by the day it was played.
+     *
+     * @param  Collection<int, int>  $venueIds
+     * @return array{haraan: array<string, mixed>, growth: array<string, mixed>, milestones: array<string, mixed>}
+     */
+    private function lifetime(Collection $venueIds, Carbon $today): array
+    {
+        $all = Booking::query()
+            ->where('booking_type', 'venue')
+            ->whereIn('venue_id', $venueIds)
+            ->get(['id', 'user_id', 'slot_date', 'status', 'channel', 'total_amount', 'created_at'])
+            ->filter(fn (Booking $b): bool => CourtOccupancy::isLive($b))
+            ->sortBy(fn (Booking $b): string => (string) $b->created_at)
+            ->values();
+
+        return [
+            'haraan'     => $this->haraanBrought($all, $today),
+            'growth'     => $this->growth($all, $today),
+            'milestones' => $this->milestones($all),
+        ];
+    }
+
+    /**
+     * Bookings that came through Haraan (the app, the website, WhatsApp) rather than the
+     * counter. On an app booking `user_id` is the player, so distinct ids are real
+     * people; on a desk booking it is the partner and never counted.
+     */
+    private function haraanBrought(Collection $all, Carbon $today): array
+    {
+        $online = $all->filter(fn (Booking $b): bool => $this->channelOf($b) !== 'walk_in');
+        $month = fn (Carbon $from, Carbon $to) => $online->filter(function (Booking $b) use ($from, $to): bool {
+            $d = Carbon::parse($b->slot_date);
+
+            return $d->gte($from) && $d->lte($to);
+        });
+        $sum = fn (Collection $rows): array => ['count' => $rows->count(), 'amount' => round((float) $rows->sum('total_amount'), 2)];
+        $thisMonthStart = $today->copy()->startOfMonth();
+        $lastMonthStart = $thisMonthStart->copy()->subMonth();
+
+        return [
+            'all_time'   => $sum($online),
+            'this_month' => $sum($month($thisMonthStart, $today->copy()->endOfMonth())),
+            'last_month' => $sum($month($lastMonthStart, $thisMonthStart->copy()->subDay())),
+            'players'    => $online->filter(fn (Booking $b): bool => $this->channelOf($b) === 'app')
+                ->pluck('user_id')->filter()->unique()->count(),
+            'share'      => $all->isEmpty() ? null : round($online->count() / $all->count(), 2),
+        ];
+    }
+
+    /**
+     * Running totals of bookings and money from the first booking to today: weekly
+     * points for a young venue, monthly once it's older than 12 weeks.
+     */
+    private function growth(Collection $all, Carbon $today): array
+    {
+        $played = $all->filter(fn (Booking $b): bool => Carbon::parse($b->slot_date)->lte($today))
+            ->sortBy(fn (Booking $b): string => Carbon::parse($b->slot_date)->toDateString())
+            ->values();
+        if ($played->isEmpty()) {
+            return ['since' => null, 'unit' => 'week', 'points' => [], 'bookings' => 0, 'revenue' => 0.0];
+        }
+
+        $first = Carbon::parse($played->first()->slot_date);
+        $monthly = $first->diffInWeeks($today) > 12;
+        $cursor = $monthly ? $first->copy()->startOfMonth() : $first->copy()->startOfWeek(Carbon::MONDAY);
+        $points = [];
+        $count = 0;
+        $money = 0.0;
+        $i = 0;
+        while ($cursor->lte($today)) {
+            $end = $monthly ? $cursor->copy()->endOfMonth() : $cursor->copy()->addDays(6);
+            while ($i < $played->count() && Carbon::parse($played[$i]->slot_date)->lte($end)) {
+                $count++;
+                $money += (float) $played[$i]->total_amount;
+                $i++;
+            }
+            $points[] = [
+                'label'    => $monthly ? $cursor->format('M') : $cursor->format('j M'),
+                'bookings' => $count,
+                'revenue'  => round($money, 2),
+            ];
+            $cursor = $monthly ? $cursor->copy()->addMonth() : $cursor->copy()->addWeek();
+        }
+
+        return [
+            'since'    => $first->format('j M Y'),
+            'unit'     => $monthly ? 'month' : 'week',
+            'points'   => $points,
+            'bookings' => $count,
+            'revenue'  => round($money, 2),
+        ];
+    }
+
+    /**
+     * Booking-count milestones from the admin's ladder: the ones reached (with the day
+     * each was crossed) and the next, with how far along the venue is toward it.
+     */
+    private function milestones(Collection $all): array
+    {
+        $ladder = collect(explode(',', PlatformRules::string('partner_insights.milestones')))
+            ->map(fn (string $n): int => (int) trim($n))
+            ->filter(fn (int $n): bool => $n > 0)
+            ->unique()->sort()->values();
+        $total = $all->count();
+
+        $reached = $ladder->filter(fn (int $n): bool => $n <= $total)
+            ->map(fn (int $n): array => [
+                'count' => $n,
+                'label' => $n === 1 ? 'First booking' : number_format($n).' bookings',
+                'date'  => Carbon::parse($all[$n - 1]->created_at)->format('j M Y'),
+            ])->values();
+
+        $firstOnline = $all->first(fn (Booking $b): bool => $this->channelOf($b) !== 'walk_in');
+        $next = $ladder->first(fn (int $n): bool => $n > $total);
+        $prev = (int) ($ladder->filter(fn (int $n): bool => $n <= $total)->last() ?? 0);
+
+        return [
+            'total'        => $total,
+            'reached'      => $reached->all(),
+            'first_online' => $firstOnline !== null ? Carbon::parse($firstOnline->created_at)->format('j M Y') : null,
+            'next'         => $next === null ? null : [
+                'count'     => $next,
+                'remaining' => $next - $total,
+                // Progress from the last milestone to the next, so a venue at 12 of 25
+                // sees a bar that's already moving rather than one that starts at 48%.
+                'progress'  => round(($total - $prev) / max($next - $prev, 1), 2),
+            ],
         ];
     }
 

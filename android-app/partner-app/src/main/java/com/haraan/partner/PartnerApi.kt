@@ -169,7 +169,44 @@ data class HomeInsights(
     val channelsLastWeek: ChannelSplit,
     val heatmap: BusyHours,
     val tomorrow: TomorrowOpen,
+    val haraan: HaraanBrought,
+    val growth: Growth,
+    val milestones: Milestones,
 )
+
+/** Bookings that came through Haraan (app, website, WhatsApp) rather than the counter. */
+data class HaraanBrought(
+    val allTime: ChannelShare,
+    val thisMonth: ChannelShare,
+    val lastMonth: ChannelShare,
+    /** Distinct players who booked in the app. */
+    val players: Int,
+    /** Share of all bookings that came through Haraan, 0..1; null with no bookings. */
+    val share: Double?,
+)
+
+/** Running totals since the first booking; only ever climbs. */
+data class Growth(
+    val since: String?,
+    /** "week" or "month". */
+    val unit: String,
+    val points: List<GrowthPoint>,
+    val bookings: Int,
+    val revenue: Double,
+)
+
+data class GrowthPoint(val label: String, val bookings: Int, val revenue: Double)
+
+data class Milestones(
+    val total: Int,
+    val reached: List<Milestone>,
+    val firstOnline: String?,
+    val next: NextMilestone?,
+)
+
+data class Milestone(val count: Int, val label: String, val date: String)
+
+data class NextMilestone(val count: Int, val remaining: Int, val progress: Float)
 
 data class InsightWeek(
     /** Monday, yyyy-MM-dd. */
@@ -349,6 +386,8 @@ data class VenueMatch(
     val source: String,
     /** Metres from the venue. Null for booking-linked matches, which need no guess. */
     val distanceM: Int?,
+    /** Cricket: 1 = home batting, 2 = away. The overs belong to this side. */
+    val battingTeam: Int = 1,
 )
 
 data class VenueMatches(val confirmed: List<VenueMatch>, val nearby: List<VenueMatch>) {
@@ -936,6 +975,36 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 },
                 quiet = list(heat.optJSONArray("quiet")) { q -> QuietWindow(q.optString("days"), q.optString("hours"), q.optInt("fill")) },
             ),
+            haraan = (o.optJSONObject("haraan") ?: JSONObject()).let { h ->
+                HaraanBrought(
+                    allTime = share(h.optJSONObject("all_time")),
+                    thisMonth = share(h.optJSONObject("this_month")),
+                    lastMonth = share(h.optJSONObject("last_month")),
+                    players = h.optInt("players"),
+                    share = if (h.isNull("share") || !h.has("share")) null else h.optDouble("share"),
+                )
+            },
+            growth = (o.optJSONObject("growth") ?: JSONObject()).let { g ->
+                Growth(
+                    since = g.optStringOrNull("since"),
+                    unit = g.optString("unit", "week"),
+                    points = list(g.optJSONArray("points")) { p ->
+                        GrowthPoint(p.optString("label"), p.optInt("bookings"), p.optDouble("revenue", 0.0))
+                    },
+                    bookings = g.optInt("bookings"),
+                    revenue = g.optDouble("revenue", 0.0),
+                )
+            },
+            milestones = (o.optJSONObject("milestones") ?: JSONObject()).let { m ->
+                Milestones(
+                    total = m.optInt("total"),
+                    reached = list(m.optJSONArray("reached")) { r -> Milestone(r.optInt("count"), r.optString("label"), r.optString("date")) },
+                    firstOnline = m.optStringOrNull("first_online"),
+                    next = m.optJSONObject("next")?.let { n ->
+                        NextMilestone(n.optInt("count"), n.optInt("remaining"), n.optDouble("progress", 0.0).toFloat())
+                    },
+                )
+            },
             tomorrow = TomorrowOpen(
                 label = tomorrow.optString("label", "Tomorrow"),
                 venues = list(tomorrow.optJSONArray("venues")) { v ->
@@ -1046,6 +1115,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 branch = o.optString("branch", ""),
                 source = o.optString("source", "nearby"),
                 distanceM = if (o.isNull("distanceM")) null else o.optInt("distanceM"),
+                battingTeam = o.optInt("battingTeam", 1),
             )
         }
     }

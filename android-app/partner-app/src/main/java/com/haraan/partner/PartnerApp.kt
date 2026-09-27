@@ -1406,7 +1406,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 Tab.Venues -> VenuesTab(api, token) { id, name ->
                     manageVenue = id to name
                 }
-                Tab.Matches -> MatchesTab(api, token, branchId)
+                Tab.Matches -> MatchesScreen(api, token, branchId)
                 Tab.Sales -> {
                     if (lane == Lane.VENUE || lane == Lane.CAFE) {
                         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
@@ -1805,7 +1805,7 @@ internal fun labelFor(tab: Tab, lane: Lane): String = when {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun <T> RefreshableContent(
+internal fun <T> RefreshableContent(
     key: Any?,
     load: suspend () -> T,
     /** Bump to refetch in place: no skeleton, and a failed refetch keeps what's shown. */
@@ -2045,7 +2045,9 @@ private fun HomeTab(
                 }
                 // All-time money only earns its place once there is some. A ₹0 card on
                 // the first screen reads as "this app doesn't work", not as a fact.
-                if (o.revenue > 0.0) {
+                // With insights on, "Since you joined" tells the all-time story as a line
+                // that climbs; the 14 near-empty daily bars here read as "nobody comes".
+                if (o.revenue > 0.0 && insights == null) {
                     item(key = "revenue") {
                         Rise(8) { LayoutBox(Modifier.padding(horizontal = 16.dp)) { RevenueCard(o, memoryKey = "home.revenue.$branch") } }
                     }
@@ -3446,145 +3448,6 @@ private fun VenuesTab(api: PartnerApi, token: String, onOpen: (Long, String) -> 
                 items(list) { v -> VenueCard(v) { onOpen(v.id, v.name) } }
             }
     }
-}
-
-@Composable
-private fun MatchesTab(api: PartnerApi, token: String, venueId: Long?) {
-    RefreshableContent(token to venueId, load = { api.matches(token, venueId) }) { m ->
-        if (m.isEmpty) {
-            EmptyState("No games on your courts yet")
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (m.confirmed.isNotEmpty()) {
-                    item { SectionLabel("ON YOUR BOOKINGS") }
-                    items(m.confirmed) { MatchCard(it) }
-                }
-                if (m.nearby.isNotEmpty()) {
-                    item {
-                        Column {
-                            if (m.confirmed.isNotEmpty()) Spacer(Modifier.height(10.dp))
-                            SectionLabel("PLAYING NEARBY")
-                            Spacer(Modifier.height(4.dp))
-                            // Said plainly, because the difference matters: these are
-                            // matches sitting on top of the venue by GPS alone. No
-                            // booking here ties them to the house.
-                            Text(
-                                "Public games within 200 m. Not booked through you.",
-                                fontSize = 12.sp,
-                                color = AuthMuted,
-                            )
-                        }
-                    }
-                    items(m.nearby) { MatchCard(it) }
-                }
-            }
-        }
-    }
-}
-
-/**
- * One match, read the way a person behind a counter reads it: is it on right
- * now, who is playing, what is the score.
- *
- * The scoreline is deliberately dumb — the server already decided what belongs
- * in each slot per sport (cricket's "120/4" against a plain number elsewhere),
- * so the card just prints what it was handed.
- */
-@Composable
-private fun MatchCard(m: VenueMatch) {
-    LayoutBox(Modifier.premiumSurface(18.dp)) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (m.isLive) LivePill() else StatusChip(m)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    m.sport.replaceFirstChar { it.uppercase() },
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AuthMuted,
-                )
-                Spacer(Modifier.weight(1f))
-                m.distanceM?.let {
-                    Text("$it m away", fontSize = 11.sp, color = AuthMuted)
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-            // Cricket puts overs in the small slot; a set sport puts the rally
-            // being played there, so a live game never reads a flat 0 - 0.
-            SideRow(m.home, m.score1, m.overs.ifBlank { m.rally1 })
-            Spacer(Modifier.height(6.dp))
-            SideRow(m.away, m.score2, m.rally2)
-
-            val footer = listOfNotNull(
-                m.branch.takeIf { it.isNotBlank() },
-                m.time.takeIf { it.isNotBlank() && !m.isLive },
-                m.title.takeIf { it.isNotBlank() },
-            ).joinToString(" · ")
-            if (footer.isNotBlank()) {
-                Spacer(Modifier.height(10.dp))
-                HorizontalDivider(color = Hairline)
-                Spacer(Modifier.height(8.dp))
-                Text(footer, fontSize = 12.sp, color = AuthMuted, maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SideRow(team: String, score: String, small: String?) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            team.ifBlank { "—" },
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = AuthInk,
-            maxLines = 1,
-            modifier = Modifier.weight(1f, false),
-        )
-        Spacer(Modifier.weight(1f))
-        small?.takeIf { it.isNotBlank() }?.let {
-            Text("($it)", fontSize = 12.sp, color = AuthMuted)
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(score, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-    }
-}
-
-/** The only red in this screen: a game that is happening right now. */
-@Composable
-private fun LivePill() {
-    Row(
-        Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x14DC2626))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp)).background(RED))
-        Spacer(Modifier.width(5.dp))
-        Text("LIVE", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = RED, letterSpacing = 0.8.sp)
-    }
-}
-
-@Composable
-private fun StatusChip(m: VenueMatch) {
-    val label = when {
-        m.isFinished -> "Result"
-        m.status.isNotBlank() -> m.status
-        else -> "Scheduled"
-    }
-    Text(
-        label.uppercase(),
-        fontSize = 10.sp,
-        fontWeight = FontWeight.ExtraBold,
-        letterSpacing = 0.8.sp,
-        color = AuthMuted,
-        modifier = Modifier.clip(RoundedCornerShape(999.dp))
-            .background(Color(0x0F0F172A))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
 }
 
 @Composable

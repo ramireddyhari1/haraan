@@ -857,6 +857,21 @@ class PartnerController extends Controller
         $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
         $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
 
+        // Which side is batting: the latest over's `batting` tag, the rule the public feed
+        // and the scorecard use. Without it the batting line ("25/0", 1.1 ov) landed on
+        // the home side whoever was in, and the card disagreed with the scorecard.
+        $battingTeam = 1;
+        if ($isCricket) {
+            $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
+            for ($i = count($overSummary) - 1; $i >= 0; $i--) {
+                $tag = $overSummary[$i]['batting'] ?? null;
+                if ($tag !== null && $tag !== '') {
+                    $battingTeam = ($tag === $m->away || $tag === 'away') ? 2 : 1;
+                    break;
+                }
+            }
+        }
+
         // A set sport's scoreline counts SETS, so a live volleyball game in its
         // first set reads "0 - 0" and the card looks idle while a rally is being
         // played. The points inside the current set go in the small slot cricket
@@ -880,9 +895,11 @@ class PartnerController extends Controller
             'title'      => (string) ($m->title ?? ''),
             'home'       => (string) $m->home,
             'away'       => (string) $m->away,
-            'score1'     => $scoreText !== '' ? $scoreText : (string) ($m->home_score ?? 0),
-            'score2'     => (string) ($m->away_score ?? 0),
+            'score1'     => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
+            'score2'     => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
             'overs'      => $isCricket ? (string) ($m->overs ?? '') : '',
+            // 1 = home, 2 = away. The overs belong to this side.
+            'battingTeam' => $battingTeam,
             'rally1'     => $rally[0],
             'rally2'     => $rally[1],
             'status'     => (string) ($m->status ?? ''),

@@ -199,4 +199,89 @@ final class PartnerInsightsTest extends TestCase
 
         $this->assertEquals(0, $this->insights()->json('data.week.totals.revenue'));
     }
+
+    public function test_haraan_brought_counts_online_bookings_and_real_players(): void
+    {
+        $today = BusinessClock::today();
+        $this->booking($today, '06:00', '07:00', 'online', 1000);
+        $this->booking($today, '07:00', '08:00', 'whatsapp', 400);
+        $this->booking($today, '08:00', '09:00', 'offline', 500);
+        $this->booking($today, '14:00', '15:00', 'online', 900, 'CANCELLED');
+
+        $h = $this->insights()->assertOk()->json('data.haraan');
+
+        $this->assertSame(2, $h['all_time']['count']);
+        $this->assertEquals(1400, $h['all_time']['amount']);
+        $this->assertSame(2, $h['this_month']['count']);
+        $this->assertSame(1, $h['players']);          // the app booking's player; WhatsApp desk rows point at the partner
+        $this->assertEquals(0.67, $h['share']);
+    }
+
+    public function test_growth_only_climbs_and_leaves_future_bookings_out(): void
+    {
+        $today = Carbon::parse(BusinessClock::today());
+        $this->booking($today->copy()->subWeeks(2)->toDateString(), '06:00', '07:00', 'online', 500);
+        $this->booking($today->toDateString(), '06:00', '07:00', 'offline', 700);
+        $this->booking($today->copy()->addDays(3)->toDateString(), '06:00', '07:00', 'online', 900);
+
+        $g = $this->insights()->assertOk()->json('data.growth');
+
+        $this->assertSame('week', $g['unit']);
+        $this->assertSame(2, $g['bookings']);
+        $this->assertEquals(1200, $g['revenue']);
+        $revenue = array_column($g['points'], 'revenue');
+        $this->assertEquals($revenue, array_values(collect($revenue)->sort()->all()));
+        $this->assertEquals(1200, end($revenue));
+    }
+
+    public function test_milestones_mark_what_is_reached_and_how_far_to_the_next(): void
+    {
+        $today = BusinessClock::today();
+        foreach (['06:00', '07:00', '08:00'] as $t) {
+            $this->booking($today, $t, substr($t, 0, 2) + 1 .':00', 'offline', 100);
+        }
+        $this->booking($today, '14:00', '15:00', 'online', 100);
+
+        $m = $this->insights()->assertOk()->json('data.milestones');
+
+        $this->assertSame(4, $m['total']);
+        $this->assertSame('First booking', $m['reached'][0]['label']);
+        $this->assertNotNull($m['first_online']);
+        $this->assertSame(10, $m['next']['count']);
+        $this->assertSame(6, $m['next']['remaining']);
+        $this->assertEquals(0.33, $m['next']['progress']);   // 1 → 10, at 4
+    }
+
+    public function test_the_milestone_ladder_is_an_admin_rule(): void
+    {
+        AppSetting::set(PlatformRules::storageKey('partner_insights.milestones'), '2,3', PlatformRules::GROUP);
+        $today = BusinessClock::today();
+        $this->booking($today, '06:00', '07:00', 'offline', 100);
+        $this->booking($today, '07:00', '08:00', 'offline', 100);
+
+        $m = $this->insights()->assertOk()->json('data.milestones');
+
+        $this->assertSame(['2 bookings'], array_column($m['reached'], 'label'));
+        $this->assertSame(3, $m['next']['count']);
+    }
+
+    public function test_matches_put_the_batting_line_on_the_side_that_is_batting(): void
+    {
+        $booking = $this->booking(BusinessClock::today(), '06:00', '07:00', 'online', 500);
+        $match = \App\Models\LiveMatch::create([
+            'sport' => 'cricket', 'status' => 'live', 'home' => 'HAB', 'away' => 'HHH', 'title' => 'HAB vs HHH',
+        ]);
+        $match->forceFill([
+            'venue_booking_id' => $booking->id, 'score_text' => '25/0', 'overs' => '1.1',
+            'home_score' => 0, 'away_score' => 25,
+            'over_summary' => [['over' => 1, 'batting' => 'HHH', 'runs' => 25]],
+        ])->save();
+
+        $row = $this->withHeader('Authorization', 'Bearer '.$this->token)
+            ->getJson('/api/partner/matches')->assertOk()->json('data.confirmed.0');
+
+        $this->assertSame(2, $row['battingTeam']);
+        $this->assertSame('25/0', $row['score2']);
+        $this->assertSame('0', $row['score1']);
+    }
 }

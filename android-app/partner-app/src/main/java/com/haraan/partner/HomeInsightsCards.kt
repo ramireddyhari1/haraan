@@ -59,6 +59,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import com.haraan.partner.ui.Haptics
 import com.haraan.partner.ui.components.pressScale
 import com.haraan.partner.ui.components.pressShade
@@ -129,10 +144,17 @@ internal fun LazyListScope.insightItems(
 ) {
     val pad = Modifier.padding(horizontal = 16.dp)
     val insights = state.value
+    // The encouraging long view leads: what Haraan brought, then the next milestone.
+    item(key = "ins-haraan") { Rise(8) { HaraanBroughtCard(insights.haraan, "$memoryKey.haraan", pad) } }
+    item(key = "ins-milestones") { Rise(8) { MilestonesCard(insights.milestones, memoryKey, pad) } }
     item(key = "ins-week-head") { Rise(8) { Box(pad) { HomeSectionHeader(Icons.Filled.BarChart, insights.week.label) } } }
     item(key = "ins-week") { Rise(9) { WeekBarsCard(state, onWeek, memoryKey, pad) } }
     item(key = "ins-channel-head") { Rise(10) { Box(pad) { HomeSectionHeader(Icons.Filled.Hub, "Where bookings come from") } } }
     item(key = "ins-channel") { Rise(10) { ChannelSplitCard(state, pad) } }
+    if (insights.growth.points.size >= 2) {
+        item(key = "ins-growth-head") { Rise(11) { Box(pad) { HomeSectionHeader(Icons.AutoMirrored.Filled.TrendingUp, "Since you joined") } } }
+        item(key = "ins-growth") { Rise(11) { GrowthCard(insights.growth, pad) } }
+    }
     val tomorrow = insights.tomorrow
     if (tomorrow.venues.isNotEmpty()) {
         item(key = "ins-tomorrow-head") { Rise(11) { Box(pad) { HomeSectionHeader(Icons.Filled.EventAvailable, "Tomorrow · ${tomorrow.label}") } } }
@@ -232,9 +254,9 @@ private fun WeekArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, des
 
 /** ₹ | Hrs — which figure the bars measure. */
 @Composable
-private fun ModeSwitch(hours: Boolean, onChange: (Boolean) -> Unit) {
+private fun ModeSwitch(hours: Boolean, second: String = "Hrs", onChange: (Boolean) -> Unit) {
     Row(Modifier.clip(RoundedCornerShape(999.dp)).background(Track).padding(3.dp)) {
-        listOf(false to "₹", true to "Hrs").forEach { (value, label) ->
+        listOf(false to "₹", true to second).forEach { (value, label) ->
             val on = value == hours
             Text(
                 label,
@@ -635,6 +657,261 @@ internal fun BusyHoursCard(heat: BusyHours, onPricing: (() -> Unit)?, modifier: 
                     fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
             }
+        }
+    }
+}
+
+
+// ---- Through Haraan --------------------------------------------------------
+
+/**
+ * What Haraan brought this venue: the online bookings and money that didn't walk in off
+ * the street, and the real players behind them. The number that says the app earns its keep.
+ */
+@Composable
+internal fun HaraanBroughtCard(h: HaraanBrought, memoryKey: String, modifier: Modifier = Modifier) {
+    val money = rememberMoneyMotion(h.allTime.amount, memoryKey)
+    Column(
+        modifier.fillMaxWidth()
+            .premiumSurface()
+            .background(Brush.linearGradient(listOf(Color(0xFFEFF4FF), Color.White)))
+            .padding(16.dp),
+    ) {
+        Text("Through Haraan", fontSize = 12.5.sp, color = AccentDeep, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        if (h.allTime.count == 0) {
+            Text("Your first online booking is next", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Players near you can find and book your courts on Haraan. Share your venue link to bring them in.",
+                fontSize = 13.sp, color = Muted,
+            )
+            return@Column
+        }
+        Text(
+            rupees(money.shown),
+            fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.8).sp,
+        )
+        Text(
+            "from ${h.allTime.count} online " + (if (h.allTime.count == 1) "booking" else "bookings") + " so far",
+            fontSize = 13.sp, color = Muted,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (h.players > 0) Fact(if (h.players == 1) "1 player found you" else "${h.players} players found you")
+            h.share?.takeIf { it > 0 }?.let { Fact("${(it * 100).roundToInt()}% of your bookings") }
+        }
+        if (h.thisMonth.count > 0 || h.lastMonth.count > 0) {
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Ghost))
+            Spacer(Modifier.height(10.dp))
+            val up = h.lastMonth.count > 0 && h.thisMonth.count > h.lastMonth.count
+            Text(
+                "This month: ${h.thisMonth.count} online · ${rupees(h.thisMonth.amount)}" +
+                    when {
+                        up -> "  ▲ up from ${h.lastMonth.count}"
+                        h.lastMonth.count > 0 -> "  · last month ${h.lastMonth.count}"
+                        else -> ""
+                    },
+                fontSize = 12.5.sp, color = if (up) Up else Ink, fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun Fact(text: String) {
+    Text(
+        text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AccentDeep,
+        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(AccentMist)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+// ---- Milestones ------------------------------------------------------------
+
+/**
+ * The next booking milestone as a bar that's already moving, and the ones already
+ * reached with the day each was crossed. A milestone the partner hasn't seen yet
+ * arrives with a buzz and a pop, once.
+ */
+@Composable
+internal fun MilestonesCard(m: Milestones, memoryKey: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val prefs = remember { context.getSharedPreferences("haraan_partner_milestones", android.content.Context.MODE_PRIVATE) }
+    val newest = m.reached.maxOfOrNull { it.count } ?: 0
+    // Read once: the pop plays for milestones crossed since the partner last looked.
+    val seen = remember(memoryKey) { runCatching { prefs.getInt(memoryKey, -1) }.getOrDefault(-1) }
+    val fresh = seen in 0 until newest
+    LaunchedEffect(memoryKey, newest) {
+        if (fresh) Haptics.confirm(view)
+        runCatching { prefs.edit().putInt(memoryKey, newest).apply() }
+    }
+
+    Column(modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.EmojiEvents, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (m.total == 1) "1 booking so far" else "${m.total} bookings so far",
+                fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Ink,
+            )
+        }
+        m.next?.let { next ->
+            Spacer(Modifier.height(12.dp))
+            val grow = remember(next.count) { Animatable(0f) }
+            LaunchedEffect(next.count, next.progress) {
+                grow.animateTo(next.progress.coerceIn(0f, 1f), tween(900, easing = FastOutSlowInEasing))
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    if (next.remaining == 1) "1 more booking to reach ${next.count}" else "${next.remaining} more bookings to reach ${next.count}",
+                    fontSize = 13.sp, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                )
+                Text("${m.total} / ${next.count}", fontSize = 12.sp, color = Muted)
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(999.dp)).background(Track)) {
+                Box(
+                    Modifier.fillMaxWidth(grow.value.coerceAtLeast(0.03f)).fillMaxHeight()
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Brush.horizontalGradient(listOf(Accent, AccentDeep))),
+                )
+            }
+        }
+        val chips = buildList {
+            m.reached.sortedByDescending { it.count }.take(3).forEach { add(Triple(it.label, it.date, it.count == newest && fresh)) }
+            m.firstOnline?.let { add(Triple("First online booking", it, false)) }
+        }
+        if (chips.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            chips.forEach { (label, date, isNew) -> ReachedRow(label, date, isNew) }
+        }
+    }
+}
+
+@Composable
+private fun ReachedRow(label: String, date: String, isNew: Boolean) {
+    val pop = remember { Animatable(if (isNew) 0.6f else 1f) }
+    LaunchedEffect(isNew) {
+        if (isNew) pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow))
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Up, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(label, fontSize = 13.5.sp, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        if (isNew) {
+            Text(
+                "NEW", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, letterSpacing = 0.6.sp,
+                modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Up).padding(horizontal = 7.dp, vertical = 2.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(date, fontSize = 12.sp, color = Muted)
+    }
+}
+
+// ---- Since you joined ------------------------------------------------------
+
+/**
+ * Running total since the first booking: a line that only climbs, drawn in on load.
+ * Drag along it to read any week or month back; each step ticks under the thumb.
+ */
+@Composable
+internal fun GrowthCard(g: Growth, modifier: Modifier = Modifier) {
+    val view = LocalView.current
+    var bookingsMode by remember { mutableStateOf(false) }
+    var picked by remember(g) { mutableStateOf<Int?>(null) }
+    val values = g.points.map { if (bookingsMode) it.bookings.toFloat() else it.revenue.toFloat() }
+    val top = values.maxOrNull()?.takeIf { it > 0f } ?: 1f
+    val draw = remember(g, bookingsMode) { Animatable(0f) }
+    LaunchedEffect(g, bookingsMode) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
+
+    Column(modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(g.since?.let { "Since $it" } ?: "So far", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (bookingsMode) "${g.bookings} bookings" else rupees(g.revenue),
+                    fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.5).sp,
+                )
+            }
+            ModeSwitch(bookingsMode, second = "Bookings") { bookingsMode = it; picked = null; Haptics.tick(view) }
+        }
+        Spacer(Modifier.height(6.dp))
+        val p = picked?.let { g.points.getOrNull(it) }
+        Text(
+            p?.let { "${if (g.unit == "month") "By end of" else "By week of"} ${it.label} · ${rupees(it.revenue)} · ${it.bookings} bookings" }
+                ?: "Drag along the line to look back",
+            fontSize = 12.5.sp, color = if (p != null) Ink else Muted, fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(10.dp))
+
+        val stepOf = { x: Float, width: Float ->
+            if (values.size < 2) 0 else ((x / width) * (values.size - 1)).roundToInt().coerceIn(0, values.size - 1)
+        }
+        Canvas(
+            Modifier.fillMaxWidth().height(130.dp)
+                .pointerInput(values.size) {
+                    detectTapGestures { o ->
+                        val i = stepOf(o.x, size.width.toFloat())
+                        picked = if (picked == i) null else i
+                        Haptics.tick(view)
+                    }
+                }
+                .pointerInput(values.size) {
+                    detectDragGestures { change, _ ->
+                        val i = stepOf(change.position.x, size.width.toFloat())
+                        if (i != picked) { picked = i; Haptics.tick(view) }
+                    }
+                },
+        ) {
+            if (values.size < 2) return@Canvas
+            val w = size.width
+            val h = size.height
+            val pad = 6.dp.toPx()
+            val pts = values.mapIndexed { i, v ->
+                Offset(w * i / (values.size - 1), pad + (h - 2 * pad) * (1f - v / top))
+            }
+            val line = Path().apply {
+                moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) {
+                    // Soft corners: a midpoint curve reads as growth, not as a spreadsheet.
+                    val a = pts[i - 1]
+                    val b = pts[i]
+                    val mx = (a.x + b.x) / 2
+                    cubicTo(mx, a.y, mx, b.y, b.x, b.y)
+                }
+            }
+            val area = Path().apply {
+                addPath(line)
+                lineTo(pts.last().x, h)
+                lineTo(pts.first().x, h)
+                close()
+            }
+            clipRect(right = w * draw.value) {
+                drawPath(area, Brush.verticalGradient(listOf(Accent.copy(alpha = 0.22f), Accent.copy(alpha = 0f))))
+                drawPath(line, Accent, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            }
+            if (draw.value > 0.98f) {
+                drawCircle(Color.White, 6.dp.toPx(), pts.last())
+                drawCircle(Accent, 4.dp.toPx(), pts.last())
+            }
+            picked?.let { i ->
+                val at = pts[i]
+                drawLine(Ink.copy(alpha = 0.18f), Offset(at.x, 0f), Offset(at.x, h), strokeWidth = 1.dp.toPx())
+                drawCircle(Color.White, 6.dp.toPx(), at)
+                drawCircle(AccentDeep, 4.dp.toPx(), at)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row {
+            Text(g.points.first().label, fontSize = 11.sp, color = Muted, modifier = Modifier.weight(1f))
+            Text("Now", fontSize = 11.sp, color = Muted)
         }
     }
 }
