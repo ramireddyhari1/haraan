@@ -28,6 +28,8 @@ use App\Services\BookingService;
 use App\Services\PartnerSettlement;
 use App\Services\RazorpayGateway;
 use App\Support\BusinessClock;
+use App\Support\CourtOccupancy;
+use App\Support\PartnerInsights;
 use App\Support\BookingReport;
 use App\Support\PartnerCapabilities;
 use App\Support\PartnerLane;
@@ -551,6 +553,24 @@ class PartnerController extends Controller
     }
 
     /**
+     * GET /api/partner/insights?week=Y-m-d — the charts under Home: channel split, the
+     * week's bars against last week, busy hours and tomorrow's open slots.
+     * Scoped like Home: every branch the caller may see, or `?venue_id=`.
+     */
+    public function insights(Request $request): JsonResponse
+    {
+        $venues = $request->user()->branches()
+            ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
+            ->get(['id', 'name', 'slot_minutes']);
+
+        $week = $request->query('week');
+
+        return response()->json([
+            'data' => (new PartnerInsights())->build($venues, is_string($week) ? $week : null),
+        ]);
+    }
+
+    /**
      * The day's slot rows a booking occupies.
      *
      * Its own slot when it was sold against one; otherwise every slot whose hour its
@@ -563,25 +583,7 @@ class PartnerController extends Controller
      */
     private function slotIdsFor(Booking $b, $slots, int $length = 60): array
     {
-        if ($b->venue_slot_id !== null && $slots->contains('id', (int) $b->venue_slot_id)) {
-            return [(int) $b->venue_slot_id];
-        }
-
-        $start = BookingService::timeToMinutes($b->start_time);
-        if ($start === null) {
-            return [];
-        }
-        $end = $this->endMinutesOf($b->end_time) ?? $start + $length;
-
-        return $slots
-            ->filter(function (VenueSlot $s) use ($start, $end, $length): bool {
-                $s0 = BookingService::timeToMinutes($s->time);
-
-                return $s0 !== null && $s0 < $end && $s0 + $length > $start;
-            })
-            ->map(fn (VenueSlot $s): int => (int) $s->id)
-            ->values()
-            ->all();
+        return CourtOccupancy::slotIdsFor($b, $slots, $length);
     }
 
     /**
@@ -593,22 +595,13 @@ class PartnerController extends Controller
      */
     private function courtIdsFor(Booking $b, array $courtIds): array
     {
-        if ($courtIds === []) {
-            return [0];
-        }
-
-        return $b->venue_court_id !== null ? [(int) $b->venue_court_id] : $courtIds;
+        return CourtOccupancy::courtIdsFor($b, $courtIds);
     }
 
     /** Minutes-of-day a booking ends; midnight ("00:00" / "24:00") is the end of the day. */
     private function endMinutesOf(?string $label): ?int
     {
-        if ($label !== null && str_starts_with(trim($label), '24:')) {
-            return 24 * 60;
-        }
-        $m = BookingService::timeToMinutes($label);
-
-        return $m === 0 ? 24 * 60 : $m;
+        return CourtOccupancy::endMinutesOf($label);
     }
 
     /** The time a booking starts, for display: its slot's label, else its own start. */
@@ -676,7 +669,7 @@ class PartnerController extends Controller
      */
     private function isDead(Booking $b): bool
     {
-        return in_array(strtolower((string) $b->status), self::DEAD_STATUSES, true);
+        return CourtOccupancy::isDead($b);
     }
 
     /** Booking statuses that carry no money and hold no slot. */

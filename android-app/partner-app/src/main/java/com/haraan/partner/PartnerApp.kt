@@ -234,7 +234,7 @@ private val NavIdle = Color(0xFF94A3B8)
 
 /** The one premium card surface used across every screen: soft lifted shadow,
  *  white fill, hairline border, consistent radius. Keeps the whole app coherent. */
-private fun Modifier.premiumSurface(radius: Dp = 18.dp): Modifier = this
+internal fun Modifier.premiumSurface(radius: Dp = 18.dp): Modifier = this
     .shadow(10.dp, RoundedCornerShape(radius), clip = false, spotColor = Color(0x1A0F172A))
     .clip(RoundedCornerShape(radius))
     .background(Color.White)
@@ -1378,6 +1378,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     onBookings = { tab = Tab.Sales; unseenBookings = 0 },
                     onSetUpSlots = { id, name -> manageStartsInSlots = true; manageVenue = id to name },
                     onOpenDesk = { id, name -> manageStartsInSlots = false; manageVenue = id to name },
+                    onPricing = if (session.can("pricing")) ({ id, name -> manageStartsInSlots = true; manageVenue = id to name }) else null,
                     onScan = { tab = Tab.Scan },
                     onSupport = { showSupport = true },
                     onReports = if (session.can("reports")) ({ showReports = true }) else null,
@@ -1857,6 +1858,8 @@ private fun HomeTab(
     onSetUpSlots: (Long, String) -> Unit = { _, _ -> },
     /** Opens a venue's day desk (grid, walk-ins). */
     onOpenDesk: (Long, String) -> Unit = { _, _ -> },
+    /** Opens a venue's courts & pricing; null when this partner may not change prices. */
+    onPricing: ((Long, String) -> Unit)? = null,
     onScan: () -> Unit = {},
     onSupport: () -> Unit = {},
     /** Each null when this partner may not open that screen; its door isn't drawn. */
@@ -1903,7 +1906,11 @@ private fun HomeTab(
                         }.getOrNull()
                     } else null
                 }
-                HomeData(overview.await(), sheet.await(), grid.await(), payouts.await(), whatsapp.await())
+                // The charts are extra: a failure loses them, never Home.
+                val insights = async {
+                    if (courtsLane) runCatching { api.insights(token, branch) }.getOrNull() else null
+                }
+                HomeData(overview.await(), sheet.await(), grid.await(), payouts.await(), whatsapp.await(), insights.await())
             }
         },
     ) { data ->
@@ -1913,6 +1920,10 @@ private fun HomeTab(
         // Set-up means the venue has no slots at all. Today's capacity is 0 on a closed
         // day too, and an established venue was told it "isn't bookable yet".
         val settingUp = courtsLane && !day.hasAnySlots
+        // The week pager lives out here: LazyColumn items can't remember across pages.
+        val insights = data.insights?.takeIf { it.enabled && !settingUp }?.let { initial ->
+            rememberInsightsState(initial) { week -> api.insights(token, branch, week) }
+        }
         val listState = rememberLazyListState()
         val density = LocalDensity.current
         // Past the hero the page grows a slim white bar, so the venue's name and
@@ -2024,6 +2035,14 @@ private fun HomeTab(
                         }
                     }
                 }
+                insights?.let { (state, go) ->
+                    insightItems(
+                        state = state,
+                        onWeek = go,
+                        memoryKey = "home.week.$branch",
+                        onPricing = onPricing?.let { open -> focus?.let { f -> { open(f.id, f.name) } } },
+                    )
+                }
                 // All-time money only earns its place once there is some. A ₹0 card on
                 // the first screen reads as "this app doesn't work", not as a fact.
                 if (o.revenue > 0.0) {
@@ -2053,6 +2072,8 @@ private data class HomeData(
     val payouts: PayoutsPage? = null,
     /** WhatsApp desk summary for its door; null when not a venue or not loaded. */
     val whatsapp: com.haraan.partner.whatsapp.model.WhatsAppMetrics? = null,
+    /** The week's bars, channel split, tomorrow and busy hours; null when not a venue or off. */
+    val insights: HomeInsights? = null,
 )
 
 /**
@@ -2629,7 +2650,7 @@ private fun placeLine(venues: List<VenueSummary>?, focus: VenueSummary?, branch:
 
 /** Home's cards arrive in order, each a beat after the last, instead of all at once. */
 @Composable
-private fun Rise(order: Int, content: @Composable () -> Unit) {
+internal fun Rise(order: Int, content: @Composable () -> Unit) {
     val shown = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(order * 45L)
@@ -2725,7 +2746,7 @@ private fun NavyCta(text: String, onClick: () -> Unit) {
 
 /** A section title with its icon and, when there is somewhere real to go, one link. */
 @Composable
-private fun HomeSectionHeader(icon: ImageVector, title: String, action: String? = null, onAction: () -> Unit = {}) {
+internal fun HomeSectionHeader(icon: ImageVector, title: String, action: String? = null, onAction: () -> Unit = {}) {
     val view = LocalView.current
     Row(
         Modifier.fillMaxWidth().padding(top = 6.dp),

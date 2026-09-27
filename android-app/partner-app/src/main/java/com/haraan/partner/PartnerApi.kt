@@ -158,6 +158,82 @@ data class Overview(
 )
 
 /**
+ * The charts under Home (`GET /api/partner/insights`). Court-hours and rupees of live
+ * bookings only, placed by the same rule as [ShiftBoard] and the desk grid.
+ */
+data class HomeInsights(
+    val enabled: Boolean,
+    val week: InsightWeek,
+    val channelsToday: ChannelSplit,
+    val channelsWeek: ChannelSplit,
+    val channelsLastWeek: ChannelSplit,
+    val heatmap: BusyHours,
+    val tomorrow: TomorrowOpen,
+)
+
+data class InsightWeek(
+    /** Monday, yyyy-MM-dd. */
+    val start: String,
+    val label: String,
+    val prev: String,
+    /** Null on the current week: there is no future to page to. */
+    val next: String?,
+    val days: List<InsightDay>,
+    val revenue: Double,
+    val bookedHours: Double,
+    val totalHours: Double,
+    val lastRevenue: Double,
+)
+
+data class InsightDay(
+    val date: String,
+    val label: String,
+    val day: Int,
+    val today: Boolean,
+    val future: Boolean,
+    val revenue: Double,
+    val bookedHours: Double,
+    val totalHours: Double,
+    val lastRevenue: Double,
+    val lastBookedHours: Double,
+)
+
+data class ChannelShare(val amount: Double, val hours: Double, val count: Int)
+
+data class ChannelSplit(val walkIn: ChannelShare, val app: ChannelShare, val whatsapp: ChannelShare) {
+    val amount: Double get() = walkIn.amount + app.amount + whatsapp.amount
+    val count: Int get() = walkIn.count + app.count + whatsapp.count
+    /** Share of the money that came through Haraan (app + WhatsApp), 0..1; null with no money. */
+    val onlineShare: Double? get() = if (amount > 0) (app.amount + whatsapp.amount) / amount else null
+}
+
+data class BusyHours(
+    /** False until the venue has enough bookings for "quiet" to mean something. */
+    val ready: Boolean,
+    val weeks: Int,
+    val hours: List<String>,
+    /** Seven rows, Mon..Sun; each cell 0..1, or null where the venue doesn't run that hour. */
+    val rows: List<Pair<String, List<Float?>>>,
+    val quiet: List<QuietWindow>,
+)
+
+data class QuietWindow(val days: String, val hours: String, val fill: Int)
+
+data class TomorrowOpen(val label: String, val venues: List<TomorrowVenue>)
+
+data class TomorrowVenue(
+    val id: Long,
+    val name: String,
+    val closed: Boolean,
+    val openHours: Double,
+    val totalHours: Double,
+    val windows: List<Pair<String, Int>>,
+    val shareUrl: String,
+    /** The admin's share message, filled in; blank from an older server. */
+    val shareText: String,
+)
+
+/**
  * Today, on this partner's courts — what `GET /api/partner/today` answers.
  *
  * Capacity counts CELLS (courts x slots), the same unit the desk grid draws, so
@@ -790,6 +866,91 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     )
                 }
             },
+        )
+    }
+
+    suspend fun insights(token: String, venueId: Long? = null, week: String? = null): HomeInsights = withContext(Dispatchers.IO) {
+        val query = listOfNotNull(
+            venueId?.takeIf { it > 0L }?.let { "venue_id=$it" },
+            week?.let { "week=$it" },
+        ).joinToString("&")
+        val o = JSONObject(get("/api/partner/insights" + if (query.isEmpty()) "" else "?$query", token)).getJSONObject("data")
+        parseInsights(o)
+    }
+
+    private fun parseInsights(o: JSONObject): HomeInsights {
+        fun share(c: JSONObject?) = ChannelShare(
+            amount = c?.optDouble("amount", 0.0) ?: 0.0,
+            hours = c?.optDouble("hours", 0.0) ?: 0.0,
+            count = c?.optInt("count") ?: 0,
+        )
+        fun split(c: JSONObject?) = ChannelSplit(share(c?.optJSONObject("walk_in")), share(c?.optJSONObject("app")), share(c?.optJSONObject("whatsapp")))
+        fun <T> list(a: JSONArray?, map: (JSONObject) -> T): List<T> =
+            if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(map) }
+
+        val week = o.optJSONObject("week") ?: JSONObject()
+        val totals = week.optJSONObject("totals") ?: JSONObject()
+        val channels = o.optJSONObject("channels")
+        val heat = o.optJSONObject("heatmap") ?: JSONObject()
+        val tomorrow = o.optJSONObject("tomorrow") ?: JSONObject()
+        val hours = heat.optJSONArray("hours")
+
+        return HomeInsights(
+            enabled = o.optBoolean("enabled", false),
+            week = InsightWeek(
+                start = week.optString("start", ""),
+                label = week.optString("label", "This week"),
+                prev = week.optString("prev", ""),
+                next = week.optStringOrNull("next"),
+                days = list(week.optJSONArray("days")) { d ->
+                    InsightDay(
+                        date = d.optString("date"),
+                        label = d.optString("label"),
+                        day = d.optInt("day"),
+                        today = d.optBoolean("today"),
+                        future = d.optBoolean("future"),
+                        revenue = d.optDouble("revenue", 0.0),
+                        bookedHours = d.optDouble("booked_hours", 0.0),
+                        totalHours = d.optDouble("total_hours", 0.0),
+                        lastRevenue = d.optDouble("last_revenue", 0.0),
+                        lastBookedHours = d.optDouble("last_booked_hours", 0.0),
+                    )
+                },
+                revenue = totals.optDouble("revenue", 0.0),
+                bookedHours = totals.optDouble("booked_hours", 0.0),
+                totalHours = totals.optDouble("total_hours", 0.0),
+                lastRevenue = week.optJSONObject("last")?.optDouble("revenue", 0.0) ?: 0.0,
+            ),
+            channelsToday = split(channels?.optJSONObject("today")),
+            channelsWeek = split(channels?.optJSONObject("week")),
+            channelsLastWeek = split(channels?.optJSONObject("last_week")),
+            heatmap = BusyHours(
+                ready = heat.optBoolean("ready", false),
+                weeks = heat.optInt("weeks", 4),
+                hours = if (hours == null) emptyList() else (0 until hours.length()).map { hours.optString(it) },
+                rows = list(heat.optJSONArray("rows")) { r ->
+                    val fill = r.optJSONArray("fill")
+                    r.optString("label") to (if (fill == null) emptyList() else (0 until fill.length()).map {
+                        if (fill.isNull(it)) null else fill.optDouble(it, 0.0).toFloat()
+                    })
+                },
+                quiet = list(heat.optJSONArray("quiet")) { q -> QuietWindow(q.optString("days"), q.optString("hours"), q.optInt("fill")) },
+            ),
+            tomorrow = TomorrowOpen(
+                label = tomorrow.optString("label", "Tomorrow"),
+                venues = list(tomorrow.optJSONArray("venues")) { v ->
+                    TomorrowVenue(
+                        id = v.optLong("id"),
+                        name = v.optString("name"),
+                        closed = v.optBoolean("closed"),
+                        openHours = v.optDouble("open_hours", 0.0),
+                        totalHours = v.optDouble("total_hours", 0.0),
+                        windows = list(v.optJSONArray("windows")) { w -> w.optString("label") to w.optInt("free_courts") },
+                        shareUrl = v.optString("share_url", ""),
+                        shareText = v.optString("share_text", ""),
+                    )
+                },
+            ),
         )
     }
 

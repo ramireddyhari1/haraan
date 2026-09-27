@@ -551,6 +551,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/context', 'context');
         Route::get('/overview', 'overview');
         Route::get('/today', 'today');
+        Route::get('/insights', 'insights');
         Route::get('/events', 'events');
         Route::get('/events/{id}', 'showEvent')->whereNumber('id');
         Route::get('/events/{id}/analytics', 'eventAnalytics')->whereNumber('id');
