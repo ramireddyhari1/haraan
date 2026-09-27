@@ -1059,16 +1059,21 @@ final class BookingService
         ?string $guestPhone,
         ?int $courtId = null,
         int $duration = 1,
+        ?int $holdMinutes = null,
     ): Booking {
-        return $this->reserveVenue($venueId, $slotId, $courtId, $date, $duration, [
-            'user_id'     => $partner->id,
-            'channel'     => 'offline',
-            'guest_name'  => $guestName,
-            'guest_phone' => $guestPhone,
+        // A walk-in paying online (UPI QR / link) is a HOLD until the money lands: PENDING
+        // with `reserved_until`, so it blocks the court while the customer pays and frees
+        // it by itself if they don't. Paid at the counter, it is confirmed straight away.
+        return $this->reserveVenue($venueId, $slotId, $courtId, $date, $duration, array_filter([
+            'user_id'      => $partner->id,
+            'channel'      => 'offline',
+            'guest_name'   => $guestName,
+            'guest_phone'  => $guestPhone,
             // Desk bookings are priced by the partner at the counter, not by app coupons.
-            'user'        => null,
-            'coupon_code' => null,
-        ]);
+            'user'         => null,
+            'coupon_code'  => null,
+            'hold_minutes' => $holdMinutes,
+        ], fn ($v, $k) => $v !== null || in_array($k, ['user', 'coupon_code', 'guest_name', 'guest_phone'], true), ARRAY_FILTER_USE_BOTH), reserve: $holdMinutes !== null);
     }
 
     /**

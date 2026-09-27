@@ -441,7 +441,7 @@ class VenueBookingUserToPartnerTest extends TestCase
         // And the desk is genuinely refused, which is what the amber cell is warning about.
         $this->as($this->owner)->postJson("/api/partner/venues/{$this->venue->id}/bookings", [
             'slotId' => $this->slot->id, 'courtId' => $this->court->id,
-            'date' => $this->date(), 'duration' => 1, 'guestName' => 'Walk In',
+            'date' => $this->date(), 'duration' => 1, 'guestName' => 'Walk In', 'paymentMethod' => 'cash',
         ])->assertStatus(409);
     }
 

@@ -294,7 +294,7 @@ fun DayBookingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(StatusFilter.values()) { filterOption ->
+                items(StatusFilter.values().filter { it != StatusFilter.UNPAID }) { filterOption ->
                     val isSelected = state.filter.statusFilter == filterOption
                     Box(
                         modifier = Modifier

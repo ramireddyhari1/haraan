@@ -648,7 +648,8 @@ class PartnerController extends Controller
             ->whereRaw('lower(coalesce(payment_status, ?)) <> ?', ['unpaid', 'paid'])
             ->where('total_amount', '>', 0)
             ->get(['status', 'total_amount', 'amount_paid'])
-            ->reject(fn (Booking $b): bool => $this->isDead($b));
+            // A hold waiting on a QR is not money owed; it pays or it lapses.
+            ->reject(fn (Booking $b): bool => $this->isDead($b) || strtolower((string) $b->status) === 'pending');
 
         return [
             'count'  => $owed->count(),
@@ -1125,13 +1126,13 @@ class PartnerController extends Controller
             'duration'   => ['nullable', 'integer', 'min:1', 'max:12'],
             'guestName'  => ['nullable', 'string', 'max:120'],
             'guestPhone' => ['nullable', 'string', 'max:30'],
-            // How the desk took the money. 'link' mints a Razorpay payment link and
-            // leaves the booking unpaid until the payment webhook says otherwise;
-            // 'later' records nothing at all.
-            // 'upi_qr' mints a Razorpay UPI QR the desk shows on screen; like 'link' it
-            // leaves the booking unpaid until Razorpay reports the capture. Plain 'upi'
-            // still means "already paid to the venue's own UPI" (older app builds).
-            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,upi_qr,card,link,later,package'],
+            // How the customer pays — and there are only two ways. OFFLINE: the money is
+            // in hand at the counter (cash, the venue's own UPI, card) or a pass is used,
+            // so the booking is confirmed and paid at once. ONLINE: a Razorpay UPI QR or
+            // link, so the booking is a HOLD until Razorpay reports the payment and lapses
+            // on its own if it never comes. There is no "pay later": an unpaid walk-in
+            // held a court it never paid for.
+            'paymentMethod' => ['required', 'string', 'in:cash,upi,upi_qr,card,link,package'],
             // Which of the customer's passes to spend a session from.
             'customerPackageId' => ['nullable', 'integer'],
         ]);
@@ -1141,6 +1142,8 @@ class PartnerController extends Controller
         // they were never assigned to, by passing its id.
         $partnerId = $request->user()->effectivePartnerId();
         $venue = $this->branch($request, $id);
+        $method = (string) $data['paymentMethod'];
+        $online = in_array($method, ['link', 'upi_qr'], true);
 
         $booking = $this->bookings->createOfflineVenueBooking(
             $request->user(),
@@ -1151,10 +1154,15 @@ class PartnerController extends Controller
             $data['guestPhone'] ?? null,
             isset($data['courtId']) ? (int) $data['courtId'] : null,
             isset($data['duration']) ? (int) $data['duration'] : 1,
+            // The hold outlives the desk's payment timer by a little, for its last check.
+            $online ? \App\Support\PlatformRules::int('bookings.desk_qr_minutes') + 2 : null,
         );
 
-        $method = $data['paymentMethod'] ?? 'later';
         $amount = (float) $booking->total_amount;
+        if ($online && $amount <= 0) {
+            // Nothing to pay online: it's simply booked.
+            $booking = $this->bookings->confirmDeskHold($booking);
+        }
         $payLink = null;
         $payLinkId = null;
         $payment = null;
@@ -1340,6 +1348,22 @@ class PartnerController extends Controller
         }
 
         $paymentId = $state['payment_id'];
+
+        // An online walk-in is a hold: confirming it also books the money (idempotent on
+        // the payment id). One paid after its hold lapsed is reclaimed if the court is
+        // still free, and refunded automatically if someone else has it.
+        if (in_array(strtoupper((string) $booking->status), ['PENDING', 'EXPIRED'], true)) {
+            try {
+                $this->bookings->confirmReservation([(int) $booking->id], $paymentId);
+            } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException $e) {
+                return ['paid' => false, 'status' => 'refunded', 'error' => $e->getMessage()];
+            }
+            $booking->refresh();
+            BookingNotifier::dispatch($booking);
+
+            return ['paid' => true, 'status' => 'paid'];
+        }
+
         $already = $paymentId !== null && BookingPayment::query()
             ->where('booking_id', $booking->id)->where('reference', $paymentId)->exists();
 
@@ -1444,6 +1468,11 @@ class PartnerController extends Controller
         $booking->refresh();
         if (strtoupper((string) $booking->status) === 'CANCELLED') {
             return response()->json(['error' => 'This booking was cancelled.'], 422);
+        }
+        // An online walk-in is still a hold. Confirm it BEFORE taking the cash: if the hold
+        // lapsed and the court was sold, this refuses and no money has changed hands.
+        if (in_array(strtoupper((string) $booking->status), ['PENDING', 'EXPIRED'], true)) {
+            $booking = $this->bookings->confirmDeskHold($booking);
         }
 
         $due = round((float) $booking->total_amount - (float) $booking->amount_paid, 2);

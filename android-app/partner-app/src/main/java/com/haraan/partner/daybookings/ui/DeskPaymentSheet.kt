@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,8 +102,31 @@ fun DeskPaymentSheet(
     onDismiss: () -> Unit,
     onOpenPage: () -> Unit = {},
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val paid = rememberUpdatedState(state.phase == DeskPayPhase.PAID)
+    // Not paid yet, the sheet can't be swiped away: leaving means cancelling, and that's asked.
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { it != androidx.compose.material3.SheetValue.Hidden || paid.value },
+    )
     val view = LocalView.current
+    var askLeave by remember { mutableStateOf(false) }
+    val leave: () -> Unit = { if (state.phase == DeskPayPhase.PAID) onDismiss() else if (!state.busy) askLeave = true }
+
+    if (askLeave) {
+        AlertDialog(
+            onDismissRequest = { askLeave = false },
+            title = { Text("Cancel this booking?", fontWeight = FontWeight.ExtraBold) },
+            text = { Text("${state.customer} hasn't paid yet. The booking is cancelled and the court goes back on sale.") },
+            confirmButton = {
+                TextButton(onClick = { askLeave = false; onCancelBooking() }) {
+                    Text("Cancel booking", color = Red, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { askLeave = false }) { Text("Keep waiting", fontWeight = FontWeight.Bold) }
+            },
+        )
+    }
 
     LaunchedEffect(state.phase) {
         when (state.phase) {
@@ -112,7 +137,7 @@ fun DeskPaymentSheet(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = leave,
         sheetState = sheetState,
         containerColor = Color.White,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -125,7 +150,7 @@ fun DeskPaymentSheet(
                 .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Header(state, onDismiss)
+            Header(state, leave)
             Spacer(Modifier.height(14.dp))
 
             if (state.phase == DeskPayPhase.PAID) {

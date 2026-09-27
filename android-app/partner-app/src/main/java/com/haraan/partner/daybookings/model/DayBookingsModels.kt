@@ -81,7 +81,9 @@ data class DayBookingItem(
     val isCheckedIn: Boolean,
 ) {
     val isWalkIn: Boolean get() = channel.equals("offline", ignoreCase = true)
-    val isDue: Boolean get() = balanceDue > 0.0 && !isCancelled && totalAmount > 0.0
+    /** Waiting on an online payment at the desk: holds the court until it's paid or lapses. */
+    val isAwaitingPayment: Boolean get() = status.equals("PENDING", ignoreCase = true)
+    val isDue: Boolean get() = balanceDue > 0.0 && !isCancelled && totalAmount > 0.0 && !isAwaitingPayment
 }
 
 /**

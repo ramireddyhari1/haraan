@@ -171,6 +171,19 @@ final class RazorpayBilling
             return 'already_recorded';
         }
 
+        // A desk walk-in paying online is a HOLD: confirm it (booking the money with it),
+        // or refund automatically if it lapsed and the court was sold meanwhile.
+        if (in_array(strtoupper((string) $booking->status), ['PENDING', 'EXPIRED'], true)) {
+            try {
+                app(BookingService::class)->confirmReservation([(int) $booking->id], $paymentId ?: null);
+            } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException) {
+                return 'refunded_overbooked';
+            }
+            BookingNotifier::dispatch($booking->refresh());
+
+            return 'link_paid';
+        }
+
         // Razorpay reports paise; fall back to the booking's own total if it's absent.
         $amount = isset($payment['amount'])
             ? ((int) $payment['amount']) / 100

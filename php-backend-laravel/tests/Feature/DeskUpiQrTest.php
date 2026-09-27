@@ -11,6 +11,7 @@ use App\Models\Venue;
 use App\Models\VenueSlot;
 use App\Support\BusinessClock;
 use App\Support\JwtService;
+use App\Support\PlatformRules;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
@@ -147,7 +148,7 @@ final class DeskUpiQrTest extends TestCase
         $first = $this->walkIn()->json('booking.id');
         $this->qrPaid = true;
         $this->slot = VenueSlot::create(['venue_id' => $this->venue->id, 'time' => '7:00 PM', 'price' => 500, 'capacity' => 1]);
-        $second = $this->walkIn('later')->assertCreated()->json('booking.id');
+        $second = $this->walkIn('link')->assertCreated()->json('booking.id');
 
         $this->api("/bookings/{$second}/payment-status", ['qrId' => 'qr_Desk1'])->assertStatus(422);
 
@@ -215,7 +216,7 @@ final class DeskUpiQrTest extends TestCase
 
     public function test_a_link_the_desk_chooses_is_texted_to_the_customer(): void
     {
-        $id = $this->walkIn('later')->json('booking.id');
+        $id = $this->walkIn()->json('booking.id');
 
         $this->api("/bookings/{$id}/payment-request", ['kind' => 'link'])
             ->assertOk()->assertJsonPath('payment.present', 'share')->assertJsonPath('payment.url', 'https://rzp.io/i/fallback');
@@ -233,5 +234,74 @@ final class DeskUpiQrTest extends TestCase
         $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser($other, $secret))
             ->postJson("/api/partner/bookings/{$id}/collect", ['method' => 'cash'])
             ->assertNotFound();
+    }
+
+    // ── Offline or online, nothing in between ──────────────────────────────────────
+
+    public function test_there_is_no_pay_later_walk_in(): void
+    {
+        $this->walkIn('later')->assertStatus(422);
+        $this->api("/venues/{$this->venue->id}/bookings", [
+            'slotId' => $this->slot->id,
+            'date' => BusinessClock::todayDate()->addDay()->toDateString(),
+            'guestName' => 'Ravi',
+        ])->assertStatus(422);
+
+        $this->assertSame(0, Booking::query()->count());
+    }
+
+    public function test_an_online_walk_in_is_a_hold_until_it_is_paid(): void
+    {
+        $id = $this->walkIn()->assertCreated()->json('booking.id');
+        $b = Booking::find($id);
+
+        $this->assertSame('PENDING', strtoupper((string) $b->status));
+        $this->assertNotNull($b->reserved_until);
+        $this->assertTrue($b->reserved_until->isFuture());
+
+        // While the customer pays, nobody else can take the court.
+        $this->walkIn('cash')->assertStatus(409);
+
+        $this->qrPaid = true;
+        $this->api("/bookings/{$id}/payment-status", ['qrId' => 'qr_Desk1'])->assertOk()->assertJsonPath('paid', true);
+
+        $b->refresh();
+        $this->assertSame('CONFIRMED', strtoupper((string) $b->status));
+        $this->assertNull($b->reserved_until);
+        $this->assertSame('paid', strtolower((string) $b->payment_status));
+        $this->assertSame(1, BookingPayment::query()->where('booking_id', $id)->count());
+    }
+
+    public function test_an_unpaid_hold_frees_the_court_when_it_lapses(): void
+    {
+        $id = $this->walkIn()->assertCreated()->json('booking.id');
+
+        $this->travel(PlatformRules::int('bookings.desk_qr_minutes') + 3)->minutes();
+
+        // Nothing was paid, so the court is for sale again — to the next walk-in.
+        $next = $this->walkIn('cash')->assertCreated()->json('booking.id');
+        $this->assertNotSame($id, $next);
+        $this->assertSame('CONFIRMED', strtoupper((string) Booking::find($next)->status));
+    }
+
+    public function test_cash_at_the_counter_confirms_the_hold(): void
+    {
+        $id = $this->walkIn()->json('booking.id');
+
+        $this->api("/bookings/{$id}/collect", ['method' => 'cash', 'closeKind' => 'upi_qr', 'closeId' => 'qr_Desk1'])
+            ->assertOk()->assertJsonPath('paid', true)->assertJsonPath('via', 'cash');
+
+        $b = Booking::find($id);
+        $this->assertSame('CONFIRMED', strtoupper((string) $b->status));
+        $this->assertSame('paid', strtolower((string) $b->payment_status));
+    }
+
+    public function test_a_hold_waiting_on_a_qr_is_not_money_owed(): void
+    {
+        $this->walkIn()->assertCreated();
+
+        $this->withHeader('Authorization', 'Bearer '.$this->token)->getJson('/api/partner/today')
+            ->assertOk()
+            ->assertJsonPath('data.chase.count', 0);
     }
 }

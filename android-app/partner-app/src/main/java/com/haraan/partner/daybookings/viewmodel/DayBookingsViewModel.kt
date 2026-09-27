@@ -480,6 +480,13 @@ class DayBookingsViewModel(
      */
     fun deskPayDismiss() {
         val s = _uiState.value.deskPay ?: return
+        // Not paid: the booking goes, and the court with it. A walk-in is paid at the desk
+        // or online — never left booked and owing. (The server's hold would lapse by
+        // itself anyway; this frees the court now.)
+        if (s.phase != DeskPayPhase.PAID) {
+            deskPayCancelBooking()
+            return
+        }
         deskPayJob?.cancel()
         _uiState.update {
             it.copy(
