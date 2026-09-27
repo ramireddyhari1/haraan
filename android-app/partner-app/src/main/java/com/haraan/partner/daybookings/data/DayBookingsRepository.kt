@@ -107,10 +107,14 @@ class DayBookingsRepositoryImpl(
         }
 
         try {
-            val remoteSummaries = remoteDataSource.getBookings(token, venueId)
+            // The server filters to this date and returns all of it; it used to send the
+            // latest 100 rows of everything, so a busy day lost bookings from its own
+            // totals, and undated rows appeared under every date.
+            val remoteSummaries = remoteDataSource.getBookings(token, venueId, date)
             localDataSource.saveBookings(cacheKeyVenueId, date, remoteSummaries)
             val filteredItems = remoteSummaries
                 .map { it.toDayBookingItem() }
+                // An older server ignores ?date, so still keep only this day's rows.
                 .filter { it.slotDate.isBlank() || it.slotDate == date }
             emit(Resource.Success(filteredItems, isOffline = false))
         } catch (e: Exception) {

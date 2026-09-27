@@ -1,5 +1,6 @@
 package com.haraan.partner
 
+import androidx.lifecycle.repeatOnLifecycle
 import android.content.Context
 import android.content.Intent
 import com.haraan.partner.daybookings.ui.DayBookingsScreen
@@ -56,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -955,15 +957,121 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showOperationsCenter by remember { mutableStateOf(false) }
     val token = session.token ?: return
 
+    // Everything the console keeps across screens lives above the early returns
+    // below: state remembered after a `return` left composition whenever a drawer
+    // screen opened, so coming back reset the tab to Home, zeroed the bell and
+    // stopped new-booking alerts for as long as Reports or Payouts was open.
+    val screenOpen = showNotifications || showSupport || showAcademy || showPackages ||
+        showCustomers || showPayouts || showReports || showStaff || showShiftRegister ||
+        showStandingSlots || showPricingMatrix || showWhatsAppDesk || showOperationsCenter ||
+        detail != null || manageVenue != null
+    // Build the visible tabs from the partner's lane so an event host never sees
+    // venue tabs and vice-versa. Sales is shared but relabelled per lane. The lane
+    // seeds from the cached type and is corrected once the server confirms it.
+    var lane by remember { mutableStateOf(laneOf(session.partnerType)) }
+
+    // The shell: which branches this account may act on, and at what altitude.
+    // Loaded once; a failure leaves ctx null, which renders exactly the
+    // single-branch console that shipped before branches existed — the switcher
+    // never becomes a way to lock someone out of their own app.
+    var ctx by remember { mutableStateOf<PartnerContext?>(null) }
+    var branchId by remember { mutableStateOf(session.branchId) }
+    LaunchedEffect(token) { ctx = runCatching { api.context(token) }.getOrNull() }
+    // The partner's venues, for the header avatar and Home's setup path. A failed
+    // load stays null, which Home treats as "not known yet" rather than "none".
+    var venues by remember { mutableStateOf<List<VenueSummary>?>(null) }
+    LaunchedEffect(token) { venues = runCatching { api.venues(token) }.getOrNull() }
+
+    // A remembered branch the server no longer offers (reassigned, deactivated)
+    // must fall back to "all branches" rather than silently filtering everything
+    // to an outlet this person can't see.
+    LaunchedEffect(ctx) {
+        val known = ctx ?: return@LaunchedEffect
+        if (branchId != null && known.branches.none { it.id == branchId }) {
+            branchId = null
+            session.branchId = null
+        }
+    }
+
+    val tabs = remember(lane) {
+        buildList {
+            add(Tab.Home)
+            if (lane != Lane.VENUE) add(Tab.Events)
+            if (lane != Lane.EVENT) add(Tab.Venues)
+            // Games on the turf. A venue's bar has the room for a fifth; the
+            // combined lane's does not, so it reaches Matches from the drawer
+            // instead. A café has no pitch and an event host has no venue, so
+            // neither lane is offered it at all.
+            if (lane == Lane.VENUE) add(Tab.Matches)
+            add(Tab.Sales)
+            add(Tab.Scan)
+        }
+    }
+    // What the drawer lists. The drawer is the index, so a destination the bar
+    // couldn't fit still has to appear here.
+    val navTabs = remember(tabs, lane) {
+        if (lane != Lane.BOTH) tabs
+        else tabs.toMutableList().apply { add(indexOf(Tab.Venues) + 1, Tab.Matches) }
+    }
+    var tab by remember { mutableStateOf(Tab.Home) }
+    // Back from any other tab returns Home first; only Back on Home leaves the app.
+    // Not while a venue desk or analytics screen is on top: this handler is composed
+    // after the screen handler above, so it won — Back switched the tab hidden behind
+    // the open venue, and it took a second Back to close the venue and land on Home.
+    BackHandler(enabled = tab != Tab.Home && !screenOpen) { tab = Tab.Home }
+    // If the lane resolves and the current tab is no longer valid, fall back Home.
+    LaunchedEffect(navTabs) { if (tab !in navTabs) tab = Tab.Home }
+
+    // Live booking alerts (Part A — works with no push infra): while the app is
+    // open, poll for bookings and surface anything newer than we've already shown
+    // as a top banner + a bell badge. FCM (Part B) covers the closed-app case.
+    val view = LocalView.current
+    var unseenBookings by remember { mutableStateOf(0) }
+    var bookingBanner by remember { mutableStateOf<String?>(null) }
+    // Bumped whenever a new booking lands, so an open Home refetches quietly and
+    // its money figures count up to the new total instead of waiting for a pull.
+    var moneyLanded by remember { mutableStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(token) {
+        // Only while the app is on screen: in the background this pulled 100
+        // bookings every 20 seconds for nobody, and drained the desk phone's battery.
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+        while (true) {
+            runCatching {
+                val list = api.bookings(token)
+                val maxId = list.maxOfOrNull { it.id } ?: 0L
+                val last = session.lastNotifiedBookingId
+                when {
+                    last == 0L -> session.lastNotifiedBookingId = maxId // baseline; don't alert on first load
+                    maxId > last -> {
+                        val fresh = list.filter { it.id > last }
+                        unseenBookings += fresh.size
+                        // Deliberately NOT branch-filtered: an owner wants to know
+                        // a booking landed anywhere, not only at the outlet they
+                        // happen to be looking at — so the alert names the branch.
+                        bookingBanner = fresh.firstOrNull()?.let {
+                            val where = it.branch ?: it.label
+                            listOfNotNull(where, "₹" + formatInr(it.amount)).joinToString(" · ")
+                        }
+                        session.lastNotifiedBookingId = maxId
+                        moneyLanded++
+                        Haptics.money(view)
+                    }
+                }
+            }
+            kotlinx.coroutines.delay(20_000)
+        }
+        }
+    }
+    LaunchedEffect(bookingBanner) {
+        if (bookingBanner != null) { kotlinx.coroutines.delay(6_000); bookingBanner = null }
+    }
+
     // The phone's Back closes whichever console screen is open, in the same order
     // they take the screen below. There was no handler at all, so Back from
     // Payouts, Reports, the venue desk — any of them — closed the whole app.
     // Screens with their own inner steps register their own handler later in
     // composition, which wins over this one.
-    val screenOpen = showNotifications || showSupport || showAcademy || showPackages ||
-        showCustomers || showPayouts || showReports || showStaff || showShiftRegister ||
-        showStandingSlots || showPricingMatrix || showWhatsAppDesk || showOperationsCenter ||
-        detail != null || manageVenue != null
     BackHandler(enabled = screenOpen) {
         when {
             showNotifications -> showNotifications = false
@@ -1017,38 +1125,15 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         return
     }
 
-    // Build the visible tabs from the partner's lane so an event host never sees
-    // venue tabs and vice-versa. Sales is shared but relabelled per lane. The lane
-    // seeds from the cached type and is corrected once the server confirms it.
-    var lane by remember { mutableStateOf(laneOf(session.partnerType)) }
-
-    // The shell: which branches this account may act on, and at what altitude.
-    // Loaded once; a failure leaves ctx null, which renders exactly the
-    // single-branch console that shipped before branches existed — the switcher
-    // never becomes a way to lock someone out of their own app.
-    var ctx by remember { mutableStateOf<PartnerContext?>(null) }
-    var branchId by remember { mutableStateOf(session.branchId) }
-    LaunchedEffect(token) { ctx = runCatching { api.context(token) }.getOrNull() }
-    // The partner's venues, for the header avatar and Home's setup path. A failed
-    // load stays null, which Home treats as "not known yet" rather than "none".
-    var venues by remember { mutableStateOf<List<VenueSummary>?>(null) }
-    LaunchedEffect(token) { venues = runCatching { api.venues(token) }.getOrNull() }
-
-    // A remembered branch the server no longer offers (reassigned, deactivated)
-    // must fall back to "all branches" rather than silently filtering everything
-    // to an outlet this person can't see.
-    LaunchedEffect(ctx) {
-        val known = ctx ?: return@LaunchedEffect
-        if (branchId != null && known.branches.none { it.id == branchId }) {
-            branchId = null
-            session.branchId = null
-        }
-    }
-
     if (showShiftRegister) {
         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
             ?: ctx?.branches?.firstOrNull()
-        val venueId = targetVenue?.id ?: 1L
+        // No fallback id: guessing venue 1 opened some other business's data.
+        val venueId = targetVenue?.id
+        if (venueId == null) {
+            VenueToolNotice("Shift register", "Shift register needs a venue", NO_VENUE_NOTE, onBack = { showShiftRegister = false })
+            return
+        }
         val context = LocalContext.current
         val localDs = remember { ShiftLocalDataSource(context) }
         val repo = remember { ShiftRepository(localDs) }
@@ -1064,40 +1149,39 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     if (showStandingSlots) {
         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
             ?: ctx?.branches?.firstOrNull()
-        val venueId = targetVenue?.id ?: 1L
         val context = LocalContext.current
         val localDs = remember { com.haraan.partner.recurring.data.RecurringLocalDataSource(context) }
         val repo = remember { com.haraan.partner.recurring.data.RecurringRepository(localDs) }
         val recurringVm = remember { com.haraan.partner.recurring.viewmodel.StandingContractViewModel(repo, token) }
-        val courts = remember(targetVenue) {
-            listOf(1L to "Court 1", 2L to "Court 2", 3L to "Court 3")
+        // The venue's real courts. This was a hard-coded "Court 1/2/3", so contracts were
+        // written against court ids that belong to other venues or don't exist.
+        WithVenueCourts(api, token, targetVenue?.id, "Standing slots", onBack = { showStandingSlots = false }) { venueId, courts ->
+            com.haraan.partner.recurring.ui.StandingSlotsMasterScreen(
+                viewModel = recurringVm,
+                venueId = venueId,
+                availableCourts = courts,
+                onNavigateBack = { showStandingSlots = false }
+            )
         }
-        com.haraan.partner.recurring.ui.StandingSlotsMasterScreen(
-            viewModel = recurringVm,
-            venueId = venueId,
-            availableCourts = courts,
-            onNavigateBack = { showStandingSlots = false }
-        )
         return
     }
 
     if (showPricingMatrix) {
         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
             ?: ctx?.branches?.firstOrNull()
-        val venueId = targetVenue?.id ?: 1L
         val context = LocalContext.current
         val localDs = remember { com.haraan.partner.pricing.data.PricingLocalDataSource(context) }
         val repo = remember { com.haraan.partner.pricing.data.PricingRepository(localDs) }
         val pricingVm = remember { com.haraan.partner.pricing.viewmodel.PricingMatrixViewModel(repo, token) }
-        val courts = remember(targetVenue) {
-            listOf(1L to "Court 1", 2L to "Court 2", 3L to "Court 3")
+        // Real courts, not a hard-coded "Court 1/2/3" (see Standing slots above).
+        WithVenueCourts(api, token, targetVenue?.id, "Pricing", onBack = { showPricingMatrix = false }) { venueId, courts ->
+            com.haraan.partner.pricing.ui.PricingMatrixDashboard(
+                viewModel = pricingVm,
+                venueId = venueId,
+                availableCourts = courts,
+                onNavigateBack = { showPricingMatrix = false }
+            )
         }
-        com.haraan.partner.pricing.ui.PricingMatrixDashboard(
-            viewModel = pricingVm,
-            venueId = venueId,
-            availableCourts = courts,
-            onNavigateBack = { showPricingMatrix = false }
-        )
         return
     }
 
@@ -1122,7 +1206,11 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     if (showOperationsCenter) {
         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
             ?: ctx?.branches?.firstOrNull()
-        val venueId = targetVenue?.id ?: 1L
+        val venueId = targetVenue?.id
+        if (venueId == null) {
+            VenueToolNotice("Operations", "Operations needs a venue", NO_VENUE_NOTE, onBack = { showOperationsCenter = false })
+            return
+        }
         val context = LocalContext.current
         val localDs = remember { com.haraan.partner.operations.data.OperationsLocalDataSource(context) }
         val remoteDs = remember { com.haraan.partner.operations.data.OperationsRemoteDataSource() }
@@ -1135,75 +1223,6 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         )
         return
     }
-    val tabs = remember(lane) {
-        buildList {
-            add(Tab.Home)
-            if (lane != Lane.VENUE) add(Tab.Events)
-            if (lane != Lane.EVENT) add(Tab.Venues)
-            // Games on the turf. A venue's bar has the room for a fifth; the
-            // combined lane's does not, so it reaches Matches from the drawer
-            // instead. A café has no pitch and an event host has no venue, so
-            // neither lane is offered it at all.
-            if (lane == Lane.VENUE) add(Tab.Matches)
-            add(Tab.Sales)
-            add(Tab.Scan)
-        }
-    }
-    // What the drawer lists. The drawer is the index, so a destination the bar
-    // couldn't fit still has to appear here.
-    val navTabs = remember(tabs, lane) {
-        if (lane != Lane.BOTH) tabs
-        else tabs.toMutableList().apply { add(indexOf(Tab.Venues) + 1, Tab.Matches) }
-    }
-    var tab by remember { mutableStateOf(Tab.Home) }
-    // Back from any other tab returns Home first; only Back on Home leaves the app.
-    // Not while a venue desk or analytics screen is on top: this handler is composed
-    // after the screen handler above, so it won — Back switched the tab hidden behind
-    // the open venue, and it took a second Back to close the venue and land on Home.
-    BackHandler(enabled = tab != Tab.Home && detail == null && manageVenue == null) { tab = Tab.Home }
-    // If the lane resolves and the current tab is no longer valid, fall back Home.
-    LaunchedEffect(navTabs) { if (tab !in navTabs) tab = Tab.Home }
-
-    // Live booking alerts (Part A — works with no push infra): while the app is
-    // open, poll for bookings and surface anything newer than we've already shown
-    // as a top banner + a bell badge. FCM (Part B) covers the closed-app case.
-    val view = LocalView.current
-    var unseenBookings by remember { mutableStateOf(0) }
-    var bookingBanner by remember { mutableStateOf<String?>(null) }
-    // Bumped whenever a new booking lands, so an open Home refetches quietly and
-    // its money figures count up to the new total instead of waiting for a pull.
-    var moneyLanded by remember { mutableStateOf(0) }
-    LaunchedEffect(token) {
-        while (true) {
-            runCatching {
-                val list = api.bookings(token)
-                val maxId = list.maxOfOrNull { it.id } ?: 0L
-                val last = session.lastNotifiedBookingId
-                when {
-                    last == 0L -> session.lastNotifiedBookingId = maxId // baseline; don't alert on first load
-                    maxId > last -> {
-                        val fresh = list.filter { it.id > last }
-                        unseenBookings += fresh.size
-                        // Deliberately NOT branch-filtered: an owner wants to know
-                        // a booking landed anywhere, not only at the outlet they
-                        // happen to be looking at — so the alert names the branch.
-                        bookingBanner = fresh.firstOrNull()?.let {
-                            val where = it.branch ?: it.label
-                            listOfNotNull(where, "₹" + formatInr(it.amount)).joinToString(" · ")
-                        }
-                        session.lastNotifiedBookingId = maxId
-                        moneyLanded++
-                        Haptics.money(view)
-                    }
-                }
-            }
-            kotlinx.coroutines.delay(20_000)
-        }
-    }
-    LaunchedEffect(bookingBanner) {
-        if (bookingBanner != null) { kotlinx.coroutines.delay(6_000); bookingBanner = null }
-    }
-
     detail?.let { target ->
         AnalyticsScreen(api, token, target, onBack = { detail = null })
         return
@@ -1891,7 +1910,9 @@ private fun HomeTab(
         val o = data.overview
         val day = data.day
         LaunchedEffect(o.type) { onLane(o.type) }
-        val settingUp = courtsLane && !day.hasCapacity
+        // Set-up means the venue has no slots at all. Today's capacity is 0 on a closed
+        // day too, and an established venue was told it "isn't bookable yet".
+        val settingUp = courtsLane && !day.hasAnySlots
         val listState = rememberLazyListState()
         val density = LocalDensity.current
         // Past the hero the page grows a slim white bar, so the venue's name and
@@ -4603,10 +4624,17 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
     var editing by remember { mutableStateOf<SlotEdit?>(null) }
     var adding by remember { mutableStateOf(false) }
     var showCourts by remember { mutableStateOf(false) }
+    var generating by remember { mutableStateOf(false) }
+    // Delete asks first: one tap used to remove a slot at once, and a stray run of taps
+    // emptied a venue's whole week.
+    var confirmDelete by remember { mutableStateOf<SlotEdit?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val view = LocalView.current
     val state by produceState<UiState<List<SlotEdit>>>(UiState.Loading, reload) {
         value = runCatchingUi { api.venueSlots(token, venueId) }
     }
+    LaunchedEffect(note) { if (note != null) { kotlinx.coroutines.delay(3000); note = null } }
     // The sports a slot may be narrowed to are whatever this venue's courts host —
     // asking the courts keeps the picker honest instead of offering a sport nothing
     // can be booked for. A failure here just means no picker, never a broken screen.
@@ -4661,10 +4689,33 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                     }
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            // One tap for a whole day of slots, instead of "+" forty times.
+            LayoutBox(Modifier.padding(horizontal = 16.dp)) {
+                PressableSurface(onClick = { Haptics.tick(view); generating = true }) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LayoutBox(
+                            Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                                .background(Brush.linearGradient(listOf(Color(0xFFE0E9FF), Color(0xFFC9D8FF)))),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFF1D4ED8), modifier = Modifier.size(21.dp)) }
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Generate slots", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                            Spacer(Modifier.height(1.dp))
+                            Text("30-min or 1-hour slots, open to close, in one tap", fontSize = 12.sp, color = AuthMuted)
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            note?.let {
+                Text(it, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF16A34A))
+            }
             Spacer(Modifier.height(14.dp))
             Loaded(state) { slots ->
                 if (slots.isEmpty()) {
-                    EmptyState("No slots yet. Tap + to add your first bookable slot.")
+                    EmptyState("No slots yet. Tap Generate slots to build your day, or + to add one.")
                 } else {
                     LazyColumn(
                         Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -4691,14 +4742,15 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
+                                    // No price of its own = the court's rate is charged, not ₹0.
                                     Text(
-                                        "₹" + formatInr(slot.price),
-                                        style = MaterialTheme.typography.titleMedium,
+                                        if (slot.price > 0) "₹" + formatInr(slot.price) else "Court rate",
+                                        style = if (slot.price > 0) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = if (slot.price > 0) MaterialTheme.colorScheme.primary else AuthMuted,
                                     )
                                     IconButton(onClick = { editing = slot }) { Icon(Icons.Filled.Edit, contentDescription = "Edit") }
-                                    IconButton(onClick = { scope.launch { runCatching { api.deleteSlot(token, venueId, slot.id) }; reload++ } }) {
+                                    IconButton(onClick = { Haptics.tick(view); confirmDelete = slot }) {
                                         Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = RED)
                                     }
                                 }
@@ -4708,6 +4760,46 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                 }
             }
         }
+
+    if (generating) {
+        val count = (state as? UiState.Data)?.value?.size ?: 0
+        com.haraan.partner.slots.GenerateSlotsSheet(
+            api = api,
+            token = token,
+            venueId = venueId,
+            existingCount = count,
+            onDismiss = { generating = false },
+            onGenerated = { r ->
+                generating = false
+                note = buildString {
+                    append("${r.created} slot${if (r.created == 1) "" else "s"} created")
+                    if (r.removed > 0) append(" · ${r.removed} replaced")
+                    if (r.kept > 0) append(" · ${r.kept} already there")
+                }
+                reload++
+            },
+        )
+    }
+
+    confirmDelete?.let { slot ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Delete ${slot.time}?", fontWeight = FontWeight.Bold) },
+            text = { Text("${slot.day ?: "Every day"} · this time stops being bookable. Bookings already taken stay.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = null
+                    scope.launch {
+                        runCatching { api.deleteSlot(token, venueId, slot.id) }
+                            .onSuccess { Haptics.confirm(view) }
+                            .onFailure { Haptics.reject(view) }
+                        reload++
+                    }
+                }) { Text("Delete", color = RED, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Keep") } },
+        )
+    }
     }
 
     if (adding) {
@@ -6052,6 +6144,82 @@ private fun PayoutAccountDialog(
             Spacer(Modifier.height(4.dp))
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private const val NO_VENUE_NOTE =
+    "This account has no venue yet, or it couldn't be loaded. Refresh Home, or ask Haraan to assign your venue."
+
+/**
+ * A venue tool that needs the venue's courts: loads them, and says what's wrong in
+ * plain words - no venue, the load failed (with Retry), or no courts yet - instead
+ * of opening the tool on invented courts or on another business's venue id.
+ */
+@Composable
+private fun WithVenueCourts(
+    api: PartnerApi,
+    token: String,
+    venueId: Long?,
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable (venueId: Long, courts: List<Pair<Long, String>>) -> Unit,
+) {
+    if (venueId == null) {
+        VenueToolNotice(title, "$title needs a venue", NO_VENUE_NOTE, onBack = onBack)
+        return
+    }
+    var attempt by remember { mutableStateOf(0) }
+    val courts by produceState<UiState<List<Pair<Long, String>>>>(UiState.Loading, venueId, attempt) {
+        value = runCatchingUi { api.venueCourts(token, venueId).map { it.id to it.name } }
+    }
+    when (val c = courts) {
+        is UiState.Loading -> VenueToolNotice(title, null, null, loading = true, onBack = onBack)
+        is UiState.Error -> VenueToolNotice(title, "Couldn't load your courts", c.message, onBack = onBack, onRetry = { attempt++ })
+        is UiState.Data -> if (c.value.isEmpty()) {
+            VenueToolNotice(title, "Add a court first", "$title works per court. Add your courts in Pricing & slots, then come back.", onBack = onBack)
+        } else {
+            content(venueId, c.value)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VenueToolNotice(
+    title: String,
+    heading: String?,
+    body: String?,
+    loading: Boolean = false,
+    onBack: () -> Unit,
+    onRetry: (() -> Unit)? = null,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (loading) {
+                CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp))
+            } else {
+                if (heading != null) Text(heading, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                if (body != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(body, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
+                if (onRetry != null) {
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = onRetry) { Text("Try again") }
+                }
             }
         }
     }

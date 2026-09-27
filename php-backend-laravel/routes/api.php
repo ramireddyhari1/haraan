@@ -567,6 +567,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
 
         // --- Write actions gated by staff capability (owners hold all) ---
         Route::middleware('partner.can:pricing')->group(function (): void {
+            Route::post('/venues/{id}/slots/generate', 'generateSlots')->whereNumber('id');
             Route::post('/venues/{id}/slots', 'saveSlot')->whereNumber('id');
             Route::post('/venues/{id}/slots/{slotId}', 'saveSlot')->whereNumber('id')->whereNumber('slotId');
             Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');

@@ -130,10 +130,16 @@ data class YieldRecommendationItem(
     val rulePayload: CreatePricingRuleRequest? = null
 ) : Serializable
 
+/**
+ * The pricing summary. Every figure defaults to 0 and [loaded] to false: these used to
+ * default to ₹1000 / ₹800–₹1500, so a failed load put plausible rates that weren't the
+ * partner's on screen with no sign anything was wrong.
+ */
 data class PricingDashboardMetrics(
-    val averageHourlyRate: Int = 1000,
-    val minRate: Int = 800,
-    val maxRate: Int = 1500,
+    val loaded: Boolean = false,
+    val averageHourlyRate: Int = 0,
+    val minRate: Int = 0,
+    val maxRate: Int = 0,
     val activeRulesCount: Int = 0,
     val compositeCourtsCount: Int = 0,
     val recommendationsCount: Int = 0,

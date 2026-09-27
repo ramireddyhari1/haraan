@@ -58,9 +58,10 @@ class PricingRemoteDataSource(
         }
 
         PricingDashboardMetrics(
-            averageHourlyRate = json.optInt("average_hourly_rate", 1000),
-            minRate = json.optInt("min_rate", 800),
-            maxRate = json.optInt("max_rate", 1500),
+            loaded = true,
+            averageHourlyRate = json.optInt("average_hourly_rate", 0),
+            minRate = json.optInt("min_rate", 0),
+            maxRate = json.optInt("max_rate", 0),
             activeRulesCount = json.optInt("active_rules_count", 0),
             compositeCourtsCount = json.optInt("composite_courts_count", 0),
             recommendationsCount = json.optInt("recommendations_count", recs.size),
@@ -92,7 +93,7 @@ class PricingRemoteDataSource(
                         hour = s.getInt("hour"),
                         timeLabel = s.getString("time_label"),
                         rate = s.getInt("rate"),
-                        baseRate = s.optInt("base_rate", 1000),
+                        baseRate = s.optInt("base_rate", 0),
                         ruleId = if (s.has("rule_id") && !s.isNull("rule_id")) s.getLong("rule_id") else null,
                         ruleName = s.optString("rule_name").takeIf { it.isNotBlank() && it != "null" },
                         mode = s.optString("mode", "absolute"),
@@ -111,10 +112,10 @@ class PricingRemoteDataSource(
         WeeklyPricingMatrix(
             courtId = if (json.has("court_id") && !json.isNull("court_id")) json.getLong("court_id") else null,
             courtName = json.optString("court_name", "Court"),
-            baseRate = json.optInt("base_rate", 1000),
-            minRate = json.optInt("min_rate", 1000),
-            maxRate = json.optInt("max_rate", 1000),
-            averageRate = json.optInt("average_rate", 1000),
+            baseRate = json.optInt("base_rate", 0),
+            minRate = json.optInt("min_rate", 0),
+            maxRate = json.optInt("max_rate", 0),
+            averageRate = json.optInt("average_rate", 0),
             matrix = matrixMap
         )
     }
@@ -244,7 +245,7 @@ class PricingRemoteDataSource(
                         id = ch.getLong("id"),
                         name = ch.getString("name"),
                         partitionLabel = ch.optString("partition_label").takeIf { it.isNotBlank() && it != "null" },
-                        price = ch.optInt("price", 1000),
+                        price = ch.optInt("price", 0),
                         seats = if (ch.has("seats") && !ch.isNull("seats")) ch.getInt("seats") else null,
                         sports = chSports,
                         isActive = ch.optBoolean("is_active", true)
@@ -259,7 +260,7 @@ class PricingRemoteDataSource(
                     kind = c.optString("kind", "court"),
                     isComposite = c.optBoolean("is_composite", true),
                     splitType = c.optString("split_type", "half"),
-                    price = c.optInt("price", 1000),
+                    price = c.optInt("price", 0),
                     sports = sports,
                     allowSimultaneousBooking = c.optBoolean("allow_simultaneous_booking", false),
                     children = chList
@@ -281,7 +282,7 @@ class PricingRemoteDataSource(
                     name = s.getString("name"),
                     kind = s.optString("kind", "court"),
                     isComposite = s.optBoolean("is_composite", false),
-                    price = s.optInt("price", 1000),
+                    price = s.optInt("price", 0),
                     sports = sports
                 )
             )

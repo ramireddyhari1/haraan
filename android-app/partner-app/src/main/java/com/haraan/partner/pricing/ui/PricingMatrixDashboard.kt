@@ -118,8 +118,8 @@ fun PricingMatrixDashboard(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    KpiStatItem("AVG RATE", "₹${state.metrics.averageHourlyRate}/hr")
-                    KpiStatItem("RANGE", "₹${state.metrics.minRate} - ₹${state.metrics.maxRate}")
+                    KpiStatItem("AVG RATE", if (state.metrics.loaded && state.metrics.averageHourlyRate > 0) "₹${state.metrics.averageHourlyRate}/hr" else "—")
+                    KpiStatItem("RANGE", if (state.metrics.loaded && state.metrics.maxRate > 0) "₹${state.metrics.minRate} - ₹${state.metrics.maxRate}" else "—")
                     KpiStatItem("ACTIVE RULES", "${state.metrics.activeRulesCount}")
                     KpiStatItem("COMPOSITE", "${state.metrics.compositeCourtsCount}")
                 }

@@ -338,17 +338,26 @@ class PartnerController extends Controller
         // branch drops events rather than pretending they happened there.
         $onOneBranch = $this->branchFilter($request) !== null;
 
+        // ?date=Y-m-d: that day's venue bookings, all of them — what the desk's day list
+        // and its Collected/Due add up. The feed used to be only the latest 100 rows, so
+        // at a busy venue a day's advance bookings dropped out of its own totals.
+        $date = $request->query('date');
+        $date = is_string($date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : null;
+
         $bookings = Booking::query()
-            ->where(function ($q) use ($partnerId, $venueIds, $onOneBranch): void {
+            ->when($date !== null, fn ($q) => $q
+                ->whereIn('venue_id', $venueIds)
+                ->whereDate('slot_date', $date))
+            ->when($date === null, fn ($q) => $q->where(function ($q) use ($partnerId, $venueIds, $onOneBranch): void {
                 $q->whereIn('venue_id', $venueIds);
 
                 if (! $onOneBranch) {
                     $q->orWhereHas('event', fn ($e) => $e->where('partner_id', $partnerId));
                 }
-            })
+            }))
             ->with(['event:id,title', 'venue:id,name,branch_label', 'user:id,name', 'payments'])
             ->latest()
-            ->limit(100)
+            ->limit($date !== null ? 1000 : 100)
             ->get()
             ->map(fn (Booking $b): array => $this->bookingSummary($b) + [
                 'event'  => $b->event?->title,
@@ -391,7 +400,8 @@ class PartnerController extends Controller
     {
         $venues = $request->user()->branches()
             ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
-            ->get(['id', 'name', 'branch_label']);
+            ->get(['id', 'name', 'branch_label', 'slot_minutes']);
+        $slotLength = fn ($venueId): int => (int) ($venues->firstWhere('id', $venueId)?->slotLength() ?? 60);
 
         // The venue's today. In UTC this flipped at 05:30 IST, so from midnight
         // until then Home showed yesterday's sheet under "TODAY".
@@ -460,7 +470,7 @@ class PartnerController extends Controller
             }
             $venueSlots = $slotsByVenue->get($b->venue_id) ?? collect();
             $courtIds = ($courtsByVenue->get($b->venue_id) ?? collect())->pluck('id')->map(fn ($id): int => (int) $id)->all();
-            foreach ($this->slotIdsFor($b, $venueSlots) as $slotId) {
+            foreach ($this->slotIdsFor($b, $venueSlots, $slotLength($b->venue_id)) as $slotId) {
                 foreach ($this->courtIdsFor($b, $courtIds) as $courtId) {
                     $occupied[$b->venue_id.'-'.$courtId.'-'.$slotId] = true;
                 }
@@ -477,19 +487,19 @@ class PartnerController extends Controller
         $venueName = fn (Booking $b): string => (string) ($venues->firstWhere('id', $b->venue_id)?->name ?? '');
 
         $now = BusinessClock::now();
-        $rows = $live->map(function (Booking $b) use ($slotById, $date, $now, $courtName, $venueName): array {
+        $rows = $live->map(function (Booking $b) use ($slotById, $date, $now, $courtName, $venueName, $slotLength): array {
             // The slot's label, or the booking's own start: online and WhatsApp bookings
             // carry times but no slot, and read "—" in Next up, sorted last and never
             // went "on court".
             $time = $this->displayTime($b, $slotById);
             $start = $this->startOf($date, $time);
-            // An hour is the slot length unless the booking says otherwise; when the time
-            // cannot be parsed at all the booking sorts last rather than vanishing.
+            // The booking's own hours when it has them, else one of the venue's slots (30
+            // or 60 min); when the time can't be parsed at all it sorts last, not vanishes.
             $endMin = $this->endMinutesOf($b->end_time);
             $startMin = BookingService::timeToMinutes($b->start_time);
-            $end = $start !== null && $endMin !== null && $startMin !== null && $endMin > $startMin && $b->venue_slot_id === null
+            $end = $start !== null && $endMin !== null && $startMin !== null && $endMin > $startMin
                 ? $start->copy()->addMinutes($endMin - $startMin)
-                : $start?->copy()->addHour();
+                : $start?->copy()->addMinutes($slotLength($b->venue_id));
 
             return [
                 'time'     => $time,
@@ -514,6 +524,13 @@ class PartnerController extends Controller
             'data' => [
                 'date'      => $date,
                 'day_label' => BusinessClock::now()->format('D, j M'),
+                // Whether the venues have ANY slots, on any day. Home's "get set up"
+                // screen keys off this, not today's capacity: a closed day or a weekday
+                // with no rows has no capacity either, and showed an established venue
+                // "isn't bookable yet".
+                'setup'     => [
+                    'has_slots' => VenueSlot::query()->whereIn('venue_id', $venueIds)->where('is_available', true)->exists(),
+                ],
                 'capacity'  => [
                     'total'  => $capacity,
                     'booked' => $bookedCells,
@@ -544,7 +561,7 @@ class PartnerController extends Controller
      * @param  \Illuminate\Support\Collection<int, VenueSlot>  $slots  the day's rows for this venue
      * @return list<int>
      */
-    private function slotIdsFor(Booking $b, $slots): array
+    private function slotIdsFor(Booking $b, $slots, int $length = 60): array
     {
         if ($b->venue_slot_id !== null && $slots->contains('id', (int) $b->venue_slot_id)) {
             return [(int) $b->venue_slot_id];
@@ -554,13 +571,13 @@ class PartnerController extends Controller
         if ($start === null) {
             return [];
         }
-        $end = $this->endMinutesOf($b->end_time) ?? $start + 60;
+        $end = $this->endMinutesOf($b->end_time) ?? $start + $length;
 
         return $slots
-            ->filter(function (VenueSlot $s) use ($start, $end): bool {
+            ->filter(function (VenueSlot $s) use ($start, $end, $length): bool {
                 $s0 = BookingService::timeToMinutes($s->time);
 
-                return $s0 !== null && $s0 < $end && $s0 + 60 > $start;
+                return $s0 !== null && $s0 < $end && $s0 + $length > $start;
             })
             ->map(fn (VenueSlot $s): int => (int) $s->id)
             ->values()
@@ -613,6 +630,7 @@ class PartnerController extends Controller
         return [
             'date'      => $date,
             'day_label' => BusinessClock::now()->format('D, j M'),
+            'setup'     => ['has_slots' => false],
             'capacity'  => ['total' => 0, 'booked' => 0, 'done' => 0],
             'money'     => ['expected' => 0.0, 'collected' => 0.0, 'due' => 0.0],
             'chase'     => ['count' => 0, 'amount' => 0.0],
@@ -1002,11 +1020,12 @@ class PartnerController extends Controller
         // when it has none (app, web and WhatsApp bookings), and on every court when it
         // names none. Keyed "court-slot"; court 0 is a venue with no courts.
         $courtIds = $courts->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $place = function ($list) use ($slots, $courtIds): array {
+        $length = $venue->slotLength();
+        $place = function ($list) use ($slots, $courtIds, $length): array {
             $bySlot = [];
             $byCell = [];
             foreach ($list as $b) {
-                foreach ($this->slotIdsFor($b, $slots) as $slotId) {
+                foreach ($this->slotIdsFor($b, $slots, $length) as $slotId) {
                     $bySlot[$slotId][] = $b;
                     foreach ($this->courtIdsFor($b, $courtIds) as $courtId) {
                         $byCell[$courtId.'-'.$slotId][] = $b;
@@ -2461,6 +2480,56 @@ class PartnerController extends Controller
     }
 
     /** DELETE /api/partner/venues/{id}/slots/{slotId} — remove a slot. */
+    /**
+     * POST /api/partner/venues/{id}/slots/generate
+     * { open: "6:00 AM", close: "11:00 PM", step: 30|60, days: ["Every day"] | ["Monday", …],
+     *   price?: number, capacity?: int, mode: "add"|"replace" }
+     *
+     * Builds every slot between opening and closing in one go ({@see SlotGenerator}).
+     */
+    public function generateSlots(Request $request, string $id): JsonResponse
+    {
+        $venue = $this->branch($request, $id);
+
+        $data = $request->validate([
+            'open'     => ['required', 'string', 'max:20'],
+            'close'    => ['required', 'string', 'max:20'],
+            'step'     => ['required', 'integer', 'in:30,60'],
+            'days'     => ['nullable', 'array'],
+            'days.*'   => ['string', 'max:20'],
+            'price'    => ['nullable', 'numeric', 'min:0'],
+            'capacity' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'mode'     => ['nullable', 'in:add,replace'],
+        ]);
+
+        try {
+            $result = \App\Support\SlotGenerator::generate(
+                $venue,
+                $data['open'],
+                $data['close'],
+                (int) $data['step'],
+                array_values($data['days'] ?? []),
+                isset($data['price']) ? (float) $data['price'] : null,
+                (int) ($data['capacity'] ?? 1),
+                $data['mode'] ?? 'add',
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $slots = VenueSlot::query()->where('venue_id', $venue->id)->orderBy('sort_order')->get()
+            ->map(fn (VenueSlot $s): array => $this->slotRow($s));
+
+        return response()->json([
+            'status'  => 'ok',
+            'created' => $result['created'],
+            'kept'    => $result['kept'],
+            'removed' => $result['removed'],
+            'step'    => (int) $data['step'],
+            'data'    => $slots,
+        ]);
+    }
+
     public function deleteSlot(Request $request, string $id, string $slotId): JsonResponse
     {
         $venue = $this->branch($request, $id);

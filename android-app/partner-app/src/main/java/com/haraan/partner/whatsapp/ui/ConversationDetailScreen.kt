@@ -1,5 +1,6 @@
 package com.haraan.partner.whatsapp.ui
 
+import androidx.lifecycle.repeatOnLifecycle
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -56,10 +57,14 @@ fun ConversationDetailScreen(
     BackHandler(onBack = onBack)
 
     // Live while it's open: new messages, and a payment landing, without a manual refresh.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(conversation.id) {
-        while (true) {
-            delay(THREAD_POLL_MS)
-            viewModel.refreshOpenConversation(venueId)
+        // Only while the app is on screen, not in the background.
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) {
+                delay(THREAD_POLL_MS)
+                viewModel.refreshOpenConversation(venueId)
+            }
         }
     }
 

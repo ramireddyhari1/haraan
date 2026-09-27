@@ -66,7 +66,9 @@ final class VenueSlotAvailability
 
         $blocks = $dayClosed ? collect() : VenueBlock::query()->applyingOn($venue->id, $date)->get();
 
-        return $slots->map(function (VenueSlot $slot) use ($dayClosed, $courts, $related, $bookings, $blocks, $duration): array {
+        $slotLength = $venue->slotLength();
+
+        return $slots->map(function (VenueSlot $slot) use ($dayClosed, $courts, $related, $bookings, $blocks, $duration, $slotLength): array {
             $eligible = $courts->filter(fn (VenueCourt $c) => $slot->allowsCourt($c))->values();
             $total = max(1, $eligible->count());
 
@@ -75,7 +77,9 @@ final class VenueSlotAvailability
             }
 
             $start = BookingService::timeToMinutes($slot->time);
-            $end = $start !== null ? $start + ($duration * 60) : null;
+            // One slot is the venue's slot length (30 or 60 min), not always an hour — a
+            // fixed 60 made a 30-minute venue's 6:00 booking also block 6:30.
+            $end = $start !== null ? $start + ($duration * $slotLength) : null;
 
             // Venues that don't model courts (or whose courts can't host this slot's sports)
             // book by slot alone — the legacy one-booking-per-slot rule checkout still applies.

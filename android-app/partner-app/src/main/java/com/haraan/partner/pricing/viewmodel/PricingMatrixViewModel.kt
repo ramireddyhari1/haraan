@@ -75,7 +75,12 @@ class PricingMatrixViewModel(
     fun loadDashboard(venueId: Long) {
         viewModelScope.launch {
             repository.getDashboardFlow(token, venueId).collect { metrics ->
-                _uiState.update { it.copy(metrics = metrics) }
+                _uiState.update {
+                    it.copy(
+                        metrics = metrics,
+                        errorMessage = if (metrics.loaded) it.errorMessage else "Couldn't load your pricing summary. Pull down or reopen to try again.",
+                    )
+                }
             }
         }
     }

@@ -16,8 +16,8 @@ class DayBookingsRemoteDataSource(private val api: PartnerApi) {
         return api.venueDay(token, venueId, date)
     }
 
-    suspend fun getBookings(token: String, venueId: Long?): List<BookingSummary> {
-        return api.bookings(token, venueId)
+    suspend fun getBookings(token: String, venueId: Long?, date: String? = null): List<BookingSummary> {
+        return api.bookings(token, venueId, date)
     }
 
     suspend fun createWalkIn(

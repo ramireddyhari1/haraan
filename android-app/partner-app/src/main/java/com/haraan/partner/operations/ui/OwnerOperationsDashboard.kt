@@ -113,6 +113,19 @@ fun OwnerOperationsDashboard(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = HaraanTheme.colors.slateDark)
                 }
+            } else if (uiState.loadError != null) {
+                // Said out loud: a failed load used to look like a business with no revenue.
+                Column(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Couldn't load operations", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(uiState.loadError ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(14.dp))
+                    Button(onClick = { viewModel.loadOverview(venueId) }) { Text("Try again") }
+                }
             } else {
                 when (uiState.selectedTab) {
                     0 -> RevenueOverviewTab(uiState.data.revenue)

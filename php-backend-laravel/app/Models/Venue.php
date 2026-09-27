@@ -287,6 +287,12 @@ final class Venue extends Model
         return $this->windowsForWeekday($date->format('D')) !== [];
     }
 
+    /** Minutes in one of this venue's slots: 30 or 60 (the default when unset). */
+    public function slotLength(): int
+    {
+        return max(30, (int) ($this->slot_minutes ?: 60));
+    }
+
     /**
      * The template slot rows that apply to a date: the venue's every-day rows plus the
      * rows labelled with that weekday, a weekday row replacing an every-day row at the same

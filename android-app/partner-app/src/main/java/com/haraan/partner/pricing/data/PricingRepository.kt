@@ -19,8 +19,8 @@ class PricingRepository(
             val fresh = remoteDs.fetchDashboard(token, venueId)
             emit(fresh)
         } catch (_: Exception) {
-            // Emit fallback metrics
-            emit(PricingDashboardMetrics())
+            // Not loaded: the screen shows "—" and says so, never stand-in rates.
+            emit(PricingDashboardMetrics(loaded = false))
         }
     }.flowOn(Dispatchers.IO)
 

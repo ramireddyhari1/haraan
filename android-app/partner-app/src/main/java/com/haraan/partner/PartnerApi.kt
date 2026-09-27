@@ -176,6 +176,8 @@ data class ShiftBoard(
     val chaseAmount: Double,
     val closed: List<String>,
     val next: List<ShiftBooking>,
+    /** The venues have slots on some day (not necessarily today). */
+    val hasAnySlots: Boolean = slotsTotal > 0,
 ) {
     val occupancy: Float get() = if (slotsTotal <= 0) 0f else slotsBooked.toFloat() / slotsTotal
 
@@ -356,6 +358,9 @@ data class WalkInResult(
 
 /** Reply to "make a fresh QR": either it was paid meanwhile, or here is the new one. */
 data class PaymentRequestResult(val paid: Boolean, val payment: DeskPayment?)
+
+/** What "Generate slots" did. */
+data class GenerateResult(val created: Int, val kept: Int, val removed: Int)
 
 /** One booking in the partner's report. */
 data class ReportRow(
@@ -757,6 +762,9 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
 
         ShiftBoard(
             dayLabel = o.optString("day_label", ""),
+            // Older servers don't send it: fall back to today's capacity, as before.
+            hasAnySlots = o.optJSONObject("setup")?.optBoolean("has_slots", capacity.optInt("total") > 0)
+                ?: (capacity.optInt("total") > 0),
             slotsTotal = capacity.optInt("total"),
             slotsBooked = capacity.optInt("booked"),
             slotsDone = capacity.optInt("done"),
@@ -818,8 +826,11 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         }
     }
 
-    suspend fun bookings(token: String, venueId: Long? = null): List<BookingSummary> = withContext(Dispatchers.IO) {
-        parseArray(get("/api/partner/bookings" + branchParam(venueId), token)) { o ->
+    /** The bookings feed; with [date] ("yyyy-MM-dd") it's every venue booking for that day. */
+    suspend fun bookings(token: String, venueId: Long? = null, date: String? = null): List<BookingSummary> = withContext(Dispatchers.IO) {
+        val base = "/api/partner/bookings" + branchParam(venueId)
+        val url = if (date == null) base else base + (if ('?' in base) "&" else "?") + "date=$date"
+        parseArray(get(url, token)) { o ->
             val label = o.optStringOrNull("event") ?: o.optStringOrNull("venue")
             BookingSummary(
                 id = o.optLong("id"),
@@ -1060,6 +1071,28 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 sports = o.optJSONArray("sports").toStringList(),
             )
         }
+    }
+
+    /**
+     * Build every slot between [open] and [close] in one go. [days] is ["Every day"] or
+     * weekday names; [mode] "add" keeps existing slots, "replace" starts over.
+     */
+    suspend fun generateSlots(
+        token: String,
+        venueId: Long,
+        open: String,
+        close: String,
+        stepMinutes: Int,
+        days: List<String>,
+        price: Double?,
+        mode: String,
+    ): GenerateResult = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("open", open).put("close", close).put("step", stepMinutes)
+            .put("days", JSONArray(days)).put("mode", mode)
+        if (price != null) body.put("price", price)
+        val o = JSONObject(post("/api/partner/venues/$venueId/slots/generate", body.toString(), token))
+        GenerateResult(created = o.optInt("created"), kept = o.optInt("kept"), removed = o.optInt("removed"))
     }
 
     private fun parseHolder(o: JSONObject) = PackageHolder(

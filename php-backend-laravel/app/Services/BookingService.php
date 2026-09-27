@@ -1329,7 +1329,8 @@ final class BookingService
 
             // Length in minutes: whole hours for slot bookings, or exactly what the desk
             // asked for (90 minutes is a normal turf booking).
-            $lengthMin = isset($meta['duration_min']) ? max(30, (int) $meta['duration_min']) : $duration * 60;
+            // A slot booking lasts `duration` of the venue's slots (30 or 60 min each).
+            $lengthMin = isset($meta['duration_min']) ? max(30, (int) $meta['duration_min']) : $duration * $venue->slotLength();
             $endMin = $startMin !== null ? $startMin + $lengthMin : null;
 
             // Every booking lives inside one calendar date (slot_date + HH:MM). A venue open

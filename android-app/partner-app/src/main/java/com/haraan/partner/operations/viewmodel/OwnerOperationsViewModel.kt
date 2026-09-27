@@ -15,7 +15,12 @@ data class OwnerOperationsUiState(
     val selectedTab: Int = 0, // 0: Overview/Revenue, 1: Heatmap, 2: Staff, 3: Funnel & Alerts, 4: AI Suggestions
     val data: OperationsMasterData = OperationsMasterData(),
     val actionMessage: String? = null,
-    val isActionLoading: Boolean = false
+    val isActionLoading: Boolean = false,
+    /**
+     * The overview couldn't load. Without this a failure looked exactly like an empty
+     * business — no alerts, zero revenue — and a failed action just stopped spinning.
+     */
+    val loadError: String? = null,
 )
 
 class OwnerOperationsViewModel(
@@ -28,12 +33,12 @@ class OwnerOperationsViewModel(
 
     fun loadOverview(venueId: Long) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, loadError = null) }
             try {
                 val master = repository.getOperationsOverview(token, venueId)
                 _uiState.update { it.copy(isLoading = false, data = master) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false) }
+                _uiState.update { it.copy(isLoading = false, loadError = e.message ?: "Couldn't load operations") }
             }
         }
     }
@@ -58,10 +63,10 @@ class OwnerOperationsViewModel(
                         )
                     }
                 } else {
-                    _uiState.update { it.copy(isActionLoading = false) }
+                    _uiState.update { it.copy(isActionLoading = false, actionMessage = "That didn't go through. Try again.") }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isActionLoading = false) }
+                _uiState.update { it.copy(isActionLoading = false, actionMessage = e.message ?: "That didn't go through. Try again.") }
             }
         }
     }
@@ -80,14 +85,14 @@ class OwnerOperationsViewModel(
                         it.copy(
                             isActionLoading = false,
                             data = updatedData,
-                            actionMessage = "✨ AI Recommendation applied successfully!"
+                            actionMessage = "Recommendation applied"
                         )
                     }
                 } else {
-                    _uiState.update { it.copy(isActionLoading = false) }
+                    _uiState.update { it.copy(isActionLoading = false, actionMessage = "That didn't go through. Try again.") }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isActionLoading = false) }
+                _uiState.update { it.copy(isActionLoading = false, actionMessage = e.message ?: "That didn't go through. Try again.") }
             }
         }
     }
@@ -108,10 +113,10 @@ class OwnerOperationsViewModel(
                         )
                     }
                 } else {
-                    _uiState.update { it.copy(isActionLoading = false) }
+                    _uiState.update { it.copy(isActionLoading = false, actionMessage = "That didn't go through. Try again.") }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isActionLoading = false) }
+                _uiState.update { it.copy(isActionLoading = false, actionMessage = e.message ?: "That didn't go through. Try again.") }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.haraan.partner.whatsapp.ui
 
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -58,11 +59,15 @@ fun WhatsAppDeskDashboard(
         return
     }
 
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(venueId) {
         viewModel.loadDashboard(venueId)
-        while (true) {
-            delay(INBOX_POLL_MS)
-            if (viewModel.uiState.value.selectedConversation == null) viewModel.refreshInbox(venueId)
+        // Polls only while the app is on screen, not in the background.
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) {
+                delay(INBOX_POLL_MS)
+                if (viewModel.uiState.value.selectedConversation == null) viewModel.refreshInbox(venueId)
+            }
         }
     }
 
