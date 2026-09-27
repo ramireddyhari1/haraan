@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.EventAvailable
@@ -62,7 +63,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.CheckCircle
@@ -147,12 +147,12 @@ internal fun LazyListScope.insightItems(
     // The encouraging long view leads: what Haraan brought, then the next milestone.
     item(key = "ins-haraan") { Rise(8) { HaraanBroughtCard(insights.haraan, "$memoryKey.haraan", pad) } }
     item(key = "ins-milestones") { Rise(8) { MilestonesCard(insights.milestones, memoryKey, pad) } }
-    item(key = "ins-week-head") { Rise(8) { Box(pad) { HomeSectionHeader(Icons.Filled.BarChart, insights.week.label) } } }
+    item(key = "ins-week-head") { Rise(8) { Box(pad) { HomeSectionHeader(Icons.Filled.BarChart, "Day by day") } } }
     item(key = "ins-week") { Rise(9) { WeekBarsCard(state, onWeek, memoryKey, pad) } }
     item(key = "ins-channel-head") { Rise(10) { Box(pad) { HomeSectionHeader(Icons.Filled.Hub, "Where bookings come from") } } }
     item(key = "ins-channel") { Rise(10) { ChannelSplitCard(state, pad) } }
     if (insights.growth.points.size >= 2) {
-        item(key = "ins-growth-head") { Rise(11) { Box(pad) { HomeSectionHeader(Icons.AutoMirrored.Filled.TrendingUp, "Since you joined") } } }
+        item(key = "ins-growth-head") { Rise(11) { Box(pad) { HomeSectionHeader(Icons.AutoMirrored.Filled.TrendingUp, "Games played so far") } } }
         item(key = "ins-growth") { Rise(11) { GrowthCard(insights.growth, pad) } }
     }
     val tomorrow = insights.tomorrow
@@ -187,7 +187,7 @@ internal fun WeekBarsCard(state: InsightsState, onWeek: (String) -> Unit, memory
             Column(Modifier.weight(1f)) {
                 Text(week.label, fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold)
                 Text(
-                    if (hoursMode) "${hrs(week.bookedHours)} hrs" else rupees(money.shown),
+                    if (hoursMode) hoursLabel(week.bookedHours) else rupees(money.shown),
                     fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.6).sp,
                 )
             }
@@ -204,7 +204,7 @@ internal fun WeekBarsCard(state: InsightsState, onWeek: (String) -> Unit, memory
                 val pct = (abs(delta) * 100).roundToInt()
                 Text(
                     if (pct == 0) "Same as last week" else (if (delta > 0) "▲ " else "▼ ") + "$pct% vs last week",
-                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (delta >= 0) Up else Down,
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = when { pct == 0 -> Muted; delta > 0 -> Up; else -> Down },
                 )
             }
         }
@@ -229,7 +229,7 @@ internal fun WeekBarsCard(state: InsightsState, onWeek: (String) -> Unit, memory
             Text(
                 day?.let {
                     val main = if (hoursMode) "${hrs(it.bookedHours)} of ${hrs(it.totalHours)} hrs" else rupees(it.revenue) + " · ${hrs(it.bookedHours)} of ${hrs(it.totalHours)} hrs"
-                    val last = if (hoursMode) "${hrs(it.lastBookedHours)} hrs" else rupees(it.lastRevenue)
+                    val last = if (hoursMode) hoursLabel(it.lastBookedHours) else rupees(it.lastRevenue)
                     "${it.label} ${it.day} · $main · last week $last"
                 } ?: "Tap a day to see its numbers",
                 fontSize = 12.5.sp, color = Ink, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
@@ -375,7 +375,7 @@ internal fun ChannelSplitCard(state: InsightsState, modifier: Modifier = Modifie
     Column(modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (total > 0) "${split.count} bookings · ${rupees(total)}" else "No bookings yet",
+                if (total > 0) "${plural(split.count, "booking")} · ${rupees(total)}" else "No bookings yet",
                 fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.weight(1f),
             )
             if (isCurrentWeek) {
@@ -417,7 +417,7 @@ internal fun ChannelSplitCard(state: InsightsState, modifier: Modifier = Modifie
                 Spacer(Modifier.width(10.dp))
                 Text(label, fontSize = 13.5.sp, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text(
-                    if (share.count == 0) "—" else "${hrs(share.hours)} hrs",
+                    if (share.count == 0) "—" else hoursLabel(share.hours),
                     fontSize = 12.5.sp, color = Muted,
                 )
                 Spacer(Modifier.width(12.dp))
@@ -579,7 +579,13 @@ internal fun BusyHoursCard(heat: BusyHours, onPricing: (() -> Unit)?, modifier: 
                             heat.hours.forEachIndexed { i, h ->
                                 Box(Modifier.width(cell), contentAlignment = Alignment.CenterStart) {
                                     // Every third hour is labelled; the rest would collide.
-                                    if (i % 3 == 0) Text(h.replace(" ", ""), fontSize = 9.5.sp, color = Muted, maxLines = 1, softWrap = false)
+                                    // No label in the last two cells: it would run off the card.
+                                    if (i % 3 == 0 && i < heat.hours.size - 2) {
+                                        Text(
+                                            h, fontSize = 9.5.sp, color = Muted, maxLines = 1, softWrap = false,
+                                            modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -826,7 +832,8 @@ internal fun GrowthCard(g: Growth, modifier: Modifier = Modifier) {
     val view = LocalView.current
     var bookingsMode by remember { mutableStateOf(false) }
     var picked by remember(g) { mutableStateOf<Int?>(null) }
-    val values = g.points.map { if (bookingsMode) it.bookings.toFloat() else it.revenue.toFloat() }
+    // A zero before the first game: even a young venue's line climbs from the floor.
+    val values = listOf(0f) + g.points.map { if (bookingsMode) it.bookings.toFloat() else it.revenue.toFloat() }
     val top = values.maxOrNull()?.takeIf { it > 0f } ?: 1f
     val draw = remember(g, bookingsMode) { Animatable(0f) }
     LaunchedEffect(g, bookingsMode) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
@@ -834,19 +841,19 @@ internal fun GrowthCard(g: Growth, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(g.since?.let { "Since $it" } ?: "So far", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold)
+                Text(g.since?.let { "Since your first game · $it" } ?: "So far", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold)
                 Text(
-                    if (bookingsMode) "${g.bookings} bookings" else rupees(g.revenue),
+                    if (bookingsMode) plural(g.bookings, "booking") else rupees(g.revenue),
                     fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.5).sp,
                 )
             }
             ModeSwitch(bookingsMode, second = "Bookings") { bookingsMode = it; picked = null; Haptics.tick(view) }
         }
         Spacer(Modifier.height(6.dp))
-        val p = picked?.let { g.points.getOrNull(it) }
+        val p = picked?.let { g.points.getOrNull(it - 1) }
         Text(
-            p?.let { "${if (g.unit == "month") "By end of" else "By week of"} ${it.label} · ${rupees(it.revenue)} · ${it.bookings} bookings" }
-                ?: "Drag along the line to look back",
+            p?.let { "${if (g.unit == "month") "By end of" else "By week of"} ${it.label} · ${rupees(it.revenue)} · ${plural(it.bookings, "booking")}" }
+                ?: if (picked == 0) "Before your first game" else "Drag along the line to look back",
             fontSize = 12.5.sp, color = if (p != null) Ink else Muted, fontWeight = FontWeight.Medium,
         )
         Spacer(Modifier.height(10.dp))
@@ -864,7 +871,8 @@ internal fun GrowthCard(g: Growth, modifier: Modifier = Modifier) {
                     }
                 }
                 .pointerInput(values.size) {
-                    detectDragGestures { change, _ ->
+                    // Sideways only: an up/down swipe over the chart must still scroll the page.
+                    detectHorizontalDragGestures { change, _ ->
                         val i = stepOf(change.position.x, size.width.toFloat())
                         if (i != picked) { picked = i; Haptics.tick(view) }
                     }
@@ -910,8 +918,12 @@ internal fun GrowthCard(g: Growth, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(6.dp))
         Row {
-            Text(g.points.first().label, fontSize = 11.sp, color = Muted, modifier = Modifier.weight(1f))
+            Text("Start", fontSize = 11.sp, color = Muted, modifier = Modifier.weight(1f))
             Text("Now", fontSize = 11.sp, color = Muted)
         }
     }
 }
+
+private fun plural(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
+
+private fun hoursLabel(v: Double) = hrs(v) + if (hrs(v) == "1") " hr" else " hrs"
