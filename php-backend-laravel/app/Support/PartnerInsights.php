@@ -109,19 +109,176 @@ final class PartnerInsights
      */
     private function lifetime(Collection $venueIds, Carbon $today): array
     {
-        $all = Booking::query()
-            ->where('booking_type', 'venue')
-            ->whereIn('venue_id', $venueIds)
-            ->get(['id', 'user_id', 'slot_date', 'status', 'channel', 'total_amount', 'created_at'])
-            ->filter(fn (Booking $b): bool => CourtOccupancy::isLive($b))
-            ->sortBy(fn (Booking $b): string => (string) $b->created_at)
-            ->values();
+        $all = $this->liveHistory($venueIds);
 
         return [
             'haraan'     => $this->haraanBrought($all, $today),
             'growth'     => $this->growth($all, $today),
             'milestones' => $this->milestones($all),
+            'customers'  => $this->customerSummary($all, $today),
         ];
+    }
+
+    /**
+     * GET /api/partner/insights/customers — who booked in a period, new or back again.
+     *
+     * @param  Collection<int, Venue>  $venues
+     */
+    public function customers(Collection $venues, string $period): array
+    {
+        $today = Carbon::parse(BusinessClock::today());
+        $all = $this->liveHistory($venues->pluck('id'));
+        [$from, $to] = $this->periodBounds($period, $today);
+        $people = $this->people($all);
+
+        $rows = [];
+        foreach ($people as $p) {
+            $inPeriod = array_values(array_filter($p['visits'], fn (array $v): bool => $v['date'] >= $from->toDateString() && $v['date'] <= $to->toDateString()));
+            if ($inPeriod === []) {
+                continue;
+            }
+            $isNew = $p['first'] >= $from->toDateString();
+            $recent = array_slice(array_reverse($p['visits']), 0, 6);
+            $rows[] = [
+                'name'           => $p['name'],
+                'phone'          => $p['phone'],
+                'type'           => $isNew ? 'new' : 'returning',
+                'visits'         => count($p['visits']),
+                'visits_period'  => count($inPeriod),
+                'first_visit'    => Carbon::parse($p['first'])->format('j M Y'),
+                'last_visit'     => Carbon::parse($p['last'])->format('j M'),
+                'spent'          => round($p['spent'], 2),
+                'via'            => $p['via'],
+                'recent'         => array_map(fn (array $v): array => [
+                    'date'    => Carbon::parse($v['date'])->format('D, j M'),
+                    'time'    => $v['time'],
+                    'amount'  => round($v['amount'], 2),
+                    'channel' => $v['channel'],
+                ], $recent),
+                'sort'           => $p['last'],
+            ];
+        }
+        usort($rows, fn (array $a, array $b): int => [$b['visits_period'], $b['sort']] <=> [$a['visits_period'], $a['sort']]);
+
+        return [
+            'period'    => $period,
+            'label'     => $this->periodLabel($period),
+            'customers' => array_map(fn (array $r): array => collect($r)->except('sort')->all(), $rows),
+        ];
+    }
+
+    /** Every live venue booking in scope, oldest first, with who made it. */
+    private function liveHistory(Collection $venueIds): Collection
+    {
+        return Booking::query()
+            ->where('booking_type', 'venue')
+            ->whereIn('venue_id', $venueIds)
+            ->with('user:id,name,phone')
+            ->get(['id', 'user_id', 'venue_id', 'slot_date', 'start_time', 'status', 'channel', 'total_amount', 'guest_name', 'guest_phone', 'attendee_name', 'created_at'])
+            ->filter(fn (Booking $b): bool => CourtOccupancy::isLive($b))
+            ->sortBy(fn (Booking $b): string => (string) $b->created_at)
+            ->values();
+    }
+
+    /**
+     * One entry per real person, keyed the way the CRM keys them: a phone number, so the
+     * same player walking in and booking in the app is one customer. An app player with
+     * no phone is keyed by their account. A walk-in with no phone can't be recognised
+     * next time, so it isn't counted either way.
+     *
+     * @return array<string, array{name: string, phone: ?string, first: string, last: string, spent: float, via: string, visits: list<array{date: string, time: string, amount: float, channel: string}>}>
+     */
+    private function people(Collection $all): array
+    {
+        $people = [];
+        foreach ($all->sortBy(fn (Booking $b): string => Carbon::parse($b->slot_date)->toDateString()) as $b) {
+            $channel = $this->channelOf($b);
+            $desk = $channel !== 'app';
+            $phone = $this->phoneKey($desk ? $b->guest_phone : ($b->user->phone ?? $b->guest_phone));
+            $key = $phone !== null ? 'p'.$phone : (! $desk && $b->user_id ? 'u'.$b->user_id : null);
+            if ($key === null) {
+                continue;
+            }
+            $name = trim((string) ($desk ? $b->guest_name : ($b->user->name ?? $b->attendee_name ?? $b->guest_name))) ?: 'Guest';
+            $date = Carbon::parse($b->slot_date)->toDateString();
+            $start = \App\Services\BookingService::timeToMinutes($b->start_time);
+
+            $people[$key] ??= ['name' => $name, 'phone' => $phone, 'first' => $date, 'last' => $date, 'spent' => 0.0, 'via' => $channel, 'visits' => []];
+            $p = &$people[$key];
+            $p['last'] = max($p['last'], $date);
+            $p['first'] = min($p['first'], $date);
+            $p['name'] = $name;          // the latest spelling the desk typed
+            $p['via'] = $channel;
+            $p['spent'] += (float) $b->total_amount;
+            $p['visits'][] = [
+                'date'    => $date,
+                'time'    => $start === null ? '' : Carbon::today()->addMinutes($start)->format('g:i A'),
+                'amount'  => (float) $b->total_amount,
+                'channel' => $channel,
+            ];
+            unset($p);
+        }
+
+        return $people;
+    }
+
+    private function phoneKey(?string $raw): ?string
+    {
+        $d = preg_replace('/[^0-9]/', '', (string) $raw);
+
+        return ($d !== null && strlen($d) >= 10) ? substr($d, -10) : null;
+    }
+
+    /** @return array{0: Carbon, 1: Carbon} */
+    private function periodBounds(string $period, Carbon $today): array
+    {
+        return $period === 'week'
+            ? [$today->copy()->startOfWeek(Carbon::MONDAY), $today->copy()->startOfWeek(Carbon::MONDAY)->addDays(6)]
+            : [$today->copy()->startOfMonth(), $today->copy()->endOfMonth()->startOfDay()];
+    }
+
+    private function periodLabel(string $period): string
+    {
+        return $period === 'week' ? 'This week' : 'This month';
+    }
+
+    /**
+     * New vs returning for this week and this month, against the one before, plus how
+     * many customers ever came back at all.
+     */
+    private function customerSummary(Collection $all, Carbon $today): array
+    {
+        $people = $this->people($all);
+        $count = function (Carbon $from, Carbon $to) use ($people): array {
+            $new = $back = 0;
+            foreach ($people as $p) {
+                $in = false;
+                foreach ($p['visits'] as $v) {
+                    if ($v['date'] >= $from->toDateString() && $v['date'] <= $to->toDateString()) {
+                        $in = true;
+                        break;
+                    }
+                }
+                if (! $in) {
+                    continue;
+                }
+                $p['first'] >= $from->toDateString() ? $new++ : $back++;
+            }
+
+            return ['new' => $new, 'returning' => $back];
+        };
+
+        $out = [];
+        foreach (['week', 'month'] as $period) {
+            [$from, $to] = $this->periodBounds($period, $today);
+            $prevFrom = $period === 'week' ? $from->copy()->subWeek() : $from->copy()->subMonth();
+            $prevTo = $from->copy()->subDay();
+            $out[$period] = $count($from, $to) + ['label' => $this->periodLabel($period), 'last' => $count($prevFrom, $prevTo)];
+        }
+        $total = count($people);
+        $repeat = count(array_filter($people, fn (array $p): bool => count(array_unique(array_column($p['visits'], 'date'))) > 1));
+
+        return $out + ['total' => $total, 'came_back' => $repeat];
     }
 
     /**

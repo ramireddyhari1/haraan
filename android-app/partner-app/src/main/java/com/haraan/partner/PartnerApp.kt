@@ -1924,6 +1924,11 @@ private fun HomeTab(
         // Set-up means the venue has no slots at all. Today's capacity is 0 on a closed
         // day too, and an established venue was told it "isn't bookable yet".
         val settingUp = courtsLane && !day.hasAnySlots
+        // The customers screen opens over Home from the new vs returning card.
+        var customersOpen by remember { mutableStateOf<Pair<String, String>?>(null) }
+        customersOpen?.let { (period, type) ->
+            CustomersScreen(api, token, branch, period, type) { customersOpen = null }
+        }
         // The week pager lives out here: LazyColumn items can't remember across pages.
         val insights = data.insights?.takeIf { it.enabled && !settingUp }?.let { initial ->
             rememberInsightsState(initial) { week -> api.insights(token, branch, week) }
@@ -2045,6 +2050,7 @@ private fun HomeTab(
                         onWeek = go,
                         memoryKey = "home.week.$branch",
                         onPricing = onPricing?.let { open -> focus?.let { f -> { open(f.id, f.name) } } },
+                        onCustomers = { period, type -> customersOpen = period to type },
                     )
                 }
                 // All-time money only earns its place once there is some. A ₹0 card on

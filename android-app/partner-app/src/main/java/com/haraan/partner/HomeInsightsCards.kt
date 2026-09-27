@@ -6,6 +6,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -67,6 +68,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
@@ -141,12 +143,15 @@ internal fun LazyListScope.insightItems(
     onWeek: (String) -> Unit,
     memoryKey: String,
     onPricing: (() -> Unit)?,
+    onCustomers: (period: String, type: String) -> Unit = { _, _ -> },
 ) {
     val pad = Modifier.padding(horizontal = 16.dp)
     val insights = state.value
     // The encouraging long view leads: what Haraan brought, then the next milestone.
     item(key = "ins-haraan") { Rise(8) { HaraanBroughtCard(insights.haraan, "$memoryKey.haraan", pad) } }
     item(key = "ins-milestones") { Rise(8) { MilestonesCard(insights.milestones, memoryKey, pad) } }
+    item(key = "ins-customers-head") { Rise(9) { Box(pad) { HomeSectionHeader(Icons.Filled.Groups, "Your customers") } } }
+    item(key = "ins-customers") { Rise(9) { CustomersCard(insights.customers, onCustomers, pad) } }
     item(key = "ins-week-head") { Rise(8) { Box(pad) { HomeSectionHeader(Icons.Filled.BarChart, "Day by day") } } }
     item(key = "ins-week") { Rise(9) { WeekBarsCard(state, onWeek, memoryKey, pad) } }
     item(key = "ins-channel-head") { Rise(10) { Box(pad) { HomeSectionHeader(Icons.Filled.Hub, "Where bookings come from") } } }
@@ -541,104 +546,214 @@ private fun shareOpenSlots(context: android.content.Context, v: TomorrowVenue) {
 
 // ---- Busy hours ------------------------------------------------------------
 
+/** One grid column: a real clock hour, or the fold where the venue doesn't sell. */
+private sealed interface HeatCol {
+    data class Hour(val index: Int, val label: String) : HeatCol
+    data object Fold : HeatCol
+}
+
+/** Five crisp shades read as a designed scale; a smooth gradient reads as a default. */
+private fun heatShade(fill: Float): Color = when {
+    fill <= 0f -> Track
+    fill < 0.25f -> Color(0xFFD6E3FF)
+    fill < 0.5f -> Color(0xFF9DBBFF)
+    fill < 0.75f -> Accent
+    else -> Color(0xFF1537B0)
+}
+
 /**
- * Weekday × hour, darker where courts usually fill, over the last few weeks. Under it,
- * the quiet stretches by name and the one lever that fills them: price.
+ * How full each weekday × hour usually is. Leads with the answer (the busiest hour),
+ * shows only the hours the venue sells, and lets a thumb run across the grid — each
+ * cell ticks as it passes and the readout follows the finger.
  */
 @Composable
 internal fun BusyHoursCard(heat: BusyHours, onPricing: (() -> Unit)?, modifier: Modifier = Modifier) {
     val view = LocalView.current
     var picked by remember(heat) { mutableStateOf<Pair<Int, Int>?>(null) }
 
-    Column(modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
-        Text(
-            "Last ${heat.weeks} weeks · darker is fuller",
-            fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(12.dp))
+    // Hours no day sells are folded away; a run of them becomes one thin divider.
+    val cols = remember(heat) {
+        buildList<HeatCol> {
+            heat.hours.indices.forEach { h ->
+                val sold = heat.rows.any { it.second.getOrNull(h) != null }
+                when {
+                    sold -> add(HeatCol.Hour(h, heat.hours[h]))
+                    isNotEmpty() && last() !is HeatCol.Fold -> add(HeatCol.Fold)
+                }
+            }
+            if (lastOrNull() is HeatCol.Fold) removeAt(lastIndex)
+        }
+    }
+    val hourCols = cols.filterIsInstance<HeatCol.Hour>()
+    val busiest = remember(heat) {
+        heat.rows.flatMapIndexed { r, (_, cells) -> cells.mapIndexedNotNull { c, f -> f?.let { Triple(r, c, it) } } }
+            .maxByOrNull { it.third }?.takeIf { it.third > 0f }
+    }
+    val todayRow = remember { java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK).let { (it + 5) % 7 } }
+    val wave = remember(heat) { Animatable(0f) }
+    LaunchedEffect(heat) { wave.animateTo(1f, tween(700, easing = FastOutSlowInEasing)) }
 
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val labelW = 34.dp
-            val gap = 3.dp
-            val count = heat.hours.size.coerceAtLeast(1)
-            // Fit the day on screen when it can; a long day scrolls instead of shrinking to specks.
-            val fitted = (maxWidth - labelW - gap * (count - 1)) / count
-            val cell = if (fitted < 16.dp) 16.dp else if (fitted > 30.dp) 30.dp else fitted
-            Column {
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                        Spacer(Modifier.height(16.dp))
-                        heat.rows.forEach { (label, _) ->
-                            Box(Modifier.width(labelW).height(cell), contentAlignment = Alignment.CenterStart) {
-                                Text(label.take(3), fontSize = 11.sp, color = Muted, fontWeight = FontWeight.SemiBold)
+    Column(modifier.fillMaxWidth().premiumSurface().padding(16.dp)) {
+        // The answer first; the grid is the evidence.
+        val shown = picked ?: busiest?.let { it.first to it.second }
+        val shownFill = shown?.let { (r, c) -> heat.rows.getOrNull(r)?.second?.getOrNull(c) }
+        if (shown != null && shownFill != null) {
+            Text(
+                (if (picked == null) "Busiest: " else "") + "${heat.rows[shown.first].first} ${heat.hours.getOrNull(shown.second).orEmpty()}",
+                fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.3).sp,
+            )
+            Text(
+                "Usually ${(shownFill * 100).roundToInt()}% full · last ${heat.weeks} weeks",
+                fontSize = 12.5.sp, color = Muted,
+            )
+        } else {
+            Text("Every hour is still open to sell", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.3).sp)
+            Text("No hour has filled up in the last ${heat.weeks} weeks yet", fontSize = 12.5.sp, color = Muted)
+        }
+        Spacer(Modifier.height(14.dp))
+
+        if (hourCols.isNotEmpty()) {
+            val labelW = 36.dp
+            val rowH = 24.dp
+            val gap = 4.dp
+            // Weights: an hour is 1, a fold is a sliver.
+            val weights = cols.map { if (it is HeatCol.Fold) 0.35f else 1f }
+            val totalW = weights.sum()
+            fun colAt(x: Float, width: Float): Int? {
+                var acc = 0f
+                val at = (x / width).coerceIn(0f, 0.9999f) * totalW
+                cols.forEachIndexed { i, _ ->
+                    acc += weights[i]
+                    if (at < acc) return i
+                }
+                return null
+            }
+
+            Row {
+                Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                    heat.rows.forEachIndexed { r, (label, _) ->
+                        Row(Modifier.width(labelW).height(rowH), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                label.take(3), fontSize = 11.5.sp,
+                                fontWeight = if (r == todayRow) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                color = if (r == todayRow) AccentDeep else Muted,
+                            )
+                            // Today, marked on the label so its cells keep their colour.
+                            if (r == todayRow) {
+                                Spacer(Modifier.width(3.dp))
+                                Box(Modifier.size(4.dp).clip(RoundedCornerShape(99.dp)).background(Accent))
                             }
                         }
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.height(16.dp)) {
-                            heat.hours.forEachIndexed { i, h ->
-                                Box(Modifier.width(cell), contentAlignment = Alignment.CenterStart) {
-                                    // Every third hour is labelled; the rest would collide.
-                                    // No label in the last two cells: it would run off the card.
-                                    if (i % 3 == 0 && i < heat.hours.size - 2) {
-                                        Text(
-                                            h, fontSize = 9.5.sp, color = Muted, maxLines = 1, softWrap = false,
-                                            modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true),
-                                        )
+                }
+                BoxWithConstraints(Modifier.weight(1f)) {
+                    val widthPx = constraints.maxWidth.toFloat()
+                    val rowPx = with(androidx.compose.ui.platform.LocalDensity.current) { (rowH + gap).toPx() }
+                    fun pick(x: Float, y: Float) {
+                        val r = (y / rowPx).toInt().coerceIn(0, heat.rows.lastIndex)
+                        val col = colAt(x, widthPx)?.let { cols[it] } as? HeatCol.Hour ?: return
+                        if (heat.rows[r].second.getOrNull(col.index) == null) return
+                        val next = r to col.index
+                        if (next != picked) { picked = next; Haptics.tick(view) }
+                    }
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .pointerInput(cols) { detectTapGestures { o -> pick(o.x, o.y) } }
+                            .pointerInput(cols) {
+                                // Sideways runs scrub; up/down still scrolls the page.
+                                detectHorizontalDragGestures { change, _ -> pick(change.position.x, change.position.y) }
+                            },
+                        verticalArrangement = Arrangement.spacedBy(gap),
+                    ) {
+                        heat.rows.forEachIndexed { r, (_, cells) ->
+                            Row(
+                                Modifier.fillMaxWidth().height(rowH),
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                cols.forEachIndexed { ci, col ->
+                                    // Columns ripple in left to right.
+                                    val appear = (wave.value * (cols.size + 4) - ci).coerceIn(0f, 1f)
+                                    when (col) {
+                                        HeatCol.Fold -> Box(Modifier.weight(0.35f), contentAlignment = Alignment.Center) {
+                                            Box(Modifier.size(3.dp).clip(RoundedCornerShape(99.dp)).background(Ghost))
+                                        }
+                                        is HeatCol.Hour -> {
+                                            val fill = cells.getOrNull(col.index)
+                                            val isPicked = picked == (r to col.index)
+                                            Box(
+                                                Modifier.weight(1f).fillMaxHeight()
+                                                    .graphicsLayer {
+                                                        alpha = appear
+                                                        val s = if (isPicked) 1.12f else 0.85f + 0.15f * appear
+                                                        scaleX = s; scaleY = s
+                                                    }
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(if (fill == null) Color.Transparent else heatShade(fill))
+                                                    .then(
+                                                        if (isPicked) Modifier.border(2.dp, Ink, RoundedCornerShape(6.dp)) else Modifier,
+                                                    ),
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                        heat.rows.forEachIndexed { r, (_, cells) ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                                cells.forEachIndexed { c, fill ->
-                                    val isPicked = picked == (r to c)
-                                    Box(
-                                        Modifier.size(cell).clip(RoundedCornerShape(5.dp))
-                                            .background(
-                                                if (fill == null) Color.Transparent
-                                                else lerp(Track, AccentDeep, fill.coerceIn(0f, 1f)),
-                                            )
-                                            .then(
-                                                if (fill != null) Modifier.clickable {
-                                                    picked = if (isPicked) null else r to c
-                                                    Haptics.tick(view)
-                                                } else Modifier,
-                                            )
-                                            .then(if (isPicked) Modifier.background(Ink.copy(alpha = 0.25f)) else Modifier),
-                                    )
+                        // Hour marks: the start of each run and every third hour after it.
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            var sinceMark = 99
+                            cols.forEachIndexed { ci, col ->
+                                when (col) {
+                                    HeatCol.Fold -> { Spacer(Modifier.weight(0.35f)); sinceMark = 99 }
+                                    is HeatCol.Hour -> {
+                                        val mark = sinceMark >= 3 && ci < cols.size - 1
+                                        if (mark) sinceMark = 0
+                                        sinceMark++
+                                        Box(Modifier.weight(1f)) {
+                                            if (mark) {
+                                                Text(
+                                                    col.label, fontSize = 10.sp, color = Muted, maxLines = 1, softWrap = false,
+                                                    modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true),
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
+            // A key, not an instruction.
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.weight(1f))
+                Text("Empty", fontSize = 11.sp, color = Muted)
+                Spacer(Modifier.width(6.dp))
+                listOf(0f, 0.2f, 0.4f, 0.6f, 0.9f).forEach { f ->
+                    Box(Modifier.padding(horizontal = 1.5.dp).size(12.dp).clip(RoundedCornerShape(3.dp)).background(heatShade(f)))
+                }
+                Spacer(Modifier.width(6.dp))
+                Text("Full", fontSize = 11.sp, color = Muted)
+            }
         }
 
-        Spacer(Modifier.height(10.dp))
-        val pickedLine = picked?.let { (r, c) ->
-            val row = heat.rows.getOrNull(r)
-            val fill = row?.second?.getOrNull(c)
-            if (row != null && fill != null) "${row.first} ${heat.hours.getOrNull(c).orEmpty()} · ${(fill * 100).roundToInt()}% full on average" else null
-        }
-        Text(
-            pickedLine ?: "Tap a square to see how full that hour usually is",
-            fontSize = 12.5.sp, color = if (pickedLine != null) Ink else Muted, fontWeight = FontWeight.Medium,
-        )
-
-        if (!heat.ready) {
-            Spacer(Modifier.height(8.dp))
-            Text("Quiet hours are named once a few more bookings are in.", fontSize = 12.5.sp, color = Muted)
-        } else if (heat.quiet.isNotEmpty()) {
+        if (heat.ready && heat.quiet.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
-            Text("Your quiet hours", fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
-            Spacer(Modifier.height(6.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Ghost))
+            Spacer(Modifier.height(12.dp))
+            Text("Quiet hours to fill", fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Spacer(Modifier.height(4.dp))
             heat.quiet.forEach { q ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(Down))
-                    Spacer(Modifier.width(10.dp))
+                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${q.days} · ${q.hours}", fontSize = 13.5.sp, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    Text("${q.fill}% full", fontSize = 12.5.sp, color = Muted)
+                    Text(
+                        "${q.fill}% full", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Down,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Down.copy(alpha = 0.1f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
                 }
             }
             if (onPricing != null) {
@@ -654,15 +769,13 @@ internal fun BusyHoursCard(heat: BusyHours, onPricing: (() -> Unit)?, modifier: 
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Open pricing", color = AccentDeep, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                    Text("Set a lower price for these hours", color = AccentDeep, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
                     Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = AccentDeep, modifier = Modifier.size(18.dp))
                 }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "A lower price for these hours is the quickest way to fill them.",
-                    fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-                )
             }
+        } else if (!heat.ready) {
+            Spacer(Modifier.height(10.dp))
+            Text("Quiet hours show up here after a few more bookings.", fontSize = 12.sp, color = Muted)
         }
     }
 }

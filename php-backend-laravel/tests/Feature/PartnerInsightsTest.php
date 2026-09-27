@@ -284,4 +284,74 @@ final class PartnerInsightsTest extends TestCase
         $this->assertSame('25/0', $row['score2']);
         $this->assertSame('0', $row['score1']);
     }
+
+    private function visit(string $date, string $start, ?string $phone, string $channel = 'offline', ?User $player = null, string $name = 'Ravi'): Booking
+    {
+        return Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $this->venue->id,
+            'user_id' => $player?->id ?? $this->partner->id,
+            'channel' => $channel, 'status' => 'CONFIRMED', 'payment_status' => 'paid',
+            'slot_date' => $date, 'start_time' => $start, 'end_time' => sprintf('%02d:00', (int) substr($start, 0, 2) + 1),
+            'quantity' => 1, 'total_amount' => 500, 'amount_paid' => 500,
+            'guest_name' => $channel === 'online' ? null : $name, 'guest_phone' => $channel === 'online' ? null : $phone,
+        ]);
+    }
+
+    public function test_customers_split_into_new_and_returning_by_their_first_visit(): void
+    {
+        $today = Carbon::parse(BusinessClock::today());
+        $monthStart = $today->copy()->startOfMonth();
+        // Ravi first came last month and is back this month; Sita is new this month.
+        $this->visit($monthStart->copy()->subDays(10)->toDateString(), '06:00', '98765 43210');
+        $this->visit($monthStart->toDateString(), '07:00', '+91 98765 43210');
+        $this->visit($monthStart->toDateString(), '08:00', '9123456789', name: 'Sita');
+        // A walk-in with no phone can't be recognised next time: not counted.
+        $this->visit($monthStart->toDateString(), '14:00', null, name: 'Anon');
+
+        $c = $this->insights()->assertOk()->json('data.customers');
+
+        $this->assertSame(1, $c['month']['new']);
+        $this->assertSame(1, $c['month']['returning']);
+        $this->assertSame(1, $c['month']['last']['new']);
+        $this->assertSame(2, $c['total']);
+        $this->assertSame(1, $c['came_back']);
+    }
+
+    public function test_the_same_phone_in_the_app_and_at_the_desk_is_one_customer(): void
+    {
+        $today = Carbon::parse(BusinessClock::today());
+        $player = User::factory()->create(['name' => 'Ravi Kumar', 'phone' => '+919876543210']);
+        $this->visit($today->copy()->startOfMonth()->subDays(3)->toDateString(), '06:00', '9876543210');
+        $this->visit($today->toDateString(), '07:00', null, 'online', $player);
+
+        $list = $this->withHeader('Authorization', 'Bearer '.$this->token)
+            ->getJson('/api/partner/insights/customers?period=month')->assertOk()->json('data');
+
+        $this->assertSame('This month', $list['label']);
+        $this->assertCount(1, $list['customers']);
+        $row = $list['customers'][0];
+        $this->assertSame('returning', $row['type']);
+        $this->assertSame('Ravi Kumar', $row['name']);
+        $this->assertSame('9876543210', $row['phone']);
+        $this->assertSame(2, $row['visits']);
+        $this->assertSame(1, $row['visits_period']);
+        $this->assertEquals(1000, $row['spent']);
+        $this->assertSame('app', $row['via']);
+        $this->assertCount(2, $row['recent']);
+    }
+
+    public function test_another_partners_customers_never_show(): void
+    {
+        $other = User::factory()->create(['role' => 'partner', 'partner_type' => 'venue', 'status' => 'active']);
+        $theirs = Venue::create(['name' => 'Not Mine', 'location' => 'X', 'price' => 500, 'is_active' => true, 'is_bookable' => true, 'partner_id' => $other->id]);
+        Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $theirs->id, 'user_id' => $other->id, 'channel' => 'offline',
+            'status' => 'CONFIRMED', 'payment_status' => 'paid', 'slot_date' => BusinessClock::today(),
+            'start_time' => '06:00', 'end_time' => '07:00', 'quantity' => 1, 'total_amount' => 500, 'amount_paid' => 500,
+            'guest_name' => 'Secret', 'guest_phone' => '9000000001',
+        ]);
+
+        $this->withHeader('Authorization', 'Bearer '.$this->token)
+            ->getJson('/api/partner/insights/customers')->assertOk()->assertJsonCount(0, 'data.customers');
+    }
 }

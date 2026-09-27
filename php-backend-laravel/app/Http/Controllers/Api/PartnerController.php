@@ -571,6 +571,20 @@ class PartnerController extends Controller
     }
 
     /**
+     * GET /api/partner/insights/customers?period=week|month — the people behind the new vs
+     * returning card, scoped like Home.
+     */
+    public function insightCustomers(Request $request): JsonResponse
+    {
+        $venues = $request->user()->branches()
+            ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
+            ->get(['id', 'name', 'slot_minutes']);
+        $period = $request->query('period') === 'week' ? 'week' : 'month';
+
+        return response()->json(['data' => (new PartnerInsights())->customers($venues, $period)]);
+    }
+
+    /**
      * The day's slot rows a booking occupies.
      *
      * Its own slot when it was sold against one; otherwise every slot whose hour its

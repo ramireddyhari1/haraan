@@ -172,7 +172,35 @@ data class HomeInsights(
     val haraan: HaraanBrought,
     val growth: Growth,
     val milestones: Milestones,
+    val customers: CustomerSummary,
 )
+
+/** New vs returning customers for one period, against the one before. */
+data class PeriodCustomers(val label: String, val new: Int, val returning: Int, val lastNew: Int, val lastReturning: Int) {
+    val total: Int get() = new + returning
+}
+
+data class CustomerSummary(val week: PeriodCustomers, val month: PeriodCustomers, val total: Int, val cameBack: Int)
+
+/** One person behind the card: recognised by phone, so walk-in and app visits are one customer. */
+data class InsightCustomer(
+    val name: String,
+    val phone: String?,
+    /** "new" or "returning". */
+    val type: String,
+    val visits: Int,
+    val visitsPeriod: Int,
+    val firstVisit: String,
+    val lastVisit: String,
+    val spent: Double,
+    /** walk_in | app | whatsapp — how they booked last. */
+    val via: String,
+    val recent: List<CustomerVisit>,
+)
+
+data class CustomerVisit(val date: String, val time: String, val amount: Double, val channel: String)
+
+data class CustomerList(val label: String, val customers: List<InsightCustomer>)
 
 /** Bookings that came through Haraan (app, website, WhatsApp) rather than the counter. */
 data class HaraanBrought(
@@ -917,6 +945,37 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         parseInsights(o)
     }
 
+    /** The people behind the new vs returning card, for "week" or "month". */
+    suspend fun insightCustomers(token: String, venueId: Long?, period: String): CustomerList = withContext(Dispatchers.IO) {
+        val query = listOfNotNull("period=$period", venueId?.takeIf { it > 0L }?.let { "venue_id=$it" }).joinToString("&")
+        val o = JSONObject(get("/api/partner/insights/customers?$query", token)).getJSONObject("data")
+        val arr = o.optJSONArray("customers")
+        CustomerList(
+            label = o.optString("label", ""),
+            customers = if (arr == null) emptyList() else (0 until arr.length()).mapNotNull { i ->
+                arr.optJSONObject(i)?.let { r ->
+                    val rec = r.optJSONArray("recent")
+                    InsightCustomer(
+                        name = r.optString("name", "Guest"),
+                        phone = r.optStringOrNull("phone"),
+                        type = r.optString("type", "new"),
+                        visits = r.optInt("visits"),
+                        visitsPeriod = r.optInt("visits_period"),
+                        firstVisit = r.optString("first_visit"),
+                        lastVisit = r.optString("last_visit"),
+                        spent = r.optDouble("spent", 0.0),
+                        via = r.optString("via", "walk_in"),
+                        recent = if (rec == null) emptyList() else (0 until rec.length()).mapNotNull { j ->
+                            rec.optJSONObject(j)?.let { v ->
+                                CustomerVisit(v.optString("date"), v.optString("time"), v.optDouble("amount", 0.0), v.optString("channel"))
+                            }
+                        },
+                    )
+                }
+            },
+        )
+    }
+
     private fun parseInsights(o: JSONObject): HomeInsights {
         fun share(c: JSONObject?) = ChannelShare(
             amount = c?.optDouble("amount", 0.0) ?: 0.0,
@@ -1003,6 +1062,21 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     next = m.optJSONObject("next")?.let { n ->
                         NextMilestone(n.optInt("count"), n.optInt("remaining"), n.optDouble("progress", 0.0).toFloat())
                     },
+                )
+            },
+            customers = (o.optJSONObject("customers") ?: JSONObject()).let { c ->
+                fun period(x: JSONObject?, fallback: String) = PeriodCustomers(
+                    label = x?.optString("label", fallback) ?: fallback,
+                    new = x?.optInt("new") ?: 0,
+                    returning = x?.optInt("returning") ?: 0,
+                    lastNew = x?.optJSONObject("last")?.optInt("new") ?: 0,
+                    lastReturning = x?.optJSONObject("last")?.optInt("returning") ?: 0,
+                )
+                CustomerSummary(
+                    week = period(c.optJSONObject("week"), "This week"),
+                    month = period(c.optJSONObject("month"), "This month"),
+                    total = c.optInt("total"),
+                    cameBack = c.optInt("came_back"),
                 )
             },
             tomorrow = TomorrowOpen(
