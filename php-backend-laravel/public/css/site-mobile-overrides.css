@@ -777,18 +777,7 @@
     .footer-column p { font-size: 13px; }
 
     /* --- DATE PICKER --- */
-    .date-picker-strip {
-        gap: 10px;
-        overflow-x: auto;
-        padding-bottom: 8px;
-        -webkit-overflow-scrolling: touch;
-    }
-    .date-pill {
-        flex-shrink: 0;
-        padding: 10px 12px;
-        border-radius: 20px;
-        font-size: 13px;
-    }
+    .date-picker-strip { -webkit-overflow-scrolling: touch; }
 
     /* --- GALLERY --- */
     .gallery-airbnb-grid {
@@ -2520,10 +2509,17 @@
     }
     .mven__book:disabled { background: #CBD5E1; color: #fff; }
 
-    /* --- The sheet the real booking widget / review form move into -------- */
+    /* --- The sheet the real booking widget / review form move into --------
+       Three rows: grip + title, the scrolling picker, and a docked summary
+       (the moved .sticky-booking-card) so "Confirm & Pay" never scrolls away. */
     .mven__modal { display: block; position: fixed; inset: 0; z-index: 60; }
     .mven__modal[hidden] { display: none; }
-    .mven__modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.5); }
+    .mven__modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.52);
+        animation: mven-fade-in 0.22s ease both;
+    }
     .mven__modal-card {
         position: absolute;
         left: 0;
@@ -2532,43 +2528,337 @@
         display: flex;
         flex-direction: column;
         max-height: 92vh;
+        max-height: 92dvh;
         border-radius: 24px 24px 0 0;
         background: #fff;
+        box-shadow: 0 -12px 40px rgba(15, 23, 42, 0.18);
+        overflow: hidden;
+        animation: mven-sheet-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+    .mven__modal.is-closing .mven__modal-backdrop { animation: mven-fade-out 0.2s ease both; }
+    .mven__modal.is-closing .mven__modal-card { animation: mven-sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; }
+    @keyframes mven-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+    @keyframes mven-sheet-out { from { transform: none; } to { transform: translateY(100%); } }
+    @keyframes mven-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes mven-fade-out { from { opacity: 1; } to { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+        .mven__modal-backdrop, .mven__modal-card { animation: none; }
+    }
+
+    .mven__modal-grip {
+        flex: none;
+        align-self: center;
+        width: 36px;
+        height: 4px;
+        margin-top: 8px;
+        border-radius: 4px;
+        background: #CBD5E1;
     }
     .mven__modal-head {
+        flex: none;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding: 16px 16px 8px;
-        border-bottom: 1px solid #E2E8F0;
+        padding: 8px 12px 10px 20px;
+        border-bottom: 1px solid #EEF2F7;
     }
-    .mven__modal-title { margin: 0; font-size: 18px; font-weight: 800; color: #0F172A; }
+    .mven__modal-title { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: #0F172A; }
     .mven__modal-x {
         display: inline-flex;
-        padding: 6px;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
         border: 0;
         border-radius: 50%;
-        background: none;
-        color: #64748B;
+        background: #F1F5F9;
+        color: #475569;
         cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.12s ease, background 0.15s ease;
     }
+    .mven__modal-x svg { width: 18px; height: 18px; }
+    .mven__modal-x:active { transform: scale(0.9); background: #E2E8F0; }
+
     .mven__modal-body {
-        flex: 1;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
-        padding: 8px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+        overscroll-behavior: contain;
+        padding: 16px 16px 20px;
         -webkit-overflow-scrolling: touch;
     }
+    .mven__modal-foot {
+        flex: none;
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+        border-top: 1px solid #EEF2F7;
+        background: #fff;
+        box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
+    }
+    .mven__modal-foot:empty { display: none; }
+    /* Nothing docked (the review form): the body carries the safe-area gap. */
+    .mven__modal-body:has(+ .mven__modal-foot:empty) {
+        padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
     /* The moved widgets carry desktop panel chrome (card, shadow, wide padding)
-       that would nest a card inside the sheet â€” flatten it. */
+       that would nest a card inside the sheet - flatten it. */
     .mven__modal-body .detail-card-panel,
-    .mven__modal-body .sticky-booking-card {
-        margin: 0 0 12px;
-        padding: 8px 4px;
+    .mven__modal-body .sticky-booking-card,
+    .mven__modal-foot .sticky-booking-card {
+        position: static;
+        margin: 0;
+        padding: 0;
         border: 0;
         border-radius: 0;
         box-shadow: none;
         background: none;
     }
     .mven__modal-body .sticky-sidebar-container { position: static; }
+
+    /* --- Picker: the sheet title already says "Book a slot" ------------- */
+    .mven__modal-body #booking-widget > .detail-card-panel__title { display: none; }
+    .mven__modal-body #booking-widget > .detail-card-panel__subtitle {
+        margin: 0 0 14px;
+        font-size: 13px;
+        color: #64748B;
+    }
+    .mven__modal-body .sidebar-label {
+        margin-bottom: 8px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #64748B;
+    }
+    .mven__modal-body .mb-24,
+    .mven__modal-body .mb-28 { margin-bottom: 18px !important; }
+
+    /* Date strip: bleeds to the sheet edges; the look lives in site-theme-overrides. */
+    .mven__modal-body .dpick { margin-bottom: 20px; }
+    .mven__modal-body .date-picker-strip {
+        margin: 0 -16px;
+        padding: 0 10px;
+        scroll-padding: 0 10px;
+    }
+
+    /* Sport + court pills: one scrolling row, blue when picked. */
+    .mven__modal-body .sports-tab-strip,
+    .mven__modal-body .court-selector-container {
+        flex-wrap: nowrap;
+        gap: 8px;
+        margin: 0 -16px;
+        padding: 0 16px 2px;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .mven__modal-body .sports-tab-strip::-webkit-scrollbar,
+    .mven__modal-body .court-selector-container::-webkit-scrollbar { display: none; }
+    .mven__modal-body .court-pill,
+    .mven__modal-body .sport-tab {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 38px;
+        padding: 0 16px;
+        border: 1px solid #E2E8F0;
+        border-radius: 99px;
+        background: #fff;
+        font-size: 13.5px;
+        font-weight: 700;
+        color: #334155;
+        box-shadow: none;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    .mven__modal-body .sport-tab img { width: 18px; height: 18px; }
+    .mven__modal-body .court-pill:hover,
+    .mven__modal-body .sport-tab:hover { border-color: #E2E8F0; background: #fff; color: #334155; }
+    .mven__modal-body .court-pill.is-active,
+    .mven__modal-body .sport-tab.is-active {
+        border-color: #2563EB;
+        background: #2563EB;
+        color: #fff;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.24);
+    }
+    .mven__modal-body .court-pill:active,
+    .mven__modal-body .sport-tab:active { transform: scale(0.95); }
+
+    /* Slots: three to a row, white until picked, then solid blue + a tick. */
+    .mven__modal-body .slots-group { margin-bottom: 20px; }
+    .mven__modal-body .slots-group:last-child { margin-bottom: 0; }
+    .mven__modal-body .slots-group__title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 10px;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: #64748B;
+    }
+    .mven__modal-body .slots-group__title::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: #EEF2F7;
+    }
+    .mven__modal-body .slots-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .mven__modal-body .slot-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 58px;
+        padding: 8px 4px;
+        border: 1px solid #DCE4EF;
+        border-radius: 12px;
+        background: #fff;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+        transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .mven__modal-body .slot-item__time {
+        font-size: 14px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: #0F172A;
+        white-space: nowrap;
+    }
+    .mven__modal-body .slot-item__price { margin-top: 2px; font-size: 12px; font-weight: 600; color: #2563EB; }
+    .mven__modal-body .slot-item__peak {
+        margin-left: 2px;
+        font-size: 9.5px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #B45309;
+    }
+    .mven__modal-body .slot-item:not(.is-booked):active { transform: scale(0.95); }
+    .mven__modal-body .slot-item.is-selected {
+        border-color: #2563EB !important;
+        background: #2563EB !important;
+        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.30) !important;
+        transform: none;
+    }
+    .mven__modal-body .slot-item.is-selected .slot-item__time,
+    .mven__modal-body .slot-item.is-selected .slot-item__price,
+    .mven__modal-body .slot-item.is-selected .slot-item__peak { color: #fff !important; }
+    .mven__modal-body .slot-item.is-selected::after {
+        content: "";
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563EB' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 9px no-repeat;
+    }
+    .mven__modal-body .slot-item.is-booked {
+        border-style: dashed;
+        border-color: #E2E8F0;
+        background: #F8FAFC;
+    }
+    .mven__modal-body .slot-item.is-booked .slot-item__time { color: #94A3B8; }
+    .mven__modal-body .slot-item.is-booked .slot-item__price { font-size: 11px; color: #94A3B8; }
+
+    /* --- Docked summary: picked slots, the bill, and the pay button ------- */
+    .mven__modal-foot .price-row,
+    .mven__modal-foot .detail-divider,
+    .mven__modal-foot .sticky-booking-card > .mb-16,
+    .mven__modal-foot .sidebar-label,
+    .mven__modal-foot .no-slots-placeholder { display: none; }
+    .mven__modal-foot .sticky-booking-card > .mb-24 { margin: 0 !important; }
+    .mven__modal-foot .selected-slots-preview-list {
+        display: flex;
+        gap: 8px;
+        margin: 0 -16px;
+        padding: 0 16px;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .mven__modal-foot .selected-slots-preview-list::-webkit-scrollbar { display: none; }
+    .mven__modal-foot .selected-slots-preview-list:not(:has(.selected-slot-item-pill)) { display: none; }
+    .mven__modal-foot .selected-slot-item-pill {
+        flex: none;
+        display: flex;
+        align-items: center;
+        margin: 0 0 12px;
+        padding: 8px 40px 8px 12px;
+        border: 1px solid #BFDBFE;
+        border-radius: 12px;
+        background: #EFF6FF;
+    }
+    .mven__modal-foot .selected-slot-item-pill__header { display: none; }
+    .mven__modal-foot .selected-slot-item-pill__details { gap: 12px; padding: 0; }
+    .mven__modal-foot .selected-slot-item-pill__time {
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+        font-weight: 700;
+        color: #0F172A;
+        white-space: nowrap;
+    }
+    .mven__modal-foot .selected-slot-item-pill__day { font-size: 11.5px; font-weight: 600; color: #64748B; }
+    .mven__modal-foot .selected-slot-item-pill__price { font-size: 14px; font-weight: 800; color: #1D4ED8; }
+    .mven__modal-foot .selected-slot-item-pill__remove {
+        top: 50%;
+        right: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        margin-top: -14px;
+        border-radius: 50%;
+        background: #DBEAFE;
+        font-size: 16px;
+        font-weight: 700;
+        color: #1D4ED8;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.12s ease;
+    }
+    .mven__modal-foot .selected-slot-item-pill__remove:active { transform: scale(0.88); }
+
+    .mven__modal-foot .price-calculator-panel {
+        margin: 0 0 12px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+    }
+    .mven__modal-foot .calc-row { margin-bottom: 4px; font-size: 13px; color: #64748B; }
+    /* No fee and no tax: "Subtotal" would only repeat the total - one line is enough. */
+    .mven__modal-foot .price-calculator-panel:not(:has(#calc-fee-row:not([style*="none"]), #calc-tax-row:not([style*="none"]))) > .calc-row:first-child,
+    .mven__modal-foot .price-calculator-panel:not(:has(#calc-fee-row:not([style*="none"]), #calc-tax-row:not([style*="none"]))) > .dashed-divider { display: none; }
+    .mven__modal-foot .dashed-divider { margin: 8px 0; border-top-color: #E2E8F0; }
+    .mven__modal-foot .calc-row--bold { margin: 0; font-size: 16px; color: #0F172A; }
+    .mven__modal-foot .calc-row--bold .total-green { color: #0F172A; }
+
+    .mven__modal-foot .book-now-button-widget {
+        display: block;
+        height: 52px;
+        padding: 0 20px;
+        border-radius: 14px;
+        background: #E2E8F0;
+        font-size: 16px;
+        font-weight: 800;
+        color: #94A3B8;
+        box-shadow: none;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.12s ease, background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+    }
+    .mven__modal-foot .book-now-button-widget.is-ready {
+        background: #2563EB;
+        color: #fff;
+        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.32);
+    }
+    .mven__modal-foot .book-now-button-widget.is-ready:hover { background: #2563EB; transform: none; }
+    .mven__modal-foot .book-now-button-widget.is-ready:active { transform: scale(0.98); background: #1D4ED8; }
+    .mven__modal-foot .booking-notice-text { margin-top: 8px; font-size: 11.5px; color: #94A3B8 !important; }
 }

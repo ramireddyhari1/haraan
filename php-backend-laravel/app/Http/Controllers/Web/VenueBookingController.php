@@ -17,6 +17,7 @@ use App\Support\Operations;
 use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,83 @@ final class VenueBookingController extends Controller
         private readonly VenueSlotAvailability $availability,
         private readonly VenueBookingWindow $window,
     ) {}
+
+    /**
+     * POST /gamehub/{id}/book/quote — price the picked slots for the review page, with an
+     * optional coupon. Read-only: holds nothing and creates no order. Uses the same rates,
+     * fee, coupon rules and tax as reserve(), which re-prices everything on Proceed, so the
+     * review page never shows a number the browser worked out on its own.
+     */
+    public function quote(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $venue = Venue::published()->findOrFail($id);
+
+        $validated = $request->validate([
+            'date'       => ['required', 'date_format:Y-m-d'],
+            'court_id'   => ['nullable', 'integer'],
+            'slots'      => ['required', 'array', 'min:1', 'max:24'],
+            'slots.*'    => ['required', 'string', 'max:40'],
+            'couponCode' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        $date = Carbon::createFromFormat('Y-m-d', $validated['date'])->startOfDay();
+
+        $court = null;
+        if (! empty($validated['court_id'])) {
+            $court = VenueCourt::query()->where('venue_id', $venue->id)->where('is_active', true)->find($validated['court_id']);
+        }
+        $court ??= $venue->courts()->where('is_active', true)->first();
+        if ($court === null) {
+            return response()->json(['error' => 'A valid court must be selected for booking.'], 422);
+        }
+
+        $baseRate = (int) ($court->price ?? $venue->price ?? 0);
+        $lines = [];
+        foreach ($validated['slots'] as $range) {
+            $startStr = trim(explode('-', $range)[0] ?? '');
+            if (BookingService::timeToMinutes($startStr) === null) {
+                return response()->json(['error' => "Invalid slot time: {$range}"], 422);
+            }
+            $rate = (float) $court->rateFor($date, $startStr, $baseRate);
+            if ($rate <= 0) {
+                return response()->json(['error' => "Pricing for '{$range}' is not configured."], 422);
+            }
+            $lines[] = ['time' => trim($range), 'rate' => $rate];
+        }
+
+        $subtotal = round(array_sum(array_column($lines, 'rate')), 2);
+        $fee = $venue->convenienceFeeFor($subtotal);
+
+        $code = trim((string) ($validated['couponCode'] ?? ''));
+        $coupon = ['applied' => false, 'code' => null, 'message' => ''];
+        $discount = 0.0;
+        if ($code !== '') {
+            $applied = $this->bookings->resolveVenueCoupon($user, (int) $venue->id, $code, $subtotal, $fee);
+            $coupon['message'] = $applied['message'];
+            if ($applied['coupon'] !== null) {
+                $discount = round((float) $applied['discount'], 2);
+                $coupon['applied'] = true;
+                $coupon['code'] = $applied['coupon']->code;
+            }
+        }
+
+        $tax = Venue::taxFor($subtotal, $discount);
+
+        return response()->json([
+            'ok'        => true,
+            'court'     => $court->name,
+            'lines'     => $lines,
+            'subtotal'  => $subtotal,
+            'fee'       => $fee,
+            'discount'  => $discount,
+            'tax'       => $tax,
+            'tax_label' => Venue::taxLabel(),
+            'total'     => max(0.0, round($subtotal + $fee - $discount + $tax, 2)),
+            'coupon'    => $coupon,
+            'hold_minutes' => BookingService::holdMinutes(),
+        ]);
+    }
 
     /**
      * POST /gamehub/{id}/book — Reserve court slots and prepare payment.
@@ -69,7 +147,9 @@ final class VenueBookingController extends Controller
             return response()->json(['error' => 'Invalid booking date selected.'], 422);
         }
 
-        if ($bookingDate->lt(today())) {
+        // Dates and "already passed" are judged on the venue's clock (BusinessClock), not
+        // the server's UTC one - which let a 6 AM slot sell at 10 AM IST.
+        if ($bookingDate->lt(BusinessClock::todayDate())) {
             return response()->json(['error' => 'Cannot book slots for past dates.'], 422);
         }
 
@@ -121,8 +201,9 @@ final class VenueBookingController extends Controller
 
         // Parse and validate each slot
         $slotsToReserve = [];
-        $nowMinutes = (int) now()->format('H') * 60 + (int) now()->format('i');
-        $isToday = $bookingDate->isToday();
+        $venueNow = BusinessClock::now();
+        $nowMinutes = (int) $venueNow->format('H') * 60 + (int) $venueNow->format('i');
+        $isToday = $bookingDate->toDateString() === $venueNow->toDateString();
 
         foreach ($validated['slots'] as $slotRaw) {
             $timeRange = is_array($slotRaw) ? (string) ($slotRaw['time'] ?? '') : (string) $slotRaw;

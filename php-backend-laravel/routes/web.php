@@ -206,6 +206,9 @@ Route::middleware('auth')->controller(EventBookingController::class)->group(func
 // Sports venue court booking — web checkout with Razorpay standard integration.
 Route::middleware('auth')->controller(VenueBookingController::class)->group(function (): void {
     Route::post('/gamehub/{id}/book', 'reserve')->whereNumber('id')->name('site.gamehub.book');
+    // Review-page pricing (+ coupon check). Throttled like the event coupon quote: it
+    // answers "is this a real code?", which is what a code-harvesting script wants.
+    Route::post('/gamehub/{id}/book/quote', 'quote')->whereNumber('id')->middleware('throttle:30,1')->name('site.gamehub.quote');
     Route::post('/gamehub/{id}/confirm', 'confirm')->whereNumber('id')->name('site.gamehub.confirm');
     Route::post('/gamehub/{id}/release', 'release')->whereNumber('id')->name('site.gamehub.release');
 });

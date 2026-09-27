@@ -21,6 +21,7 @@ use App\Support\Operations;
 use App\Support\PlatformRules;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -1347,8 +1348,10 @@ final class BookingService
             $endHm = $endMin !== null ? $this->minutesToHm($endMin) : null;
 
             // Reject online reservations for slot times that have already passed today
-            if ($meta['channel'] === 'online' && $date === today()->toDateString() && $startMin !== null) {
-                $nowMin = (int) now()->format('H') * 60 + (int) now()->format('i');
+            // On the venue's clock (BusinessClock): UTC let already-passed IST slots through.
+            if ($meta['channel'] === 'online' && $date === BusinessClock::today() && $startMin !== null) {
+                $venueNow = BusinessClock::now();
+                $nowMin = (int) $venueNow->format('H') * 60 + (int) $venueNow->format('i');
                 if ($startMin <= $nowMin) {
                     throw new ConflictHttpException('That slot time has already passed for today');
                 }
@@ -1923,8 +1926,9 @@ final class BookingService
             $startHm = $startMin !== null ? self::minutesToHm($startMin) : null;
             $endHm = $endMin !== null ? self::minutesToHm($endMin) : null;
 
-            if ($newDateStr === today()->toDateString() && $startMin !== null) {
-                $nowMin = (int) now()->format('H') * 60 + (int) now()->format('i');
+            if ($newDateStr === BusinessClock::today() && $startMin !== null) {
+                $venueNow = BusinessClock::now();
+                $nowMin = (int) $venueNow->format('H') * 60 + (int) $venueNow->format('i');
                 if ($startMin <= $nowMin && $user->role !== 'ADMIN') {
                     throw new ConflictHttpException('That slot time has already passed for today');
                 }

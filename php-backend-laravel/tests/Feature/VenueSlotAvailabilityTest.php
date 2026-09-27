@@ -13,6 +13,7 @@ use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
 use App\Services\BookingService;
+use App\Support\BusinessClock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
@@ -74,7 +75,7 @@ class VenueSlotAvailabilityTest extends TestCase
             'venue_id' => $this->venue->id,
             'venue_court_id' => $this->courtA->id,
             'venue_slot_id' => $this->slot->id,
-            'slot_date' => today()->toDateString(),
+            'slot_date' => BusinessClock::todayDate()->toDateString(),
             'start_time' => '19:00',
             'end_time' => '20:00',
             'channel' => 'offline',
@@ -148,10 +149,10 @@ class VenueSlotAvailabilityTest extends TestCase
 
     public function test_a_booking_on_another_day_does_not_count(): void
     {
-        $this->book(['slot_date' => today()->addDay()->toDateString()]);
+        $this->book(['slot_date' => BusinessClock::todayDate()->addDay()->toDateString()]);
 
         $this->assertSame('open', $this->slotState()['state']);
-        $this->assertSame('booked', $this->slotState(today()->addDay()->toDateString())['state']);
+        $this->assertSame('booked', $this->slotState(BusinessClock::todayDate()->addDay()->toDateString())['state']);
     }
 
     public function test_booking_the_parent_court_takes_its_sub_court(): void
@@ -170,17 +171,17 @@ class VenueSlotAvailabilityTest extends TestCase
     {
         VenueBlock::create([
             'venue_id' => $this->venue->id, 'venue_court_id' => $this->courtA->id, 'kind' => 'maintenance',
-            'starts_on' => today()->toDateString(), 'ends_on' => today()->toDateString(),
+            'starts_on' => BusinessClock::todayDate()->toDateString(), 'ends_on' => BusinessClock::todayDate()->toDateString(),
             'start_time' => '18:00', 'end_time' => '21:00', 'created_by' => $this->owner->id,
         ]);
         $this->assertSame('closed', $this->slotState()['state']);
 
-        $tomorrow = today()->addDay()->toDateString();
+        $tomorrow = BusinessClock::todayDate()->addDay()->toDateString();
         VenueBlockedDate::create(['venue_id' => $this->venue->id, 'date' => $tomorrow, 'reason' => 'Holiday']);
         $this->assertSame('closed', $this->slotState($tomorrow)['state']);
 
         $this->slot->update(['is_available' => false]);
-        $this->assertSame('closed', $this->slotState(today()->addDays(2)->toDateString())['state']);
+        $this->assertSame('closed', $this->slotState(BusinessClock::todayDate()->addDays(2)->toDateString())['state']);
     }
 
     public function test_a_venue_without_courts_is_not_live_to_customers(): void
@@ -194,7 +195,7 @@ class VenueSlotAvailabilityTest extends TestCase
 
     public function test_open_means_checkout_accepts_and_booked_means_it_refuses(): void
     {
-        $date = today()->addDay()->toDateString();
+        $date = BusinessClock::todayDate()->addDay()->toDateString();
         $service = app(BookingService::class);
 
         $this->assertSame('open', $this->slotState($date)['state']);
@@ -226,7 +227,7 @@ class VenueSlotAvailabilityTest extends TestCase
         $base = '/api/venues/' . $this->venue->id . '/availability';
 
         $this->getJson($base . '?date=tomorrow')->assertStatus(422);
-        $this->getJson($base . '?date=' . today()->addDays(90)->toDateString())->assertStatus(422);
+        $this->getJson($base . '?date=' . BusinessClock::todayDate()->addDays(90)->toDateString())->assertStatus(422);
         $this->getJson('/api/venues/999999/availability')->assertNotFound();
     }
 }

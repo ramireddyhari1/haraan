@@ -191,6 +191,95 @@ class WebVenueCheckoutTest extends TestCase
         $this->assertSame(0, Booking::query()->count());
     }
 
+    /** @param  list<string>  $times */
+    private function quote(array $times, array $extra = []): \Illuminate\Testing\TestResponse
+    {
+        return $this->actingAs($this->buyer)->postJson('/gamehub/' . $this->venue->id . '/book/quote', array_merge([
+            'date' => today()->addDay()->toDateString(),
+            'court_id' => $this->court->id,
+            'slots' => $times,
+        ], $extra));
+    }
+
+    public function test_the_review_quote_matches_what_checkout_charges_and_holds_nothing(): void
+    {
+        $this->venue->update(['convenience_fee_type' => 'percent', 'convenience_fee_value' => 10]);
+
+        $this->quote(['6:00 AM - 7:00 AM', '7:00 AM - 8:00 AM'])
+            ->assertOk()
+            ->assertJsonPath('subtotal', 2000)
+            ->assertJsonPath('fee', 200)
+            ->assertJsonPath('discount', 0)
+            ->assertJsonPath('total', 2200)
+            ->assertJsonPath('lines.0.rate', 1000)
+            ->assertJsonPath('coupon.applied', false);
+
+        // A quote is not a reservation: no rows, no Razorpay order.
+        $this->assertSame(0, Booking::query()->count());
+        $this->assertSame([], $this->ordered);
+
+        // And Proceed charges exactly the quoted total.
+        $this->reserve(['6:00 AM - 7:00 AM', '7:00 AM - 8:00 AM'])->assertOk();
+        $this->assertSame([220000], $this->ordered);
+    }
+
+    public function test_the_review_quote_applies_a_venue_coupon_and_names_a_bad_one(): void
+    {
+        \App\Models\Coupon::create([
+            'scope' => 'venue', 'venue_id' => $this->venue->id, 'code' => 'COURT20',
+            'type' => 'percent', 'discount' => 20, 'active' => true,
+        ]);
+
+        $this->quote(['6:00 AM - 7:00 AM'], ['couponCode' => 'court20'])
+            ->assertOk()
+            ->assertJsonPath('coupon.applied', true)
+            ->assertJsonPath('coupon.code', 'COURT20')
+            ->assertJsonPath('discount', 200)
+            ->assertJsonPath('total', 800);
+
+        $this->quote(['6:00 AM - 7:00 AM'], ['couponCode' => 'NOPE'])
+            ->assertOk()
+            ->assertJsonPath('coupon.applied', false)
+            ->assertJsonPath('total', 1000)
+            ->assertJsonPath('coupon.message', 'This code isn’t valid.');
+    }
+
+    public function test_the_review_quote_needs_a_signed_in_buyer(): void
+    {
+        $this->postJson('/gamehub/' . $this->venue->id . '/book/quote', [
+            'date' => today()->addDay()->toDateString(), 'slots' => ['6:00 AM - 7:00 AM'],
+        ])->assertStatus(401);
+    }
+
+    public function test_passed_slots_and_dates_are_judged_on_the_venues_clock_not_utc(): void
+    {
+        // 10:00 AM IST is 04:30 UTC: on the server's clock the 6 AM slot was still ahead.
+        \Illuminate\Support\Carbon::setTestNow('2026-09-28 04:30:00');
+        $this->reserve(['6:00 AM - 7:00 AM'], ['date' => '2026-09-28'])->assertStatus(422);
+
+        // 01:30 AM IST on the 28th is still the 27th in UTC - the 27th is gone at the venue.
+        \Illuminate\Support\Carbon::setTestNow('2026-09-27 20:00:00');
+        $this->reserve(['8:00 AM - 9:00 AM'], ['date' => '2026-09-27'])->assertStatus(422);
+
+        $this->assertSame([], $this->ordered);
+        $this->assertSame(0, Booking::query()->count());
+
+        // And the venue's own morning is still sellable at 01:30 AM IST.
+        $this->reserve(['6:00 AM - 7:00 AM'], ['date' => '2026-09-28'])->assertOk();
+        \Illuminate\Support\Carbon::setTestNow();
+    }
+
+    public function test_the_venue_page_opens_on_the_venues_today(): void
+    {
+        // 01:30 AM IST: the strip must start on the 28th, not UTC's 27th.
+        \Illuminate\Support\Carbon::setTestNow('2026-09-27 20:00:00');
+        $this->get('/gamehub/' . $this->venue->id)
+            ->assertOk()
+            ->assertSee('Monday, 28 Sep')
+            ->assertSee("let selectedDate = '2026-09-28'", false);
+        \Illuminate\Support\Carbon::setTestNow();
+    }
+
     public function test_a_time_the_venue_never_set_up_is_refused(): void
     {
         // The website used to draw its own 6 AM–11 PM grid, and checkout sold whatever it sent.

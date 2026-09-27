@@ -292,6 +292,7 @@
 <div class="mven__modal" data-mven-modal hidden>
     <div class="mven__modal-backdrop" data-mven-close></div>
     <div class="mven__modal-card" role="dialog" aria-modal="true" aria-labelledby="mvenModalTitle">
+        <span class="mven__modal-grip" aria-hidden="true"></span>
         <div class="mven__modal-head">
             <h2 id="mvenModalTitle" class="mven__modal-title">Book a slot</h2>
             <button type="button" class="mven__modal-x" data-mven-close aria-label="Close">
@@ -299,6 +300,132 @@
             </button>
         </div>
         <div class="mven__modal-body" data-mven-modal-body></div>
+        {{-- The booking summary docks here, outside the scroll, so the pay button
+             stays under the thumb while the player scrolls the slot grid. --}}
+        <div class="mven__modal-foot" data-mven-modal-foot></div>
+    </div>
+</div>
+
+{{-- ================================================================= --}}
+{{-- Review booking — between the slot picker and Razorpay, phone + PC. --}}
+{{-- Every number on it comes from POST /gamehub/{id}/book/quote (the  --}}
+{{-- same pricing reserve() charges). Policies are only the venue's    --}}
+{{-- own: its cancellation window and its rules — nothing invented.    --}}
+{{-- ================================================================= --}}
+@php
+    $vcoRules = array_values(array_filter($venue->rules ?? []));
+@endphp
+<div class="vco" id="vco" hidden>
+    <div class="vco__backdrop" data-vco-close></div>
+    <div class="vco__panel" role="dialog" aria-modal="true" aria-labelledby="vcoTitle">
+        <header class="vco__bar">
+            <button type="button" class="vco__back" data-vco-close aria-label="Back to slots">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+            </button>
+            <h2 id="vcoTitle" class="vco__title">Review booking</h2>
+        </header>
+
+        <div class="vco__scroll">
+            <div class="vco__grid">
+                {{-- What you're booking --}}
+                <section class="vco__card vco__summary" aria-label="Booking summary">
+                    <div class="vco__summary-head">
+                        <div class="vco__venue">
+                            <strong>{{ $venue->title }}</strong>
+                            @if($venue->location)<small>{{ $venue->location }}</small>@endif
+                        </div>
+                        <span class="vco__sport" id="vco-sport"></span>
+                    </div>
+                    <div class="vco__meta">
+                        <span class="vco__meta-row">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><line x1="12" y1="5" x2="12" y2="19"></line><circle cx="12" cy="12" r="2.5"></circle></svg>
+                            <span id="vco-court"></span>
+                        </span>
+                        <span class="vco__meta-row">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"></rect><path d="M3 9.5h18M8 2.5v4M16 2.5v4"></path></svg>
+                            <span id="vco-date"></span>
+                        </span>
+                    </div>
+                    <ul class="vco__slots" id="vco-slots"></ul>
+                </section>
+
+                {{-- Price details --}}
+                <section class="vco__card vco__price" id="vco-price" aria-label="Price details">
+                    <h3 class="vco__h3">Price details</h3>
+                    <p class="vco__error" id="vco-price-error" hidden></p>
+
+                    <div class="vco__row">
+                        <span id="vco-court-price-label">Court price</span>
+                        <span id="vco-court-price">—</span>
+                    </div>
+
+                    <button type="button" class="vco__coupon-open" id="vco-coupon-open" aria-expanded="false" aria-controls="vco-coupon-form">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>
+                        <span>Apply coupon</span>
+                        <svg class="vco__chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
+                    <form class="vco__coupon-form" id="vco-coupon-form" hidden autocomplete="off">
+                        <input type="text" id="vco-coupon-input" class="vco__coupon-input" placeholder="Enter coupon code" maxlength="40" autocapitalize="characters" spellcheck="false" aria-label="Coupon code">
+                        <button type="submit" class="vco__coupon-apply">Apply</button>
+                    </form>
+                    <div class="vco__coupon-applied" id="vco-coupon-applied" hidden>
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span><b id="vco-coupon-applied-code"></b> applied<small id="vco-coupon-applied-save"></small></span>
+                        <button type="button" id="vco-coupon-remove" class="vco__link">Remove</button>
+                    </div>
+                    <p class="vco__coupon-msg" id="vco-coupon-msg" role="status" hidden></p>
+
+                    <div class="vco__row" id="vco-fees-row" hidden>
+                        <span>
+                            Convenience fee &amp; taxes
+                            <button type="button" class="vco__link vco__link--block" id="vco-breakup-toggle" aria-expanded="false" aria-controls="vco-breakup">See breakup</button>
+                        </span>
+                        <span id="vco-fees"></span>
+                    </div>
+                    <div class="vco__breakup" id="vco-breakup" hidden>
+                        <div class="vco__row vco__row--sub" id="vco-fee-row"><span>Convenience fee</span><span id="vco-fee"></span></div>
+                        <div class="vco__row vco__row--sub" id="vco-tax-row"><span id="vco-tax-label">Tax</span><span id="vco-tax"></span></div>
+                    </div>
+
+                    <div class="vco__row vco__row--save" id="vco-discount-row" hidden>
+                        <span>Coupon <b id="vco-discount-code"></b></span>
+                        <span id="vco-discount"></span>
+                    </div>
+
+                    <div class="vco__rule"></div>
+                    <div class="vco__row vco__row--total"><span>Total amount</span><span id="vco-total">—</span></div>
+                    <div class="vco__row vco__row--pay"><span>Payable now</span><span id="vco-paynow">—</span></div>
+
+                    <div class="vco__pay">
+                        <span class="vco__pay-total" id="vco-foot-total" aria-hidden="true"></span>
+                        <button type="button" class="vco__proceed" id="vco-proceed" disabled>Updating price…</button>
+                    </div>
+                    <p class="vco__secure">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+                        Secure payment via Razorpay
+                        <span class="vco__hold" id="vco-hold"></span>
+                    </p>
+                </section>
+
+                {{-- The venue's own policies --}}
+                @if($venue->cancellation || count($vcoRules))
+                    <section class="vco__card vco__policies" aria-label="Policies">
+                        @if($venue->cancellation)
+                            <h4 class="vco__h4">Cancellation policy</h4>
+                            <p class="vco__policy">{{ $venue->cancellation }}</p>
+                        @endif
+                        @if(count($vcoRules))
+                            <h4 class="vco__h4">Venue rules</h4>
+                            <ul class="vco__rules">
+                                @foreach($vcoRules as $rule)
+                                    <li>{{ $rule }}</li>
+                                @endforeach
+                            </ul>
+                        @endif
+                    </section>
+                @endif
+            </div>
+        </div>
     </div>
 </div>
 
@@ -373,13 +500,15 @@
             <!-- Court Booking Scheduler (Core Widget) -->
             <div id="booking-widget" class="detail-card-panel">
                 <h3 class="detail-card-panel__title detail-card-panel__title--compact">Select Booking Slot</h3>
-                <p class="detail-card-panel__subtitle">Click on one or more available green slots below to queue your booking.</p>
+                <p class="detail-card-panel__subtitle">Tap one or more open slots to add them to your booking.</p>
 
                 <!-- Date Picker Strip -->
                 @php
                     $datePills = [];
                     for ($i = 0; $i < 7; $i++) {
-                        $dt = now()->addDays($i);
+                        // The venue's calendar day, not the server's UTC one: before 5:30 AM IST
+                        // UTC is still on yesterday, and "Today" pointed at the wrong date.
+                        $dt = \App\Support\BusinessClock::todayDate()->addDays($i);
                         $datePills[] = [
                             'ymd' => $dt->toDateString(),
                             'dayName' => $i === 0 ? 'Today' : ($i === 1 ? 'Tomorrow' : $dt->format('D')),
@@ -388,13 +517,26 @@
                         ];
                     }
                 @endphp
-                <div class="date-picker-strip">
-                    @foreach($datePills as $index => $dp)
-                        <button type="button" onclick="selectDate(this, '{{ $dp['ymd'] }}', '{{ $dp['display'] }}')" class="date-pill {{ $index === 0 ? 'is-active' : '' }}">
-                            <span class="date-pill__day">{{ $dp['dayName'] }}</span>
-                            <span class="date-pill__date">{{ $dp['dateStr'] }}</span>
+                {{-- Two weeks of days to tap, plus a calendar for any other date. The
+                     server-rendered pills are the no-JS fallback; renderDateStrip() redraws
+                     the strip and greys out days past the venue's booking window. --}}
+                <div class="dpick">
+                    <div class="dpick__head">
+                        <span class="dpick__label" id="dpick-label">{{ \App\Support\BusinessClock::todayDate()->format('l, j M') }}</span>
+                        <button type="button" class="dpick__cal-btn" id="dpick-cal-btn" aria-expanded="false" aria-controls="dpick-cal">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"></rect><path d="M3 9.5h18M8 2.5v4M16 2.5v4"></path></svg>
+                            Pick a date
                         </button>
-                    @endforeach
+                    </div>
+                    <div class="date-picker-strip" id="date-strip">
+                        @foreach($datePills as $index => $dp)
+                            <button type="button" data-ymd="{{ $dp['ymd'] }}" class="date-pill {{ $index === 0 ? 'is-active' : '' }}">
+                                <span class="date-pill__day">{{ $index === 0 ? 'Today' : \Illuminate\Support\Carbon::parse($dp['ymd'])->format('D') }}</span>
+                                <span class="date-pill__date">{{ \Illuminate\Support\Carbon::parse($dp['ymd'])->format('j') }}</span>
+                            </button>
+                        @endforeach
+                    </div>
+                    <div class="dpick__cal" id="dpick-cal" hidden></div>
                 </div>
 
                 <!-- Sport Selector Tabs (if multiple sports exist) -->
@@ -1491,20 +1633,172 @@
         }
     }
 
-    function selectDate(element, ymd, display) {
-        document.querySelectorAll('.date-pill').forEach(btn => btn.classList.remove('is-active'));
-        element.classList.add('is-active');
+    /* ---- Dates: a two-week strip plus a calendar for any other day ------ */
+    const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const STRIP_DAYS = 14;
+    // Before the first availability answer says otherwise, offer this far ahead; the
+    // server refuses anything past the venue's real window with its own message.
+    const FALLBACK_WINDOW_DAYS = 60;
 
+    // Local-part parsing throughout, so a date never slides a day through UTC.
+    const parseYmd = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
+    const toYmd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+
+    // The last day this viewer may book (from /availability's booking_window).
+    let lastBookableYmd = toYmd(addDays(parseYmd(todayYmd), FALLBACK_WINDOW_DAYS));
+    let calMonth = null; // first of the month the calendar shows
+
+    function dayDisplay(ymd) {
+        const d = parseYmd(ymd);
+        const diff = Math.round((d - parseYmd(todayYmd)) / 86400000);
+        if (diff === 0) return 'Today';
+        if (diff === 1) return 'Tomorrow';
+        return WEEKDAYS[d.getDay()] + ', ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
+    }
+
+    // Slot rows repeat by weekday (VenueSlot::forDate), so a date past the pre-built
+    // week borrows the rows of the same weekday inside it.
+    function daySlots(ymd) {
+        if (slotsByDate[ymd]) return slotsByDate[ymd];
+        const wd = parseYmd(ymd).getDay();
+        const twin = Object.keys(slotsByDate).find(k => parseYmd(k).getDay() === wd);
+        return twin ? slotsByDate[twin] : [];
+    }
+
+    function renderDateStrip() {
+        const strip = document.getElementById('date-strip');
+        if (!strip) return;
+        const today = parseYmd(todayYmd);
+        const days = [];
+        for (let i = 0; i < STRIP_DAYS; i++) days.push(toYmd(addDays(today, i)));
+        // A calendar pick past the strip joins it at the end, so the choice stays visible.
+        const custom = !days.includes(selectedDate);
+        if (custom) days.push(selectedDate);
+
+        strip.innerHTML = days.map((ymd, i) => {
+            const d = parseYmd(ymd);
+            const locked = ymd > lastBookableYmd;
+            const monthStart = d.getDate() === 1 || (custom && i === days.length - 1);
+            const cls = ['date-pill',
+                ymd === selectedDate ? 'is-active' : '',
+                ymd === todayYmd ? 'is-today' : '',
+                monthStart && ymd !== todayYmd ? 'is-month-start' : '',
+                custom && i === days.length - 1 ? 'is-custom' : '',
+                locked ? 'is-locked' : ''].join(' ');
+            const top = ymd === todayYmd ? 'Today' : (monthStart ? MONTHS[d.getMonth()] : WEEKDAYS[d.getDay()]);
+            return `<button type="button" class="${cls}" data-ymd="${ymd}" ${locked ? 'disabled' : ''}
+                        aria-pressed="${ymd === selectedDate}" aria-label="${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}">
+                        <span class="date-pill__day">${top}</span>
+                        <span class="date-pill__date">${d.getDate()}</span>
+                    </button>`;
+        }).join('');
+
+        const label = document.getElementById('dpick-label');
+        if (label) {
+            const d = parseYmd(selectedDate);
+            label.textContent = WEEKDAYS_LONG[d.getDay()] + ', ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
+        }
+        centerActiveDate();
+    }
+
+    // Scroll only the strip. scrollIntoView() also scrolls every ancestor - inside the
+    // mobile sheet that shoved the whole (overflow: hidden) card sideways.
+    function centerActiveDate() {
+        const strip = document.getElementById('date-strip');
+        const pill = strip && strip.querySelector('.is-active');
+        if (!pill) return;
+        strip.scrollLeft = pill.offsetLeft - (strip.clientWidth - pill.offsetWidth) / 2; // strip is the offsetParent
+    }
+
+    function renderCalendar() {
+        const cal = document.getElementById('dpick-cal');
+        if (!cal || cal.hidden) return;
+        const today = parseYmd(todayYmd);
+        const last = parseYmd(lastBookableYmd);
+        const y = calMonth.getFullYear(), m = calMonth.getMonth();
+        const canPrev = y > today.getFullYear() || (y === today.getFullYear() && m > today.getMonth());
+        const canNext = y < last.getFullYear() || (y === last.getFullYear() && m < last.getMonth());
+        const lead = new Date(y, m, 1).getDay();
+        const count = new Date(y, m + 1, 0).getDate();
+
+        let cells = '';
+        for (let i = 0; i < lead; i++) cells += '<span class="dpick__cell is-blank"></span>';
+        for (let n = 1; n <= count; n++) {
+            const ymd = toYmd(new Date(y, m, n));
+            const off = ymd < todayYmd || ymd > lastBookableYmd;
+            const cls = ['dpick__cell',
+                ymd === selectedDate ? 'is-active' : '',
+                ymd === todayYmd ? 'is-today' : ''].join(' ');
+            cells += `<button type="button" class="${cls}" data-ymd="${ymd}" ${off ? 'disabled' : ''}>${n}</button>`;
+        }
+
+        const chev = (d) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${d}"></polyline></svg>`;
+        cal.innerHTML = `
+            <div class="dpick__cal-head">
+                <button type="button" class="dpick__nav" data-cal-step="-1" ${canPrev ? '' : 'disabled'} aria-label="Previous month">${chev('15 18 9 12 15 6')}</button>
+                <strong>${MONTHS_LONG[m]} ${y}</strong>
+                <button type="button" class="dpick__nav" data-cal-step="1" ${canNext ? '' : 'disabled'} aria-label="Next month">${chev('9 18 15 12 9 6')}</button>
+            </div>
+            <div class="dpick__grid">
+                ${WEEKDAYS.map(w => `<span class="dpick__wd">${w.charAt(0)}</span>`).join('')}
+                ${cells}
+            </div>
+            <p class="dpick__note">Bookable up to ${dayDisplay(lastBookableYmd)}</p>`;
+    }
+
+    function toggleCalendar(open) {
+        const cal = document.getElementById('dpick-cal');
+        const btn = document.getElementById('dpick-cal-btn');
+        if (!cal || !btn) return;
+        const show = open ?? cal.hidden;
+        cal.hidden = !show;
+        btn.setAttribute('aria-expanded', String(show));
+        if (show) {
+            const d = parseYmd(selectedDate);
+            calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+            renderCalendar();
+        }
+    }
+
+    // Learn the viewer's real window from an availability answer.
+    function applyBookingWindow(win) {
+        if (!win || !/^\d{4}-\d{2}-\d{2}$/.test(win.last_date || '') || win.last_date === lastBookableYmd) return;
+        lastBookableYmd = win.last_date;
+        renderDateStrip();
+        renderCalendar();
+    }
+
+    function selectDate(ymd) {
+        if (!ymd || ymd === selectedDate) return;
         selectedDate = ymd;
-        selectedDateDisplay = display || ymd;
+        selectedDateDisplay = dayDisplay(ymd);
         const dtEl = document.getElementById('selected-date-text');
         if (dtEl) dtEl.innerText = selectedDateDisplay;
-        
+        renderDateStrip();
+
         // A new day is a new set of slots and bookings.
         selectedSlots = [];
         updatePriceBreakdown();
         loadAvailability();
     }
+
+    document.addEventListener('click', (e) => {
+        const pill = e.target.closest('#date-strip .date-pill');
+        if (pill && !pill.disabled) { selectDate(pill.dataset.ymd); return; }
+        if (e.target.closest('#dpick-cal-btn')) { toggleCalendar(); return; }
+        const step = e.target.closest('#dpick-cal [data-cal-step]');
+        if (step && !step.disabled) {
+            calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + Number(step.dataset.calStep), 1);
+            renderCalendar();
+            return;
+        }
+        const cell = e.target.closest('#dpick-cal .dpick__cell[data-ymd]');
+        if (cell && !cell.disabled) { toggleCalendar(false); selectDate(cell.dataset.ymd); }
+    });
 
     function selectSport(sport) {
         selectedSport = sport;
@@ -1573,6 +1867,7 @@
             if (seq !== availabilitySeq) return; // a newer date/court pick owns the grid
 
             dayRefusal = '';
+            applyBookingWindow(body.booking_window || (body.data && body.data.booking_window));
             if (res.status === 422) {
                 dayRefusal = body.message || 'This day is not open for booking yet.';
                 liveStates = {};
@@ -1594,7 +1889,7 @@
     }
 
     function slotState(slotId) {
-        const slot = (slotsByDate[selectedDate] || []).find(s => s.id === slotId);
+        const slot = daySlots(selectedDate).find(s => s.id === slotId);
         if (!slot || dayRefusal || !slot.open) return 'closed';
         if (liveStates && liveStates[slot.id]) return liveStates[slot.id];
         return 'open';
@@ -1605,7 +1900,7 @@
     function visibleSlots() {
         const now = new Date();
         const nowMin = now.getHours() * 60 + now.getMinutes();
-        return (slotsByDate[selectedDate] || []).filter(s =>
+        return daySlots(selectedDate).filter(s =>
             (!s.sports.length || s.sports.includes(selectedSport)) &&
             (selectedDate !== todayYmd || s.start > nowMin)
         );
@@ -1662,7 +1957,7 @@
                 const onclickAttr = isTaken ? '' : `onclick="toggleSlot(this, ${slot.id}, ${r})"`;
                 const priceHtml = state === 'booked' ? 'Booked'
                     : state === 'closed' ? 'Unavailable'
-                    : '₹' + r.toLocaleString() + (isPeak ? ' <span style="color:#16a34a;font-weight:600">peak</span>' : '');
+                    : '₹' + r.toLocaleString() + (isPeak ? ' <span class="slot-item__peak">peak</span>' : '');
 
                 groupHtml += `
                     <div ${onclickAttr} class="slot-item ${slotClass}" data-key="${slotKey}">
@@ -1686,7 +1981,7 @@
     }
 
     function toggleSlot(element, slotId, rate) {
-        const slot = (slotsByDate[selectedDate] || []).find(s => s.id === slotId);
+        const slot = daySlots(selectedDate).find(s => s.id === slotId);
         if (!slot) return;
         const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
         if (element.classList.contains('is-selected')) {
@@ -1713,6 +2008,17 @@
         renderSlots();
     }
 
+    // "2026-09-27" -> "Sun, 27 Sep" for the picked-slot pills, matching the date
+    // strip. Built by hand: Intl now spells September "Sept" in en-GB/en-IN.
+    // Parsed as local parts so the day never slides through a UTC conversion.
+    function pillDay(ymd) {
+        const [y, m, d] = String(ymd).split('-').map(Number);
+        if (!y || !m || !d) return ymd;
+        const dt = new Date(y, m - 1, d);
+        return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()] + ', ' + d + ' '
+            + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
+    }
+
     function updatePriceBreakdown() {
         const slotsCount = selectedSlots.length;
         document.getElementById('slots-count').innerText = slotsCount;
@@ -1734,7 +2040,7 @@
                         ${s.sport}${s.court ? ' • ' + s.court : ''}
                     </div>
                     <div class="selected-slot-item-pill__details">
-                        <span class="selected-slot-item-pill__time">${s.time} (${s.date})</span>
+                        <span class="selected-slot-item-pill__time">${s.time} <span class="selected-slot-item-pill__day">${pillDay(s.date)}</span></span>
                         <span class="selected-slot-item-pill__price">₹${s.price.toLocaleString()}</span>
                     </div>
                     <button onclick="removeSelectedSlot('${s.key}')" class="selected-slot-item-pill__remove">×</button>
@@ -1760,7 +2066,7 @@
             if (!isAuthenticated) {
                 bookBtn.innerText = 'Sign in to Book (' + slotsCount + ' slot' + (slotsCount > 1 ? 's' : '') + ')';
             } else {
-                bookBtn.innerText = 'Confirm & Pay ₹' + total.toLocaleString('en-IN');
+                bookBtn.innerText = 'Continue · ₹' + total.toLocaleString('en-IN');
             }
         }
     }
@@ -1854,7 +2160,12 @@
             return;
         }
 
-        const bookBtn = document.getElementById('book-now-button');
+        openReview();
+    }
+
+    // Proceed on the review page: hold the slots, then Razorpay. The server re-prices
+    // everything (rates, fee, coupon, tax) - the review's quote is only what it showed.
+    async function startPayment(couponCode, bookBtn) {
         const originalText = bookBtn.innerText;
         bookBtn.disabled = true;
         bookBtn.innerText = 'Securing slots...';
@@ -1874,6 +2185,7 @@
                     court: selectedCourt,
                     court_id: courtIds[selectedCourt] ?? null,
                     slots: selectedSlots.map(s => ({ time: s.time, price: s.price })),
+                    couponCode: couponCode || null,
                 })
             });
 
@@ -1883,12 +2195,15 @@
                 alert(data.error || 'Could not reserve slots. Please try another slot.');
                 bookBtn.disabled = false;
                 bookBtn.innerText = originalText;
+                // Most refusals mean a slot went meanwhile: back to the grid to re-pick.
+                closeReview();
                 loadAvailability();
                 return;
             }
 
             // If 0-amount or free
             if (!data.requires_payment) {
+                closeReview();
                 showSuccessModal(data.reference, data.date, data.slots, data.total, data.breakdown);
                 bookBtn.disabled = false;
                 bookBtn.innerText = originalText;
@@ -1928,6 +2243,7 @@
                         const verifyData = await verifyRes.json();
 
                         if (verifyRes.ok && verifyData.ok) {
+                            closeReview();
                             showSuccessModal(
                                 verifyData.reference || data.bookingRef,
                                 data.date,
@@ -1983,6 +2299,202 @@
             bookBtn.innerText = originalText;
         }
     }
+
+    /* ---- Review page: what you're booking, priced by the server, then Proceed ---- */
+    let reviewCoupon = '';   // the code the last quote accepted
+    let reviewSeq = 0;
+    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function openReview() {
+        const el = document.getElementById('vco');
+        if (!el || !selectedSlots.length) return;
+        reviewCoupon = '';
+        const form = document.getElementById('vco-coupon-form');
+        if (form) form.hidden = true;
+        const input = document.getElementById('vco-coupon-input');
+        if (input) input.value = '';
+        setCouponMsg('');
+        document.getElementById('vco-breakup').hidden = true;
+        document.getElementById('vco-breakup-toggle').setAttribute('aria-expanded', 'false');
+        renderReviewSummary();
+        el.hidden = false;
+        el.classList.remove('is-closing');
+        el.querySelector('.vco__scroll').scrollTop = 0;
+        document.body.classList.add('vco-locked');
+        window.HaraanOverlay?.push('vco', closeReview);
+        requote('');
+    }
+
+    function closeReview() {
+        const el = document.getElementById('vco');
+        if (!el || el.hidden || el.classList.contains('is-closing')) return;
+        window.HaraanOverlay?.pop('vco');
+        const done = () => {
+            el.hidden = true;
+            el.classList.remove('is-closing');
+            document.body.classList.remove('vco-locked');
+        };
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { done(); return; }
+        el.classList.add('is-closing');
+        setTimeout(done, 200);
+    }
+
+    function renderReviewSummary() {
+        const n = selectedSlots.length;
+        document.getElementById('vco-sport').textContent = `${selectedSport} (${n})`;
+        document.getElementById('vco-court').textContent = selectedCourt || 'Any court';
+        const d = parseYmd(selectedDate);
+        document.getElementById('vco-date').textContent =
+            `${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}, ${WEEKDAYS_LONG[d.getDay()]}`;
+        document.getElementById('vco-slots').innerHTML = selectedSlots.map(s => `
+            <li class="vco__slot">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>
+                <span class="vco__slot-time">${esc(s.time.replace(' - ', ' – '))}</span>
+                <span class="vco__slot-price" data-slot-price="${esc(s.time)}">${inr(s.price)}</span>
+                <button type="button" class="vco__slot-x" data-vco-remove="${esc(s.key)}" aria-label="Remove ${esc(s.time)}">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="17" y1="7" x2="7" y2="17"></line><line x1="7" y1="7" x2="17" y2="17"></line></svg>
+                </button>
+            </li>`).join('');
+    }
+
+    function setCouponMsg(text, ok = false) {
+        const m = document.getElementById('vco-coupon-msg');
+        if (!m) return;
+        m.textContent = text;
+        m.hidden = !text;
+        m.classList.toggle('is-ok', ok);
+    }
+
+    function setProceed(label, enabled) {
+        const btn = document.getElementById('vco-proceed');
+        btn.disabled = !enabled;
+        btn.textContent = label;
+        document.getElementById('vco-foot-total').textContent = label.includes('₹') ? label.slice(label.indexOf('₹')) : '';
+    }
+
+    // Ask the server what this selection costs (with [code] when given).
+    async function requote(code) {
+        const seq = ++reviewSeq;
+        const priceCard = document.getElementById('vco-price');
+        priceCard.classList.add('is-loading');
+        setProceed('Updating price…', false);
+        try {
+            const res = await fetch('/gamehub/' + venueId + '/book/quote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                body: JSON.stringify({
+                    date: selectedDate,
+                    court_id: courtIds[selectedCourt] ?? null,
+                    slots: selectedSlots.map(s => s.time),
+                    couponCode: code || null,
+                }),
+            });
+            const q = await res.json().catch(() => ({}));
+            if (seq !== reviewSeq) return;
+            if (!res.ok || !q.ok) {
+                const msg = q.error || (res.status === 429 ? 'Too many tries. Wait a minute and try again.' : 'Could not price this booking. Please try again.');
+                if (code) { setCouponMsg(msg); return requote(''); }
+                document.getElementById('vco-price-error').textContent = msg;
+                document.getElementById('vco-price-error').hidden = false;
+                setProceed('Unavailable', false);
+                return;
+            }
+            document.getElementById('vco-price-error').hidden = true;
+            reviewCoupon = q.coupon && q.coupon.applied ? q.coupon.code : '';
+            if (code && !reviewCoupon) setCouponMsg(q.coupon.message || 'This code isn’t valid.');
+            else if (code) setCouponMsg('');
+            renderPrice(q);
+        } catch (e) {
+            if (seq !== reviewSeq) return;
+            document.getElementById('vco-price-error').textContent = 'You seem to be offline. Check your connection and try again.';
+            document.getElementById('vco-price-error').hidden = false;
+            setProceed('Unavailable', false);
+        } finally {
+            if (seq === reviewSeq) priceCard.classList.remove('is-loading');
+        }
+    }
+
+    function renderPrice(q) {
+        // Per-slot prices as the server rates them (peak hours included).
+        (q.lines || []).forEach(l => {
+            const cell = document.querySelector(`#vco-slots [data-slot-price="${CSS.escape(l.time)}"]`);
+            if (cell) cell.textContent = inr(l.rate);
+        });
+        const n = (q.lines || []).length;
+        document.getElementById('vco-court-price-label').textContent = `Court price (${n} slot${n === 1 ? '' : 's'})`;
+        document.getElementById('vco-court-price').textContent = inr(q.subtotal);
+
+        const charges = Number(q.fee || 0) + Number(q.tax || 0);
+        document.getElementById('vco-fees-row').hidden = charges <= 0;
+        document.getElementById('vco-fees').textContent = inr(charges);
+        document.getElementById('vco-fee-row').hidden = !(q.fee > 0);
+        document.getElementById('vco-fee').textContent = inr(q.fee);
+        document.getElementById('vco-tax-row').hidden = !(q.tax > 0);
+        document.getElementById('vco-tax-label').textContent = q.tax_label || 'Tax';
+        document.getElementById('vco-tax').textContent = inr(q.tax);
+
+        const applied = !!reviewCoupon;
+        document.getElementById('vco-discount-row').hidden = !applied;
+        document.getElementById('vco-discount-code').textContent = reviewCoupon;
+        document.getElementById('vco-discount').textContent = '−' + inr(q.discount);
+        document.getElementById('vco-coupon-open').hidden = applied;
+        document.getElementById('vco-coupon-applied').hidden = !applied;
+        document.getElementById('vco-coupon-applied-code').textContent = reviewCoupon;
+        document.getElementById('vco-coupon-applied-save').textContent = applied ? 'You save ' + inr(q.discount) : '';
+        if (applied) document.getElementById('vco-coupon-form').hidden = true;
+
+        document.getElementById('vco-total').textContent = inr(q.total);
+        document.getElementById('vco-paynow').textContent = inr(q.total);
+        const hold = document.getElementById('vco-hold');
+        if (hold && q.hold_minutes) hold.textContent = `Your slot${n === 1 ? ' is' : 's are'} held for ${q.hold_minutes} minutes once you proceed.`;
+        setProceed(q.total > 0 ? 'Proceed ' + inr(q.total) : 'Confirm booking', true);
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#vco')) return;
+        // Touch feel, as in the slot sheet: a short tick on a real tap (Android only).
+        const tap = e.target.closest('button');
+        if (tap && !tap.disabled && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.isActive)) {
+            try { navigator.vibrate(tap.id === 'vco-proceed' ? 14 : 6); } catch (_) { /* blocked */ }
+        }
+        if (e.target.closest('[data-vco-close]')) { closeReview(); return; }
+
+        const rm = e.target.closest('[data-vco-remove]');
+        if (rm) {
+            removeSelectedSlot(rm.dataset.vcoRemove);
+            if (!selectedSlots.length) { closeReview(); return; }
+            renderReviewSummary();
+            requote(reviewCoupon);
+            return;
+        }
+        if (e.target.closest('#vco-coupon-open')) {
+            const form = document.getElementById('vco-coupon-form');
+            form.hidden = !form.hidden;
+            e.target.closest('#vco-coupon-open').setAttribute('aria-expanded', String(!form.hidden));
+            if (!form.hidden) document.getElementById('vco-coupon-input').focus();
+            return;
+        }
+        if (e.target.closest('#vco-coupon-remove')) { setCouponMsg(''); requote(''); return; }
+        if (e.target.closest('#vco-breakup-toggle')) {
+            const b = document.getElementById('vco-breakup');
+            b.hidden = !b.hidden;
+            e.target.closest('#vco-breakup-toggle').setAttribute('aria-expanded', String(!b.hidden));
+            return;
+        }
+        if (e.target.closest('#vco-proceed')) {
+            startPayment(reviewCoupon, document.getElementById('vco-proceed'));
+        }
+    });
+
+    document.addEventListener('submit', (e) => {
+        if (e.target.id !== 'vco-coupon-form') return;
+        e.preventDefault();
+        const code = document.getElementById('vco-coupon-input').value.trim();
+        if (!code) { setCouponMsg('Enter a coupon code.'); return; }
+        setCouponMsg('');
+        requote(code);
+    });
 
     let currentReceiptData = null;
 
@@ -2332,6 +2844,7 @@
 
     // Initialize Scheduler selectors on load
     window.addEventListener('DOMContentLoaded', () => {
+        renderDateStrip();
         selectSport(selectedSport);
         // Other players book too: re-check every 30s while the page is on screen.
         setInterval(() => { if (!document.hidden) loadAvailability(true); }, 30000);
@@ -2398,34 +2911,72 @@
     /* ---- The sheet: hosts the real booking widget / review form ------ */
     const modal = document.querySelector('[data-mven-modal]');
     const body = modal.querySelector('[data-mven-modal-body]');
+    const foot = modal.querySelector('[data-mven-modal-foot]');
     const title = modal.querySelector('.mven__modal-title');
     // Where each widget came from, so it can go home when the sheet closes and
     // the desktop layout (and its JS) still finds it where it expects.
     const home = new Map();
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let closeTimer = 0;
 
-    const open = (nodes, label) => {
+    const move = (n, into) => {
+        if (!n) return;
+        if (!home.has(n)) home.set(n, { parent: n.parentNode, next: n.nextSibling });
+        into.appendChild(n);
+    };
+    const restore = () => {
+        // Put every moved node back exactly where it was.
+        for (const [node, at] of home) at.parent.insertBefore(node, at.next);
+        home.clear();
+    };
+
+    const open = (nodes, label, footNodes = []) => {
+        // Reopened mid slide-down: finish that close first so nothing is moved twice.
+        if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0; restore(); }
         title.textContent = label;
-        nodes.filter(Boolean).forEach((n) => {
-            if (!home.has(n)) home.set(n, { parent: n.parentNode, next: n.nextSibling });
-            body.appendChild(n);
-        });
+        nodes.forEach((n) => move(n, body));
+        footNodes.forEach((n) => move(n, foot));
+        modal.classList.remove('is-closing');
         modal.hidden = false;
+        body.scrollTop = 0;
         document.body.classList.add('mven-locked');
         // Booking path: without a history entry, Back abandoned the venue page
         // mid-booking instead of closing this sheet. See HaraanOverlay in site.js.
         window.HaraanOverlay.push('mven', close);
     };
     const close = () => {
-        modal.hidden = true;
-        document.body.classList.remove('mven-locked');
+        if (modal.hidden || closeTimer) return;
         window.HaraanOverlay.pop('mven');
-        // Put every moved node back exactly where it was.
-        for (const [node, at] of home) at.parent.insertBefore(node, at.next);
-        home.clear();
+        const finish = () => {
+            closeTimer = 0;
+            modal.hidden = true;
+            modal.classList.remove('is-closing');
+            document.body.classList.remove('mven-locked');
+            restore();
+        };
+        if (reduceMotion) { finish(); return; }
+        // Let the sheet slide down before the widgets go home (matches the CSS).
+        modal.classList.add('is-closing');
+        closeTimer = setTimeout(finish, 200);
     };
 
+    /* ---- Touch feel: a short tick on every pick inside the sheet. Android
+           Chrome honours it; iOS has no web vibration and simply ignores it. -- */
+    // Only after a real tap: Chrome refuses (and logs) vibrate without user activation.
+    const tick = (ms) => {
+        if (navigator.userActivation && !navigator.userActivation.isActive) return;
+        try { navigator.vibrate && navigator.vibrate(ms); } catch { /* blocked */ }
+    };
+    modal.addEventListener('click', (e) => {
+        const hit = e.target.closest('.slot-item, .date-pill, .court-pill, .sport-tab, .selected-slot-item-pill__remove, .dpick__cal-btn, .dpick__cell, .dpick__nav');
+        if (!hit || hit.disabled || hit.classList.contains('is-booked')) return;
+        tick(hit.classList.contains('slot-item') ? 12 : 6);
+    });
+
     root.querySelectorAll('[data-mven-book]').forEach((b) => b.addEventListener('click', () => {
-        open([document.getElementById('booking-widget'), document.querySelector('.sticky-booking-card')], 'Book a slot');
+        open([document.getElementById('booking-widget')], 'Book a slot', [document.querySelector('.sticky-booking-card')]);
+        // Bring the picked day into view — the strip can be scrolled past it.
+        if (typeof centerActiveDate === 'function') centerActiveDate();
     }));
     root.querySelector('[data-mven-rate]')?.addEventListener('click', () => {
         open([document.querySelector('.review-form-card')], 'Rate this venue');

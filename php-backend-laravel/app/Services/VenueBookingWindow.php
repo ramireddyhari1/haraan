@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\User;
 use App\Models\Venue;
 use App\Services\Membership\MemberBookingPerks;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 
 /**
@@ -21,7 +22,7 @@ final class VenueBookingWindow
     /** The last date [user] may book at [venue], inclusive. */
     public function lastBookableDate(Venue $venue, ?User $user): Carbon
     {
-        return now()->startOfDay()->addDays($venue->bookingWindowDays() + $this->perks->priorityBookingDays($user));
+        return BusinessClock::todayDate()->addDays($venue->bookingWindowDays() + $this->perks->priorityBookingDays($user));
     }
 
     public function allows(Venue $venue, ?User $user, Carbon $date): bool

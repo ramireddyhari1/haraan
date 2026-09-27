@@ -547,49 +547,232 @@ h2, h3 {
     margin-bottom: 24px;
 }
 
-/* Date Picker Strip */
-.date-picker-strip {
+/* Date picker: a head line (picked day + "Pick a date"), a borderless two-week
+   strip - weekday over a big number, blue underline on the picked day - and an
+   inline month calendar for any other date inside the booking window. */
+.dpick { margin-bottom: 24px; }
+
+.dpick__head {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    overflow-x: auto;
-    padding-bottom: 12px;
-    margin-bottom: 32px;
-    border-bottom: 1px solid #f3f4f6;
-    scrollbar-width: thin;
+    margin-bottom: 8px;
 }
 
+.dpick__label {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #0F172A;
+}
+
+.dpick__cal-btn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid #DBE3EE;
+    border-radius: 99px;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    color: #2563EB;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.dpick__cal-btn:hover,
+.dpick__cal-btn[aria-expanded="true"] {
+    border-color: #BFDBFE;
+    background: #EFF6FF;
+}
+
+.dpick__cal-btn:active { transform: scale(0.95); }
+
+.date-picker-strip {
+    position: relative;
+    display: flex;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    border-bottom: 1px solid #EEF2F7;
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+}
+
+.date-picker-strip::-webkit-scrollbar { display: none; }
+
 .date-pill {
+    position: relative;
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 12px 20px;
-    border-radius: 14px;
-    border: 1.5px solid #e5e7eb;
-    background: #fff;
+    min-width: 52px;
+    padding: 8px 6px 12px;
+    border: 0;
+    border-radius: 12px 12px 0 0;
+    background: none;
     cursor: pointer;
-    transition: all 0.2s ease;
-    min-width: 100px;
-}
-
-.date-pill:hover {
-    border-color: #1E3A8A;
-    background: #EFF6FF;
+    scroll-snap-align: start;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease, transform 0.12s ease;
 }
 
 .date-pill__day {
     font-size: 12px;
-    color: #6b7280;
     font-weight: 600;
-    text-transform: uppercase;
+    line-height: 1.2;
+    color: #64748B;
+    white-space: nowrap;
 }
 
 .date-pill__date {
-    font-size: 16px;
-    font-weight: 800;
     margin-top: 4px;
-    color: #111827;
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: #0F172A;
 }
+
+.date-pill:hover .date-pill__date { color: #2563EB; }
+.date-pill:active { transform: scale(0.94); }
+
+.date-pill.is-today .date-pill__day { font-weight: 700; color: #0F172A; }
+
+.date-pill.is-month-start .date-pill__day {
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #2563EB;
+}
+
+.date-pill.is-active { background: rgba(37, 99, 235, 0.07); }
+.date-pill.is-active .date-pill__day,
+.date-pill.is-active .date-pill__date { color: #2563EB; }
+
+.date-pill.is-active::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 0;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background: #2563EB;
+}
+
+/* A calendar pick past the two weeks: set apart from the run of days. */
+.date-pill.is-custom { margin-left: 13px; }
+.date-pill.is-custom::before {
+    content: "";
+    position: absolute;
+    left: -8px;
+    top: 12px;
+    bottom: 12px;
+    border-left: 1px dashed #CBD5E1;
+}
+
+.date-pill.is-locked,
+.date-pill:disabled { cursor: not-allowed; opacity: 0.35; }
+.date-pill:disabled:active { transform: none; }
+
+/* Inline month calendar */
+.dpick__cal {
+    max-width: 380px;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+    animation: dpick-cal-in 0.18s ease both;
+}
+
+.dpick__cal[hidden] { display: none; }
+
+@keyframes dpick-cal-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dpick__cal { animation: none; }
+}
+
+.dpick__cal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.dpick__cal-head strong { font-size: 15px; font-weight: 800; color: #0F172A; }
+
+.dpick__nav {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #F1F5F9;
+    color: #334155;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, background 0.15s ease;
+}
+
+.dpick__nav:active { transform: scale(0.9); }
+.dpick__nav:disabled { opacity: 0.35; cursor: default; }
+.dpick__nav:disabled:active { transform: none; }
+
+.dpick__grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+}
+
+.dpick__wd {
+    padding: 6px 0;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    color: #94A3B8;
+}
+
+.dpick__cell {
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #0F172A;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s ease, transform 0.12s ease;
+}
+
+.dpick__cell:hover { background: #EFF6FF; }
+.dpick__cell:active { transform: scale(0.9); }
+.dpick__cell.is-today { box-shadow: inset 0 0 0 1.5px #BFDBFE; }
+.dpick__cell.is-active,
+.dpick__cell.is-active:hover { background: #2563EB; color: #fff; box-shadow: none; }
+.dpick__cell:disabled { background: none; font-weight: 500; color: #CBD5E1; cursor: default; }
+.dpick__cell:disabled:active { transform: none; }
+
+.dpick__note { margin: 8px 0 0; font-size: 12px; text-align: center; color: #94A3B8; }
 
 /* Sport tabs */
 .sports-tab-strip {
@@ -710,6 +893,16 @@ h2, h3 {
     font-weight: 600;
     color: #1E40AF;
     margin-top: 4px;
+}
+
+.slot-item__peak {
+    font-weight: 700;
+    color: #B45309;
+}
+
+.selected-slot-item-pill__day {
+    font-weight: 600;
+    color: #64748B;
 }
 
 .slot-item.is-booked {
@@ -1753,4 +1946,377 @@ a.notif-card:hover { border-color: #CBD5E1; }
     .support-thread { max-height: 52vh; padding: 14px; }
     .support-msg { max-width: 86%; }
     .support-page__title, .notif-page__title { font-size: 22px; }
+}
+
+/* ==========================================================================
+   VENUE REVIEW BOOKING (.vco) - between the slot picker and Razorpay.
+   PC: centred two-column dialog (summary + policies | sticky price card).
+   Phone (<=720px): full-screen page sliding in, pay bar pinned to the bottom.
+   ========================================================================== */
+body.vco-locked { overflow: hidden; }
+
+.vco {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    color: #0F172A;
+}
+.vco[hidden] { display: none; }
+
+.vco__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    animation: vco-fade 0.2s ease both;
+}
+
+.vco__panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 980px;
+    max-height: calc(100vh - 48px);
+    border-radius: 22px;
+    background: #F4F7FB;
+    box-shadow: 0 30px 80px rgba(15, 23, 42, 0.30);
+    overflow: hidden;
+    animation: vco-pop 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.vco.is-closing .vco__backdrop { animation: vco-fade 0.2s ease reverse both; }
+.vco.is-closing .vco__panel { animation: vco-pop 0.2s ease reverse both; }
+@keyframes vco-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vco-pop { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes vco-slide { from { transform: translateX(100%); } to { transform: none; } }
+
+.vco__bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-bottom: 1px solid #E2E8F0;
+    background: #fff;
+}
+.vco__back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #F1F5F9;
+    color: #0F172A;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, background 0.15s ease;
+}
+.vco__back:hover { background: #E2E8F0; }
+.vco__back:active { transform: scale(0.9); }
+.vco__title { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+
+.vco__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 20px;
+}
+
+.vco__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-areas: "summary price" "policies price";
+    grid-template-rows: auto 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+.vco__card {
+    padding: 18px;
+    border: 1px solid #E6ECF3;
+    border-radius: 18px;
+    background: #fff;
+}
+.vco__summary { grid-area: summary; }
+.vco__price { grid-area: price; position: sticky; top: 0; }
+.vco__policies { grid-area: policies; }
+
+/* Summary */
+.vco__summary-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #EEF2F7;
+}
+.vco__venue strong { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; }
+.vco__venue small { display: block; margin-top: 2px; font-size: 13px; color: #64748B; }
+.vco__sport {
+    flex: none;
+    padding: 5px 10px;
+    border-radius: 99px;
+    background: #EFF6FF;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1D4ED8;
+    white-space: nowrap;
+}
+.vco__meta { display: grid; gap: 10px; padding: 14px 0 6px; }
+.vco__meta-row { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: #334155; }
+.vco__meta-row svg, .vco__slot svg { flex: none; color: #64748B; }
+
+.vco__slots { margin: 0; padding: 0; list-style: none; }
+.vco__slot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 8px 0;
+    border-top: 1px dashed #E2E8F0;
+    font-size: 14px;
+}
+.vco__slot:first-child { border-top: 0; }
+.vco__slot-time { flex: 1; font-weight: 700; color: #0F172A; font-variant-numeric: tabular-nums; }
+.vco__slot-price { font-weight: 700; color: #334155; font-variant-numeric: tabular-nums; }
+.vco__slot-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1.5px solid #FCA5A5;
+    border-radius: 50%;
+    background: #fff;
+    color: #DC2626;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, background 0.15s ease;
+}
+.vco__slot-x svg { color: inherit; }
+.vco__slot-x:hover { background: #FEF2F2; }
+.vco__slot-x:active { transform: scale(0.88); }
+
+/* Price details */
+.vco__h3 { margin: 0 0 12px; font-size: 17px; font-weight: 800; }
+.vco__price.is-loading .vco__row span:last-child { opacity: 0.4; transition: opacity 0.15s ease; }
+.vco__error { margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; background: #FEF2F2; font-size: 13px; color: #B91C1C; }
+.vco__error[hidden] { display: none; }
+
+.vco__row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    font-size: 14.5px;
+    color: #334155;
+}
+.vco__row[hidden] { display: none; }
+.vco__row span:last-child { font-weight: 700; color: #0F172A; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vco__row--sub { padding: 4px 0 4px 12px; font-size: 13px; color: #64748B; }
+.vco__row--sub span:last-child { font-weight: 600; color: #475569; }
+.vco__breakup { margin: -4px 0 6px; border-left: 2px solid #E2E8F0; }
+.vco__breakup[hidden] { display: none; }
+.vco__row--save span, .vco__row--save span:last-child { color: #15803D; }
+.vco__row--total { padding-top: 12px; font-size: 17px; font-weight: 800; color: #0F172A; }
+.vco__row--total span:last-child { font-size: 18px; font-weight: 800; }
+.vco__row--pay { padding-top: 2px; font-size: 13.5px; color: #64748B; }
+.vco__row--pay span:last-child { color: #1D4ED8; }
+.vco__rule { height: 1px; margin: 6px 0 0; background: #E2E8F0; }
+
+.vco__link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    color: #2563EB;
+    cursor: pointer;
+}
+.vco__link:hover { text-decoration: underline; }
+.vco__link--block { display: block; margin-top: 2px; }
+
+.vco__coupon-open {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 50px;
+    margin: 4px 0;
+    padding: 0 12px;
+    border: 1px dashed #BFDBFE;
+    border-radius: 12px;
+    background: #F8FBFF;
+    font: inherit;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #1D4ED8;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease, transform 0.12s ease;
+}
+.vco__coupon-open[hidden] { display: none; }
+.vco__coupon-open span { flex: 1; }
+.vco__coupon-open:hover { background: #EFF6FF; }
+.vco__coupon-open:active { transform: scale(0.99); }
+.vco__coupon-open .vco__chev { transition: transform 0.2s ease; }
+.vco__coupon-open[aria-expanded="true"] .vco__chev { transform: rotate(90deg); }
+
+.vco__coupon-form { display: flex; gap: 8px; margin: 8px 0 4px; }
+.vco__coupon-form[hidden] { display: none; }
+.vco__coupon-input {
+    flex: 1;
+    min-width: 0;
+    height: 46px;
+    padding: 0 14px;
+    border: 1.5px solid #DBE3EE;
+    border-radius: 12px;
+    font: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #0F172A;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.vco__coupon-input::placeholder { font-weight: 500; letter-spacing: 0; text-transform: none; color: #94A3B8; }
+.vco__coupon-input:focus { border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+.vco__coupon-apply {
+    flex: none;
+    height: 46px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 12px;
+    background: #2563EB;
+    font: inherit;
+    font-size: 14.5px;
+    font-weight: 800;
+    color: #fff;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.15s ease;
+}
+.vco__coupon-apply:hover { background: #1D4ED8; }
+.vco__coupon-apply:active { transform: scale(0.96); }
+
+.vco__coupon-applied {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 0;
+    padding: 12px;
+    border: 1px solid #BBF7D0;
+    border-radius: 12px;
+    background: #F0FDF4;
+    font-size: 14px;
+    color: #166534;
+}
+.vco__coupon-applied[hidden] { display: none; }
+.vco__coupon-applied > span { flex: 1; }
+.vco__coupon-applied small { display: block; font-size: 12.5px; font-weight: 600; color: #15803D; }
+.vco__coupon-msg { margin: 4px 0 6px; font-size: 13px; font-weight: 600; color: #B91C1C; }
+.vco__coupon-msg.is-ok { color: #15803D; }
+.vco__coupon-msg[hidden] { display: none; }
+
+.vco__pay { margin-top: 16px; }
+.vco__pay-total { display: none; }
+.vco__proceed {
+    display: block;
+    width: 100%;
+    height: 54px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: 14px;
+    background: #2563EB;
+    font: inherit;
+    font-size: 16px;
+    font-weight: 800;
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.30);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.vco__proceed:hover { background: #1D4ED8; }
+.vco__proceed:active { transform: scale(0.98); }
+.vco__proceed:disabled { background: #CBD5E1; box-shadow: none; cursor: default; transform: none; }
+
+.vco__secure {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 10px 0 0;
+    font-size: 12px;
+    text-align: center;
+    color: #94A3B8;
+}
+
+.vco__hold { flex-basis: 100%; }
+.vco__hold:empty { display: none; }
+
+/* Policies */
+.vco__h4 { margin: 0 0 6px; font-size: 14px; font-weight: 800; color: #0F172A; }
+.vco__h4:not(:first-child) { margin-top: 16px; }
+.vco__policy { margin: 0; font-size: 13.5px; line-height: 1.55; color: #475569; }
+.vco__rules { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; color: #475569; }
+.vco__rules li + li { margin-top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .vco__backdrop, .vco__panel { animation: none !important; }
+}
+
+/* Phone: a full page of its own, pay bar pinned under the thumb. */
+@media (max-width: 720px) {
+    .vco { padding: 0; align-items: stretch; }
+    .vco__backdrop { display: none; }
+    .vco__panel {
+        max-width: none;
+        max-height: none;
+        height: 100%;
+        border-radius: 0;
+        box-shadow: none;
+        animation: vco-slide 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+    .vco.is-closing .vco__panel { animation: vco-slide 0.2s ease reverse both; }
+    .vco__bar { padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+    .vco__scroll { padding: 12px 12px calc(96px + env(safe-area-inset-bottom, 0px)); }
+    .vco__grid {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "summary" "price" "policies";
+        grid-template-rows: none;
+        gap: 12px;
+    }
+    .vco__card { padding: 16px; border-radius: 16px; }
+    .vco__price { position: static; }
+    .vco__pay {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0;
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+        border-top: 1px solid #E2E8F0;
+        background: #fff;
+        box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+    }
+    .vco__proceed { flex: 1; height: 52px; }
 }

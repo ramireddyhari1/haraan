@@ -33,6 +33,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
@@ -1577,7 +1578,7 @@ final class PublicWebController extends Controller
         $label = static fn (int $m): string => Carbon::today()->addMinutes($m)->format('h:i A');
         $slotsByDate = [];
         for ($i = 0; $i < 7; $i++) {
-            $date = now()->addDays($i)->startOfDay();
+            $date = BusinessClock::todayDate()->addDays($i);
             $slotsByDate[$date->toDateString()] = $v->slotsOn($date)->map(function ($s) use ($step, $label) {
                 $start = BookingService::timeToMinutes($s->time);
                 if ($start === null) {

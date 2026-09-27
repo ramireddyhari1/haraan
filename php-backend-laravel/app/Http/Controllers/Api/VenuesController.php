@@ -13,6 +13,7 @@ use App\Support\MediaUrl;
 use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 
 final class VenuesController extends Controller
@@ -129,14 +130,14 @@ final class VenuesController extends Controller
         ]);
         $date = isset($validated['date'])
             ? Carbon::createFromFormat('Y-m-d', $validated['date'])->startOfDay()
-            : now()->startOfDay();
+            : BusinessClock::todayDate();
         $duration = isset($validated['duration']) ? (int) $validated['duration'] : 1;
         $courtId = isset($validated['court_id']) ? (int) $validated['court_id'] : null;
 
         $viewer = $request->attributes->get('auth_user');
         $viewer = $viewer instanceof User ? $viewer : null;
 
-        if ($date->lt(now()->startOfDay()->subDay())) {
+        if ($date->lt(BusinessClock::todayDate()->subDay())) {
             return response()->json(['message' => 'Date out of range'], 422);
         }
 
