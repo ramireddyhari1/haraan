@@ -75,6 +75,12 @@ data class VenueReviewItem(
 /** One price row in the admin-authored price chart (a time band → hourly rate). */
 data class VenuePriceBand(val time: String, val price: Int)
 
+/** One fee rule from the API's `fees` list: flat ₹ per booking, or % of the slot subtotal. */
+data class VenueFeeRule(val label: String, val type: String, val value: Double)
+
+/** A fee as it lands on the bill — [VenueDetailData.feeLinesOn]. */
+data class VenueFeeLine(val label: String, val amount: Int)
+
 /** A day grouping inside a price-chart variant (e.g. "Mon–Fri" → bands). */
 data class VenuePriceGroup(val days: String, val rows: List<VenuePriceBand>)
 
@@ -138,19 +144,36 @@ data class VenueDetailData(
     // total charged.
     val convenienceFeeType: String = "none",
     val convenienceFeeValue: Double = 0.0,
+    // Every fee the venue charges, from the API's `fees` list: the convenience fee first,
+    // then the ones Haraan names in /control ("Floodlight charge" …). Empty on servers
+    // that predate the list — the two fields above then describe the only fee.
+    val feeRules: List<VenueFeeRule> = emptyList(),
     // Pulse tax, set platform-wide in /control → Platform rules → Fees. Same shape as the fee,
     // but taken on (subtotal − discount) and only on online bookings. Read via [taxOn].
     val taxType: String = "none",
     val taxValue: Double = 0.0,
     val taxLabel: String = "GST",
 ) {
-    /** The fee this venue adds to a [subtotal], rounded to whole rupees like the summary. */
-    fun convenienceFeeOn(subtotal: Int): Int {
-        if (subtotal <= 0 || convenienceFeeValue <= 0.0) return 0
-        return when (convenienceFeeType.lowercase()) {
-            "flat" -> kotlin.math.round(convenienceFeeValue).toInt()
-            "percent" -> kotlin.math.round(subtotal * convenienceFeeValue / 100.0).toInt()
-            else -> 0
+    /** Every fee this venue adds to a [subtotal] — the sum of [feeLinesOn]. */
+    fun convenienceFeeOn(subtotal: Int): Int = feeLinesOn(subtotal).sumOf { it.amount }
+
+    /**
+     * The fees on a [subtotal], one bill line each, whole rupees like the summary — the
+     * same lines Venue::feeLinesFor() charges on the server. Falls back to the single
+     * convenience-fee pair when the server sent no `fees` list.
+     */
+    fun feeLinesOn(subtotal: Int): List<VenueFeeLine> {
+        if (subtotal <= 0) return emptyList()
+        val rules = feeRules.ifEmpty {
+            listOf(VenueFeeRule("Booking fee", convenienceFeeType, convenienceFeeValue))
+        }
+        return rules.mapNotNull { r ->
+            val amount = when (r.type.lowercase()) {
+                "flat" -> kotlin.math.round(r.value).toInt()
+                "percent" -> kotlin.math.round(subtotal * r.value / 100.0).toInt()
+                else -> 0
+            }
+            if (amount > 0) VenueFeeLine(r.label, amount) else null
         }
     }
 
@@ -366,6 +389,13 @@ class VenueRepository {
             // Absent on older servers, which is the "none" case anyway.
             convenienceFeeType = s("convenience_fee_type").ifBlank { "none" },
             convenienceFeeValue = d.optDouble("convenience_fee_value", 0.0).let { if (it.isNaN()) 0.0 else it },
+            feeRules = (d.optJSONArray("fees") ?: JSONArray()).mapObjects { f ->
+                VenueFeeRule(
+                    label = f.optString("label").trim().ifBlank { "Fee" },
+                    type = f.optString("type"),
+                    value = f.optDouble("value", 0.0).let { if (it.isNaN()) 0.0 else it },
+                )
+            }.filter { it.value > 0.0 && it.type.lowercase() in setOf("flat", "percent") },
             taxType = s("tax_type").ifBlank { "none" },
             taxValue = d.optDouble("tax_value", 0.0).let { if (it.isNaN()) 0.0 else it },
             taxLabel = s("tax_label").ifBlank { "GST" },

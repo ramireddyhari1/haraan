@@ -124,6 +124,7 @@ import com.haraan.app.data.TokenStore
 import com.haraan.app.data.ReviewResult
 import com.haraan.app.data.VenueCourt
 import com.haraan.app.data.VenueDetailData
+import com.haraan.app.data.VenueFeeLine
 import com.haraan.app.data.VenueRepository
 import com.haraan.app.data.VenueReviewItem
 import com.haraan.app.data.VenueSlotItem
@@ -1590,6 +1591,8 @@ internal fun BookingSheet(
   // The venue's fee rule until the server quotes its own for this order. Both are the
   // same arithmetic on the same two columns, so the summary reads the charge either way.
   val feeRs = quotedFeeRs ?: venue.convenienceFeeOn(subtotalRs)
+  // The same fee, itemised: "Convenience fee", "Floodlight charge"… (Venue::feeLinesFor).
+  val feeLines = venue.feeLinesOn(subtotalRs)
   // Pulse tax on the post-discount subtotal (/control → Fees), as reserveVenue charges it.
   val taxRs = venue.taxOn(subtotalRs, discountRs)
   // Fee added, discount taken off, tax on top — mirroring reserveVenue's order exactly.
@@ -1786,6 +1789,7 @@ internal fun BookingSheet(
         perHour = perHour,
         subtotal = subtotalRs,
         fee = feeRs,
+        feeLines = feeLines,
         discount = discountRs,
         tax = taxRs,
         appliedCode = appliedCode,
@@ -2005,6 +2009,7 @@ private fun VenueOrderSummaryPage(
   perHour: Int,
   subtotal: Int,
   fee: Int,
+  feeLines: List<VenueFeeLine> = emptyList(),
   discount: Int,
   tax: Int,
   appliedCode: String?,
@@ -2126,6 +2131,7 @@ private fun VenueOrderSummaryPage(
         perHour = perHour,
         subtotal = subtotal,
         fee = fee,
+        feeLines = feeLines,
         discount = discount,
         tax = tax,
         appliedCode = appliedCode,
@@ -2209,6 +2215,7 @@ private fun OrderSummaryBody(
   perHour: Int,
   subtotal: Int,
   fee: Int,
+  feeLines: List<VenueFeeLine> = emptyList(),
   discount: Int,
   tax: Int,
   appliedCode: String?,
@@ -2249,7 +2256,13 @@ private fun OrderSummaryBody(
 
     // The arithmetic, shown — every line the server used to reach the charge.
     SummaryLine("₹$perHour × $duration hr", "₹$subtotal", muted = true)
-    if (fee > 0) SummaryLine("Booking fee", "₹$fee", muted = true)
+    // One line per fee while they add up to what the server quoted; if a coupon quote
+    // came back with a different fee, show that one number rather than lines that disagree.
+    if (feeLines.isNotEmpty() && feeLines.sumOf { it.amount } == fee) {
+      feeLines.forEach { SummaryLine(it.label, "₹${it.amount}", muted = true) }
+    } else if (fee > 0) {
+      SummaryLine("Booking fee", "₹$fee", muted = true)
+    }
     if (discount > 0) {
       Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
