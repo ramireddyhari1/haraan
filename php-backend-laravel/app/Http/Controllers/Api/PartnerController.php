@@ -439,10 +439,32 @@ class PartnerController extends Controller
             ->with(['user:id,name'])
             ->get();
 
-        $live = $bookings->reject(fn (Booking $b): bool => $this->isDead($b));
+        // A PENDING row is a player on the payment screen (or a checkout the release job
+        // hasn't expired yet). It holds the court while it lasts, but it is not a sale:
+        // counting it put "3 of 2 slots booked" on Home and inflated Expected and Due.
+        $live = $bookings->reject(fn (Booking $b): bool => $this->isDead($b)
+            || strtolower((string) $b->status) === 'pending');
 
         $expected = round((float) $live->sum('total_amount'), 2);
         $collected = round((float) $live->sum('amount_paid'), 2);
+
+        // Booked = court-hours taken, the same unit as the total, so the two can't
+        // disagree the way "3 of 2" did. Each booking is placed by its slot or its own
+        // hours, and a booking with no court takes every court.
+        $occupied = [];
+        foreach ($live as $b) {
+            if (in_array((int) $b->venue_id, $blocked, true)) {
+                continue;
+            }
+            $venueSlots = $slotsByVenue->get($b->venue_id) ?? collect();
+            $courtIds = ($courtsByVenue->get($b->venue_id) ?? collect())->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            foreach ($this->slotIdsFor($b, $venueSlots) as $slotId) {
+                foreach ($this->courtIdsFor($b, $courtIds) as $courtId) {
+                    $occupied[$b->venue_id.'-'.$courtId.'-'.$slotId] = true;
+                }
+            }
+        }
+        $bookedCells = min(count($occupied), $capacity);
 
         $courtName = function (Booking $b) use ($courtsByVenue): string {
             $court = ($courtsByVenue->get($b->venue_id) ?? collect())
@@ -454,11 +476,18 @@ class PartnerController extends Controller
 
         $now = BusinessClock::now();
         $rows = $live->map(function (Booking $b) use ($slotById, $date, $now, $courtName, $venueName): array {
-            $time = (string) ($slotById->get($b->venue_slot_id)?->time ?? '');
+            // The slot's label, or the booking's own start: online and WhatsApp bookings
+            // carry times but no slot, and read "—" in Next up, sorted last and never
+            // went "on court".
+            $time = $this->displayTime($b, $slotById);
             $start = $this->startOf($date, $time);
-            // An hour is the slot length everywhere in this product; when the time
+            // An hour is the slot length unless the booking says otherwise; when the time
             // cannot be parsed at all the booking sorts last rather than vanishing.
-            $end = $start?->copy()->addHour();
+            $endMin = $this->endMinutesOf($b->end_time);
+            $startMin = BookingService::timeToMinutes($b->start_time);
+            $end = $start !== null && $endMin !== null && $startMin !== null && $endMin > $startMin && $b->venue_slot_id === null
+                ? $start->copy()->addMinutes($endMin - $startMin)
+                : $start?->copy()->addHour();
 
             return [
                 'time'     => $time,
@@ -485,7 +514,7 @@ class PartnerController extends Controller
                 'day_label' => BusinessClock::now()->format('D, j M'),
                 'capacity'  => [
                     'total'  => $capacity,
-                    'booked' => $live->count(),
+                    'booked' => $bookedCells,
                     'done'   => $rows->where('past', true)->count(),
                 ],
                 'money'     => [
@@ -500,6 +529,80 @@ class PartnerController extends Controller
                 'next'      => $ahead->take(4)->map(fn (array $r): array => collect($r)->except('sort')->all())->values(),
             ],
         ]);
+    }
+
+    /**
+     * The day's slot rows a booking occupies.
+     *
+     * Its own slot when it was sold against one; otherwise every slot whose hour its
+     * start–end window overlaps. The app and web checkouts, WhatsApp and the bot store
+     * start/end times and NO slot id — matching on the id alone is how a paid 7 AM
+     * booking sat on the desk grid as "Open".
+     *
+     * @param  \Illuminate\Support\Collection<int, VenueSlot>  $slots  the day's rows for this venue
+     * @return list<int>
+     */
+    private function slotIdsFor(Booking $b, $slots): array
+    {
+        if ($b->venue_slot_id !== null && $slots->contains('id', (int) $b->venue_slot_id)) {
+            return [(int) $b->venue_slot_id];
+        }
+
+        $start = BookingService::timeToMinutes($b->start_time);
+        if ($start === null) {
+            return [];
+        }
+        $end = $this->endMinutesOf($b->end_time) ?? $start + 60;
+
+        return $slots
+            ->filter(function (VenueSlot $s) use ($start, $end): bool {
+                $s0 = BookingService::timeToMinutes($s->time);
+
+                return $s0 !== null && $s0 < $end && $s0 + 60 > $start;
+            })
+            ->map(fn (VenueSlot $s): int => (int) $s->id)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The court columns a booking occupies: its own court, or — for a booking with no
+     * court, which is a booking of the whole venue — every court.
+     *
+     * @param  list<int>  $courtIds  the venue's active courts ([] when it has none)
+     * @return list<int>
+     */
+    private function courtIdsFor(Booking $b, array $courtIds): array
+    {
+        if ($courtIds === []) {
+            return [0];
+        }
+
+        return $b->venue_court_id !== null ? [(int) $b->venue_court_id] : $courtIds;
+    }
+
+    /** Minutes-of-day a booking ends; midnight ("00:00" / "24:00") is the end of the day. */
+    private function endMinutesOf(?string $label): ?int
+    {
+        if ($label !== null && str_starts_with(trim($label), '24:')) {
+            return 24 * 60;
+        }
+        $m = BookingService::timeToMinutes($label);
+
+        return $m === 0 ? 24 * 60 : $m;
+    }
+
+    /** The time a booking starts, for display: its slot's label, else its own start. */
+    private function displayTime(Booking $b, $slotById): string
+    {
+        $slotTime = (string) ($slotById->get($b->venue_slot_id)?->time ?? '');
+        if ($slotTime !== '') {
+            return $slotTime;
+        }
+
+        $start = BookingService::timeToMinutes($b->start_time);
+
+        return $start === null ? '' : Carbon::today()->addMinutes($start)->format('g:i A');
     }
 
     /** A day with no venues in scope still has to answer in the same shape. */
@@ -907,26 +1010,39 @@ class PartnerController extends Controller
         $all = Booking::query()
             ->where('booking_type', 'venue')->where('venue_id', $venue->id)
             ->whereDate('slot_date', $date)
-            ->where(function ($q): void {
-                $q->where('status', self::PAID)
-                    ->orWhere(fn ($hold) => $hold
-                        ->whereRaw('lower(status) = ?', ['pending'])
-                        ->whereNotNull('reserved_until')
-                        ->where('reserved_until', '>', now()));
-            })
+            // The conflict engine's own list (confirmed in any casing, paid, completed,
+            // checked in, live holds). Matching 'CONFIRMED' exactly missed the rest, and
+            // the grid drew those court-hours Open.
+            ->where(fn ($q) => BookingService::occupyingStatuses($q))
             ->with('user:id,name')->get();
 
         $isHold = static fn (Booking $b): bool => strtoupper((string) $b->status) === 'PENDING';
         $bookings = $all->reject($isHold);
         $holds = $all->filter($isHold);
 
-        $bySlot = $bookings->groupBy('venue_slot_id');
-        $holdsBySlot = $holds->groupBy('venue_slot_id');
-        // One bucket per (court, slot) cell so the grid can render each court column.
-        // Court id 0 keys the bookings made before courts existed (venue-level only).
-        $cellKey = static fn (Booking $b): string => ((int) ($b->venue_court_id ?? 0)).'-'.((int) ($b->venue_slot_id ?? 0));
-        $byCell = $bookings->groupBy($cellKey);
-        $holdsByCell = $holds->groupBy($cellKey);
+        // Place every booking on the cells it covers — by its slot, or by its own hours
+        // when it has none (app, web and WhatsApp bookings), and on every court when it
+        // names none. Keyed "court-slot"; court 0 is a venue with no courts.
+        $courtIds = $courts->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $place = function ($list) use ($slots, $courtIds): array {
+            $bySlot = [];
+            $byCell = [];
+            foreach ($list as $b) {
+                foreach ($this->slotIdsFor($b, $slots) as $slotId) {
+                    $bySlot[$slotId][] = $b;
+                    foreach ($this->courtIdsFor($b, $courtIds) as $courtId) {
+                        $byCell[$courtId.'-'.$slotId][] = $b;
+                    }
+                }
+            }
+
+            return [
+                collect($bySlot)->map(fn ($l) => collect($l)),
+                collect($byCell)->map(fn ($l) => collect($l)),
+            ];
+        };
+        [$bySlot, $byCell] = $place($bookings);
+        [$holdsBySlot, $holdsByCell] = $place($holds);
 
         $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $holdsBySlot, $holdsByCell, $courts, $date, $venue): array {
             $b = $bySlot->get($s->id) ?? collect();

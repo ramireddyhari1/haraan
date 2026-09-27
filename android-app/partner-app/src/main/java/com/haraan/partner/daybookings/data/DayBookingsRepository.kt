@@ -132,12 +132,17 @@ class DayBookingsRepositoryImpl(
             for (slot in grid.slots) {
                 if (slot.courts.isNotEmpty()) {
                     for (cell in slot.courts) {
+                        // A court that can't be sold at this hour isn't capacity.
+                        if (!cell.allowed) continue
                         totalSlots++
-                        if (cell.isBooked || cell.isHeld) {
-                            bookedSlots++
-                            expectedRevenue += cell.price
-                        } else if (cell.allowed && !grid.isBlocked) {
-                            availableSlots++
+                        when {
+                            // Sold. A hold (a player on the payment screen) is neither
+                            // sold nor free, so it counts toward neither.
+                            cell.isBooked -> {
+                                bookedSlots++
+                                expectedRevenue += cell.price
+                            }
+                            !cell.isHeld && !grid.isBlocked -> availableSlots++
                         }
                     }
                 } else {

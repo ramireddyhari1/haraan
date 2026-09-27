@@ -1493,26 +1493,27 @@ final class BookingService
      */
     private function assertNoBookingOverlap(int $venueId, ?int $courtId, ?int $slotId, string $date, ?int $startMin, ?int $endMin, ?int $excludeBookingId = null): void
     {
+        $occupying = fn () => Booking::query()
+            ->where('booking_type', 'venue')
+            ->where('venue_id', $venueId)
+            ->whereDate('slot_date', $date)
+            ->where(fn ($q) => $this->occupyingStatuses($q))
+            ->when($excludeBookingId !== null, fn ($q) => $q->where('id', '!=', $excludeBookingId));
+
         if ($courtId !== null) {
             $court = VenueCourt::find($courtId);
             $courtIds = $court ? $court->allRelatedCourtIds() : [$courtId];
 
-            $existingQuery = Booking::query()
-                ->where('booking_type', 'venue')
-                ->where('venue_id', $venueId)
-                ->whereIn('venue_court_id', $courtIds)
-                ->whereDate('slot_date', $date)
-                ->where(fn ($q) => $this->occupyingStatuses($q));
-
-            if ($excludeBookingId !== null) {
-                $existingQuery->where('id', '!=', $excludeBookingId);
-            }
-
-            $existing = $existingQuery->get(['start_time', 'end_time', 'venue_court_id']);
+            // A booking with NO court is a booking of the venue, not of one court: the app
+            // and web checkouts at a venue with a single court store it that way. SQL `IN`
+            // never matches NULL, so these rows used to be invisible here — and the desk
+            // sold 7 AM on a court the app had already sold at 7 AM.
+            $existing = $occupying()
+                ->where(fn ($q) => $q->whereIn('venue_court_id', $courtIds)->orWhereNull('venue_court_id'))
+                ->get(['start_time', 'end_time', 'venue_court_id', 'venue_slot_id']);
 
             foreach ($existing as $b) {
-                $es = $this->timeToMinutes($b->start_time);
-                $ee = self::endMinutes($b->end_time);
+                [$es, $ee] = $this->bookedWindow($b);
 
                 // A booking with no window (or ours has none) coarsely blocks the whole day —
                 // safer than silently allowing a possible clash we can't reason about.
@@ -1521,35 +1522,58 @@ final class BookingService
                 }
 
                 if ($startMin < $ee && $endMin > $es) {
-                    if ((int) $b->venue_court_id === (int) $courtId) {
-                        throw new ConflictHttpException('That court is already booked for this time');
-                    } else {
-                        throw new ConflictHttpException('Court conflict: Connected composite or sub-court is already booked for this time');
-                    }
+                    throw new ConflictHttpException(match (true) {
+                        $b->venue_court_id === null => 'That time is already booked at this venue',
+                        (int) $b->venue_court_id === (int) $courtId => 'That court is already booked for this time',
+                        default => 'Court conflict: Connected composite or sub-court is already booked for this time',
+                    });
                 }
             }
 
             return;
         }
 
-        if ($slotId !== null) {
-            $takenQuery = Booking::query()
-                ->where('booking_type', 'venue')
-                ->where('venue_id', $venueId)
-                ->where('venue_slot_id', $slotId)
-                ->whereDate('slot_date', $date)
-                ->where(fn ($q) => $this->occupyingStatuses($q));
+        // No court named: the venue is sold by the hour as a whole. The same slot, or any
+        // booking whose hours overlap — online checkouts store a start time and no slot
+        // id, so matching on the slot id alone let the desk sell the same hour twice.
+        if ($slotId === null && ($startMin === null || $endMin === null)) {
+            return;
+        }
 
-            if ($excludeBookingId !== null) {
-                $takenQuery->where('id', '!=', $excludeBookingId);
-            }
-
-            $taken = $takenQuery->exists();
-
-            if ($taken) {
+        foreach ($occupying()->get(['start_time', 'end_time', 'venue_court_id', 'venue_slot_id']) as $b) {
+            if ($slotId !== null && (int) $b->venue_slot_id === $slotId) {
                 throw new ConflictHttpException('That slot is already booked for this date');
             }
+
+            [$es, $ee] = $this->bookedWindow($b);
+            if ($startMin !== null && $endMin !== null && $es !== null && $ee !== null && $startMin < $ee && $endMin > $es) {
+                throw new ConflictHttpException('That time is already booked at this venue');
+            }
         }
+    }
+
+    /**
+     * The minutes a booking occupies: its own start/end, or — for rows saved against a
+     * slot template with no times of their own — that slot's hour.
+     *
+     * @return array{0: int|null, 1: int|null}
+     */
+    private function bookedWindow(Booking $b): array
+    {
+        $start = self::timeToMinutes($b->start_time);
+        $end = self::endMinutes($b->end_time);
+
+        if ($start === null && $b->venue_slot_id !== null) {
+            $slotTime = VenueSlot::query()->whereKey($b->venue_slot_id)->value('time');
+            $start = self::timeToMinutes($slotTime);
+            $end = $start !== null ? $start + 60 : null;
+        }
+
+        if ($start !== null && $end === null) {
+            $end = $start + 60;
+        }
+
+        return [$start, $end];
     }
 
     /**
