@@ -72,6 +72,32 @@ final class VenueSlot extends Model
         return self::EVERY_DAY;
     }
 
+    /**
+     * The slot rows that run on one date — THE day rule, used by the website, checkout,
+     * the WhatsApp bot, the partner desk and Home alike.
+     *
+     * Every-day rows plus that weekday's rows. A weekday row at the same start time as an
+     * every-day row replaces it (a Saturday 6 AM at a peak rate wins over the every-day
+     * 6 AM), so the two never both show. This used to be "weekday rows, else every-day
+     * rows": a venue with Mon–Sun 6 AM rows and "Every day" 8–11 AM rows never sold
+     * 8–11 AM online, while the partner desk counted those hours as capacity.
+     *
+     * @param  \Illuminate\Support\Collection<int, VenueSlot>  $rows  a venue's slot rows
+     * @return \Illuminate\Support\Collection<int, VenueSlot>
+     */
+    public static function forDate(\Illuminate\Support\Collection $rows, \Carbon\CarbonInterface $date): \Illuminate\Support\Collection
+    {
+        $weekday = $date->format('l');
+        $startOf = fn (VenueSlot $s): int => \App\Services\BookingService::timeToMinutes($s->time) ?? PHP_INT_MAX;
+
+        $mine = $rows->filter(fn (VenueSlot $s): bool => self::normaliseDay($s->day) === $weekday);
+        $taken = $mine->map($startOf)->all();
+        $everyDay = $rows->filter(fn (VenueSlot $s): bool => self::normaliseDay($s->day) === self::EVERY_DAY
+            && ! in_array($startOf($s), $taken, true));
+
+        return $mine->concat($everyDay)->sortBy($startOf)->values();
+    }
+
     public function venue(): BelongsTo
     {
         return $this->belongsTo(Venue::class);

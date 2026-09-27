@@ -409,11 +409,13 @@ class PartnerController extends Controller
             ->whereIn('venue_id', $venueIds)->whereDate('date', $date)
             ->pluck('venue_id')->map(fn ($v) => (int) $v)->all();
 
-        $slots = $this->runsOnDay(
-            VenueSlot::query()->whereIn('venue_id', $venueIds)->where('is_available', true),
-            $date,
-        )->orderBy('sort_order')->get(['id', 'venue_id', 'time']);
-        $slotsByVenue = $slots->groupBy('venue_id');
+        // Each venue's rows for today by the one day rule the website and checkout use.
+        $day = Carbon::parse($date);
+        $slotsByVenue = VenueSlot::query()->whereIn('venue_id', $venueIds)->where('is_available', true)
+            ->get(['id', 'venue_id', 'day', 'time'])
+            ->groupBy('venue_id')
+            ->map(fn ($rows) => VenueSlot::forDate($rows, $day));
+        $slots = $slotsByVenue->flatten(1);
         $slotById = $slots->keyBy('id');
 
         $courtsByVenue = VenueCourt::query()
@@ -681,30 +683,6 @@ class PartnerController extends Controller
         // business zone; parsed in UTC it was 5½ hours late, and "on court" lit up
         // for the wrong booking.
         return BusinessClock::at($date, $time);
-    }
-
-    /**
-     * Narrow a venue-slot query to the rows that actually run on one date.
-     *
-     * `venue_slots` is a WEEKLY TEMPLATE: a venue carries a row per weekday per
-     * time, so a turf open sixteen hours a day holds 112 rows, not 16. Reading
-     * them all as one day's inventory is how Home first reported "0 of 696 slots
-     * booked" — seven days of capacity stacked on a Saturday — and why the desk
-     * grid drew every weekday's rows under a single date.
-     *
-     * Rows tagged with a weekday match that weekday. Rows tagged "Every day" (what
-     * VenueSlot now saves), or the older "Today"/"Everyday"/"Daily"/blank, belong to
-     * every day.
-     */
-    private function runsOnDay($query, string $date)
-    {
-        $weekday = strtolower(Carbon::parse($date)->format('l'));
-
-        return $query->where(function ($q) use ($weekday): void {
-            $q->whereRaw('lower(trim(coalesce(day, ?))) in (?, ?, ?, ?, ?)', ['', $weekday, 'today', 'everyday', 'every day', 'daily'])
-                ->orWhereNull('day')
-                ->orWhere('day', '');
-        });
     }
 
     /**
@@ -994,10 +972,10 @@ class PartnerController extends Controller
 
         // One date, one day's template rows. Without this the grid stacked all
         // seven weekdays under whichever date was selected.
-        $slots = $this->runsOnDay(
-            VenueSlot::query()->where('venue_id', $venue->id),
-            $date,
-        )->orderBy('sort_order')->get();
+        $slots = VenueSlot::forDate(
+            VenueSlot::query()->where('venue_id', $venue->id)->get(),
+            Carbon::parse($date),
+        );
         $courts = VenueCourt::query()->where('venue_id', $venue->id)
             ->where('is_active', true)->orderBy('sort_order')->get();
 

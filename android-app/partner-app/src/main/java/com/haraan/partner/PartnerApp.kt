@@ -1157,7 +1157,10 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     }
     var tab by remember { mutableStateOf(Tab.Home) }
     // Back from any other tab returns Home first; only Back on Home leaves the app.
-    BackHandler(enabled = tab != Tab.Home) { tab = Tab.Home }
+    // Not while a venue desk or analytics screen is on top: this handler is composed
+    // after the screen handler above, so it won — Back switched the tab hidden behind
+    // the open venue, and it took a second Back to close the venue and land on Home.
+    BackHandler(enabled = tab != Tab.Home && detail == null && manageVenue == null) { tab = Tab.Home }
     // If the lane resolves and the current tab is no longer valid, fall back Home.
     LaunchedEffect(navTabs) { if (tab !in navTabs) tab = Tab.Home }
 

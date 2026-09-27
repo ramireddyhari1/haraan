@@ -45,7 +45,7 @@ class VenueSlotDayTest extends TestCase
         }
     }
 
-    public function test_a_weekday_row_shows_only_on_that_day_and_replaces_every_day_rows(): void
+    public function test_a_weekday_row_adds_to_the_every_day_rows_on_its_day_only(): void
     {
         $venue = $this->venue();
         VenueSlot::create(['venue_id' => $venue->id, 'day' => 'Every day', 'time' => '6:00 AM']);
@@ -54,8 +54,34 @@ class VenueSlotDayTest extends TestCase
         $monday = $venue->fresh()->slotsOn(Carbon::parse('2026-09-28'));
         $tuesday = $venue->fresh()->slotsOn(Carbon::parse('2026-09-29'));
 
-        $this->assertSame(['7:00 PM'], $monday->pluck('time')->all());
+        $this->assertSame(['6:00 AM', '7:00 PM'], $monday->pluck('time')->all());
         $this->assertSame(['6:00 AM'], $tuesday->pluck('time')->all());
+    }
+
+    public function test_every_day_rows_still_sell_on_days_that_have_weekday_rows(): void
+    {
+        // Prod venue 4: Mon–Sun 6 AM rows, and "Every day" 8–11 AM rows that the website,
+        // checkout and WhatsApp bot never offered on any day.
+        $venue = $this->venue();
+        foreach (VenueSlot::WEEKDAYS as $d) {
+            VenueSlot::create(['venue_id' => $venue->id, 'day' => $d, 'time' => '6:00 AM']);
+        }
+        VenueSlot::create(['venue_id' => $venue->id, 'day' => 'Every day', 'time' => '8:00 AM']);
+
+        foreach (range(0, 6) as $i) {
+            $this->assertSame(['6:00 AM', '8:00 AM'], $venue->fresh()->slotsOn(Carbon::parse('2026-09-28')->addDays($i))->pluck('time')->all());
+        }
+    }
+
+    public function test_a_weekday_row_replaces_the_every_day_row_at_the_same_time(): void
+    {
+        $venue = $this->venue();
+        VenueSlot::create(['venue_id' => $venue->id, 'day' => 'Every day', 'time' => '6:00 AM', 'price' => 500]);
+        $saturday = VenueSlot::create(['venue_id' => $venue->id, 'day' => 'Saturday', 'time' => '06:00', 'price' => 800]);
+
+        $sat = $venue->fresh()->slotsOn(Carbon::parse('2026-10-03'));
+
+        $this->assertSame([$saturday->id], $sat->pluck('id')->all());
     }
 
     public function test_the_migration_rewrites_legacy_labels(): void

@@ -2525,14 +2525,20 @@ private fun FormDropdown(
 }
 
 /**
- * The slot rows that run on [date]: rows labelled with its weekday, else the venue's
- * every-day rows. The server saves a slot's day as a weekday name or "Every day"
- * (VenueSlot::normaliseDay); "Daily"/"Today" are older spellings of every day.
+ * The slot rows that run on [date] — the server's rule (VenueSlot::forDate), so the app
+ * offers exactly the times the website and checkout sell: the every-day rows plus rows
+ * labelled with its weekday, a weekday row replacing an every-day row at the same time.
+ * The server saves a slot's day as a weekday name or "Every day"; "Daily"/"Today" are
+ * older spellings of every day.
  */
 private fun slotsForDay(slots: List<VenueSlotItem>, date: LocalDate): List<VenueSlotItem> {
   val label = dayLabelFor(date)
-  return slots.filter { it.day.equals(label, ignoreCase = true) }
-    .ifEmpty { slots.filter { it.day.trim().lowercase() in EVERY_DAY_LABELS } }
+  val mine = slots.filter { it.day.trim().equals(label, ignoreCase = true) }
+  val taken = mine.mapNotNull { timeToMinutes(it.time) }.toSet()
+  val everyDay = slots.filter {
+    it.day.trim().lowercase() in EVERY_DAY_LABELS && timeToMinutes(it.time) !in taken
+  }
+  return (mine + everyDay).sortedBy { timeToMinutes(it.time) ?: Int.MAX_VALUE }
 }
 
 private val EVERY_DAY_LABELS = setOf("every day", "everyday", "daily", "today", "")

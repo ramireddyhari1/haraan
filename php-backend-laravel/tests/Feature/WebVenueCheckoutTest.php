@@ -216,13 +216,24 @@ class WebVenueCheckoutTest extends TestCase
         $this->assertSame([], $this->ordered);
     }
 
-    public function test_a_weekday_row_replaces_the_everyday_rows_for_that_day(): void
+    public function test_a_weekday_row_adds_to_the_everyday_rows_for_that_day(): void
     {
         $date = today()->addDay();
         VenueSlot::create(['venue_id' => $this->venue->id, 'day' => $date->format('l'), 'time' => '5:00 PM', 'price' => 1000, 'is_available' => true]);
 
-        $this->reserve(['6:00 AM - 7:00 AM'])->assertStatus(422);
+        // The every-day hours keep selling on a day that also has its own rows.
+        $this->reserve(['6:00 AM - 7:00 AM'])->assertOk();
         $this->reserve(['5:00 PM - 6:00 PM'])->assertOk();
+    }
+
+    public function test_a_weekday_row_at_the_same_time_replaces_the_everyday_row(): void
+    {
+        $date = today()->addDay();
+        VenueSlot::query()->where('venue_id', $this->venue->id)->where('time', '6:00 AM')->update(['is_available' => true]);
+        VenueSlot::create(['venue_id' => $this->venue->id, 'day' => $date->format('l'), 'time' => '6:00 AM', 'price' => 1000, 'is_available' => false]);
+
+        // That day's own 6 AM row is closed, and the every-day 6 AM doesn't slip back in.
+        $this->reserve(['6:00 AM - 7:00 AM'])->assertStatus(422);
     }
 
     public function test_the_venue_page_offers_only_the_admins_slots(): void

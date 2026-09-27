@@ -288,25 +288,20 @@ final class Venue extends Model
     }
 
     /**
-     * The template slot rows that apply to a date: the rows labelled with that weekday
-     * ("Monday"), else the venue's every-day rows. Same rule as the
-     * app's venue page (VenueDetailScreen slotsFor), so web and app offer the same times.
+     * The template slot rows that apply to a date: the venue's every-day rows plus the
+     * rows labelled with that weekday, a weekday row replacing an every-day row at the same
+     * time ({@see VenueSlot::forDate()}). Same rule as the partner desk and the app's venue
+     * page (VenueDetailScreen slotsForDay), so everyone offers the same times.
      *
      * @return \Illuminate\Support\Collection<int, VenueSlot>
      */
     public function slotsOn(\Carbon\CarbonInterface $date): \Illuminate\Support\Collection
     {
         $all = $this->relationLoaded('slots') ? $this->slots : $this->slots()->get();
-        $weekday = $date->format('l');
 
-        // normaliseDay: any label that isn't a weekday (legacy "Today", "Daily", blank) is
-        // an every-day row, as admin has always presented it.
-        $mine = $all->filter(fn (VenueSlot $s) => VenueSlot::normaliseDay($s->day) === $weekday);
-        if ($mine->isEmpty()) {
-            $mine = $all->filter(fn (VenueSlot $s) => VenueSlot::normaliseDay($s->day) === VenueSlot::EVERY_DAY);
-        }
-
-        return $mine->sortBy(fn (VenueSlot $s) => \App\Services\BookingService::timeToMinutes($s->time) ?? PHP_INT_MAX)->values();
+        // normaliseDay (inside forDate): any label that isn't a weekday (legacy "Today",
+        // "Daily", blank) is an every-day row, as admin has always presented it.
+        return VenueSlot::forDate($all, $date);
     }
 
     /**
