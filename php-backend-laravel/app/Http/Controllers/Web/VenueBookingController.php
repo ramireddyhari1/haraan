@@ -107,6 +107,8 @@ final class VenueBookingController extends Controller
             'lines'     => $lines,
             'subtotal'  => $subtotal,
             'fee'       => $fee,
+            // One line per fee (convenience fee + the venue's named fees), summing to `fee`.
+            'fee_lines' => $venue->feeLinesFor($subtotal),
             'discount'  => $discount,
             'tax'       => $tax,
             'tax_label' => Venue::taxLabel(),
@@ -391,6 +393,7 @@ final class VenueBookingController extends Controller
         $breakdown = [
             'subtotal'       => $subtotal,
             'convenienceFee' => $fee,
+            'feeLines'       => $venue->feeLinesFor($subtotal),
             'discount'       => $discount,
             'tax'            => $tax,
             'taxLabel'       => Venue::taxLabel(),

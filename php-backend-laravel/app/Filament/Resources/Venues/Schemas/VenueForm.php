@@ -334,6 +334,56 @@ class VenueForm
                             ->required(fn ($get): bool => in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
                             ->visible(fn ($get): bool => ! self::isPartnerPanel()
                                 && in_array($get('convenience_fee_type'), ['flat', 'percent'], true)),
+
+                        // Any other fee, named by Haraan ("Floodlight charge", "Maintenance fee"),
+                        // each its own line on the customer's bill. Venue::feeRules() adds these
+                        // after the convenience fee, so every checkout (app, website, WhatsApp)
+                        // charges them. Admin-only, like the fee above.
+                        Placeholder::make('fees_readonly')
+                            ->label('Other fees')
+                            ->visible(fn (?Venue $record): bool => self::isPartnerPanel() && ! empty($record?->fees))
+                            ->content(fn (?Venue $record): string => collect($record?->fees ?? [])
+                                ->filter(fn ($f): bool => ! empty($f['label']) && (float) ($f['value'] ?? 0) > 0)
+                                ->map(fn ($f): string => $f['label'] . ': ' . (($f['type'] ?? '') === 'percent'
+                                    ? rtrim(rtrim(number_format((float) $f['value'], 2), '0'), '.') . '% of the slot price'
+                                    : '₹' . number_format((float) $f['value'], 2) . ' per booking'))
+                                ->implode(' · ') . ' — set by Haraan'),
+                        Repeater::make('fees')
+                            ->label('Other fees')
+                            ->visible(fn (): bool => ! self::isPartnerPanel())
+                            ->addActionLabel('Add a fee')
+                            ->defaultItems(0)
+                            ->reorderable()
+                            ->collapsible()
+                            ->itemLabel(fn (array $state): string => trim((string) ($state['label'] ?? '')) ?: 'New fee')
+                            ->helperText('Type any fee name — it shows as its own line on the customer’s bill, after the convenience fee. Charged on the app, the website and WhatsApp bookings, and paid to the venue with the booking.')
+                            ->schema([
+                                TextInput::make('label')
+                                    ->label('Fee name (shown to customers)')
+                                    ->placeholder('Floodlight charge')
+                                    ->required()
+                                    ->maxLength(40),
+                                Select::make('type')
+                                    ->label('Charged as')
+                                    ->options([
+                                        'flat'    => 'Flat ₹ per booking',
+                                        'percent' => '% of the slot price',
+                                    ])
+                                    ->default('flat')
+                                    ->required()
+                                    ->native(false)
+                                    ->live(),
+                                TextInput::make('value')
+                                    ->label(fn ($get): string => $get('type') === 'percent' ? 'Fee (%)' : 'Fee (₹)')
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->maxValue(fn ($get): int => $get('type') === 'percent' ? 50 : 5000)
+                                    ->prefix(fn ($get): ?string => $get('type') === 'flat' ? '₹' : null)
+                                    ->suffix(fn ($get): ?string => $get('type') === 'percent' ? '%' : null)
+                                    ->required(),
+                            ])
+                            ->columns(3)
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Photos')

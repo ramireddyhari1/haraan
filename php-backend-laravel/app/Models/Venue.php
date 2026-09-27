@@ -21,7 +21,7 @@ final class Venue extends Model
     use AuditsAdminChanges;
 
     /** Only changes to these fields are audit-logged (see AuditsAdminChanges). */
-    protected array $auditedAttributes = ['status', 'published_at', 'price', 'convenience_fee_type', 'convenience_fee_value', 'is_bookable', 'is_active', 'booking_window_days', 'partner_id', 'cancel_free_hours', 'cancel_refund_percent'];
+    protected array $auditedAttributes = ['status', 'published_at', 'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'is_bookable', 'is_active', 'booking_window_days', 'partner_id', 'cancel_free_hours', 'cancel_refund_percent'];
 
     use BroadcastsContentChanges;
 
@@ -31,7 +31,7 @@ final class Venue extends Model
     protected $fillable = [
         'name', 'category', 'kind', 'branch_label', 'branch_code', 'capabilities',
         'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
-        'price', 'convenience_fee_type', 'convenience_fee_value',
+        'price', 'convenience_fee_type', 'convenience_fee_value', 'fees',
         'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'status', 'published_at', 'is_bookable', 'booking_window_days', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
@@ -44,6 +44,7 @@ final class Venue extends Model
         'capabilities' => 'array',
         'sports' => 'array',
         'rules' => 'array',
+        'fees' => 'array',
         'price_chart' => 'array',
         'hours_json' => 'array',
         'slot_minutes' => 'integer',
@@ -512,17 +513,60 @@ final class Venue extends Model
      */
     public function convenienceFeeFor(float $subtotal): float
     {
-        if ($subtotal <= 0) {
-            return 0.0;
+        return round(array_sum(array_column($this->feeLinesFor($subtotal), 'amount')), 2);
+    }
+
+    /**
+     * Every fee this venue charges, as rules: the convenience fee first (when set), then the
+     * admin's own named fees from /control ("Floodlight charge" ...). One list so the checkout
+     * maths, the review page's breakup and the API all read the same thing.
+     *
+     * @return list<array{label: string, type: string, value: float}>
+     */
+    public function feeRules(): array
+    {
+        $rules = [];
+
+        if (in_array($this->convenience_fee_type, ['flat', 'percent'], true) && (float) $this->convenience_fee_value > 0) {
+            $rules[] = ['label' => 'Convenience fee', 'type' => $this->convenience_fee_type, 'value' => (float) $this->convenience_fee_value];
         }
 
-        $value = max(0.0, (float) $this->convenience_fee_value);
+        foreach ((array) ($this->fees ?? []) as $fee) {
+            $type = $fee['type'] ?? null;
+            $value = (float) ($fee['value'] ?? 0);
+            $label = trim((string) ($fee['label'] ?? ''));
+            if (! in_array($type, ['flat', 'percent'], true) || $value <= 0 || $label === '') {
+                continue;
+            }
+            $rules[] = ['label' => mb_substr($label, 0, 40), 'type' => $type, 'value' => $value];
+        }
 
-        return match ($this->convenience_fee_type) {
-            'flat'    => round($value, 2),
-            'percent' => round($subtotal * $value / 100, 2),
-            default   => 0.0,
-        };
+        return $rules;
+    }
+
+    /**
+     * The fees on a slot subtotal, one display line each, rounded to paise (the Razorpay order
+     * is built from these). Nothing on a free order; zero-amount lines are dropped.
+     *
+     * @return list<array{label: string, amount: float}>
+     */
+    public function feeLinesFor(float $subtotal): array
+    {
+        if ($subtotal <= 0) {
+            return [];
+        }
+
+        $lines = [];
+        foreach ($this->feeRules() as $rule) {
+            $amount = $rule['type'] === 'flat'
+                ? round($rule['value'], 2)
+                : round($subtotal * $rule['value'] / 100, 2);
+            if ($amount > 0) {
+                $lines[] = ['label' => $rule['label'], 'amount' => $amount];
+            }
+        }
+
+        return $lines;
     }
 
     /**

@@ -238,4 +238,38 @@ class VenueEditSafetyTest extends TestCase
             ->call('save')
             ->assertHasFormErrors(['convenience_fee_value']);
     }
+
+    public function test_the_admin_can_add_named_fees_by_typing_their_name(): void
+    {
+        $venue = $this->venue();
+
+        Livewire::test(EditVenue::class, ['record' => $venue->getRouteKey()])
+            ->fillForm([
+                'convenience_fee_type' => 'flat', 'convenience_fee_value' => 20,
+                'fees' => [
+                    ['label' => 'Floodlight charge', 'type' => 'flat', 'value' => 50],
+                    ['label' => 'Maintenance fee', 'type' => 'percent', 'value' => 2],
+                ],
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $venue->refresh();
+        $this->assertSame(['Floodlight charge', 'Maintenance fee'], array_column($venue->fees, 'label'));
+        // ₹1,000 of court time: 20 + 50 + 2% (20) = ₹90.
+        $this->assertEqualsWithDelta(90.0, $venue->convenienceFeeFor(1000), 0.001);
+        $this->assertSame(['Convenience fee', 'Floodlight charge', 'Maintenance fee'], array_column($venue->feeLinesFor(1000), 'label'));
+    }
+
+    public function test_a_named_fee_needs_a_name_and_a_sane_amount(): void
+    {
+        $venue = $this->venue();
+
+        Livewire::test(EditVenue::class, ['record' => $venue->getRouteKey()])
+            ->fillForm(['fees' => [['label' => '', 'type' => 'percent', 'value' => 80]]])
+            ->call('save')
+            ->assertHasFormErrors();
+
+        $this->assertEmpty($venue->fresh()->fees);
+    }
 }

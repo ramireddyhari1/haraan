@@ -55,8 +55,14 @@ final class VenuesController extends Controller
             // coupon (the only response that carried a fee), so a fee venue showed a
             // total on the order summary that was not the total Razorpay then charged.
             // Same two fields the model prices from — none | flat | percent.
-            'convenience_fee_type' => $venue->convenience_fee_type ?? 'none',
-            'convenience_fee_value' => (float) ($venue->convenience_fee_value ?? 0),
+            //
+            // Apps up to APK 39 read only this one pair, so it carries every fee the venue
+            // charges folded into one rule when that is exact: all flat -> one flat sum, all
+            // percent -> one percent sum. A venue mixing flat and % fees can't be folded; the
+            // pair then stays the plain convenience fee and `fees` below has the full list.
+            ...self::legacyFeePair($venue),
+            // Every fee as its own rule (label, flat|percent, value), convenience fee first.
+            'fees' => $venue->feeRules(),
             // Pulse tax (/control → Platform rules → Fees), same shape: none | flat | percent,
             // on (subtotal − discount). Platform-wide, so every venue quotes the same rule.
             'tax_type' => PlatformRules::string('fees.venue_tax_type'),
@@ -154,6 +160,30 @@ final class VenuesController extends Controller
             'slots' => $availability->forDate($venue, $date, $duration, $courtId),
             'booking_window' => $window->describe($venue, $viewer),
         ]]);
+    }
+
+    /**
+     * The single convenience_fee_type/value pair older apps price from, standing in for
+     * all of the venue's fees whenever one rule can say it exactly.
+     *
+     * @return array{convenience_fee_type: string, convenience_fee_value: float}
+     */
+    private static function legacyFeePair(Venue $venue): array
+    {
+        $rules = $venue->feeRules();
+        $types = array_values(array_unique(array_column($rules, 'type')));
+
+        if (count($types) === 1) {
+            return [
+                'convenience_fee_type' => $types[0],
+                'convenience_fee_value' => round(array_sum(array_column($rules, 'value')), 2),
+            ];
+        }
+
+        return [
+            'convenience_fee_type' => $venue->convenience_fee_type ?? 'none',
+            'convenience_fee_value' => (float) ($venue->convenience_fee_value ?? 0),
+        ];
     }
 
     /** Compact card shape shared by list + detail. */

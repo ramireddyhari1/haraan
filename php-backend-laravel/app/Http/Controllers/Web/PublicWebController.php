@@ -1618,6 +1618,8 @@ final class PublicWebController extends Controller
             // The booking sheet estimates the total from these; the server recomputes it.
             'convenience_fee_type' => (string) ($v->convenience_fee_type ?? 'none'),
             'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),
+            // Every fee (convenience + the admin's named ones), for the same estimate.
+            'fee_rules' => $v->feeRules(),
             'hours' => $v->displayHours() ?: '',
             'cancellation' => $v->cancellationText(),
             // The app's VenueDetailScreen reads these (address line, "Show in Map"/

@@ -377,13 +377,13 @@
 
                     <div class="vco__row" id="vco-fees-row" hidden>
                         <span>
-                            Convenience fee &amp; taxes
+                            <span id="vco-fees-title">Fees &amp; taxes</span>
                             <button type="button" class="vco__link vco__link--block" id="vco-breakup-toggle" aria-expanded="false" aria-controls="vco-breakup">See breakup</button>
                         </span>
                         <span id="vco-fees"></span>
                     </div>
                     <div class="vco__breakup" id="vco-breakup" hidden>
-                        <div class="vco__row vco__row--sub" id="vco-fee-row"><span>Convenience fee</span><span id="vco-fee"></span></div>
+                        <div id="vco-fee-lines"></div>
                         <div class="vco__row vco__row--sub" id="vco-tax-row"><span id="vco-tax-label">Tax</span><span id="vco-tax"></span></div>
                     </div>
 
@@ -762,7 +762,7 @@
                         <span id="calc-subtotal">₹0</span>
                     </div>
                     <div class="calc-row" id="calc-fee-row" style="display:none">
-                        <span>Convenience fee</span>
+                        <span>{{ count($venue->fee_rules ?? []) > 1 ? 'Fees' : (($venue->fee_rules[0]['label'] ?? null) ?: 'Convenience fee') }}</span>
                         <span id="calc-fee">₹0</span>
                     </div>
                     <div class="calc-row" id="calc-tax-row" style="display:none">
@@ -1452,7 +1452,7 @@
                             <span class="receipt-value" id="tp-subtotal">₹0</span>
                         </div>
                         <div class="receipt-row" id="tp-fee-row">
-                            <span class="receipt-label">CONVENIENCE FEE</span>
+                            <span class="receipt-label" id="tp-fee-label">CONVENIENCE FEE</span>
                             <span class="receipt-value" id="tp-fee">₹0</span>
                         </div>
                         <div class="receipt-row" id="tp-tax-row">
@@ -1539,13 +1539,15 @@
     const courtPeak = @json($venue->court_peak ?? new \stdClass);
     const venueBasePrice = {{ (int) $venue->price }};
     // Mirrors Venue::convenienceFeeFor() — the server recomputes it; this is only the estimate.
-    const venueFeeType = @json((string) ($venue->convenience_fee_type ?? 'none'));
-    const venueFeeValue = {{ (float) ($venue->convenience_fee_value ?? 0) }};
+    // Mirrors Venue::feeLinesFor(): the convenience fee + the admin's named fees, each
+    // rounded to paise. Only an estimate for the sheet; the review page asks the server.
+    const venueFeeRules = @json($venue->fee_rules ?? []);
     function venueFeeFor(subtotal) {
         if (subtotal <= 0) return 0;
-        if (venueFeeType === 'flat') return Math.round(venueFeeValue * 100) / 100;
-        if (venueFeeType === 'percent') return Math.round(subtotal * venueFeeValue) / 100;
-        return 0;
+        const sum = venueFeeRules.reduce((t, r) => t + (r.type === 'flat'
+            ? Math.round(r.value * 100) / 100
+            : Math.round(subtotal * r.value) / 100), 0);
+        return Math.round(sum * 100) / 100;
     }
     // Mirrors Venue::taxFor() (/control → Platform rules → Fees → Pulse tax), on subtotal − discount.
     const venueTaxType = @json(\App\Support\PlatformRules::string('fees.venue_tax_type'));
@@ -2428,8 +2430,12 @@
         const charges = Number(q.fee || 0) + Number(q.tax || 0);
         document.getElementById('vco-fees-row').hidden = charges <= 0;
         document.getElementById('vco-fees').textContent = inr(charges);
-        document.getElementById('vco-fee-row').hidden = !(q.fee > 0);
-        document.getElementById('vco-fee').textContent = inr(q.fee);
+        const feeLines = (q.fee_lines && q.fee_lines.length) ? q.fee_lines
+            : (q.fee > 0 ? [{ label: 'Convenience fee', amount: q.fee }] : []);
+        document.getElementById('vco-fee-lines').innerHTML = feeLines.map(l =>
+            `<div class="vco__row vco__row--sub"><span>${esc(l.label)}</span><span>${inr(l.amount)}</span></div>`).join('');
+        document.getElementById('vco-fees-title').textContent =
+            (q.tax > 0 ? (feeLines.length ? 'Fees & taxes' : 'Taxes') : (feeLines.length === 1 ? feeLines[0].label : 'Fees'));
         document.getElementById('vco-tax-row').hidden = !(q.tax > 0);
         document.getElementById('vco-tax-label').textContent = q.tax_label || 'Tax';
         document.getElementById('vco-tax').textContent = inr(q.tax);
@@ -2562,6 +2568,10 @@
         if (feeEl) feeEl.innerText = '₹' + fee.toLocaleString('en-IN');
         const feeRow = document.getElementById('tp-fee-row');
         if (feeRow) feeRow.style.display = fee > 0 ? '' : 'none';
+        // Named after the fee when there is one ("FLOODLIGHT CHARGE"), else "FEES".
+        const feeLabelEl = document.getElementById('tp-fee-label');
+        const feeLines = Array.isArray(b.feeLines) ? b.feeLines : [];
+        if (feeLabelEl) feeLabelEl.innerText = (feeLines.length === 1 ? feeLines[0].label : (feeLines.length > 1 ? 'Fees' : 'Convenience fee')).toUpperCase();
 
         const taxEl = document.getElementById('tp-tax');
         if (taxEl) taxEl.innerText = '₹' + tax.toLocaleString('en-IN');

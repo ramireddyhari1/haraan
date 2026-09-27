@@ -244,6 +244,61 @@ class WebVenueCheckoutTest extends TestCase
             ->assertJsonPath('coupon.message', 'This code isn’t valid.');
     }
 
+    public function test_named_fees_from_control_are_charged_as_their_own_lines(): void
+    {
+        // Convenience fee 10% + two fees the admin typed in /control.
+        $this->venue->update([
+            'convenience_fee_type' => 'percent', 'convenience_fee_value' => 10,
+            'fees' => [
+                ['label' => 'Floodlight charge', 'type' => 'flat', 'value' => 50],
+                ['label' => 'Maintenance fee', 'type' => 'percent', 'value' => 2.5],
+                ['label' => '', 'type' => 'flat', 'value' => 99],       // unnamed: ignored
+                ['label' => 'Zero', 'type' => 'flat', 'value' => 0],    // nothing to charge
+            ],
+        ]);
+
+        // 2 slots = ₹2,000 → 200 + 50 + 50 = ₹300 in fees.
+        $this->quote(['6:00 AM - 7:00 AM', '7:00 AM - 8:00 AM'])
+            ->assertOk()
+            ->assertJsonPath('fee', 300)
+            ->assertJsonPath('fee_lines', [
+                ['label' => 'Convenience fee', 'amount' => 200],
+                ['label' => 'Floodlight charge', 'amount' => 50],
+                ['label' => 'Maintenance fee', 'amount' => 50],
+            ])
+            ->assertJsonPath('total', 2300);
+
+        // Checkout charges exactly that, and the rows still add up to the Razorpay amount.
+        $this->reserve(['6:00 AM - 7:00 AM', '7:00 AM - 8:00 AM'])
+            ->assertOk()
+            ->assertJsonPath('breakdown.convenienceFee', 300)
+            ->assertJsonPath('breakdown.feeLines.1.label', 'Floodlight charge');
+        $this->assertSame([230000], $this->ordered);
+        $rows = Booking::query()->where('razorpay_order_id', 'order_web_1')->get();
+        $this->assertEqualsWithDelta(2300.0, $rows->sum(fn (Booking $b) => $b->amountCharged()), 0.001);
+        $this->assertEqualsWithDelta(300.0, (float) $rows->sum('convenience_fee'), 0.001);
+    }
+
+    public function test_the_app_api_folds_same_kind_fees_into_the_old_fee_pair(): void
+    {
+        // Older apps price from one pair: all-flat fees fold into one flat sum…
+        $this->venue->update(['convenience_fee_type' => 'flat', 'convenience_fee_value' => 20,
+            'fees' => [['label' => 'Floodlight charge', 'type' => 'flat', 'value' => 50]]]);
+        $this->getJson('/api/venues/' . $this->venue->id)
+            ->assertOk()
+            ->assertJsonPath('data.convenience_fee_type', 'flat')
+            ->assertJsonPath('data.convenience_fee_value', 70)
+            ->assertJsonPath('data.fees.1.label', 'Floodlight charge');
+
+        // …a flat + % mix can't be one rule, so the pair stays the plain convenience fee.
+        $this->venue->update(['fees' => [['label' => 'Maintenance fee', 'type' => 'percent', 'value' => 5]]]);
+        $this->getJson('/api/venues/' . $this->venue->id)
+            ->assertOk()
+            ->assertJsonPath('data.convenience_fee_type', 'flat')
+            ->assertJsonPath('data.convenience_fee_value', 20)
+            ->assertJsonCount(2, 'data.fees');
+    }
+
     public function test_the_review_quote_needs_a_signed_in_buyer(): void
     {
         $this->postJson('/gamehub/' . $this->venue->id . '/book/quote', [
@@ -342,7 +397,7 @@ class WebVenueCheckoutTest extends TestCase
         $this->get('/gamehub/' . $this->venue->id)
             ->assertOk()
             ->assertSee('Convenience fee')
-            ->assertSee("const venueFeeType = \"flat\"", false)
+            ->assertSee('const venueFeeRules = [{"label":"Convenience fee","type":"flat","value":30', false)
             ->assertDontSee('GST (18%)')
             ->assertDontSee('PLATFORM FEE');
     }

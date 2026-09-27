@@ -355,6 +355,19 @@ class VenueInfolist
                     ->color(fn (Venue $record): string => in_array($record->convenience_fee_type, ['flat', 'percent'], true) ? 'info' : 'gray')
                     ->columnSpan(['default' => 1, 'md' => 2]),
 
+                TextEntry::make('other_fees')
+                    ->label('Other fees charged to the customer')
+                    ->state(fn (Venue $record): array => collect($record->fees ?? [])
+                        ->filter(fn ($f): bool => trim((string) ($f['label'] ?? '')) !== '' && (float) ($f['value'] ?? 0) > 0)
+                        ->map(fn ($f): string => $f['label'] . ' — ' . (($f['type'] ?? '') === 'percent'
+                            ? rtrim(rtrim(number_format((float) $f['value'], 2), '0'), '.') . '% of the slot subtotal'
+                            : '₹' . number_format((float) $f['value'], 2) . ' flat'))
+                        ->values()->all())
+                    ->placeholder('None')
+                    ->badge()
+                    ->color('info')
+                    ->columnSpan(['default' => 1, 'md' => 2]),
+
                 TextEntry::make('fee_example')
                     ->label('Worked example on one default-rate hour')
                     ->state(function (Venue $record): string {
