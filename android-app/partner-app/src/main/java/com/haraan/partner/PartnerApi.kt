@@ -357,6 +357,33 @@ data class WalkInResult(
 /** Reply to "make a fresh QR": either it was paid meanwhile, or here is the new one. */
 data class PaymentRequestResult(val paid: Boolean, val payment: DeskPayment?)
 
+/** One booking in the partner's report. */
+data class ReportRow(
+    val id: String,
+    val bookedAt: String,
+    val type: String,
+    val item: String,
+    val slot: String,
+    val slotDate: String,
+    val customer: String,
+    val phone: String,
+    val channel: String,
+    val quantity: Int,
+    val amount: Double,
+    val amountPaid: Double,
+    val status: String,
+    val paymentStatus: String,
+    val checkedIn: Int,
+    val ticket: String,
+) {
+    /** Cancelled, refunded, failed, expired, or a checkout still unpaid: not a sale. */
+    val isSale: Boolean
+        get() = status.lowercase() !in setOf("cancelled", "refunded", "failed", "expired", "pending")
+    val isWalkIn: Boolean get() = channel.equals("offline", true)
+}
+
+data class ReportData(val from: String, val to: String, val partner: String, val rows: List<ReportRow>)
+
 /** Live payment state of a walk-in's link, straight from Razorpay. */
 data class PayState(val paid: Boolean, val status: String)
 
@@ -981,8 +1008,44 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     }
 
     /** Fetch the booking report as raw CSV text for a date range. */
-    suspend fun reportCsv(token: String, from: String, to: String): String = withContext(Dispatchers.IO) {
-        get("/api/partner/reports/bookings?from=$from&to=$to&format=csv", token)
+    suspend fun reportCsv(token: String, from: String, to: String, by: String = "booked"): String = withContext(Dispatchers.IO) {
+        get("/api/partner/reports/bookings?from=$from&to=$to&format=csv&by=$by", token)
+    }
+
+    /** The same report as rows, for the in-app preview and the PDF. */
+    suspend fun reportRows(token: String, from: String, to: String, by: String = "booked"): ReportData = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/reports/bookings?from=$from&to=$to&format=json&by=$by", token))
+        val arr = o.optJSONArray("rows") ?: JSONArray()
+        ReportData(
+            from = o.optString("from", from),
+            to = o.optString("to", to),
+            partner = o.optString("partner", ""),
+            rows = (0 until arr.length()).map { i ->
+                val r = arr.getJSONObject(i)
+                val amount = r.optString("amount").toDoubleOrNull() ?: 0.0
+                val payStatus = r.optString("payment_status", "")
+                ReportRow(
+                    id = r.optString("id"),
+                    bookedAt = r.optString("booked_at"),
+                    type = r.optString("type"),
+                    item = r.optString("item"),
+                    slot = r.optString("slot"),
+                    slotDate = r.optString("slot_date"),
+                    customer = r.optString("customer"),
+                    phone = r.optString("phone"),
+                    channel = r.optString("channel"),
+                    quantity = r.optString("quantity").toIntOrNull() ?: 1,
+                    amount = amount,
+                    // Older servers don't send amount_paid; a "paid" booking then counts in full.
+                    amountPaid = r.optString("amount_paid").toDoubleOrNull()
+                        ?: if (payStatus.equals("paid", true)) amount else 0.0,
+                    status = r.optString("status"),
+                    paymentStatus = payStatus,
+                    checkedIn = r.optString("checked_in").toIntOrNull() ?: 0,
+                    ticket = r.optString("ticket"),
+                )
+            },
+        )
     }
 
     suspend fun venueSlots(token: String, venueId: Long): List<SlotEdit> = withContext(Dispatchers.IO) {

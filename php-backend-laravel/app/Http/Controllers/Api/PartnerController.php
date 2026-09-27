@@ -1612,21 +1612,27 @@ class PartnerController extends Controller
             'from'   => ['nullable', 'date'],
             'to'     => ['nullable', 'date'],
             'format' => ['nullable', 'in:csv,json'],
+            // booked = by the day the booking was made (the default); played = by its date.
+            'by'     => ['nullable', 'in:booked,played'],
         ]);
 
         $from = isset($data['from']) ? date('Y-m-d', strtotime($data['from'])) : BusinessClock::now()->subDays(30)->toDateString();
         $to = isset($data['to']) ? date('Y-m-d', strtotime($data['to'])) : BusinessClock::today();
+        $by = $data['by'] ?? 'booked';
 
         if (($data['format'] ?? 'csv') === 'json') {
             return response()->json([
                 'from'    => $from,
                 'to'      => $to,
+                'by'      => $by,
+                // Who the report is for, so the PDF can carry the business name.
+                'partner' => (string) (User::query()->find($partnerId)?->name ?? ''),
                 'headers' => BookingReport::headers(),
-                'rows'    => BookingReport::rows($partnerId, $from, $to),
+                'rows'    => BookingReport::rows($partnerId, $from, $to, $by),
             ]);
         }
 
-        $csv = BookingReport::csv($partnerId, $from, $to);
+        $csv = BookingReport::csv($partnerId, $from, $to, $by);
         $filename = "bookings_{$from}_to_{$to}.csv";
 
         return response($csv, 200, [

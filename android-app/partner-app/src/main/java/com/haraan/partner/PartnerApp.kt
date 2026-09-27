@@ -1009,7 +1009,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         return
     }
     if (showReports) {
-        ReportsScreen(api, token, onBack = { showReports = false })
+        com.haraan.partner.reports.ReportsScreen(api, token, onBack = { showReports = false })
         return
     }
     if (showStaff) {
@@ -4815,19 +4815,6 @@ private fun pickDate(context: Context, current: Long, onPicked: (Long) -> Unit) 
     ).show()
 }
 
-private fun shareCsv(context: Context, from: String, to: String, csv: String) {
-    val file = File(context.cacheDir, "bookings_${from}_to_$to.csv")
-    file.writeText(csv)
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    val send = Intent(Intent.ACTION_SEND).apply {
-        type = "text/csv"
-        putExtra(Intent.EXTRA_STREAM, uri)
-        putExtra(Intent.EXTRA_SUBJECT, "Booking report $from to $to")
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    context.startActivity(Intent.createChooser(send, "Share report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-}
-
 /** Notifications — the bell inbox broadcast from the Haraan team. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -6066,77 +6053,6 @@ private fun PayoutAccountDialog(
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold)
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ReportsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
-    val context = LocalContext.current
-    var fromMs by remember { mutableStateOf(todayMillis() - 30 * DAY_MS) }
-    var toMs by remember { mutableStateOf(todayMillis()) }
-    var busy by remember { mutableStateOf(false) }
-    var msg by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Reports") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-            )
-        },
-    ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("Booking report", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(
-                "Download a CSV of all bookings across your events and venues for a date range.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            DateRow("From", prettyDate(fromMs)) { pickDate(context, fromMs) { fromMs = it } }
-            DateRow("To", prettyDate(toMs)) { pickDate(context, toMs) { toMs = it } }
-            Button(
-                enabled = !busy,
-                onClick = {
-                    busy = true
-                    msg = null
-                    scope.launch {
-                        try {
-                            val csv = api.reportCsv(token, apiDate(fromMs), apiDate(toMs))
-                            shareCsv(context, apiDate(fromMs), apiDate(toMs), csv)
-                            msg = "Report ready — pick where to save or share it."
-                        } catch (e: Exception) {
-                            msg = e.message ?: "Could not build report"
-                        } finally {
-                            busy = false
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (busy) "Preparing…" else "Download / share CSV") }
-            if (msg != null) {
-                Text(msg!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DateRow(label: String, value: String, onClick: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            TextButton(onClick = onClick) { Text(value) }
         }
     }
 }

@@ -16,7 +16,7 @@ use App\Models\Venue;
 class BookingReport
 {
     /** @return array<int, array<string, string>> */
-    public static function rows(int $partnerId, string $from, string $to): array
+    public static function rows(int $partnerId, string $from, string $to, string $by = 'booked'): array
     {
         $eventIds = Event::query()->where('partner_id', $partnerId)->pluck('id');
         $venueIds = Venue::query()->where('partner_id', $partnerId)->pluck('id');
@@ -25,8 +25,9 @@ class BookingReport
             ->where(function ($q) use ($eventIds, $venueIds): void {
                 $q->whereIn('event_id', $eventIds)->orWhereIn('venue_id', $venueIds);
             })
-            ->whereDate('created_at', '>=', $from)
-            ->whereDate('created_at', '<=', $to)
+            // 'booked' = when the booking was made; 'played' = the date it is for (slot_date).
+            ->whereDate($by === 'played' ? 'slot_date' : 'created_at', '>=', $from)
+            ->whereDate($by === 'played' ? 'slot_date' : 'created_at', '<=', $to)
             ->with(['event:id,title', 'venue:id,name', 'user:id,name'])
             ->orderBy('created_at')
             ->get();
@@ -46,6 +47,9 @@ class BookingReport
             'status'     => (string) $b->status,
             'checked_in' => (string) (int) $b->checked_in_count,
             'ticket'     => (string) ($b->ticket_code ?? ''),
+            // Appended, not inserted: spreadsheets built on the older columns keep lining up.
+            'amount_paid'    => number_format((float) $b->amount_paid, 2, '.', ''),
+            'payment_status' => (string) ($b->payment_status ?? ''),
         ])->all();
     }
 
@@ -55,16 +59,17 @@ class BookingReport
         return [
             'Booking ID', 'Booked At', 'Type', 'Item', 'Slot', 'Slot Date',
             'Customer', 'Phone', 'Channel', 'Qty', 'Amount', 'Status', 'Checked In', 'Ticket',
+            'Amount Paid', 'Payment Status',
         ];
     }
 
     /** Render the report as a CSV string. */
-    public static function csv(int $partnerId, string $from, string $to): string
+    public static function csv(int $partnerId, string $from, string $to, string $by = 'booked'): string
     {
         $out = fopen('php://temp', 'r+');
         fputcsv($out, self::headers());
 
-        foreach (self::rows($partnerId, $from, $to) as $row) {
+        foreach (self::rows($partnerId, $from, $to, $by) as $row) {
             fputcsv($out, array_values($row));
         }
 
