@@ -25,6 +25,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -445,6 +456,13 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
     var speed by remember(clip.id) { mutableStateOf(1f) }
     var player by remember(clip.id) { mutableStateOf<android.media.MediaPlayer?>(null) }
 
+    // Where the playhead is while the video runs, read off the player every frame.
+    var playPositionMs by remember(clip.id) { mutableStateOf(0L) }
+    // Non-null while a finger is on the timeline: the position under it, drawn at once,
+    // with the (slower) frame decode catching up behind.
+    var scrubMs by remember(clip.id) { mutableStateOf<Long?>(null) }
+    val view = androidx.compose.ui.platform.LocalView.current
+
     val retriever = remember(clip.url) { android.media.MediaMetadataRetriever() }
     var retrieverReady by remember(clip.url) { mutableStateOf(false) }
     LaunchedEffect(clip.url) {
@@ -474,6 +492,30 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
             framePositionMs = clamped
             frame = bitmap
         }
+    }
+
+    val durationMs: Long = clip.durationMs.takeIf { it > 0 }
+        ?: player?.let { runCatching { it.duration.toLong() }.getOrNull() }?.takeIf { it > 0 }
+        ?: 10_000L
+
+    // The playhead follows the video frame by frame while it plays. Stops in frame mode,
+    // where the position is whatever frame is on screen.
+    LaunchedEffect(player, frame) {
+        val mp = player ?: return@LaunchedEffect
+        if (frame != null) return@LaunchedEffect
+        while (true) {
+            androidx.compose.runtime.withFrameMillis { }
+            runCatching { mp.currentPosition.toLong() }.getOrNull()?.let { playPositionMs = it }
+        }
+    }
+
+    // Scrubbing decodes only the LATEST position asked for. A finger crosses dozens of
+    // positions a second; decoding each in turn would leave the picture lagging far
+    // behind the thumb.
+    LaunchedEffect(retrieverReady) {
+        if (!retrieverReady) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { scrubMs }
+            .collectLatest { ms -> if (ms != null) stepTo(ms) }
     }
 
     // Poll while the queued review runs.
@@ -522,6 +564,33 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                 // was drawn below the bottom edge and could not be reached at all.
                 .verticalScroll(rememberScrollState()),
         ) {
+            // What this footage IS, before the footage: the ball, the camera, and a close
+            // control where every video viewer puts one.
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (clip.overBall.isNotBlank()) "Over ${clip.overBall}" else "Unmarked delivery",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                    Text(clip.roleLabel, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+                }
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .pressable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -593,79 +662,94 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                     }
                 }
             }
-            // TRANSPORT. Step back, step forward, and the speeds a review actually uses.
+            // TRANSPORT. A timeline you can drag, frame steps that click like a dial, and
+            // the speeds a review actually uses.
             if (!playbackFailed) {
+                val shownMs = scrubMs ?: if (frame != null) framePositionMs else playPositionMs
+                ClipTimeline(
+                    positionMs = shownMs,
+                    durationMs = durationMs,
+                    onScrub = { ms ->
+                        // A detent every 100ms of footage: the thumb feels the clip pass
+                        // under it, and can count its way to the moment of impact.
+                        val before = (scrubMs ?: shownMs) / 100
+                        if (ms / 100 != before) {
+                            view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                        scrubMs = ms
+                    },
+                    onScrubEnd = {
+                        scrubMs?.let { framePositionMs = it }
+                        scrubMs = null
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 12.dp),
+                )
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    StepButton("◀") { scope.launch { stepTo(framePositionMs - FRAME_STEP_MS) } }
-                    Spacer(Modifier.width(8.dp))
-                    StepButton("▶") { scope.launch { stepTo(framePositionMs + FRAME_STEP_MS) } }
-                    Spacer(Modifier.width(14.dp))
-
-                    // Leaving frame mode is its own action: tapping a speed while looking
-                    // at a still should resume, not silently change a hidden setting.
-                    if (frame != null) {
-                        TransportChip("RESUME", selected = false) {
-                            frame = null
-                            player?.let { mp ->
-                                runCatching { mp.seekTo(framePositionMs.toInt()); mp.start() }
-                            }
-                        }
-                    } else {
-                        listOf(1f, 0.5f, 0.25f).forEach { option ->
-                            TransportChip(
-                                label = if (option == 1f) "1x" else "${option}x".replace("0.", "."),
-                                selected = speed == option,
-                            ) {
-                                speed = option
-                                player?.let { mp ->
-                                    runCatching {
-                                        mp.playbackParams = mp.playbackParams.setSpeed(option)
-                                        // setPlaybackParams starts a paused player on some
-                                        // devices; keep the intent explicit.
-                                        if (!mp.isPlaying) mp.start()
+                    StepButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous frame") {
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                        val from = if (frame != null) framePositionMs else playPositionMs
+                        scope.launch { stepTo(from - FRAME_STEP_MS) }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    // Play / pause. Pausing lands in frame mode at the exact frame on
+                    // screen, so the steps either side carry on from there.
+                    val playing = frame == null
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .pressable(onClick = {
+                                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                                if (playing) {
+                                    scope.launch { stepTo(playPositionMs) }
+                                } else {
+                                    frame = null
+                                    player?.let { mp ->
+                                        runCatching { mp.seekTo(framePositionMs.toInt()); mp.start() }
                                     }
                                 }
-                            }
-                            Spacer(Modifier.width(6.dp))
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    if (frame != null) {
-                        Text(
-                            "%.2fs".format(framePositionMs / 1000.0),
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 12.sp,
-                            style = TextStyle(fontFeatureSettings = "tnum"),
+                            }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            if (playing) "Pause" else "Play",
+                            tint = Color.Black,
+                            modifier = Modifier.size(24.dp),
                         )
                     }
+                    Spacer(Modifier.width(6.dp))
+                    StepButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next frame") {
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                        val from = if (frame != null) framePositionMs else playPositionMs
+                        scope.launch { stepTo(from + FRAME_STEP_MS) }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    SpeedSelector(
+                        speeds = listOf(1f, 0.5f, 0.25f),
+                        selected = speed,
+                    ) { option ->
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                        speed = option
+                        // A speed means "watch it like this" — from a still, that resumes.
+                        frame = null
+                        player?.let { mp ->
+                            runCatching {
+                                mp.playbackParams = mp.playbackParams.setSpeed(option)
+                                // setPlaybackParams starts a paused player on some
+                                // devices; keep the intent explicit.
+                                if (!mp.isPlaying) {
+                                    mp.seekTo(framePositionMs.toInt())
+                                    mp.start()
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (clip.overBall.isNotBlank()) "Over ${clip.overBall}" else "Unmarked delivery",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(clip.roleLabel, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
-                }
-                Text(
-                    "Close",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.pressable(onClick = onClose).padding(8.dp),
-                )
             }
 
             // THE REVIEW.
@@ -690,10 +774,11 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.1f))
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Accent)
                                 .pressable(
                                     onClick = {
+                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
                                         failure = null
                                         status = ReviewStatus.PENDING
                                         scope.launch {
@@ -713,9 +798,15 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                                         }
                                     },
                                 )
-                                .padding(vertical = 13.dp),
+                                .padding(vertical = 15.dp),
                             horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Icon(
+                                if (status == ReviewStatus.FAILED) Icons.Filled.Refresh else Icons.Filled.CenterFocusStrong,
+                                null, tint = Color.White, modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
                             Text(
                                 if (status == ReviewStatus.FAILED) "Try again" else "Review this ball",
                                 color = Color.White,
@@ -743,35 +834,139 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
 
 /** A frame step. Deliberately large targets — this gets tapped repeatedly. */
 @Composable
-private fun StepButton(glyph: String, onClick: () -> Unit) {
+private fun StepButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .size(42.dp)
+            .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.12f))
             .pressable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(glyph, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
+/**
+ * The speeds as ONE control with a thumb that slides between them — three loose chips
+ * read as three unrelated buttons, when this is a single setting with three positions.
+ */
 @Composable
-private fun TransportChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun SpeedSelector(speeds: List<Float>, selected: Float, onPick: (Float) -> Unit) {
+    val index = speeds.indexOf(selected).coerceAtLeast(0)
+    val slot = 44.dp
+    val thumb by androidx.compose.animation.core.animateDpAsState(
+        targetValue = slot * index,
+        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = 700f),
+        label = "speedThumb",
+    )
     Box(
         Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(
-                if (selected) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.1f),
-            )
-            .pressable(onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 8.dp),
+            .clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = 0.12f))
+            .padding(3.dp),
     ) {
+        Box(
+            Modifier
+                .offset(x = thumb)
+                .size(width = slot, height = 32.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White),
+        )
+        Row {
+            speeds.forEach { option ->
+                val on = option == selected
+                Box(
+                    Modifier
+                        .size(width = slot, height = 32.dp)
+                        .clip(RoundedCornerShape(50))
+                        .pressable(onClick = { onPick(option) }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (option == 1f) "1×" else "${option}×".replace("0.", "."),
+                        color = if (on) Color.Black else Color.White.copy(alpha = 0.75f),
+                        fontSize = 12.5.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The clip's length as a track you can put a finger on. Tap to jump, drag to scrub; the
+ * thumb swells while held so it's clear the clip is under your control, and the time
+ * reads out beside it to the hundredth — the unit an lbw argument is settled in.
+ */
+@Composable
+private fun ClipTimeline(
+    positionMs: Long,
+    durationMs: Long,
+    onScrub: (Long) -> Unit,
+    onScrubEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var held by remember { mutableStateOf(false) }
+    // The gesture outlives recompositions; it must always call the CURRENT callbacks.
+    val scrub = androidx.compose.runtime.rememberUpdatedState(onScrub)
+    val end = androidx.compose.runtime.rememberUpdatedState(onScrubEnd)
+    val thumbScale by androidx.compose.animation.core.animateFloatAsState(
+        if (held) 1.5f else 1f, label = "scrubThumb"
+    )
+    val fraction = (positionMs.toFloat() / durationMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .weight(1f)
+                .height(28.dp)
+                .pointerInput(durationMs) {
+                    fun at(x: Float) = ((x / size.width).coerceIn(0f, 1f) * durationMs).toLong()
+                    // One gesture for tap and drag alike: down jumps, movement scrubs, up
+                    // lets go. Two detectors on one track fight over who owns the finger.
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        held = true
+                        scrub.value(at(down.position.x))
+                        while (true) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            change.consume()
+                            scrub.value(at(change.position.x))
+                        }
+                        held = false
+                        end.value()
+                    }
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Canvas(Modifier.fillMaxWidth().height(28.dp)) {
+                val y = size.height / 2f
+                val h = 4.dp.toPx()
+                drawRoundRect(
+                    Color.White.copy(alpha = 0.18f),
+                    topLeft = Offset(0f, y - h / 2), size = Size(size.width, h),
+                    cornerRadius = CornerRadius(h / 2),
+                )
+                drawRoundRect(
+                    Accent,
+                    topLeft = Offset(0f, y - h / 2), size = Size(size.width * fraction, h),
+                    cornerRadius = CornerRadius(h / 2),
+                )
+                drawCircle(Color.White, radius = 7.dp.toPx() * thumbScale, center = Offset(size.width * fraction, y))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
         Text(
-            label,
-            color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+            "%.2fs".format(positionMs / 1000.0),
+            color = Color.White.copy(alpha = 0.75f),
             fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+            modifier = Modifier.width(46.dp),
+            textAlign = TextAlign.End,
         )
     }
 }

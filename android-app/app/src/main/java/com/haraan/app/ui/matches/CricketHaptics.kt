@@ -64,6 +64,14 @@ enum class Thud {
 
     /** Undo. Two quick LIGHT taps: paired like a six, but nothing like it in weight. */
     UNDO,
+
+    /**
+     * BALL — the bowler is running in. Not a knock at all: one LONGER pulse, a swell
+     * rather than a click. Duration is the one property every motor renders faithfully
+     * (an ERM ignores amplitude but not time), so it stays distinct from every scoring
+     * knock on any phone, and the scorer's thumb learns "that was the go, not a run".
+     */
+    DELIVERY,
 }
 
 private fun vibratorFor(context: Context): Vibrator? = try {
@@ -111,6 +119,9 @@ suspend fun cricketThud(context: Context, kind: Thud) {
                     if (i > 0) delay(70)
                     vibrator.vibrate(light)
                 }
+                Thud.DELIVERY -> vibrator.vibrate(
+                    VibrationEffect.createOneShot(55, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
             }
             return
         }
@@ -125,6 +136,8 @@ suspend fun cricketThud(context: Context, kind: Thud) {
             Thud.SIX -> longArrayOf(0, 55, 70, 90) to intArrayOf(0, 200, 0, 255)
             Thud.WICKET -> longArrayOf(0, 40, 45, 40, 45, 110) to intArrayOf(0, 255, 0, 255, 0, 255)
             Thud.UNDO -> longArrayOf(0, 20, 60, 20) to intArrayOf(0, 90, 0, 90)
+            // A rising swell with no gaps — the run-up, felt as one gathering motion.
+            Thud.DELIVERY -> longArrayOf(0, 22, 22, 22, 18) to intArrayOf(0, 50, 100, 170, 230)
         }
         vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
     } catch (e: kotlinx.coroutines.CancellationException) {

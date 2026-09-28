@@ -4,6 +4,19 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,6 +25,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -874,132 +889,109 @@ private fun ScorerLoaded(
 
         // Hero score.
         //
-        // Left-anchored and DENSE. Centred, it was a lonely number floating in air with an
-        // unlabelled second line under it; a scorer wants the state of the innings in one
-        // glance - what the score is, how far in, how fast, and what is being chased.
+        // Left-anchored and DENSE: what the score is, how far in, how fast, and what is
+        // being chased — as a scoreboard prints it, figures on one line with no boxes. Four
+        // grey pills in a row is the house style of dashboards with nothing to say.
+        val crr = if (state.balls > 0) state.runs * 6.0 / state.balls else 0.0
+        val ballsLeft = (state.maxOvers * 6 - state.balls).coerceAtLeast(0)
+        val target = firstInningsTotal?.let { it + 1 }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "${state.runs}/${state.wickets}", color = ScInk, fontSize = 46.sp,
-                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
-                )
-                Text(
-                    "  ${oversText(state.balls)}", color = ScInk, fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 7.dp),
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
-                )
-                Text(
-                    "/${state.maxOvers} ov", color = ScInk2, fontSize = 14.sp,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
-                )
-
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            // Every figure below is derived from the innings on screen - nothing asserted.
-            val crr = if (state.balls > 0) state.runs * 6.0 / state.balls else 0.0
-            val ballsLeft = (state.maxOvers * 6 - state.balls).coerceAtLeast(0)
-            val target = firstInningsTotal?.let { it + 1 }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StatChip("CRR", String.format(java.util.Locale.US, "%.2f", crr))
-                Spacer(Modifier.width(8.dp))
-                when {
-                    currentInnings >= 2 && target != null && !chaseWon && !inningsOver -> {
-                        val need = (target - state.runs).coerceAtLeast(0)
-                        StatChip("NEED", "$need off $ballsLeft", accent = ScTeal)
-                        Spacer(Modifier.width(8.dp))
-                        val rrr = if (ballsLeft > 0) need * 6.0 / ballsLeft else 0.0
-                        StatChip("RRR", String.format(java.util.Locale.US, "%.2f", rrr), accent = ScTeal)
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    // The number turns over like a scoreboard plate when a run lands, rather
+                    // than silently becoming a different number.
+                    RollingFigure(state.runs, fontSize = 48.sp, color = ScInk)
+                    Text(
+                        "/", color = ScInk.copy(alpha = 0.35f), fontSize = 48.sp,
+                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    )
+                    RollingFigure(state.wickets, fontSize = 48.sp, color = ScInk)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.padding(bottom = 9.dp)) {
+                        Text(
+                            oversText(state.balls), color = ScInk, fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+                        )
+                        Text(
+                            "of ${state.maxOvers} overs", color = ScInk2, fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
-                    else -> StatChip("BALLS LEFT", "$ballsLeft")
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // Every figure is derived from the innings on screen — nothing asserted.
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    when {
+                        currentInnings >= 2 && target != null && !chaseWon && !inningsOver -> {
+                            val need = (target - state.runs).coerceAtLeast(0)
+                            val rrr = if (ballsLeft > 0) need * 6.0 / ballsLeft else 0.0
+                            Figure("NEED", "$need off $ballsLeft", ScTeal)
+                            Figure("REQ", String.format(java.util.Locale.US, "%.2f", rrr), ScTeal)
+                            Figure("CRR", String.format(java.util.Locale.US, "%.2f", crr))
+                        }
+                        else -> {
+                            Figure("CRR", String.format(java.util.Locale.US, "%.2f", crr))
+                            Figure("BALLS LEFT", "$ballsLeft")
+                        }
+                    }
+                }
+
+                val statusLine = when {
+                    chaseWon -> "Target chased · won by ${(allOutWickets - state.wickets).coerceAtLeast(0)} wickets" to ScOlive
+                    canStartSecondInnings -> "1st innings complete · ${state.runs}/${state.wickets}" to ScOlive
+                    inningsOver -> stringResource(R.string.innings_complete_fmt, state.maxOvers) to ScOlive
+                    else -> state.toss to ScInk2
+                }
+                // Toss, ground and start on ONE quiet line. A scorer arriving at a phone left
+                // on the bench confirms the fixture here before touching a key; it needs to be
+                // findable, not to compete with the score.
+                val fixture = listOfNotNull(
+                    statusLine.first.takeIf { it.isNotBlank() && statusLine.second != ScOlive },
+                    state.venue.takeIf { it.isNotBlank() },
+                    state.startLabel.takeIf { it.isNotBlank() }
+                ).joinToString("  ·  ")
+                if (statusLine.second == ScOlive) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(statusLine.first, color = ScOlive, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                }
+                if (fixture.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        fixture, color = ScInk2, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
+                        maxLines = 2, lineHeight = 15.sp,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
                 }
             }
 
-            val statusLine = when {
-                chaseWon -> "Target chased · won by ${(allOutWickets - state.wickets).coerceAtLeast(0)} wickets" to ScOlive
-                canStartSecondInnings -> "1st innings complete · ${state.runs}/${state.wickets}" to ScOlive
-                inningsOver -> stringResource(R.string.innings_complete_fmt, state.maxOvers) to ScOlive
-                else -> state.toss to ScInk2
-            }
-            if (statusLine.first.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    statusLine.first, color = statusLine.second, fontSize = 12.5.sp,
-                    fontWeight = if (statusLine.second == ScOlive) FontWeight.Bold else FontWeight.Medium
-                )
-            }
-
-            // Ground and start time. A scorer arriving at a phone left on the bench needs to
-            // confirm they are on the right fixture before they touch a key; the team name
-            // alone does not settle that when a side plays twice in a day.
-            val fixture = listOfNotNull(
-                state.venue.takeIf { it.isNotBlank() },
-                state.startLabel.takeIf { it.isNotBlank() }
-            ).joinToString("  ·  ")
-            if (fixture.isNotBlank()) {
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    fixture, color = ScInk2, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
-                    maxLines = 2,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            }
-        }
-
             Spacer(Modifier.width(14.dp))
 
-            // The batting side's crest. This corner was empty, and the block it sits in is
-            // the one a scorer screenshots into a team group — a crest makes that crop
-            // identifiably THEIR match rather than a generic scoreline.
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                val side = if (currentInnings >= 2) 3 - state.battedFirst else state.battedFirst
-                val battingLogo = if (side == 2) state.team2Logo else state.team1Logo
-                val battingCode = if (side == 2) state.team2Code else state.team1Code
-                TeamLogo(
-                    team = battingCode,
-                    logoUrl = battingLogo,
-                    modifier = Modifier.size(58.dp)
-                )
-                Spacer(Modifier.height(7.dp))
-                // The maker's mark sits UNDER the team's, which is the correct order of
-                // billing on a scoreboard: whose match it is first, whose tool second.
-                Image(
-                    painter = painterResource(id = R.drawable.haraan_wordmark),
-                    contentDescription = "Haraan",
-                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                    colorFilter = ColorFilter.tint(ScInk2.copy(alpha = 0.7f)),
-                    modifier = Modifier.height(14.dp),
-                )
-            }
+            // The batting side's crest, alone. The Haraan wordmark used to sit under it at
+            // caption size, where it read as the TEAM's name ("Haroon") — a label under a
+            // crest is always taken to be whose crest it is.
+            val side = if (currentInnings >= 2) 3 - state.battedFirst else state.battedFirst
+            TeamLogo(
+                team = if (side == 2) state.team2Code else state.team1Code,
+                logoUrl = if (side == 2) state.team2Logo else state.team1Logo,
+                modifier = Modifier.size(60.dp)
+            )
         }
 
         Box(Modifier.fillMaxWidth().height(1.dp).background(ScLine))
 
-        // Batsmen — tap a name to change that batter (a confirmation is asked first).
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
-            BatterCell(
-                Modifier.weight(1f), state.striker, onStrike = true,
-                onClick = if (activeBattingSquad.isNotEmpty())
-                    { { confirmChangeRole = "striker" } } else null,
-                member = memberFor(activeBattingSquad, state.striker.name)
-            )
-            Box(Modifier.width(1.dp).height(36.dp).background(ScLine))
-            BatterCell(
-                Modifier.weight(1f), state.nonStriker, onStrike = false, alignStart = false,
-                onClick = if (activeBattingSquad.isNotEmpty())
-                    { { confirmChangeRole = "nonStriker" } } else null,
-                member = memberFor(activeBattingSquad, state.nonStriker.name)
-            )
-        }
+        // The crease. Tap a batter to change them (a confirmation is asked first).
+        Crease(
+            striker = state.striker,
+            nonStriker = state.nonStriker,
+            squad = activeBattingSquad,
+            onTap = if (activeBattingSquad.isNotEmpty()) { role -> confirmChangeRole = role } else null,
+        )
 
         // Bowler + this over (panel)
         Column(
@@ -1007,98 +999,132 @@ private fun ScorerLoaded(
                 .fillMaxWidth()
                 .background(ScPanel)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val bowlerMember = memberFor(activeBowlingSquad, state.bowler.name)
-                ScorerFace(state.bowler.name, bowlerMember?.avatar.orEmpty(), ScTeal, size = 52.dp)
+                ScorerFace(state.bowler.name, bowlerMember?.avatar.orEmpty(), ScTeal, size = 42.dp)
                 Spacer(Modifier.width(10.dp))
-                Text(state.bowler.name, color = ScInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                if (bowlerMember?.isVerified == true) {
-                    Spacer(Modifier.width(5.dp))
-                    VerifiedTick()
-                }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${oversText(state.bowler.balls)}-0-${state.bowler.runs}-${state.bowler.wickets}",
-                    color = ScInk2, fontSize = 13.sp
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "THIS OVER", color = ScInk2, fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp
-                )
-                Spacer(Modifier.weight(1f))
-                // Runs conceded off the over so far, read straight off the tokens on screen.
-                // A wide and a no-ball each cost one; a wicket costs nothing.
-                val offOver = state.thisOver.sumOf { t ->
-                    when (t.trim().uppercase()) {
-                        "W" -> 0
-                        "WD", "NB" -> 1
-                        else -> t.trim().toIntOrNull() ?: 0
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "BOWLING", color = ScInk2, fontSize = 9.5.sp,
+                        fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            creaseName(state.bowler.name), color = ScInk, fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold, maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (bowlerMember?.isVerified == true) {
+                            Spacer(Modifier.width(5.dp))
+                            VerifiedTick()
+                        }
                     }
                 }
-                Text(
-                    "$offOver ${if (offOver == 1) "run" else "runs"}",
-                    color = ScInk, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                val recent = state.thisOver.takeLast(6)
-                recent.forEachIndexed { i, token ->
-                    BallBubble(token, newest = i == recent.lastIndex)
+                // The spell as a scorecard prints it. No maidens column: maidens are not
+                // tracked, and a column of permanent zeros is a number made up.
+                val b = state.bowler
+                val econ = if (b.balls > 0) b.runs * 6.0 / b.balls else 0.0
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    SpellFigure("O", oversText(b.balls))
+                    SpellFigure("R", "${b.runs}")
+                    SpellFigure("W", "${b.wickets}", if (b.wickets > 0) ScRed else ScInk)
+                    SpellFigure("ECON", if (b.balls > 0) String.format(java.util.Locale.US, "%.1f", econ) else "–")
                 }
             }
+
+            ThisOver(overNumber = state.balls / 6 + 1, tokens = state.thisOver)
         }
 
         // The keypad TAKES the remaining height rather than being pushed down by a Spacer.
         // That spacer left a fifth of the screen as dead air above a row of thin keys - the
         // surest sign of a layout that has not decided what it is for. The keys now grow
         // into whatever the device gives them.
-        if (canStartSecondInnings) {
-            Spacer(Modifier.weight(1f))
-            StartSecondInningsButton(onClick = ::startSecondInnings)
-        } else if (awaitingBall && !inningsOver && openingBowlerSet) {
-            BallGate(
-                canUndo = history.isNotEmpty(),
-                showReview = cameraLive,
-                onReview = { showReview = true },
-                onBall = {
-                    awaitingBall = false
-                    ballInPlay = true
-                    onDelivery(state, false)
-                },
-                onUndo = { apply("UNDO") },
-                modifier = Modifier.weight(1f),
-            )
-        } else {
-            Column(Modifier.weight(1f)) {
-                if (ballInPlay) {
-                    BallInPlayStrip(onCancel = {
-                        // Dead ball, aborted run-up: nothing was bowled. Viewers' animation
-                        // stops and the scorer is back at BALL.
-                        ballInPlay = false
-                        awaitingBall = true
-                        onDelivery(state, true)
-                    })
+        val bottom = when {
+            canStartSecondInnings -> BottomMode.SECOND_INNINGS
+            awaitingBall && !inningsOver && openingBowlerSet -> BottomMode.GATE
+            else -> BottomMode.KEYPAD
+        }
+        // The gate and the keypad are one surface changing state, not two screens swapped.
+        // BALL hands over by the keypad rising into place (the result is what's next), and
+        // a scored ball hands back by the keypad sinking away under the next BALL. Quick —
+        // ~200ms — because this happens every delivery and must never make a scorer wait.
+        AnimatedContent(
+            targetState = bottom,
+            transitionSpec = {
+                if (targetState == BottomMode.KEYPAD) {
+                    (slideInVertically(tween(220, easing = FastOutSlowInEasing)) { it / 4 } + fadeIn(tween(160)))
+                        .togetherWith(fadeOut(tween(110)) + scaleOut(tween(160), targetScale = 0.97f))
+                } else {
+                    (fadeIn(tween(200, delayMillis = 40)) + scaleIn(tween(240, easing = FastOutSlowInEasing), initialScale = 0.96f))
+                        .togetherWith(slideOutVertically(tween(200)) { it / 5 } + fadeOut(tween(140)))
                 }
-                Keypad(onKey = ::apply, modifier = Modifier.weight(1f))
+            },
+            label = "scorerBottom",
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) { mode ->
+            when (mode) {
+                BottomMode.SECOND_INNINGS -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
+                    StartSecondInningsButton(onClick = ::startSecondInnings)
+                }
+                BottomMode.GATE -> BallGate(
+                    nextBall = "${state.balls / 6}.${state.balls % 6 + 1}",
+                    bowler = creaseName(state.bowler.name),
+                    striker = creaseName(state.striker.name),
+                    lastBall = state.thisOver.lastOrNull(),
+                    canUndo = history.isNotEmpty(),
+                    showReview = cameraLive,
+                    onReview = { showReview = true },
+                    onBall = {
+                        awaitingBall = false
+                        ballInPlay = true
+                        onDelivery(state, false)
+                    },
+                    onUndo = { apply("UNDO") },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                BottomMode.KEYPAD -> Column(Modifier.fillMaxSize()) {
+                    if (ballInPlay) {
+                        BallInPlayStrip(
+                            bowler = creaseName(state.bowler.name),
+                            striker = creaseName(state.striker.name),
+                            onCancel = {
+                                // Dead ball, aborted run-up: nothing was bowled. Viewers'
+                                // animation stops and the scorer is back at BALL.
+                                ballInPlay = false
+                                awaitingBall = true
+                                onDelivery(state, true)
+                            },
+                        )
+                    }
+                    Keypad(onKey = ::apply, modifier = Modifier.weight(1f))
+                }
             }
         }
     }
 }
+
+private enum class BottomMode { GATE, KEYPAD, SECOND_INNINGS }
 
 /**
  * Between balls: BALL (the bowler is running in — viewers see the delivery) or UNDO the
  * ball just scored. BALL is the big target because it is tapped every delivery; UNDO is
  * the rare correction and sits beside it, smaller, where a thumb reaching for BALL won't
  * land on it.
+ *
+ * It names the actual contest — "Pillai to Sandeep" at 3.5 — because that is what the
+ * scorer is about to watch, and a generic "bowler running in" could be any ball of any
+ * match. With nothing to undo and no camera, the side column is gone rather than greyed:
+ * a dead slab a quarter of the screen wide is the loudest thing on a quiet screen.
  */
 @Composable
 private fun BallGate(
+    nextBall: String,
+    bowler: String,
+    striker: String,
+    lastBall: String?,
     canUndo: Boolean,
     onBall: () -> Unit,
     onUndo: () -> Unit,
@@ -1114,167 +1140,364 @@ private fun BallGate(
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color(0xFFF8FAFC), ScKey)))
             .navigationBarsPadding()
-            .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
+            .padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            "NEXT DELIVERY", color = ScInk2, fontSize = 10.sp,
-            fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "NEXT DELIVERY", color = ScInk2, fontSize = 10.sp,
+                fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                nextBall, color = ScInk, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+            )
+        }
         Row(
             Modifier.fillMaxWidth().weight(1f),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            GateButton(
-                label = "BALL",
-                sub = "Bowler running in",
-                solid = true,
-                modifier = Modifier.weight(2.2f),
+            BallKey(
+                matchup = if (bowler.isNotBlank() && striker.isNotBlank()) "$bowler to $striker" else "Tap as the bowler runs in",
+                modifier = Modifier.weight(2.2f).fillMaxHeight(),
             ) {
-                scope.launch { cricketThud(context, Thud.RUN) }
+                scope.launch { cricketThud(context, Thud.DELIVERY) }
                 onBall()
             }
             // With a camera paired, REVIEW and UNDO share the right column — both are about
             // the ball just gone, and BALL keeps its full-height target for the next one.
-            Column(
-                Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (showReview) {
-                    GateButton(
-                        label = "REVIEW",
-                        sub = "Watch last ball",
-                        solid = false,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    ) {
-                        scope.launch { cricketThud(context, Thud.TICK) }
-                        onReview()
-                    }
-                }
-                GateButton(
-                    label = "UNDO",
-                    sub = "Last ball",
-                    solid = false,
-                    enabled = canUndo,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+            if (showReview || canUndo) {
+                Column(
+                    Modifier.weight(1f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    scope.launch { cricketThud(context, Thud.UNDO) }
-                    onUndo()
+                    if (showReview) {
+                        SideKey(
+                            label = "REVIEW",
+                            sub = "Watch last ball",
+                            icon = Icons.Filled.PlayArrow,
+                            live = true,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        ) {
+                            scope.launch { cricketThud(context, Thud.TICK) }
+                            onReview()
+                        }
+                    }
+                    if (canUndo) {
+                        SideKey(
+                            label = "UNDO",
+                            // The ball it will take back, so nobody undoes the wrong one.
+                            sub = lastBall?.let { "Last: ${ballWord(it)}" } ?: "Last ball",
+                            icon = Icons.AutoMirrored.Filled.Undo,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        ) {
+                            scope.launch { cricketThud(context, Thud.UNDO) }
+                            onUndo()
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/** "4" → "four", "W" → "wicket" — how a scorer would say the ball out loud. */
+private fun ballWord(token: String): String = when (token.trim().uppercase()) {
+    "0", "•" -> "dot"
+    "4" -> "four"
+    "6" -> "six"
+    "W" -> "wicket"
+    "WD" -> "wide"
+    "NB" -> "no-ball"
+    else -> token.trim().lowercase()
+}
+
+/**
+ * BALL, built like a physical key: a face sitting on a darker base, which it travels down
+ * into under the thumb and springs back out of. A flat colour that only shrinks reads as a
+ * picture of a button; one with travel reads as something you pressed.
+ *
+ * The ball on it turns slowly while waiting — the only motion on the gate, so the eye knows
+ * where the next tap goes — and on the tap it is released: it shoots up and away as the
+ * keypad rises, which is the delivery leaving the bowler's hand.
+ */
 @Composable
-private fun GateButton(
+private fun BallKey(matchup: String, modifier: Modifier, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    // One tap per gate. The key is leaving with the transition; a second tap during those
+    // 200ms must not send a second BALL.
+    var released by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val travel by animateDpAsState(
+        targetValue = if (pressed || released) 5.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 1400f),
+        label = "ballTravel"
+    )
+    val spinT = androidx.compose.animation.core.rememberInfiniteTransition(label = "ballIdle")
+    val spin by spinT.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            tween(5200, easing = androidx.compose.animation.core.LinearEasing)
+        ),
+        label = "ballSpin"
+    )
+    val flight = remember { androidx.compose.animation.core.Animatable(0f) }
+
+    Box(
+        modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF1E3A8A))
+            .clickable(interactionSource = interaction, indication = null, enabled = !released) {
+                released = true
+                // The feel and the signal go at once; the ball's flight is only the picture
+                // of it and never holds the scorer up.
+                onClick()
+                scope.launch {
+                    flight.animateTo(1f, tween(260, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+                }
+            },
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(bottom = 5.dp)
+                .offset(y = travel)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.verticalGradient(
+                        if (pressed) listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
+                        else listOf(Color(0xFF3B82F6), ScTeal)
+                    )
+                )
+                // A hairline of light along the top edge — the face catching the sky.
+                .border(
+                    1.dp,
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.38f), Color.Transparent)),
+                    RoundedCornerShape(20.dp)
+                ),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CricketBall(
+                spin = spin,
+                modifier = Modifier
+                    .size(46.dp)
+                    .graphicsLayer {
+                        val t = flight.value
+                        translationY = -t * size.height * 2.4f
+                        scaleX = 1f - t * 0.45f
+                        scaleY = 1f - t * 0.45f
+                        alpha = 1f - t
+                    }
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "BALL", color = Color.White,
+                fontSize = 30.sp, fontWeight = FontWeight.Normal, letterSpacing = 4.sp,
+                fontFamily = com.haraan.app.theme.ArchivoDisplay,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                matchup, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp,
+                fontWeight = FontWeight.Medium, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A white ball with a real seam: two stitched lines curving across it, turning with
+ * [spin]. Drawn, not an emoji — it's the one object on the screen that IS cricket.
+ */
+@Composable
+private fun CricketBall(spin: Float, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier) {
+        val r = size.minDimension / 2f
+        // Shadow first, so the ball sits in the key rather than being stuck on it.
+        drawCircle(Color.Black.copy(alpha = 0.2f), radius = r, center = center.copy(y = center.y + r * 0.12f))
+        drawCircle(
+            Brush.radialGradient(
+                listOf(Color.White, Color(0xFFD6E0F0)),
+                center = center.copy(x = center.x - r * 0.35f, y = center.y - r * 0.35f),
+                radius = r * 1.6f,
+            ),
+            radius = r,
+        )
+        rotate(spin, pivot = center) {
+            val stitch = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = r * 0.08f,
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(r * 0.13f, r * 0.09f)),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+            // Two parallel arcs a little off-centre: a seam seen at an angle.
+            for (dx in listOf(-0.12f, 0.12f)) {
+                drawArc(
+                    color = ScTeal,
+                    startAngle = -58f, sweepAngle = 116f, useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - r * 2.55f + dx * r, center.y - r * 1.15f),
+                    size = androidx.compose.ui.geometry.Size(r * 2.3f, r * 2.3f),
+                    style = stitch,
+                )
+            }
+        }
+    }
+}
+
+/** REVIEW / UNDO: tonal, with a glyph, and giving under the thumb like the keypad keys. */
+@Composable
+private fun SideKey(
     label: String,
     sub: String,
-    solid: Boolean,
+    icon: ImageVector,
     modifier: Modifier,
-    enabled: Boolean = true,
+    live: Boolean = false,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.96f else 1f,
+        targetValue = if (pressed) 0.95f else 1f,
         animationSpec = spring(dampingRatio = 0.42f, stiffness = 900f),
-        label = "gateScale"
+        label = "sideScale"
     )
     val bg by animateColorAsState(
-        targetValue = when {
-            !enabled -> Color(0xFFE9EEF5)
-            solid && pressed -> Color(0xFF1D4ED8)
-            solid -> ScTeal
-            pressed -> ScTeal.copy(alpha = 0.32f)
-            else -> ScTeal.copy(alpha = 0.14f)
-        },
-        label = "gateBg"
+        targetValue = if (pressed) ScTeal.copy(alpha = 0.16f) else ScPanel,
+        label = "sideBg"
     )
-    val ink = when {
-        !enabled -> ScInk2.copy(alpha = 0.5f)
-        solid -> Color.White
-        else -> ScTeal
-    }
-    Column(
+    Box(
         modifier
-            .fillMaxHeight()
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(16.dp))
             .background(bg)
-            .border(
-                if (solid || !enabled) 0.dp else 1.5.dp,
-                if (solid || !enabled) Color.Transparent else ScTeal.copy(alpha = 0.75f),
-                RoundedCornerShape(16.dp)
-            )
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .border(1.dp, if (pressed) ScTeal.copy(alpha = 0.6f) else Color(0xFFCBD5E1), RoundedCornerShape(16.dp))
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
     ) {
-        if (solid) {
-            // A drawn ball, not an emoji: seam and all, in the key's own ink.
-            androidx.compose.foundation.Canvas(Modifier.size(34.dp)) {
-                drawCircle(color = ink)
-                val seam = androidx.compose.ui.graphics.drawscope.Stroke(width = size.minDimension * 0.06f)
-                drawArc(
-                    color = ScTeal, startAngle = -60f, sweepAngle = 120f, useCenter = false,
-                    topLeft = androidx.compose.ui.geometry.Offset(-size.width * 0.35f, 0f),
-                    size = size, style = seam
-                )
-                drawArc(
-                    color = ScTeal, startAngle = 120f, sweepAngle = 120f, useCenter = false,
-                    topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.35f, 0f),
-                    size = size, style = seam
-                )
+        if (live) {
+            // The camera is actually checking in — green is "live", as everywhere else.
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(top = 9.dp, end = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF16A34A)))
+                Spacer(Modifier.width(4.dp))
+                Text("CAM", color = ScInk2, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
             }
-            Spacer(Modifier.height(10.dp))
         }
-        Text(
-            label, color = ink,
-            fontSize = if (solid) 26.sp else 16.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = if (solid) 3.sp else 1.sp,
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            sub, color = ink.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium,
-        )
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 6.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).background(ScTeal.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = ScTeal, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(label, color = ScInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(1.dp))
+            Text(
+                sub, color = ScInk2, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
-/** Shown over the keypad while a ball is in play: what viewers are seeing, and a way out. */
+/**
+ * Over the keypad while a ball is in play: who is bowling to whom, how long viewers have
+ * been watching the run-up, and a way out. The clock matters — a ball "in play" for 40s
+ * means the scorer forgot to enter it, and viewers are staring at a looping delivery.
+ */
 @Composable
-private fun BallInPlayStrip(onCancel: () -> Unit) {
+private fun BallInPlayStrip(bowler: String, striker: String, onCancel: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "inPlay")
-    val dot by pulse.animateFloat(
-        initialValue = 0.35f, targetValue = 1f,
+    val ring by pulse.animateFloat(
+        initialValue = 0f, targetValue = 1f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            androidx.compose.animation.core.tween(700),
-            androidx.compose.animation.core.RepeatMode.Reverse
+            tween(1100, easing = androidx.compose.animation.core.LinearOutSlowInEasing)
         ),
-        label = "dot"
+        label = "ring"
+    )
+    var seconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000)
+            seconds++
+        }
+    }
+    val stale = seconds >= 30
+    val bg by animateColorAsState(
+        if (stale) Color(0xFFFFF7ED) else ScTeal.copy(alpha = 0.07f), label = "inPlayBg"
     )
     Row(
         Modifier
             .fillMaxWidth()
-            .background(ScTeal.copy(alpha = 0.08f))
-            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            .background(bg)
+            .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(8.dp).graphicsLayer { alpha = dot }.clip(CircleShape).background(ScTeal))
+        // A dot sending out a ring, like a radar blip: live, without blinking at the scorer.
+        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(18.dp)
+                    .graphicsLayer {
+                        scaleX = 0.35f + ring * 0.65f
+                        scaleY = 0.35f + ring * 0.65f
+                        alpha = 1f - ring
+                    }
+                    .clip(CircleShape)
+                    .background(ScTeal.copy(alpha = 0.5f))
+            )
+            Box(Modifier.size(7.dp).clip(CircleShape).background(ScTeal))
+        }
         Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "BALL IN PLAY", color = ScTeal, fontSize = 10.5.sp,
+                    fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (seconds > 59) "1:00+" else "0:%02d".format(seconds),
+                    color = if (stale) ScSix else ScInk2, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
+            Text(
+                when {
+                    stale -> "Viewers are waiting — enter the result"
+                    bowler.isNotBlank() && striker.isNotBlank() -> "$bowler to $striker"
+                    else -> "Tap the result"
+                },
+                color = ScInk, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
         Text(
-            "Ball in play · tap the result", color = ScTeal, fontSize = 12.sp,
-            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
-        )
-        Text(
-            "Dead ball", color = ScInk2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            "Dead ball", color = ScInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onCancel)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(50))
+                .background(ScPanel)
+                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(50))
+                .clickable {
+                    scope.launch { cricketThud(context, Thud.TICK) }
+                    onCancel()
+                }
+                .padding(horizontal = 12.dp, vertical = 8.dp)
         )
     }
 }
@@ -1306,84 +1529,317 @@ private fun StartSecondInningsButton(onClick: () -> Unit) {
 }
 
 /**
- * One derived figure. A label and its value on a single line inside a quiet pill.
- *
- * Deliberately NOT a boxed "stat card" with a big number stacked over a caption - four of
- * those in a row is the house style of dashboards that have nothing to say, and it would
- * cost the vertical space the keypad now uses.
+ * A number that turns over like a scoreboard plate: the old value slides out, the new one
+ * in, upward when it grows and downward on an undo. The count going UP is something you
+ * see happen, not a digit that is quietly different next time you look.
  */
 @Composable
-private fun StatChip(label: String, value: String, accent: Color = ScInk) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(7.dp))
-            .background(if (accent == ScInk) Color(0xFFE8EDF4) else accent.copy(alpha = 0.12f))
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = ScInk2, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
-        Spacer(Modifier.width(6.dp))
+private fun RollingFigure(value: Int, fontSize: androidx.compose.ui.unit.TextUnit, color: Color) {
+    AnimatedContent(
+        targetState = value,
+        transitionSpec = {
+            val up = targetState > initialState
+            (slideInVertically(spring(dampingRatio = 0.8f, stiffness = 500f)) { if (up) it else -it } + fadeIn(tween(120)))
+                .togetherWith(slideOutVertically(tween(160)) { if (up) -it / 2 else it / 2 } + fadeOut(tween(100)))
+                .using(androidx.compose.animation.SizeTransform(clip = true))
+        },
+        label = "rollingFigure",
+    ) { v ->
         Text(
-            value, color = accent, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+            "$v", color = color, fontSize = fontSize,
+            fontFamily = com.haraan.app.theme.ArchivoDisplay,
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
         )
     }
 }
 
+/** A labelled figure on the score line: small caps label, the value in ink. No box. */
 @Composable
-private fun BatterCell(
-    modifier: Modifier,
+private fun Figure(label: String, value: String, accent: Color = ScInk) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = ScInk2, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            value, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+        )
+    }
+}
+
+/** One column of the bowler's spell: the scorecard's own heading over its value. */
+@Composable
+private fun SpellFigure(label: String, value: String, color: Color = ScInk) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = ScInk2, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            value, color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+        )
+    }
+}
+
+/**
+ * The two batters, and which of them is on strike.
+ *
+ * The batters stay where they stand. The old layout always drew the striker on the left,
+ * so every single swapped the two players across the screen — the eye had to re-find
+ * both names after every odd run. Now each keeps their side (a new batter takes the
+ * departed one's place) and the STRIKE moves: a lit plate slides across to whoever faces
+ * next. Crossing for a run is the one thing on this row that should move, so it does.
+ */
+@Composable
+private fun Crease(
+    striker: ScorerBatter,
+    nonStriker: ScorerBatter,
+    squad: List<SquadMember>,
+    onTap: ((role: String) -> Unit)?,
+) {
+    // Which name stands on which side. Plain memory, not state: it is a pure function of
+    // the names seen so far, recomputed deterministically on every composition.
+    val sides = remember { arrayOf(striker.name, nonStriker.name) }
+    val names = listOf(striker.name, nonStriker.name)
+    when {
+        striker.name == nonStriker.name -> { sides[0] = striker.name; sides[1] = nonStriker.name }
+        sides[0] in names && sides[1] in names && sides[0] != sides[1] -> Unit
+        sides[0] in names -> sides[1] = names.first { it != sides[0] }
+        sides[1] in names -> sides[0] = names.first { it != sides[1] }
+        else -> { sides[0] = striker.name; sides[1] = nonStriker.name }
+    }
+    val strikerLeft = striker.name == sides[0]
+    val left = if (strikerLeft) striker else nonStriker
+    val right = if (strikerLeft) nonStriker else striker
+
+    val plate by animateFloatAsState(
+        targetValue = if (strikerLeft) 0f else 1f,
+        animationSpec = spring(dampingRatio = 0.74f, stiffness = 420f),
+        label = "strikePlate"
+    )
+
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 10.dp)
+    ) {
+        val half = maxWidth / 2
+        // The lit plate under the striker.
+        Box(
+            Modifier
+                .offset(x = half * plate)
+                .width(half)
+                .height(IntrinsicPlateHeight)
+                .padding(horizontal = 2.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(ScTeal.copy(alpha = 0.07f))
+                .border(1.dp, ScTeal.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+        )
+        Row(Modifier.fillMaxWidth().height(IntrinsicPlateHeight), verticalAlignment = Alignment.CenterVertically) {
+            CreaseBatter(
+                b = left, onStrike = strikerLeft, mirrored = false,
+                member = memberFor(squad, left.name),
+                onClick = onTap?.let { tap -> { tap(if (strikerLeft) "striker" else "nonStriker") } },
+                modifier = Modifier.weight(1f),
+            )
+            CreaseBatter(
+                b = right, onStrike = !strikerLeft, mirrored = true,
+                member = memberFor(squad, right.name),
+                onClick = onTap?.let { tap -> { tap(if (strikerLeft) "nonStriker" else "striker") } },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+private val IntrinsicPlateHeight = 84.dp
+
+@Composable
+private fun CreaseBatter(
     b: ScorerBatter,
     onStrike: Boolean,
-    alignStart: Boolean = true,
-    onClick: (() -> Unit)? = null,
-    member: SquadMember? = null,
+    mirrored: Boolean,
+    member: SquadMember?,
+    onClick: (() -> Unit)?,
+    modifier: Modifier,
 ) {
-    val accent = if (onStrike) ScTeal else ScInk2
-    Row(
-        modifier = modifier
-            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        horizontalArrangement = if (alignStart) Arrangement.Start else Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // The player, not a bat glyph. Both ends of the crease used to carry the identical
-        // icon, so telling them apart meant reading the names.
-        ScorerFace(b.name, member?.avatar.orEmpty(), accent, size = 58.dp)
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.97f else 1f, spring(dampingRatio = 0.5f, stiffness = 900f), label = "batterPress"
+    )
+    val nameColor by animateColorAsState(if (onStrike) ScTeal else ScInk, label = "batterName")
+
+    val face: @Composable () -> Unit = {
+        ScorerFace(b.name, member?.avatar.orEmpty(), if (onStrike) ScTeal else ScInk2, size = 46.dp)
+    }
+    val text: @Composable () -> Unit = {
+        Column(horizontalAlignment = if (mirrored) Alignment.End else Alignment.Start) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (onStrike && mirrored) BatGlyph()
                 Text(
-                    creaseName(b.name),
-                    color = if (onStrike) ScTeal else ScInk,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
+                    creaseName(b.name), color = nameColor, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 104.dp)
                 )
-                if (member?.isVerified == true) VerifiedTick()
-                // A batter who hasn't faced a ball can be swapped — show a tap affordance.
-                if (onClick != null) Icon(Icons.Outlined.Edit, "Change batter", tint = ScInk2, modifier = Modifier.size(13.dp))
+                if (member?.isVerified == true) VerifiedTick(12.dp)
+                if (onStrike && !mirrored) BatGlyph()
             }
-            Spacer(Modifier.height(2.dp))
-            Text("${b.runs}(${b.balls})", color = ScInk2, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.Bottom) {
+                RollingFigure(b.runs, fontSize = 22.sp, color = ScInk)
+                Text(
+                    " (${b.balls})", color = ScInk2, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(bottom = 3.dp),
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
+            Text(
+                if (b.balls > 0) "SR " + String.format(java.util.Locale.US, "%.1f", b.runs * 100.0 / b.balls) else "Yet to face",
+                color = ScInk2, fontSize = 10.5.sp, fontWeight = FontWeight.Medium,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+            )
         }
+    }
+
+    Row(
+        modifier
+            .fillMaxHeight()
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(16.dp))
+            .then(
+                if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
+                else Modifier
+            )
+            .padding(horizontal = 10.dp),
+        horizontalArrangement = if (mirrored) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (mirrored) { text(); Spacer(Modifier.width(10.dp)); face() }
+        else { face(); Spacer(Modifier.width(10.dp)); text() }
+    }
+}
+
+/**
+ * A small cricket bat beside the striker's name, leaning as a bat rests against a
+ * batter's pad: a long blade with a square shoulder and a thin handle. Drawn upright it
+ * read as a bottle; the lean and the proportions are what make it a bat.
+ */
+@Composable
+private fun BatGlyph() {
+    androidx.compose.foundation.Canvas(Modifier.size(12.dp, 16.dp)) {
+        val h = size.height
+        val bladeW = h * 0.26f
+        rotate(28f, pivot = center) {
+            val x = center.x - bladeW / 2f
+            // Handle: thin, rounded, the top third.
+            drawRoundRect(
+                ScTeal,
+                topLeft = androidx.compose.ui.geometry.Offset(center.x - bladeW * 0.18f, 0f),
+                size = androidx.compose.ui.geometry.Size(bladeW * 0.36f, h * 0.36f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(bladeW * 0.18f),
+            )
+            // Blade: square shoulders, rounded toe.
+            drawRoundRect(
+                ScTeal,
+                topLeft = androidx.compose.ui.geometry.Offset(x, h * 0.33f),
+                size = androidx.compose.ui.geometry.Size(bladeW, h * 0.67f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(bladeW * 0.22f),
+            )
+        }
+    }
+}
+
+/**
+ * The over as six places. Every legal ball fills the next place; a wide or no-ball sits
+ * between them without taking one, because it has to be bowled again — which is exactly
+ * how an over is counted, and why the old "last six tokens" strip dropped real balls off
+ * the front whenever the bowler sprayed a wide. The empty places are the balls still to
+ * come, so the scorer sees at a glance that this is ball four, not "some balls".
+ */
+@Composable
+private fun ThisOver(overNumber: Int, tokens: List<String>) {
+    val legal = tokens.count { !isIllegal(it) }
+    val runs = tokens.sumOf { t ->
+        when (t.trim().uppercase()) {
+            "W" -> 0
+            "WD", "NB" -> 1
+            else -> t.trim().toIntOrNull() ?: 0
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "OVER $overNumber", color = ScInk2, fontSize = 10.sp,
+                fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "$runs ${if (runs == 1) "run" else "runs"}",
+                color = ScInk, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+            )
+        }
+        val scroll = rememberScrollState()
+        // A long over (wides) runs past the edge; keep the ball just bowled in view.
+        LaunchedEffect(tokens.size) { scroll.animateScrollTo(scroll.maxValue) }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(scroll),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tokens.forEachIndexed { i, token ->
+                BallBubble(token, newest = i == tokens.lastIndex)
+            }
+            repeat((6 - legal).coerceAtLeast(0)) { EmptyBall() }
+        }
+    }
+}
+
+private fun isIllegal(token: String) = token.trim().uppercase().let { it == "WD" || it == "NB" }
+
+/** A ball still to be bowled: a dashed ring, the shape of what will fill it. */
+@Composable
+private fun EmptyBall() {
+    androidx.compose.foundation.Canvas(Modifier.size(38.dp)) {
+        drawCircle(
+            Color(0xFFCBD5E1),
+            radius = size.minDimension / 2f - 1.dp.toPx(),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = 1.5.dp.toPx(),
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
+            )
+        )
     }
 }
 
 @Composable
 private fun BallBubble(token: String, newest: Boolean = false) {
-    val (bg, fg) = when (token) {
-        "6" -> ScSix to ScInk
-        "4" -> ScFour to Color.White
-        "W" -> ScRed to Color.White
-        "0", "•" -> ScLine to ScInk2
-        else -> Color.White to ScInk
+    val t = token.trim().uppercase()
+    // Scorecard notation, lower-case for extras so they never shout louder than runs.
+    val label = when (t) {
+        "0", "•" -> "•"
+        "WD" -> "wd"
+        "NB" -> "nb"
+        "B", "BYE" -> "b"
+        "LB" -> "lb"
+        else -> token.trim()
+    }
+    // Every kind has a surface. Runs used to be white on a white panel — text floating in
+    // space, with nothing to say "this is a ball".
+    val bg: Color
+    val fg: Color
+    var ring: Color = Color.Transparent
+    when (t) {
+        "6" -> { bg = ScSix; fg = Color.White }
+        "4" -> { bg = ScFour; fg = Color.White }
+        "W" -> { bg = ScRed; fg = Color.White }
+        "0", "•" -> { bg = Color(0xFFEEF2F7); fg = ScInk2 }
+        "WD", "NB" -> { bg = ScSix.copy(alpha = 0.12f); fg = Color(0xFFB45309); ring = ScSix.copy(alpha = 0.45f) }
+        "B", "BYE", "LB" -> { bg = Color(0xFFEEF2F7); fg = ScInk2; ring = Color(0xFFCBD5E1) }
+        else -> { bg = ScPanel; fg = ScInk; ring = Color(0xFF94A3B8) }
     }
 
     // The ball just entered lands rather than appears: it punches in slightly oversized and
-    // settles. It is the on-screen half of the key's knock - the scorer sees the delivery
-    // reach the strip without having to re-read the whole over.
+    // settles — the on-screen half of the key's knock.
     val scale = remember(token, newest) { androidx.compose.animation.core.Animatable(if (newest) 0.55f else 1f) }
     LaunchedEffect(newest, token) {
         if (newest) scale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 700f))
@@ -1391,14 +1847,17 @@ private fun BallBubble(token: String, newest: Boolean = false) {
 
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(38.dp)
             .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
             .clip(CircleShape)
-            .background(bg),
+            .background(bg)
+            .border(1.5.dp, ring, CircleShape),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            token, color = fg, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+            label, color = fg,
+            fontSize = if (label.length > 1) 12.sp else 15.sp,
+            fontWeight = FontWeight.Bold,
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
         )
     }
@@ -1612,16 +2071,14 @@ private fun ScorerFace(name: String, photoUrl: String, accent: Color, size: Dp =
             .border(if (size >= 48.dp) 2.dp else 1.5.dp, accent.copy(alpha = 0.55f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
+        Text(
+            scorerInitials(name), color = accent,
+            fontSize = (size.value * 0.34f).sp, fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp,
+        )
         if (photoUrl.isNotBlank()) {
             coil.compose.AsyncImage(
                 model = photoUrl,
-                contentDescription = name,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().clip(CircleShape),
-            )
-        } else {
-            Image(
-                painter = painterResource(id = R.drawable.ic_default_player_avatar),
                 contentDescription = name,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
