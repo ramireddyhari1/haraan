@@ -360,6 +360,28 @@ data class GroundInsights(
     val bullets: List<String> = emptyList(),
 )
 
+/** A private match as its share code shows it to someone about to join it to play. */
+data class CodeMatchPreview(
+  val matchId: String,
+  val sport: String,
+  val home: String,
+  val away: String,
+  val homeCount: Int,
+  val awayCount: Int,
+  val venue: String,
+  val finished: Boolean,
+  val isOwner: Boolean,
+  /** "home" / "away" when the viewer is already in a squad, else null. */
+  val mySide: String?,
+)
+
+sealed interface CodeJoinResult {
+  data class Ok(val match: CodeMatchPreview) : CodeJoinResult
+  data object NeedsLogin : CodeJoinResult
+  data object NeedsProfile : CodeJoinResult
+  data class Failed(val message: String) : CodeJoinResult
+}
+
 class MatchRepository(
   private val baseUrl: String = ApiConfig.BASE_URL,
 ) {
@@ -703,6 +725,63 @@ class MatchRepository(
       if (message.isNotBlank()) body.put("message", message)
       postJson("/api/matches/$matchId/join", body, token).code in 200..299
     } catch (_: Exception) { false }
+  }
+
+  /** GET /api/matches/join-by-code/{code} — what a private match's code opens, to pick a side. */
+  suspend fun previewPrivateMatch(token: String, code: String): CodeJoinResult = withContext(Dispatchers.IO) {
+    try {
+      val clean = java.net.URLEncoder.encode(code.trim().uppercase(), "UTF-8")
+      val conn = (URL("${baseUrl.trimEnd('/')}/api/matches/join-by-code/$clean").openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 15000; readTimeout = 15000
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      val code2 = conn.responseCode
+      val body = readBody(conn)
+      conn.disconnect()
+      codeJoinResult(code2, body)
+    } catch (_: Exception) {
+      CodeJoinResult.Failed("Couldn't reach Haraan. Check your connection and try again.")
+    }
+  }
+
+  /** POST /api/matches/join-by-code — put yourself into a private match's squad to play. */
+  suspend fun joinPrivateMatch(token: String, code: String, side: String): CodeJoinResult = withContext(Dispatchers.IO) {
+    try {
+      val body = JSONObject().put("code", code.trim().uppercase()).put("side", side)
+      val res = postJson("/api/matches/join-by-code", body, token)
+      codeJoinResult(res.code, res.body)
+    } catch (_: Exception) {
+      CodeJoinResult.Failed("Couldn't reach Haraan. Check your connection and try again.")
+    }
+  }
+
+  private fun codeJoinResult(status: Int, body: String): CodeJoinResult {
+    if (status == 401) return CodeJoinResult.NeedsLogin
+    val json = runCatching { JSONObject(body) }.getOrNull()
+    if (status == 403 && json?.optString("code") == "profile_incomplete") return CodeJoinResult.NeedsProfile
+    if (status !in 200..299 || json == null) {
+      return CodeJoinResult.Failed(
+        json?.optString("error")?.takeIf { it.isNotBlank() }
+          ?: if (status == 429) "Too many tries — wait a minute and try again." else "Couldn't open that match.",
+      )
+    }
+    val d = json.optJSONObject("data") ?: return CodeJoinResult.Failed("Couldn't open that match.")
+    return CodeJoinResult.Ok(
+      CodeMatchPreview(
+        matchId = d.optString("matchId"),
+        sport = d.optString("sport", "cricket"),
+        home = d.optString("home"),
+        away = d.optString("away"),
+        homeCount = d.optInt("homeCount"),
+        awayCount = d.optInt("awayCount"),
+        venue = d.optString("venue"),
+        finished = d.optBoolean("finished"),
+        isOwner = d.optBoolean("isOwner"),
+        mySide = d.optString("mySide").takeIf { !d.isNull("mySide") && it.isNotBlank() },
+      ),
+    )
   }
 
   /** DELETE /api/matches/{id}/join — withdraw the viewer's own pending request. */

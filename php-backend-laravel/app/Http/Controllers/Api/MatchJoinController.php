@@ -267,6 +267,153 @@ final class MatchJoinController extends Controller
         return response()->json(['message' => 'Accepted', 'data' => $req->fresh()]);
     }
 
+    /**
+     * What a private match's share code opens, before the player picks a side.
+     * GET /api/matches/join-by-code/{code}
+     *
+     * The code is the invitation — a private match never appears in discovery, so the
+     * only way to hold its code is to have been given it by the creator.
+     */
+    public function codePreview(Request $request, string $code): JsonResponse
+    {
+        $viewer = $request->attributes->get('auth_user');
+        if (!$viewer instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        $match = LiveMatch::byJoinCode($code)->where('is_private', true)->first();
+        if ($match === null) {
+            return response()->json(['error' => 'No match found for that code.'], 404);
+        }
+
+        return response()->json(['data' => $this->codeMatchPayload($match, $viewer)]);
+    }
+
+    /**
+     * Join a private match to PLAY, by its share code. No owner approval: holding the
+     * code is the invitation. Takes a same-named guest slot on that side if the scorer
+     * already typed the player in, otherwise adds them to the end of the squad.
+     * POST /api/matches/join-by-code   { code, side: home|away }
+     */
+    public function joinByCode(Request $request): JsonResponse
+    {
+        $viewer = $request->attributes->get('auth_user');
+        if (!$viewer instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        $data = $request->validate([
+            'code' => ['required', 'string', 'max:16'],
+            'side' => ['required', 'in:home,away'],
+        ]);
+
+        $match = LiveMatch::byJoinCode($data['code'])->where('is_private', true)->first();
+        if ($match === null) {
+            return response()->json(['error' => 'No match found for that code.'], 404);
+        }
+        if ((int) $match->user_id === (int) $viewer->id) {
+            return response()->json(['error' => "It's your own match — you're already in it."], 422);
+        }
+        if ($match->isFinished()) {
+            return response()->json(['error' => 'This match has already finished.'], 422);
+        }
+        $pid = trim((string) ($viewer->player_id ?? ''));
+        if ($pid === '') {
+            return response()->json([
+                'error' => 'Complete your ActionBoard player profile first.',
+                'code'  => 'profile_incomplete',
+            ], 403);
+        }
+
+        $side = $data['side'];
+        $name = trim((string) ($viewer->name ?: 'Player'));
+
+        $joined = DB::transaction(function () use ($match, $side, $pid, $name): bool {
+            $match = LiveMatch::query()->lockForUpdate()->find($match->id);
+            $home = is_array($match->home_squad) ? $match->home_squad : [];
+            $away = is_array($match->away_squad) ? $match->away_squad : [];
+
+            foreach (array_merge($home, $away) as $p) {
+                if (is_array($p) && (string) ($p['id'] ?? '') === $pid) {
+                    return false; // already in — idempotent, never a second copy
+                }
+            }
+
+            $squad = $side === 'home' ? $home : $away;
+            $claimed = false;
+            foreach ($squad as $i => $p) {
+                $entryName = is_array($p) ? trim((string) ($p['name'] ?? '')) : trim((string) $p);
+                $entryId = is_array($p) ? ($p['id'] ?? null) : null;
+                if (empty($entryId) && $entryName !== '' && mb_strtolower($entryName) === mb_strtolower($name)) {
+                    $squad[$i] = array_merge(is_array($p) ? $p : [], ['id' => $pid, 'name' => $entryName]);
+                    $claimed = true;
+                    break;
+                }
+            }
+            if (!$claimed) {
+                $squad[] = ['id' => $pid, 'name' => $name];
+            }
+
+            if ($side === 'home') {
+                $match->home_squad = $squad;
+            } else {
+                $match->away_squad = $squad;
+            }
+            $match->save();
+
+            return true;
+        });
+
+        $match->refresh();
+        if ($joined) {
+            MatchUpdated::dispatch($match->id);
+            $team = $side === 'home' ? $match->home : $match->away;
+            $this->notifyUser(
+                (int) $match->user_id,
+                'Player joined',
+                "{$name} joined {$team} in {$match->home} vs {$match->away} with your match code.",
+            );
+        }
+
+        return response()->json([
+            'message' => $joined ? 'Joined' : 'Already in this match',
+            'data'    => $this->codeMatchPayload($match, $viewer),
+        ], $joined ? 201 : 200);
+    }
+
+    /** @return array<string, mixed> */
+    private function codeMatchPayload(LiveMatch $match, User $viewer): array
+    {
+        $home = is_array($match->home_squad) ? $match->home_squad : [];
+        $away = is_array($match->away_squad) ? $match->away_squad : [];
+        $pid = (string) ($viewer->player_id ?? '');
+        $sideOf = static function (array $squad) use ($pid): bool {
+            if ($pid === '') {
+                return false;
+            }
+            foreach ($squad as $p) {
+                if (is_array($p) && (string) ($p['id'] ?? '') === $pid) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        return [
+            'matchId'    => (string) $match->id,
+            'sport'      => strtolower((string) ($match->sport ?: 'cricket')),
+            'home'       => (string) $match->home,
+            'away'       => (string) $match->away,
+            'homeEmblem' => (string) ($match->home_emblem ?? ''),
+            'awayEmblem' => (string) ($match->away_emblem ?? ''),
+            'homeCount'  => count($home),
+            'awayCount'  => count($away),
+            'venue'      => (string) ($match->venue ?? ''),
+            'status'     => (string) ($match->status ?? ''),
+            'finished'   => $match->isFinished(),
+            'isOwner'    => (int) $match->user_id === (int) $viewer->id,
+            'mySide'     => $sideOf($home) ? 'home' : ($sideOf($away) ? 'away' : null),
+        ];
+    }
+
     // ── helpers ──
 
     /**

@@ -443,6 +443,9 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     // Join-a-match: request to join an open match, and the owner's request inbox.
     Route::get('/join-requests', [MatchJoinController::class, 'incoming']);
     Route::post('/join-requests/{id}/respond', [MatchJoinController::class, 'respond'])->whereNumber('id');
+    // Join a PRIVATE match to play, by its share code (the code is the invitation).
+    Route::get('/join-by-code/{code}', [MatchJoinController::class, 'codePreview'])->middleware('throttle:30,1');
+    Route::post('/join-by-code', [MatchJoinController::class, 'joinByCode'])->middleware('throttle:15,1');
     Route::post('/{id}/join', [MatchJoinController::class, 'requestJoin'])->whereNumber('id');
     Route::delete('/{id}/join', [MatchJoinController::class, 'cancelJoin'])->whereNumber('id');
     Route::post('/{id}/team-logo', [MatchesController::class, 'uploadTeamLogo']); // custom team crest

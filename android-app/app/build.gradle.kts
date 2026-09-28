@@ -130,6 +130,10 @@ dependencies {
   // Fused location (fresh GPS fix instead of the flaky LocationManager last-known)
   implementation("com.google.android.gms:play-services-location:21.3.0")
 
+  // Google code scanner — the ActionBoard Join sheet's "Scan QR". Runs in Play services'
+  // own UI, so the app needs no CAMERA permission for it.
+  implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+
   // "Continue with Google" — Credential Manager + Sign in with Google
   implementation("androidx.credentials:credentials:1.3.0")
   implementation("androidx.credentials:credentials-play-services-auth:1.3.0")

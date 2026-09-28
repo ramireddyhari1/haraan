@@ -3903,6 +3903,7 @@ private fun CrexMatchesScreen(
   var footballSetup by remember { mutableStateOf<com.haraan.app.ui.matches.FootballScorerSetup?>(null) }
   // Drives the "Join private match by code" dialog.
   var showJoinDialog by remember { mutableStateOf(false) }
+  var joinSheetCode by remember { mutableStateOf("") }
   // Player directory search — opened from the header's search field.
   var showPlayerSearch by remember { mutableStateOf(false) }
   // A player opened FROM search. Layered over it, so backing out returns to the
@@ -4863,11 +4864,21 @@ private fun CrexMatchesScreen(
     }
 
     if (showJoinDialog) {
-      JoinByCodeDialog(
-        onDismiss = { showJoinDialog = false },
-        onJoin = { code ->
+      JoinMatchSheet(
+        repository = matchRepository,
+        initialCode = joinSheetCode,
+        onDismiss = { showJoinDialog = false; joinSheetCode = "" },
+        onOpenMatch = { code ->
           showJoinDialog = false
+          joinSheetCode = ""
           onJoinByCode(code)
+        },
+        // Joining to play is ranked: sign-in + player profile first, then straight back
+        // into the sheet with the code they already typed.
+        onNeedsAccount = { code ->
+          showJoinDialog = false
+          joinSheetCode = code
+          requireRankedAccess { showJoinDialog = true }
         },
       )
     }
@@ -5466,49 +5477,6 @@ private fun PrivateMatchShareDialog(code: String, onDismiss: () -> Unit) {
         onDismiss()
       }) {
         Text("Copy & close", color = Color(0xFF64748B))
-      }
-    },
-  )
-}
-
-// Lets a viewer open a private match by typing the share code they were given.
-@Composable
-private fun JoinByCodeDialog(onDismiss: () -> Unit, onJoin: (String) -> Unit) {
-  var code by remember { mutableStateOf("") }
-  val trimmed = code.trim()
-
-  androidx.compose.material3.AlertDialog(
-    onDismissRequest = onDismiss,
-    title = { Text("Join a private match", fontWeight = FontWeight.Bold) },
-    text = {
-      Column {
-        Text(
-          "Enter the share code you were given to follow a private match.",
-          fontSize = 14.sp,
-          color = Color(0xFF475569),
-        )
-        Spacer(Modifier.height(16.dp))
-        androidx.compose.material3.OutlinedTextField(
-          value = code,
-          onValueChange = { code = it.uppercase() },
-          singleLine = true,
-          placeholder = { Text("e.g. HRN-7K2Q") },
-          modifier = Modifier.fillMaxWidth(),
-          shape = RoundedCornerShape(12.dp),
-        )
-      }
-    },
-    confirmButton = {
-      androidx.compose.material3.TextButton(
-        onClick = { onJoin(trimmed) },
-        enabled = trimmed.length >= 4,
-      ) {
-        Text("Watch", color = if (trimmed.length >= 4) Color(0xFF2563EB) else Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
-      }
-    },
-    dismissButton = {
-      androidx.compose.material3.TextButton(onClick = onDismiss) {
-        Text("Cancel", color = Color(0xFF64748B))
       }
     },
   )
@@ -6279,25 +6247,9 @@ private fun CrexHeaderSection(
 
     Spacer(modifier = Modifier.width(2.dp))
 
-    // Join a private match by its share code. Same white-surface + border treatment so it
-    // reads as a real button, not a faint smudge.
-    Box(
-      modifier = Modifier
-        .size(38.dp)
-        .shadow(3.dp, RoundedCornerShape(12.dp), clip = false, ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.10f))
-        .clip(RoundedCornerShape(12.dp))
-        .background(Color.White)
-        .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
-        .clickable(onClick = onJoinByCode),
-      contentAlignment = Alignment.Center
-    ) {
-      Icon(
-        imageVector = Icons.Default.Login,
-        contentDescription = "Join by code",
-        tint = Color(0xFF475569),
-        modifier = Modifier.size(18.dp)
-      )
-    }
+    // One door for joining someone else's match: a private match's share code, or a
+    // camera pairing code that turns this phone into the second device.
+    JoinHeaderButton(onClick = onJoinByCode)
 
     Button(
       onClick = onCreateMatch,
