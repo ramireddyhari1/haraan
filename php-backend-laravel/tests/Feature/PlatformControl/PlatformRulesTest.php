@@ -91,6 +91,21 @@ class PlatformRulesTest extends TestCase
         $this->assertSame(['fees.venue_commission_percent'], array_keys($log->meta['changes']));
     }
 
+    /**
+     * The page has to be REACHABLE, not just work. It was built, tested through
+     * Livewire::test() and never registered in the panel, so every rule on it ran on its
+     * default for months with nowhere to change it — and every test here was green.
+     */
+    public function test_the_page_is_registered_in_control_and_opens_for_an_admin(): void
+    {
+        $this->assertContains(PlatformRulesPage::class, Filament::getPanel('control')->getPages());
+
+        $admin = $this->user('ADMIN');
+        $this->actingAs($admin)->get('/control/platform-rules')->assertOk()
+            ->assertSee('Keep clips on the match camera phone (hours)')
+            ->assertSee('Match camera video quality');
+    }
+
     public function test_members_cannot_reach_the_page(): void
     {
         $this->actingAs($this->user('user'));

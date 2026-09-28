@@ -112,6 +112,10 @@ class AdminPanelProvider extends PanelProvider
                 \App\Filament\Pages\BrandingSettings::class,
                 \App\Filament\Pages\Cities::class,
                 \App\Filament\Pages\MessagingUsagePage::class,
+                // Platform → Platform rules. Built and tested long before it was listed here,
+                // which meant every rule on it ran on its default with no way to change it.
+                // Its own canAccess() gates it per section (fees → finance, the rest → admin).
+                \App\Filament\Pages\PlatformRulesPage::class,
                 \App\Filament\Pages\ServerStatus::class,
                 \App\Filament\Pages\WhatsAppConnection::class,
             ])
