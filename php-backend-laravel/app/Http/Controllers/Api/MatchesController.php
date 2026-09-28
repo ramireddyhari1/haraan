@@ -24,6 +24,7 @@ use App\Services\ReputationService;
 use App\Services\Scoring\EventGuard;
 use App\Services\VenueVerificationService;
 use App\Support\ActionboardXp;
+use App\Support\BallInPlay;
 use App\Support\CricketRules;
 use App\Support\Operations;
 use App\Support\SportRules;
@@ -850,6 +851,25 @@ final class MatchesController extends Controller
             return response()->json(['error' => 'Match is not live.'], 422);
         }
 
+        // BALL on the scorer's keypad: the bowler is running in. Not a delivery — nothing
+        // is logged or scored — so it returns before the action log is touched. Viewers
+        // refetch on the nudge and play the delivery animation until the result lands.
+        if ($type === 'delivery' || $type === 'delivery_cancel') {
+            $type === 'delivery'
+                ? BallInPlay::start($match->id)
+                // Called dead: a paired camera throws this ball's footage away.
+                : BallInPlay::clear($match->id, cancelled: true);
+            MatchUpdated::dispatch($match->id);
+
+            return response()->json([
+                'message' => 'ok',
+                'ballInPlay' => $type === 'delivery',
+                'ballSeq' => BallInPlay::lastSeq($match->id),
+            ]);
+        }
+        // Every real action ends the ball in play: the result is in (or it was undone).
+        BallInPlay::clear($match->id);
+
         $overs = $match->overs ?? '0.0';
         $parts = explode('.', $overs);
         $overNum = (int) ($parts[0] ?? 0);
@@ -1237,8 +1257,11 @@ final class MatchesController extends Controller
             $striker = $batters[0] ?? null;
             if ($striker) {
                 if ($type !== 'wide') {
-                    $striker['runs'] += $runsOffBat;
-                    $striker['balls'] += 1;
+                    // `?? 0`: a crease row written by an older build (or seeded) can lack
+                    // the counters, and a missing key here crashed the ball AFTER it was
+                    // logged — the delivery saved, the scoreboard row never did.
+                    $striker['runs'] = (int) ($striker['runs'] ?? 0) + $runsOffBat;
+                    $striker['balls'] = (int) ($striker['balls'] ?? 0) + 1;
                 }
                 $batters[0] = $striker;
             }
@@ -1246,6 +1269,9 @@ final class MatchesController extends Controller
 
         $bowler = $match->bowler ?? [];
         if (! empty($bowler)) {
+            // Same guard as the striker above: never trust the spell row to be complete.
+            $bowler['runs'] = (int) ($bowler['runs'] ?? 0);
+            $bowler['wickets'] = (int) ($bowler['wickets'] ?? 0);
             if ($type !== 'bye' && $type !== 'legbye') {
                 $bowler['runs'] += $totalRuns;
             }

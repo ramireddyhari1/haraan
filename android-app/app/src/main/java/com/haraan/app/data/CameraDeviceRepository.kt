@@ -30,6 +30,12 @@ data class CameraSession(
 /** What the camera learns each time it checks in. */
 data class CameraHeartbeat(val score: String, val overs: String, val matchStatus: String)
 
+/**
+ * The scorer's BALL window, as the camera sees it. `seq` is the latest BALL's number;
+ * `cancelled` says that ball, once over, was called dead (its footage is discarded).
+ */
+data class BallCue(val seq: Int, val inPlay: Boolean, val cancelled: Boolean)
+
 /** The outcome of a delivery review clip upload attempt. */
 sealed interface ClipUploadResult {
     /** Confirmed 2xx by the server: clip landed safely with the scorer. */
@@ -131,6 +137,29 @@ open class CameraDeviceRepository {
     }
 
     /**
+     * The fast "is a ball being bowled" check the camera runs about once a second, so the
+     * scorer's BALL tap starts the recording here. Null on any failure — a missed cue is
+     * one missed tick, and the heartbeat, not this, decides whether the pairing is lost.
+     */
+    suspend fun cue(sessionToken: String): BallCue? = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = request(
+                "/api/match-devices/cue",
+                "POST",
+                JSONObject().put("sessionToken", sessionToken),
+                readTimeoutMs = READ_TIMEOUT_CUE_MS,
+            )
+            if (response.code !in 200..299) return@runCatching null
+            val data = JSONObject(response.body).optJSONObject("data") ?: return@runCatching null
+            BallCue(
+                seq = data.optInt("seq", 0),
+                inPlay = data.optBoolean("inPlay", false),
+                cancelled = data.optBoolean("cancelled", false),
+            )
+        }.getOrNull()
+    }
+
+    /**
      * Send one clip. Multipart written by hand for the same reason the rest of this
      * package uses HttpURLConnection: adding an HTTP client for one upload would be a
      * dependency the app does not otherwise need.
@@ -143,6 +172,7 @@ open class CameraDeviceRepository {
         file: File,
         durationMs: Long,
         overBall: String?,
+        ballSeq: Int? = null,
     ): ClipUploadResult = withContext(Dispatchers.IO) {
         val boundary = "----haraan" + System.currentTimeMillis()
         var connection: HttpURLConnection? = null
@@ -170,6 +200,7 @@ open class CameraDeviceRepository {
                 field("sessionToken", sessionToken)
                 field("durationMs", durationMs.toString())
                 if (!overBall.isNullOrBlank()) field("overBall", overBall)
+                if (ballSeq != null && ballSeq > 0) field("ballSeq", ballSeq.toString())
 
                 out.write(
                     ("--$boundary\r\nContent-Disposition: form-data; name=\"clip\"; " +
@@ -284,6 +315,9 @@ open class CameraDeviceRepository {
          * than one long wait that blocks the next check.
          */
         const val READ_TIMEOUT_HEARTBEAT_MS = 10_000
+
+        /** The cue repeats every second; an answer later than a few is already stale. */
+        const val READ_TIMEOUT_CUE_MS = 4_000
 
         /** Long enough for a booting backend to finish, short enough not to feel stuck. */
         const val RETRY_PAUSE_MS = 1_500L

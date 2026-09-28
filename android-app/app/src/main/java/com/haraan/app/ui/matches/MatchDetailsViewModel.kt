@@ -172,6 +172,7 @@ class MatchDetailsViewModel : ViewModel() {
             bowler = o.optName("bowler"),
             bowlerStats = MatchStatsMapper.parseBowlerStats(o.optString("bowlerStats")),
             thisOver = stringList(o.optJSONArray("thisOver")),
+            ballInPlay = o.optBoolean("ballInPlay", false),
             recentOvers = recentOvers(o.optJSONArray("recentOvers")),
             partnership = o.optJSONObject("partnership")?.let { Partnership(it.optInt("runs"), it.optInt("balls")) },
             lastWicket = o.optJSONObject("lastWicket")?.let { LastWicket(it.optName("name"), it.optInt("runs"), it.optInt("balls")) },

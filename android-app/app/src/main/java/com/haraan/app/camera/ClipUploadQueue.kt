@@ -31,12 +31,15 @@ data class QueuedClipMeta(
     val enqueuedAtMs: Long,
     val retryCount: Int = 0,
     val lastAttemptMs: Long = 0L,
+    /** The scorer's BALL that armed this clip; null for a clip from the camera's own button. */
+    val ballSeq: Int? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("sessionToken", sessionToken)
         put("durationMs", durationMs)
         if (!overBall.isNullOrBlank()) put("overBall", overBall)
+        if (ballSeq != null) put("ballSeq", ballSeq)
         put("enqueuedAtMs", enqueuedAtMs)
         put("retryCount", retryCount)
         put("lastAttemptMs", lastAttemptMs)
@@ -51,6 +54,7 @@ data class QueuedClipMeta(
             enqueuedAtMs = json.getLong("enqueuedAtMs"),
             retryCount = json.optInt("retryCount", 0),
             lastAttemptMs = json.optLong("lastAttemptMs", 0L),
+            ballSeq = json.optInt("ballSeq", 0).takeIf { it > 0 },
         )
     }
 }
@@ -237,6 +241,7 @@ class ClipUploadQueue(
         sessionToken: String,
         durationMs: Long,
         overBall: String?,
+        ballSeq: Int? = null,
     ) {
         if (!file.exists() || file.length() <= 0L) {
             runCatching { file.delete() }
@@ -262,6 +267,7 @@ class ClipUploadQueue(
             durationMs = durationMs,
             overBall = overBall,
             enqueuedAtMs = System.currentTimeMillis(),
+            ballSeq = ballSeq,
         )
 
         val metaFile = File(queueDir, "$clipId$EXT_META")
@@ -373,6 +379,7 @@ class ClipUploadQueue(
                 file = videoFile,
                 durationMs = meta.durationMs,
                 overBall = meta.overBall,
+                ballSeq = meta.ballSeq,
             )
 
             when (result) {

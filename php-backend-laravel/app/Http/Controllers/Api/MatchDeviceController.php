@@ -13,6 +13,7 @@ use App\Jobs\ReviewMatchClip;
 use App\Services\DeliveryReview;
 use App\Services\Membership\MemberEntitlements;
 use App\Support\AiGate;
+use App\Support\BallInPlay;
 use App\Support\Membership\MemberFeature;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -219,6 +220,23 @@ final class MatchDeviceController extends Controller
     }
 
     /**
+     * The camera's fast check: is the scorer's BALL window open, and which ball is it.
+     *
+     * Separate from the heartbeat because it runs every second or so while the camera is
+     * filming, and the heartbeat writes last_seen_at — a DB write per second per camera for
+     * a question the cache answers. This reads the device row and the cache, nothing else.
+     */
+    public function cue(Request $request): JsonResponse
+    {
+        $device = MatchDevice::where('session_token', (string) $request->input('sessionToken'))->first();
+        if ($device === null || $device->status !== MatchDevice::STATUS_CONNECTED) {
+            return response()->json(['error' => 'This device is no longer paired.'], 401);
+        }
+
+        return response()->json(['data' => BallInPlay::cue($device->match_id)]);
+    }
+
+    /**
      * A clip from a paired camera.
      *
      * Authorised by the SESSION token, not an account — the phone filming may belong to
@@ -289,6 +307,9 @@ final class MatchDeviceController extends Controller
             // The measured length, not the reported one.
             'duration_ms' => $durationMs,
             'over_ball' => mb_substr(trim((string) $request->input('overBall')), 0, 12) ?: null,
+            // The BALL this clip was armed by. Only a positive number is a ball; anything
+            // else is a clip from the camera's own button.
+            'ball_seq' => ((int) $request->input('ballSeq')) > 0 ? (int) $request->input('ballSeq') : null,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -322,6 +343,7 @@ final class MatchDeviceController extends Controller
                 'roleLabel' => MatchDevice::friendlyRole((string) $c->role),
                 'url' => $this->clipUrl($request, (string) $c->path),
                 'overBall' => (string) ($c->over_ball ?? ''),
+                'ballSeq' => $c->ball_seq === null ? null : (int) $c->ball_seq,
                 'durationMs' => (int) $c->duration_ms,
                 'recordedAt' => (string) $c->created_at,
                 'review' => $c->analysis === null ? null : json_decode((string) $c->analysis, true),
@@ -332,7 +354,15 @@ final class MatchDeviceController extends Controller
             ])
             ->all();
 
-        return response()->json(['data' => $clips]);
+        // Which ball REVIEW is asking about, and whether it is still being bowled — the
+        // app waits for the clip tagged with this number rather than guessing by recency.
+        $cue = BallInPlay::cue($match->id);
+
+        return response()->json(['data' => $clips, 'meta' => [
+            'lastBallSeq' => $cue['seq'],
+            'ballInPlay' => $cue['inPlay'],
+            'lastBallCancelled' => $cue['cancelled'],
+        ]]);
     }
 
     /**

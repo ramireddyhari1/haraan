@@ -1,5 +1,6 @@
 package com.haraan.app.ui.matches
 
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.animateColorAsState
@@ -227,6 +228,33 @@ fun ScoringScreen(
         }
     }
 
+    // Lazily start the innings before the first ball — or before the first BALL signal,
+    // which the server refuses while the match isn't live yet. Call inside persistLock.
+    suspend fun ensureStarted(token: String, after: ScorerState): Boolean {
+        if (started.value) return true
+        // The opening bowler is the one the scorer picked before the first
+        // ball (carried on `after.bowler`); fall back to the squad lead.
+        val openingBowler = bowlingSquad.firstOrNull { it.name == after.bowler.name }
+            ?: bowlingSquad.getOrNull(0)
+        // Openers honour any pre-first-ball batter swaps (resolved from the
+        // current crease names), falling back to the squad order.
+        val openStriker = battingSquad.firstOrNull { it.name == after.striker.name } ?: battingSquad.getOrNull(0)
+        val openNonStriker = battingSquad.firstOrNull { it.name == after.nonStriker.name } ?: battingSquad.getOrNull(1)
+        val start = JSONObject()
+            .put("type", "start")
+            .put("batting_team", data.battingTeam)
+            .put("striker_id", playerRef(openStriker) ?: after.striker.name.ifBlank { "Batter 1" })
+            .put("non_striker_id", playerRef(openNonStriker) ?: after.nonStriker.name.ifBlank { "Batter 2" })
+            .put("bowler_id", playerRef(openingBowler) ?: after.bowler.name.ifBlank { "Bowler" })
+        val sent1 = repo.sendScoreAction(token, matchId, start)
+        if (!sent1.ok) {
+            Toast.makeText(ctx, sent1.refusal ?: "Couldn't start scoring. Check connection.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        started.value = true
+        return true
+    }
+
     ScorerLoaded(
         seed = remember(matchId) { seedFrom(data) },
         matchId = matchId,
@@ -238,6 +266,21 @@ fun ScoringScreen(
         bowlingSquad = bowlingSquad,
         secondBattingSquad = secondBattingSquad,
         secondBowlingSquad = secondBowlingSquad,
+        onDelivery = { after, cancel ->
+            // BALL: the bowler is running in. Viewers animate a delivery until the result
+            // lands. Best-effort — a lost signal costs the viewer an animation, never a run,
+            // so a failure is not worth a toast that interrupts the scorer mid-over.
+            scope.launch {
+                val token = scoringToken() ?: return@launch
+                persistLock.withLock {
+                    if (!cancel && !ensureStarted(token, after)) return@withLock
+                    repo.sendScoreAction(
+                        token, matchId,
+                        JSONObject().put("type", if (cancel) "delivery_cancel" else "delivery")
+                    )
+                }
+            }
+        },
         onStartSecondInnings = { strikerName, nonStrikerName, bowlerName ->
             scope.launch {
                 val token = scoringToken() ?: return@launch
@@ -260,29 +303,7 @@ fun ScoringScreen(
             scope.launch {
                 val token = scoringToken() ?: return@launch
                 persistLock.withLock {
-                    // Lazily start the innings before the first ball.
-                    if (!started.value && event != "UNDO") {
-                        // The opening bowler is the one the scorer picked before the first
-                        // ball (carried on `after.bowler`); fall back to the squad lead.
-                        val openingBowler = bowlingSquad.firstOrNull { it.name == after.bowler.name }
-                            ?: bowlingSquad.getOrNull(0)
-                        // Openers honour any pre-first-ball batter swaps (resolved from the
-                        // current crease names), falling back to the squad order.
-                        val openStriker = battingSquad.firstOrNull { it.name == after.striker.name } ?: battingSquad.getOrNull(0)
-                        val openNonStriker = battingSquad.firstOrNull { it.name == after.nonStriker.name } ?: battingSquad.getOrNull(1)
-                        val start = JSONObject()
-                            .put("type", "start")
-                            .put("batting_team", data.battingTeam)
-                            .put("striker_id", playerRef(openStriker) ?: after.striker.name.ifBlank { "Batter 1" })
-                            .put("non_striker_id", playerRef(openNonStriker) ?: after.nonStriker.name.ifBlank { "Batter 2" })
-                            .put("bowler_id", playerRef(openingBowler) ?: after.bowler.name.ifBlank { "Bowler" })
-                        val sent1 = repo.sendScoreAction(token, matchId, start)
-                        if (!sent1.ok) {
-                            Toast.makeText(ctx, sent1.refusal ?: "Couldn't start scoring. Check connection.", Toast.LENGTH_LONG).show()
-                            return@withLock
-                        }
-                        started.value = true
-                    }
+                    if (event != "UNDO" && !ensureStarted(token, after)) return@withLock
                     val action = scoreActionFor(event, after, battingSquad, plot?.zone, plot?.x, plot?.y) ?: return@withLock
                     val sent2 = repo.sendScoreAction(token, matchId, action)
                     if (!sent2.ok) {
@@ -455,10 +476,22 @@ private fun ScorerLoaded(
     onWicket: (newBatsman: SquadMember?, dismissal: String, fielder: SquadMember?) -> Unit = { _, _, _ -> },
     onStartSecondInnings: (striker: String, nonStriker: String, bowler: String) -> Unit = { _, _, _ -> },
     onChangeBatsman: (role: String, member: SquadMember) -> Unit = { _, _ -> },
+    /** BALL tapped (cancel = false) or the ball in play called off (cancel = true). */
+    onDelivery: (after: ScorerState, cancel: Boolean) -> Unit = { _, _ -> },
 ) {
     val ctx = LocalContext.current
     var state by remember { mutableStateOf(seed) }
     var history by remember { mutableStateOf(listOf<ScorerState>()) }
+    // Between balls the keypad steps aside for BALL / UNDO. BALL tells viewers the bowler
+    // is running in (they get the delivery animation); the keypad then takes the result.
+    // Starts true: every ball, the first included, begins with BALL.
+    var awaitingBall by remember { mutableStateOf(true) }
+    // BALL was tapped and the result isn't in yet — what viewers are watching right now.
+    var ballInPlay by remember { mutableStateOf(false) }
+    // A paired camera phone is checking in. Only then does REVIEW appear: without a camera
+    // there is no clip to review, and a button that always says so is clutter.
+    var cameraLive by remember { mutableStateOf(false) }
+    var showReview by remember { mutableStateOf(false) }
     var pickBatsman by remember { mutableStateOf(false) }
     // Wicket flow: first pick HOW the batter was out, then who comes in.
     var pickDismissal by remember { mutableStateOf(false) }
@@ -536,6 +569,8 @@ private fun ScorerLoaded(
         history = emptyList()
         currentInnings = 2
         transitioned = true
+        awaitingBall = true
+        ballInPlay = false
         // Force the opening bowler for the chase; the 'start' is sent once he's chosen.
         openingBowlerSet = false
         pendingSecondStart = true
@@ -572,6 +607,8 @@ private fun ScorerLoaded(
         state = next
         onWicket(newBatsman, pendingDismissal, pendingFielder)
         pickBatsman = false
+        ballInPlay = false
+        awaitingBall = true
         val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
         if (next.balls > before && next.balls % 6 == 0 && !nextOver) {
             if (activeBowlingSquad.isNotEmpty()) pickBowler = true else onBowlerChange(null, null)
@@ -582,6 +619,11 @@ private fun ScorerLoaded(
         if (ev == "UNDO") {
             history.lastOrNull()?.let { state = it; history = history.dropLast(1) }
             onEvent("UNDO", state, null)
+            // Straight to the keypad to re-enter the corrected ball. No BALL first: a
+            // correction must not show viewers a delivery that never happened. The undo
+            // also ends any ball in play server-side.
+            ballInPlay = false
+            awaitingBall = false
             return
         }
         // Block scoring once the innings is complete (over quota / all out / chase won).
@@ -614,6 +656,8 @@ private fun ScorerLoaded(
         val next = reduce(state, ev)
         state = next
         onEvent(ev, next, shot)
+        ballInPlay = false
+        awaitingBall = true
         // A legal delivery just completed the over → bring on a new bowler (and roll the
         // over). Skip the prompt when that ball also ended the innings.
         val nextOver = next.balls >= next.maxOvers * 6 || next.wickets >= allOutWickets
@@ -642,6 +686,25 @@ private fun ScorerLoaded(
         val willBeAllOut = state.wickets + 1 >= allOutWickets
         // Last wicket → no new batter to pick; close the innings straight away.
         if (!willBeAllOut && activeBattingSquad.isNotEmpty()) pickBatsman = true else finishWicket(null)
+    }
+
+    // Is a camera paired? Re-asked on a slow cadence, and at once when the devices sheet
+    // closes — that is where a camera gets paired or removed.
+    LaunchedEffect(matchId, showDevices) {
+        if (matchId.isBlank() || showDevices) return@LaunchedEffect
+        val deviceRepo = com.haraan.app.data.MatchDeviceRepository()
+        while (true) {
+            val token = TokenStore.getSignedInToken(ctx)
+            if (token != null) {
+                cameraLive = runCatching { deviceRepo.devices(token, matchId).any { it.isLive } }
+                    .getOrDefault(cameraLive)
+            }
+            kotlinx.coroutines.delay(20_000)
+        }
+    }
+
+    if (showReview) {
+        LastBallReviewSheet(matchId = matchId, onDismiss = { showReview = false })
     }
 
     if (showClips) {
@@ -998,9 +1061,221 @@ private fun ScorerLoaded(
         if (canStartSecondInnings) {
             Spacer(Modifier.weight(1f))
             StartSecondInningsButton(onClick = ::startSecondInnings)
+        } else if (awaitingBall && !inningsOver && openingBowlerSet) {
+            BallGate(
+                canUndo = history.isNotEmpty(),
+                showReview = cameraLive,
+                onReview = { showReview = true },
+                onBall = {
+                    awaitingBall = false
+                    ballInPlay = true
+                    onDelivery(state, false)
+                },
+                onUndo = { apply("UNDO") },
+                modifier = Modifier.weight(1f),
+            )
         } else {
-            Keypad(onKey = ::apply, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                if (ballInPlay) {
+                    BallInPlayStrip(onCancel = {
+                        // Dead ball, aborted run-up: nothing was bowled. Viewers' animation
+                        // stops and the scorer is back at BALL.
+                        ballInPlay = false
+                        awaitingBall = true
+                        onDelivery(state, true)
+                    })
+                }
+                Keypad(onKey = ::apply, modifier = Modifier.weight(1f))
+            }
         }
+    }
+}
+
+/**
+ * Between balls: BALL (the bowler is running in — viewers see the delivery) or UNDO the
+ * ball just scored. BALL is the big target because it is tapped every delivery; UNDO is
+ * the rare correction and sits beside it, smaller, where a thumb reaching for BALL won't
+ * land on it.
+ */
+@Composable
+private fun BallGate(
+    canUndo: Boolean,
+    onBall: () -> Unit,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** A camera phone is paired: offer the last ball's clip. */
+    showReview: Boolean = false,
+    onReview: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color(0xFFF8FAFC), ScKey)))
+            .navigationBarsPadding()
+            .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "NEXT DELIVERY", color = ScInk2, fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+        Row(
+            Modifier.fillMaxWidth().weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            GateButton(
+                label = "BALL",
+                sub = "Bowler running in",
+                solid = true,
+                modifier = Modifier.weight(2.2f),
+            ) {
+                scope.launch { cricketThud(context, Thud.RUN) }
+                onBall()
+            }
+            // With a camera paired, REVIEW and UNDO share the right column — both are about
+            // the ball just gone, and BALL keeps its full-height target for the next one.
+            Column(
+                Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (showReview) {
+                    GateButton(
+                        label = "REVIEW",
+                        sub = "Watch last ball",
+                        solid = false,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    ) {
+                        scope.launch { cricketThud(context, Thud.TICK) }
+                        onReview()
+                    }
+                }
+                GateButton(
+                    label = "UNDO",
+                    sub = "Last ball",
+                    solid = false,
+                    enabled = canUndo,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    scope.launch { cricketThud(context, Thud.UNDO) }
+                    onUndo()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GateButton(
+    label: String,
+    sub: String,
+    solid: Boolean,
+    modifier: Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = 900f),
+        label = "gateScale"
+    )
+    val bg by animateColorAsState(
+        targetValue = when {
+            !enabled -> Color(0xFFE9EEF5)
+            solid && pressed -> Color(0xFF1D4ED8)
+            solid -> ScTeal
+            pressed -> ScTeal.copy(alpha = 0.32f)
+            else -> ScTeal.copy(alpha = 0.14f)
+        },
+        label = "gateBg"
+    )
+    val ink = when {
+        !enabled -> ScInk2.copy(alpha = 0.5f)
+        solid -> Color.White
+        else -> ScTeal
+    }
+    Column(
+        modifier
+            .fillMaxHeight()
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
+            .border(
+                if (solid || !enabled) 0.dp else 1.5.dp,
+                if (solid || !enabled) Color.Transparent else ScTeal.copy(alpha = 0.75f),
+                RoundedCornerShape(16.dp)
+            )
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (solid) {
+            // A drawn ball, not an emoji: seam and all, in the key's own ink.
+            androidx.compose.foundation.Canvas(Modifier.size(34.dp)) {
+                drawCircle(color = ink)
+                val seam = androidx.compose.ui.graphics.drawscope.Stroke(width = size.minDimension * 0.06f)
+                drawArc(
+                    color = ScTeal, startAngle = -60f, sweepAngle = 120f, useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(-size.width * 0.35f, 0f),
+                    size = size, style = seam
+                )
+                drawArc(
+                    color = ScTeal, startAngle = 120f, sweepAngle = 120f, useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.35f, 0f),
+                    size = size, style = seam
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        Text(
+            label, color = ink,
+            fontSize = if (solid) 26.sp else 16.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = if (solid) 3.sp else 1.sp,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            sub, color = ink.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+/** Shown over the keypad while a ball is in play: what viewers are seeing, and a way out. */
+@Composable
+private fun BallInPlayStrip(onCancel: () -> Unit) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "inPlay")
+    val dot by pulse.animateFloat(
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(700),
+            androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "dot"
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(ScTeal.copy(alpha = 0.08f))
+            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).graphicsLayer { alpha = dot }.clip(CircleShape).background(ScTeal))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "Ball in play · tap the result", color = ScTeal, fontSize = 12.sp,
+            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+        )
+        Text(
+            "Dead ball", color = ScInk2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onCancel)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 

@@ -200,6 +200,118 @@ fun MatchClipsSheet(matchId: String, onDismiss: () -> Unit) {
 }
 
 /**
+ * REVIEW on the scorer's keypad: the clip of the ball just bowled, and nothing else.
+ *
+ * Found by the BALL number the camera stamped on it, not by being newest — the upload of
+ * this ball's clip is often still crossing ground Wi-Fi when the scorer taps, and the
+ * newest file on the server is then the ball BEFORE, which is exactly the wrong clip to
+ * settle an argument with. So it waits, saying so, and plays the right one when it lands.
+ */
+@Composable
+fun LastBallReviewSheet(matchId: String, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val repo = remember { MatchDeviceRepository() }
+    var clip by remember { mutableStateOf<MatchClip?>(null) }
+    var message by remember { mutableStateOf("Getting the last ball's clip…") }
+    var waiting by remember { mutableStateOf(true) }
+    var showAll by remember { mutableStateOf(false) }
+
+    LaunchedEffect(matchId) {
+        val token = TokenStore.getSignedInToken(ctx)
+        if (token == null) {
+            message = "Sign in to review clips."
+            waiting = false
+            return@LaunchedEffect
+        }
+        val started = System.currentTimeMillis()
+        while (System.currentTimeMillis() - started < REVIEW_WAIT_MS) {
+            val page = repo.clipsPage(token, matchId)
+            when {
+                page == null -> message = "Can't reach the server. Trying again…"
+                page.lastBallSeq == 0 -> {
+                    message = "No ball has been bowled with BALL yet."
+                    waiting = false
+                    return@LaunchedEffect
+                }
+                page.lastBallClip != null -> {
+                    clip = page.lastBallClip
+                    return@LaunchedEffect
+                }
+                page.lastBallCancelled -> {
+                    message = "The last ball was called dead, so its clip was not kept."
+                    waiting = false
+                    return@LaunchedEffect
+                }
+                page.ballInPlay -> message = "The ball is still being bowled. Enter the result first."
+                else -> message = "The camera is sending the clip…"
+            }
+            kotlinx.coroutines.delay(REVIEW_POLL_MS)
+        }
+        message = "The camera hasn't sent this ball's clip. It may have missed the ball, or lost signal."
+        waiting = false
+    }
+
+    clip?.let { found ->
+        ClipPlayer(found, matchId, onClose = onDismiss)
+        return
+    }
+    if (showAll) {
+        MatchClipsSheet(matchId = matchId, onDismiss = onDismiss)
+        return
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .padding(horizontal = 18.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(22.dp))
+                .background(Panel)
+                .padding(22.dp),
+        ) {
+            Text("Review last ball", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (waiting) {
+                    CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(10.dp))
+                }
+                Text(message, color = Ink2, fontSize = 14.sp, lineHeight = 19.sp)
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Well)
+                        .pressable(onClick = { showAll = true })
+                        .padding(vertical = 13.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text("All footage", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Well)
+                        .pressable(onClick = onDismiss)
+                        .padding(vertical = 13.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text("Close", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/** Long enough for a 10s clip to finish and cross slow ground Wi-Fi. */
+private const val REVIEW_WAIT_MS = 45_000L
+private const val REVIEW_POLL_MS = 2_000L
+
+/**
  * One delivery in the grid: a frame from the clip, the over it belongs to, its length.
  *
  * The thumbnail is decoded from the video itself rather than stored server-side, because

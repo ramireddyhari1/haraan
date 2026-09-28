@@ -193,6 +193,8 @@ data class MatchUiState(
     val partnership: Partnership? = null,
     val lastWicket: LastWicket? = null,
     val thisOver: List<String> = emptyList(),
+    /** The scorer tapped BALL and the result isn't in yet — the bowler is running in. */
+    val ballInPlay: Boolean = false,
     val recentOvers: List<RecentOver> = emptyList(),
     val ballsLeft: Int? = null,
     val runsNeeded: Int? = null,

@@ -29,14 +29,17 @@ class ClipUploadQueueTest {
         var lastFile: File? = null
         var lastDurationMs: Long? = null
         var lastOverBall: String? = null
+        var lastBallSeq: Int? = null
 
         override suspend fun uploadClip(
             sessionToken: String,
             file: File,
             durationMs: Long,
             overBall: String?,
+            ballSeq: Int?,
         ): ClipUploadResult {
             uploadCalls++
+            lastBallSeq = ballSeq
             lastSessionToken = sessionToken
             lastFile = file
             lastDurationMs = durationMs
@@ -53,6 +56,7 @@ class ClipUploadQueueTest {
             durationMs = 9500L,
             overBall = "14.2",
             enqueuedAtMs = 1726840000123L,
+            ballSeq = 37,
             retryCount = 2,
             lastAttemptMs = 1726840005000L,
         )
@@ -67,6 +71,8 @@ class ClipUploadQueueTest {
         assertEquals(meta.enqueuedAtMs, parsed.enqueuedAtMs)
         assertEquals(meta.retryCount, parsed.retryCount)
         assertEquals(meta.lastAttemptMs, parsed.lastAttemptMs)
+        // The BALL number survives a process restart, so REVIEW still finds the clip.
+        assertEquals(37, parsed.ballSeq)
     }
 
     @Test
@@ -223,9 +229,10 @@ class ClipUploadQueueTest {
                 file: File,
                 durationMs: Long,
                 overBall: String?,
+                ballSeq: Int?,
             ): ClipUploadResult {
                 uploadedOrder.add(overBall ?: "")
-                return super.uploadClip(sessionToken, file, durationMs, overBall)
+                return super.uploadClip(sessionToken, file, durationMs, overBall, ballSeq)
             }
         }
 

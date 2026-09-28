@@ -200,6 +200,41 @@ class LiveMatchController extends Controller
     }
 
     /**
+     * The web match page's heartbeat: is a ball in play, and has anything been scored since
+     * the page rendered? Two values, so a watcher can poll every few seconds without paying
+     * for the full replayed detail — the page reloads only when `v` moves.
+     * GET /api/live-matches/{id}/pulse
+     */
+    public function pulse(Request $request, string $id): JsonResponse
+    {
+        $match = LiveMatch::find($id);
+        $viewer = $request->attributes->get('auth_user');
+        if ($match === null || ! $match->isVisibleTo($viewer instanceof User ? $viewer : null)) {
+            return response()->json(['error' => 'Match not found.'], 404);
+        }
+
+        return response()->json([
+            'live' => strtolower((string) $match->status) === 'live',
+            'ballInPlay' => strtolower((string) $match->status) === 'live'
+                && \App\Support\BallInPlay::since($match->id) !== null,
+            'v' => self::scoreVersion($match),
+        ]);
+    }
+
+    /**
+     * Moves whenever the scoreboard does: a ball adds a row, an undo removes one (so the
+     * count drops even when the max id is reused), and a finish or correction touches the
+     * match row itself.
+     */
+    public static function scoreVersion(LiveMatch $match): string
+    {
+        $log = DB::table('match_actions')->where('match_id', $match->id)
+            ->selectRaw('COUNT(*) as n, MAX(id) as m')->first();
+
+        return ((int) ($log->n ?? 0)).'.'.((int) ($log->m ?? 0)).'.'.optional($match->updated_at)->timestamp;
+    }
+
+    /**
      * Detail lookup by private-match share code. The code itself is the grant —
      * anyone holding it (even a guest) may watch. Public matches are not exposed
      * here; use the id route for those.
@@ -625,6 +660,10 @@ class LiveMatchController extends Controller
             'bowler' => $bowler['name'] ?? '',
             'bowlerStats' => $bowler ? trim(($bowler['figures'] ?? '') . ' (' . ($bowler['overs'] ?? '') . ')') : '',
             'thisOver' => $thisOver,
+            // The scorer tapped BALL and the result is not in yet: viewers play the
+            // delivery animation. Only while live — a finished match has no next ball.
+            'ballInPlay' => strtolower((string) $match->status) === 'live'
+                && \App\Support\BallInPlay::since($match->id) !== null,
             'recentOvers' => $recentOvers,
             'toss' => (string) ($match->decision ?? ''),
             // Full per-innings scorecards, replayed from the ball-by-ball log so the

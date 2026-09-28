@@ -288,6 +288,11 @@ Route::middleware('auth.jwt.optional')->group(function (): void {
         Route::get('/live-matches/{id}/viewers', [LiveMatchController::class, 'viewers'])->whereNumber('id');
         Route::get('/live-matches/code/{code}/viewers', [LiveMatchController::class, 'viewersByCode']);
     });
+
+    // The web match page's ball-in-play heartbeat, polled every 3s while live. Per IP, so
+    // it has to clear a whole ground on one Wi-Fi: 20/min each leaves room for ~30 phones.
+    Route::get('/live-matches/{id}/pulse', [LiveMatchController::class, 'pulse'])
+        ->whereNumber('id')->middleware('throttle:600,1');
 });
 
 // -------------------------------------------------------------------------
@@ -387,6 +392,9 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
 Route::get('match-devices/{token}/preview', [MatchDeviceController::class, 'preview']);
 Route::post('match-devices/claim', [MatchDeviceController::class, 'claim']);
 Route::post('match-devices/heartbeat', [MatchDeviceController::class, 'heartbeat']);
+// The camera's ~1s "is a ball being bowled" check. Per IP: a camera on ground Wi-Fi
+// shares it with every phone there, so the limit is generous; the call is a cache read.
+Route::post('match-devices/cue', [MatchDeviceController::class, 'cue'])->middleware('throttle:600,1');
 Route::post('match-devices/clips', [MatchDeviceController::class, 'uploadClip']);
 
 Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);

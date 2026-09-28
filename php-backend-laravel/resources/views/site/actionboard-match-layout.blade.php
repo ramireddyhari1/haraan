@@ -32,6 +32,12 @@
         $lastBall = (string) end($d['thisOver']);
     }
     $lastBallKind = $lastBall !== '' ? hrn_ball_kind($lastBall) : 'dot';
+    $ballInPlay = $isLive && (bool) ($d['ballInPlay'] ?? false);
+    // What the pulse poll compares against: the page reloads only when this moves.
+    $pulseV = '';
+    if ($isLive && ($pulseMatch = \App\Models\LiveMatch::find($id)) !== null) {
+        $pulseV = \App\Http\Controllers\Api\LiveMatchController::scoreVersion($pulseMatch);
+    }
 
     $logo1 = hrn_team_icon($d['team1Logo'] ?? '', $d['team1Emblem'] ?? '');
     $logo2 = hrn_team_icon($d['team2Logo'] ?? '', $d['team2Emblem'] ?? '');
@@ -89,9 +95,25 @@
                     </div>
 
                     {{-- Last ball + VS --}}
-                    <div class="mdx-lastball">
-                        <div class="mdx-lastball-lbl">LAST BALL</div>
+                    <div class="mdx-lastball {{ $ballInPlay ? 'is-bowling' : '' }}">
+                        <div class="mdx-lastball-lbl"><span class="lb-last">LAST BALL</span><span class="lb-bowl">BOWLING</span></div>
                         <div class="mdx-lastball-num mdx-ball-{{ $lastBallKind }}">{{ $lastBall !== '' ? $lastBall : '•' }}</div>
+                        {{-- The scorer tapped BALL: a delivery down the pitch, looping until the
+                             result lands (same drawing as the app's hero). --}}
+                        <svg class="mdx-delivery" viewBox="0 0 84 66" aria-label="Ball in play">
+                            <path d="M30 8 H54 L70.5 64.7 H13.5 Z" fill="#C8A96B" opacity=".9"/>
+                            <line x1="28.4" y1="12" x2="55.6" y2="12" stroke="#fff" stroke-opacity=".85" stroke-width="1.2"/>
+                            <line x1="14.9" y1="59.4" x2="69.1" y2="59.4" stroke="#fff" stroke-opacity=".85" stroke-width="1.5"/>
+                            <g stroke="#0F172A" stroke-width="1.6">
+                                <line x1="38.6" y1="1.4" x2="38.6" y2="10.6"/><line x1="42" y1="1.4" x2="42" y2="10.6"/><line x1="45.4" y1="1.4" x2="45.4" y2="10.6"/>
+                            </g>
+                            <ellipse class="dl-shadow" cx="0" cy="0" rx="5" ry="1.8" fill="#000" fill-opacity=".18"/>
+                            <circle class="dl-puff" cx="42" cy="26" r="4" fill="#C8A96B"/>
+                            <g class="dl-ball">
+                                <circle cx="0" cy="0" r="5.2" fill="#C62828"/>
+                                <line x1="-3.6" y1="0" x2="3.6" y2="0" stroke="#fff" stroke-opacity=".8" stroke-width=".9"/>
+                            </g>
+                        </svg>
                         <div class="mdx-vs">VS</div>
                     </div>
 
@@ -183,6 +205,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 15px; overflow: hidden; }
 .mdx-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .mdx-ribbon text { fill: rgba(71,85,105,.72); font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 1px; dominant-baseline: central; }
+.mdx-ribbon.is-bowling text { fill: #2563EB; }
 .mdx-hero-card {
     position: relative;
     border-radius: 12px;
@@ -209,6 +232,37 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-lastball-num { font-size: 40px; font-weight: 900; line-height: 1; margin: 2px 0 6px; }
 .mdx-ball-six { color: var(--green); } .mdx-ball-four { color: var(--blue); } .mdx-ball-wicket { color: var(--red); }
 .mdx-ball-run { color: #0F172A; } .mdx-ball-dot, .mdx-ball-extra { color: rgba(15,23,42,.28); }
+.mdx-lastball .lb-bowl, .mdx-delivery { display: none; }
+.mdx-lastball.is-bowling .lb-last, .mdx-lastball.is-bowling .mdx-lastball-num { display: none; }
+.mdx-lastball.is-bowling .lb-bowl { display: inline; color: var(--blue); }
+.mdx-lastball.is-bowling .mdx-delivery { display: block; width: 84px; height: 66px; margin: 2px 0 6px; }
+/* One delivery per 1.3s loop: release, dip to pitch at ~50%, carry to the stumps, gone for the
+   last 20% (the run-up). Ball and shadow move together so the bounce reads as a bounce. */
+.mdx-delivery .dl-ball { animation: mdxDeliver 1.3s linear infinite; }
+.mdx-delivery .dl-shadow { animation: mdxShadow 1.3s linear infinite; }
+.mdx-delivery .dl-puff { opacity: 0; transform-box: fill-box; transform-origin: center; animation: mdxPuff 1.3s linear infinite; }
+@keyframes mdxDeliver {
+    0%    { transform: translate(42px, 34.6px) scale(1);    opacity: 1; }
+    25%   { transform: translate(42px, 27px)   scale(.86); }
+    49.6% { transform: translate(42px, 26px)   scale(.74); }
+    65%   { transform: translate(42px, 15px)   scale(.64); }
+    79.9% { transform: translate(42px, 2.5px)  scale(.54);  opacity: 1; }
+    80%, 100% { transform: translate(42px, 2.5px) scale(.54); opacity: 0; }
+}
+@keyframes mdxShadow {
+    0%    { transform: translate(42px, 54.4px) scale(1);   opacity: 1; }
+    49.6% { transform: translate(42px, 26px)   scale(.74); }
+    79.9% { transform: translate(42px, 9px)    scale(.54); opacity: 1; }
+    80%, 100% { opacity: 0; }
+}
+@keyframes mdxPuff {
+    0%, 49.5% { opacity: 0; transform: scale(1); }
+    49.6% { opacity: .55; transform: scale(1); }
+    60%, 100% { opacity: 0; transform: scale(2.6); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .mdx-delivery .dl-ball, .mdx-delivery .dl-shadow { animation-duration: 2.6s; }
+}
 .mdx-vs { width: 30px; height: 30px; border-radius: 50%; background: #1E293B; color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .mdx-hero-stats { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; gap: 12px; flex-wrap: wrap; }
 .mdx-hero-stats-l { display: flex; gap: 16px; }
@@ -350,6 +404,16 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         var tp = svg.querySelector('textPath');
         var seg = 'HARAAN  ·  LIVE  ·  ';
         var segLen = 140;
+        var CALM = seg, BOWLING = 'BALL IN PLAY  ·  ';
+        if (document.querySelector('.mdx-lastball.is-bowling')) { seg = BOWLING; svg.classList.add('is-bowling'); }
+        // The pulse poll flips this while the bowler runs in, and back when it doesn't.
+        window.mdxRibbonBowling = function (on) {
+            var next = on ? BOWLING : CALM;
+            if (next === seg) return;
+            seg = next;
+            svg.classList.toggle('is-bowling', on);
+            layout();
+        };
 
         function layout() {
             var w = Math.round(band.clientWidth), h = Math.round(band.clientHeight);
@@ -384,8 +448,44 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 </script>
 @if($isLive)
 <script>
-    // Mirror the app's live auto-refresh — a live match ticks without a manual reload.
-    setTimeout(function(){ location.reload(); }, 30000);
+    // Live heartbeat. Every 3s: is a ball in play (show the delivery), and has anything
+    // been scored since this page rendered (reload to show it). Replaces a blind 30s
+    // reload, which missed the moment the ball was bowled entirely.
+    (function () {
+        var url = @json(url('/api/live-matches/' . $id . '/pulse'));
+        var v = @json($pulseV);
+        var slot = document.querySelector('.mdx-lastball');
+        var fails = 0, timer = null;
+
+        function bowling(on) {
+            if (slot) slot.classList.toggle('is-bowling', on);
+            if (window.mdxRibbonBowling) window.mdxRibbonBowling(on);
+        }
+
+        function beat() {
+            // A background tab doesn't need the ball; it catches up on return.
+            if (document.hidden) { timer = setTimeout(beat, 3000); return; }
+            fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+                .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function (p) {
+                    fails = 0;
+                    if (p.v !== v || !p.live) { location.reload(); return; }
+                    bowling(!!p.ballInPlay);
+                    timer = setTimeout(beat, 3000);
+                })
+                .catch(function () {
+                    // Pulse unreachable (private match, network): fall back to the old
+                    // behaviour rather than freezing the score.
+                    if (++fails >= 10) { location.reload(); return; }
+                    timer = setTimeout(beat, 3000);
+                });
+        }
+
+        timer = setTimeout(beat, 3000);
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) { clearTimeout(timer); beat(); }
+        });
+    })();
 </script>
 @endif
 @endsection

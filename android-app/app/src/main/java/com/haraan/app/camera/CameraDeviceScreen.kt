@@ -923,8 +923,59 @@ private fun CameraMode(
         }
     }
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
+    // The scorer's BALL that the clip now recording belongs to; null for a clip from this
+    // phone's own button with no ball in play.
+    var clipBallSeq by remember { mutableStateOf<Int?>(null) }
+    // Set when the scorer calls the ball dead mid-recording: the clip is thrown away when
+    // it finalises instead of being sent.
+    var discardClip by remember { mutableStateOf(false) }
+    // The last ball this phone filmed (by cue or by hand), so one BALL is filmed once — a
+    // clip that hit the ten-second cap while the ball is still "in play" is not re-armed.
+    var lastFilmedSeq by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // The latest cue, for the manual button: pressed during a ball the cue missed, its
+    // clip still carries that ball's number and REVIEW finds it.
+    var latestCue by remember { mutableStateOf<com.haraan.app.data.BallCue?>(null) }
+    // armDelivery is built further down, inside the layout; the cue loop reaches it here.
+    val armRef = remember { mutableStateOf<((Int?) -> Unit)?>(null) }
 
     DisposableEffect(Unit) { onDispose { executor.shutdown() } }
+
+    /*
+     * THE SCORER'S BALL, FILMED FROM HERE.
+     *
+     * The scorer taps BALL as the bowler runs in; this phone starts recording without anyone
+     * touching it, and stops when the scorer taps the result. Only deliveries are filmed,
+     * never the gaps between them. A ball called dead is recorded and then thrown away.
+     *
+     * A second, not a push: the camera is a guest phone with no account and no socket, and
+     * the ten-second clip is the review window, so a second of latency still catches the
+     * run-up. The heartbeat below stays the judge of whether the pairing is alive — a
+     * missed cue is just a missed tick. The phone's own button keeps working throughout, as
+     * the backup when the two phones lose each other.
+     */
+    LaunchedEffect(session.sessionToken) {
+        if (session.sessionToken == "debug_token") return@LaunchedEffect
+        while (true) {
+            val cue = repo.cue(session.sessionToken)
+            if (cue != null) {
+                latestCue = cue
+                val wanted = if (cue.inPlay) cue.seq else null
+                val filming = clipBallSeq
+                // The ball this clip belongs to is over: result in, or called dead.
+                if (recording && filming != null && filming != wanted) {
+                    if (cue.seq == filming && cue.cancelled) discardClip = true
+                    activeRecording?.stop()
+                    activeRecording = null
+                }
+                // A new ball is being bowled and nothing is filming it yet.
+                if (!recording && wanted != null && wanted != lastFilmedSeq) {
+                    armRef.value?.invoke(wanted)
+                }
+            }
+            // Tighter while filming, so the stop lands close to the result tap.
+            delay(if (recording) CUE_FILMING_MS else CUE_IDLE_MS)
+        }
+    }
 
     LaunchedEffect(Unit) { if (!granted) requestCameraPermission { granted = it } }
 
@@ -1830,8 +1881,14 @@ private fun CameraMode(
          * An anonymous function rather than a lambda so the early return below reads as an
          * early return.
          */
-        val armDelivery: () -> Unit = fun() {
+        // `ballSeq`: the scorer's BALL that armed this clip, or null from the phone's own
+        // button with no ball in play.
+        val armDelivery: (Int?) -> Unit = fun(ballSeq: Int?) {
             val capture = videoCapture ?: return
+            if (recording) return
+            if (ballSeq != null) lastFilmedSeq = ballSeq
+            clipBallSeq = ballSeq
+            discardClip = false
             uploadError = null
             // A fresh delivery: the previous track must not bleed into this one.
             vision.reset()
@@ -1852,6 +1909,14 @@ private fun CameraMode(
                 onFinished = { file, durationMs ->
                     recording = false
                     trackingLive = false
+                    clipBallSeq = null
+                    // The scorer called this ball dead: nothing was bowled worth keeping.
+                    if (discardClip) {
+                        discardClip = false
+                        runCatching { file.delete() }
+                        view.performHapticFeedback(Feel.REMOVE)
+                        return@startClip
+                    }
                     /*
                      * The measurement, taken once the delivery is over.
                      *
@@ -1904,6 +1969,9 @@ private fun CameraMode(
                         sessionToken = session.sessionToken,
                         durationMs = durationMs,
                         overBall = overs.takeIf { it.isNotBlank() },
+                        // The argument, not the state: by now the state may already name
+                        // the next ball.
+                        ballSeq = ballSeq,
                     )
                 },
             )
@@ -1919,12 +1987,19 @@ private fun CameraMode(
              * measures 10.02s server-side would be refused after the upload had already
              * been paid for over ground Wi-Fi.
              */
+            // Only THIS recording. The timer used to stop whatever was recording ten seconds
+            // on — with the scorer's result now ending clips early, that could be the next
+            // ball's clip, cut off a second in.
+            val thisRecording = activeRecording
             scope.launch {
                 delay(REVIEW_CLIP_MS)
-                activeRecording?.stop()
-                activeRecording = null
+                if (activeRecording === thisRecording) {
+                    activeRecording?.stop()
+                    activeRecording = null
+                }
             }
         }
+        armRef.value = armDelivery
 
         /*
          * THE CONTROL, on the short edge of whichever way the phone is being held.
@@ -2016,8 +2091,8 @@ private fun CameraMode(
             pendingCount > 0 && clipsSent > 0 -> "$clipsSent sent · $pendingCount queued"
             pendingCount > 0 -> "$pendingCount queued · waiting to send"
             trackedPoints > 0 -> "$clipsSent sent · $trackedPoints ball points$trackWord"
-            clipsSent > 0 -> "$clipsSent sent"
-            else -> "Tap when the bowler runs in"
+            clipsSent > 0 -> "$clipsSent sent · films on the scorer's BALL"
+            else -> "Films when the scorer taps BALL · or tap here"
         }
         ShutterControl(
             modifier = Modifier
@@ -2035,7 +2110,9 @@ private fun CameraMode(
             recording = recording,
             canFilm = granted && videoCapture != null && !recording,
             landscape = landscape,
-            onArm = armDelivery,
+            // The backup: a tap during a ball the cue missed still files the clip under
+            // that ball, so the scorer's REVIEW finds it.
+            onArm = { armDelivery(latestCue?.takeIf { it.inPlay }?.seq) },
         )
     }
 }
@@ -2737,6 +2814,12 @@ private const val TRAIL_FADE_TO = 0.85f
 private const val MAX_MISSED_HEARTBEATS = 3
 
 private const val REVIEW_CLIP_MS = 9_500L
+
+/** How often the camera asks whether the scorer's BALL window is open. */
+private const val CUE_IDLE_MS = 1_000L
+
+/** Tighter while filming, so the clip ends close to the scorer's result tap. */
+private const val CUE_FILMING_MS = 600L
 
 /** Matches DeliveryReview::MAX_REVIEW_BYTES. */
 private const val MAX_REVIEW_BYTES = 50L * 1024 * 1024

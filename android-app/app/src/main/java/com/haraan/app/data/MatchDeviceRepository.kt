@@ -2,6 +2,7 @@ package com.haraan.app.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -81,7 +82,23 @@ data class MatchClip(
     val reviewStatus: ReviewStatus = ReviewStatus.NONE,
     /** Server-supplied and safe to print — never an exception message. */
     val reviewError: String? = null,
+    /** The scorer's BALL that armed this clip. Null for a hand-started clip. */
+    val ballSeq: Int? = null,
 )
+
+/** The clips list and where the BALL count stands, in one answer. */
+data class ClipsPage(
+    val clips: List<MatchClip>,
+    /** The latest BALL's number; 0 before the first. */
+    val lastBallSeq: Int,
+    /** That ball is still being bowled — its clip cannot exist yet. */
+    val ballInPlay: Boolean,
+    /** That ball was called dead, so its clip was thrown away on the camera. */
+    val lastBallCancelled: Boolean,
+) {
+    /** The clip for the latest ball, when it has arrived. */
+    val lastBallClip: MatchClip? get() = clips.firstOrNull { it.ballSeq != null && it.ballSeq == lastBallSeq }
+}
 
 /**
  * Where a clip's review has got to.
@@ -243,11 +260,22 @@ class MatchDeviceRepository {
         }
 
     suspend fun clips(token: String, matchId: String): List<MatchClip> =
+        clipsPage(token, matchId)?.clips ?: emptyList()
+
+    /**
+     * The clips plus where the scorer's BALL count stands — what REVIEW needs to find the
+     * clip for the ball just bowled. Null when the request failed, so a caller can tell
+     * "no clip yet" from "could not ask".
+     */
+    suspend fun clipsPage(token: String, matchId: String): ClipsPage? =
         withContext(Dispatchers.IO) {
-            val response = getJson("/api/matches/$matchId/clips", token)
-            if (response.code !in 200..299) return@withContext emptyList()
-            val arr = JSONObject(response.body).optJSONArray("data") ?: return@withContext emptyList()
-            buildList {
+            val response = runCatching { getJson("/api/matches/$matchId/clips", token) }.getOrNull()
+                ?: return@withContext null
+            if (response.code !in 200..299) return@withContext null
+            val root = JSONObject(response.body)
+            val meta = root.optJSONObject("meta")
+            val arr = root.optJSONArray("data") ?: JSONArray()
+            val list = buildList {
                 for (i in 0 until arr.length()) {
                     val o = arr.optJSONObject(i) ?: continue
                     add(
@@ -263,10 +291,17 @@ class MatchDeviceRepository {
                             ),
                             reviewError = o.optString("reviewError")
                                 .takeIf { it.isNotBlank() && it != "null" },
+                            ballSeq = o.optInt("ballSeq", 0).takeIf { it > 0 },
                         ),
                     )
                 }
             }
+            ClipsPage(
+                clips = list,
+                lastBallSeq = meta?.optInt("lastBallSeq", 0) ?: 0,
+                ballInPlay = meta?.optBoolean("ballInPlay", false) ?: false,
+                lastBallCancelled = meta?.optBoolean("lastBallCancelled", false) ?: false,
+            )
         }
 
     /**

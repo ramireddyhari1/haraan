@@ -267,9 +267,10 @@ private fun HeroLastBall(state: MatchUiState) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(horizontal = 6.dp)
     ) {
+        val inPlay = state.ballInPlay && state.isLive
         Text(
-            "LAST BALL",
-            color = Color(0xFF334155).copy(alpha = 0.5f),
+            if (inPlay) "BOWLING" else "LAST BALL",
+            color = if (inPlay) Color(0xFF2563EB) else Color(0xFF334155).copy(alpha = 0.5f),
             fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
         )
         Spacer(Modifier.height(4.dp))
@@ -292,9 +293,18 @@ private fun HeroLastBall(state: MatchUiState) {
         // moments, and keying on "SIX" would leave the second one silent.
         LaunchedEffect(fired?.ballKey) { if (fired != null) burst = fired.kind }
 
+        // The burst tracker above stays composed through the delivery on purpose: if it
+        // left with the glyph, it would re-seed on return and the FOUR that ends the
+        // animation would land silently.
         Box(contentAlignment = Alignment.Center) {
-            Text(lastBall, color = c.copy(alpha = 0.12f), fontSize = 56.sp, fontWeight = FontWeight.Black)
-            Text(lastBall, color = c, fontSize = 38.sp, fontWeight = FontWeight.Black)
+            if (inPlay) {
+                // The scorer tapped BALL: the bowler is running in. Loops until the result
+                // lands, then the slot hands back to the last-ball glyph and its burst.
+                DeliveryInPlay(Modifier.size(width = 84.dp, height = 66.dp))
+            } else {
+                Text(lastBall, color = c.copy(alpha = 0.12f), fontSize = 56.sp, fontWeight = FontWeight.Black)
+                Text(lastBall, color = c, fontSize = 38.sp, fontWeight = FontWeight.Black)
+            }
             // Overlaid, so the burst can spill past the centre column without moving any
             // of the hero's layout — a score that shifted sideways on every six would be
             // worse than no animation.
@@ -310,6 +320,97 @@ private fun HeroLastBall(state: MatchUiState) {
             contentAlignment = Alignment.Center
         ) {
             Text("VS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/**
+ * A ball being bowled, seen from behind the bowler: a pitch strip narrowing to the far
+ * stumps, the ball released big and near, dipping to pitch two-thirds of the way down and
+ * carrying on to the batter. Loops until the result arrives.
+ *
+ * Drawn, not a Lottie or an emoji — it has to sit inside the hero's centre column at
+ * 84dp and read at a glance, and it takes the board's own colours.
+ */
+@Composable
+private fun DeliveryInPlay(modifier: Modifier = Modifier) {
+    val loop = rememberInfiniteTransition(label = "delivery")
+    val t by loop.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = LinearEasing), RepeatMode.Restart),
+        label = "t"
+    )
+    val pitch = Color(0xFFC8A96B)
+    val crease = Color.White.copy(alpha = 0.85f)
+    val stump = Color(0xFF0F172A)
+    val ballRed = Color(0xFFC62828)
+
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        // Pitch: a trapezoid, far end (batter) at the top, near end (bowler) at the bottom.
+        val farHalf = w * 0.14f
+        val nearHalf = w * 0.34f
+        val top = h * 0.12f
+        val bottom = h * 0.98f
+        val cx = w / 2f
+        val strip = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx - farHalf, top); lineTo(cx + farHalf, top)
+            lineTo(cx + nearHalf, bottom); lineTo(cx - nearHalf, bottom); close()
+        }
+        drawPath(strip, pitch.copy(alpha = 0.9f))
+        // Popping creases at both ends.
+        drawLine(crease, androidx.compose.ui.geometry.Offset(cx - farHalf * 1.15f, top + h * 0.06f),
+            androidx.compose.ui.geometry.Offset(cx + farHalf * 1.15f, top + h * 0.06f), strokeWidth = 1.2f * density)
+        drawLine(crease, androidx.compose.ui.geometry.Offset(cx - nearHalf * 0.95f, bottom - h * 0.08f),
+            androidx.compose.ui.geometry.Offset(cx + nearHalf * 0.95f, bottom - h * 0.08f), strokeWidth = 1.5f * density)
+        // Far stumps — the batter's end, where the ball is headed.
+        for (i in -1..1) {
+            val x = cx + i * farHalf * 0.28f
+            drawLine(stump, androidx.compose.ui.geometry.Offset(x, top - h * 0.10f),
+                androidx.compose.ui.geometry.Offset(x, top + h * 0.04f), strokeWidth = 1.6f * density)
+        }
+
+        // The delivery occupies the first 80% of the loop; the rest is the run-up pause.
+        val p = (t / 0.8f).coerceAtMost(1f)
+        if (t < 0.8f) {
+            val bounceAt = 0.62f
+            val releaseY = bottom - h * 0.16f
+            val stumpsY = top + h * 0.01f
+            val groundY = releaseY + (stumpsY - releaseY) * p
+            // Height above the pitch: falls from the hand to pitch, then rises to bail height.
+            val lift = if (p < bounceAt) {
+                val q = p / bounceAt
+                (1f - q * q) * h * 0.30f
+            } else {
+                val q = (p - bounceAt) / (1f - bounceAt)
+                (q * (2f - q)) * h * 0.10f
+            }
+            val y = groundY - lift
+            // Perspective: the ball shrinks as it travels away.
+            val r = (5.2f - 2.4f * p) * density
+            // Shadow on the pitch, so the bounce reads as a bounce.
+            drawOval(
+                Color.Black.copy(alpha = 0.18f),
+                topLeft = androidx.compose.ui.geometry.Offset(cx - r, groundY - r * 0.35f),
+                size = androidx.compose.ui.geometry.Size(r * 2f, r * 0.7f)
+            )
+            // A dust puff where it pitches.
+            if (p in bounceAt..(bounceAt + 0.14f)) {
+                val k = (p - bounceAt) / 0.14f
+                drawCircle(
+                    pitch.copy(alpha = 0.55f * (1f - k)),
+                    radius = r * (1.2f + k * 2.2f),
+                    center = androidx.compose.ui.geometry.Offset(cx, groundY)
+                )
+            }
+            drawCircle(ballRed, radius = r, center = androidx.compose.ui.geometry.Offset(cx, y))
+            drawLine(
+                Color.White.copy(alpha = 0.8f),
+                androidx.compose.ui.geometry.Offset(cx - r * 0.7f, y),
+                androidx.compose.ui.geometry.Offset(cx + r * 0.7f, y),
+                strokeWidth = 0.9f * density
+            )
         }
     }
 }
@@ -472,7 +573,9 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
 private fun ScoringRibbon(modifier: Modifier = Modifier, state: MatchUiState, band: Dp) {
     // The ribbon shows the boundary/wicket word while the MOST RECENT ball is a 4/6/W,
     // and reverts to the calm grey "HARAAN LIVE" on the next (non-boundary) ball.
-    val (word, argb) = when (state.thisOver.lastOrNull()) {
+    val (word, argb) = if (state.ballInPlay && state.isLive) {
+        "BALL  IN  PLAY" to android.graphics.Color.rgb(37, 99, 235)
+    } else when (state.thisOver.lastOrNull()) {
         "6" -> "SIX" to android.graphics.Color.rgb(22, 163, 74)
         "4" -> "FOUR" to android.graphics.Color.rgb(37, 99, 235)
         "W" -> "WICKET" to android.graphics.Color.rgb(214, 40, 40)
