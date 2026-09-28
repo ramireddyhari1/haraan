@@ -8,6 +8,8 @@ use App\Models\MemberPayment;
 use App\Models\MemberPlanPrice;
 use App\Models\MemberSubscription;
 use App\Models\MemberSubscriptionEvent;
+use App\Models\User;
+use App\Services\Membership\MemberEntitlements;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -99,6 +101,28 @@ class MembershipApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.plan.code', 'free')
             ->assertJsonPath('data.attention', 'payment_failed');
+    }
+
+    public function test_app_icons_follow_the_plan_pro_gets_pro_hero_gets_both(): void
+    {
+        $icons = function (User $user): array {
+            $rows = collect($this->asMember($user)->getJson('/api/membership')->assertOk()->json('data.entitlements'))
+                ->keyBy('key');
+
+            return [(bool) $rows['app.icon_pro']['enabled'], (bool) $rows['app.icon_hero']['enabled']];
+        };
+
+        $this->assertSame([false, false], $icons($this->member()));
+
+        $pro = $this->member();
+        $this->paidSubscription($pro, 'pro');
+        MemberEntitlements::flush();
+        $this->assertSame([true, false], $icons($pro));
+
+        $hero = $this->member();
+        $this->paidSubscription($hero, 'hero');
+        MemberEntitlements::flush();
+        $this->assertSame([true, true], $icons($hero));
     }
 
     // ── Checkout ────────────────────────────────────────────────────────────

@@ -41,6 +41,14 @@ final class MemberFeature
 
     public const PROFILE_MEMBER_BADGE = 'profile.member_badge';
 
+    /**
+     * The Pro / Hero home-screen icon. Nothing on the server to guard — the app reads these from
+     * the member's own entitlements (AppIcons.kt) and hands the default icon back when they lapse.
+     */
+    public const APP_ICON_PRO = 'app.icon_pro';
+
+    public const APP_ICON_HERO = 'app.icon_hero';
+
     public const SUPPORT_PRIORITY = 'support.priority';
 
     /**
@@ -78,6 +86,8 @@ final class MemberFeature
         self::MATCHES_SEE_VIEWERS => ['type' => self::TYPE_BOOLEAN, 'label' => "See who's watching"],
         self::MATCHES_SHOT_PLOTTING => ['type' => self::TYPE_BOOLEAN, 'label' => 'Shot plotting'],
         self::PROFILE_MEMBER_BADGE => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member badge'],
+        self::APP_ICON_PRO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Pro app icon'],
+        self::APP_ICON_HERO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Hero app icon'],
         self::SUPPORT_PRIORITY => ['type' => self::TYPE_BOOLEAN, 'label' => 'Priority support'],
         self::INSIGHTS_ADVANCED_SPORTS => ['type' => self::TYPE_LIMIT, 'label' => 'Advanced insights'],
         self::EVENTS_EARLY_ACCESS => ['type' => self::TYPE_LIMIT, 'label' => 'Early ticket access'],

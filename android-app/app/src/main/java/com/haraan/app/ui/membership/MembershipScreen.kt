@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,6 +41,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +63,7 @@ import com.haraan.app.data.membership.Membership
 import com.haraan.app.ui.pressable
 import com.haraan.app.ui.theme.HaraanColors
 import com.razorpay.Checkout
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 private val Bg = HaraanColors.Background
@@ -94,6 +97,8 @@ fun MembershipScreen(
     val state by vm.state.collectAsState()
     val context = LocalContext.current
     var confirmCancel by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { vm.enter() }
 
@@ -144,8 +149,12 @@ fun MembershipScreen(
                 val trayShown = canSellHere && buyable
 
                 Box(Modifier.weight(1f)) {
+                    // The "Plans" heading's position: after the result card and attention banner, when shown.
+                    val resultShown = state.checkout.let { it is CheckoutPhase.Succeeded || it == CheckoutPhase.StillConfirming }
+                    val plansHeading = (if (resultShown) 1 else 0) + (if (state.membership?.attention != null) 1 else 0)
                     LazyColumn(
                         Modifier.fillMaxSize(),
+                        state = listState,
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = if (trayShown) 120.dp else 24.dp),
                     ) {
                         state.checkout.let { phase ->
@@ -182,6 +191,24 @@ fun MembershipScreen(
                             Spacer(Modifier.height(12.dp))
                             if (!canSellHere && buyable) {
                                 StoreNote(state.catalogue?.checkout?.note)
+                            }
+                        }
+
+                        // Their plan's icons, and the ones another plan would add. Needs their own
+                        // entitlements, so only once the server has said who they are.
+                        state.membership?.let { m ->
+                            item(key = "app-icon") {
+                                Spacer(Modifier.height(20.dp))
+                                AppIconPicker(
+                                    membership = m,
+                                    plans = state.plans,
+                                    // A locked icon opens the plan that includes it.
+                                    onShowPlan = { code ->
+                                        vm.selectPlan(code)
+                                        scope.launch { listState.animateScrollToItem(plansHeading) }
+                                    },
+                                )
+                                Spacer(Modifier.height(8.dp))
                             }
                         }
 

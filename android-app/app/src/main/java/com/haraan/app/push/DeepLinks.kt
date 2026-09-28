@@ -26,7 +26,7 @@ sealed interface DeepLinkTarget {
 }
 
 /** Parses a `deep_link` payload into a [DeepLinkTarget]. HTTP(S) URLs are handled */
-/** externally by MainActivity and never reach here. Unknown links return null. */
+/** externally by HomeActivity and never reach here. Unknown links return null. */
 object DeepLinks {
     fun parse(raw: String?): DeepLinkTarget? {
         val link = raw?.trim()?.lowercase() ?: return null
@@ -52,7 +52,7 @@ object DeepLinks {
 
     private val REWARDS_MATCH = Regex("^(?:haraan://)?/?rewards/match/(\\d+)/?$")
 
-    /** True when the payload is a web URL MainActivity should open in a browser. */
+    /** True when the payload is a web URL HomeActivity should open in a browser. */
     fun isWebUrl(raw: String?): Boolean {
         val link = raw?.trim()?.lowercase() ?: return false
         return link.startsWith("http://") || link.startsWith("https://")

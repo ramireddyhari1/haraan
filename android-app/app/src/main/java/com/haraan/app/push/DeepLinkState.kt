@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * A one-shot channel for a pending deep link, from [com.haraan.app.MainActivity]
+ * A one-shot channel for a pending deep link, from [com.haraan.app.HomeActivity]
  * (which reads it off the launch/tap intent) to the composable that can act on it
  * ([com.haraan.app.ui.main.MainAppContainer], which owns the tab + inbox state).
  *

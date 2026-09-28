@@ -535,7 +535,7 @@ internal fun MainAppContainer(
   var ticketPass by remember { mutableStateOf<com.haraan.app.data.BookingLite?>(null) }
 
   // Route a deep link from a tapped push into the right place. Held in DeepLinkState
-  // by MainActivity; applied here since this composable owns the tab + inbox state.
+  // by HomeActivity; applied here since this composable owns the tab + inbox state.
   // A link tapped while signed out lands here once the user reaches this screen.
   val pendingDeepLink by com.haraan.app.push.DeepLinkState.pending.collectAsState()
   LaunchedEffect(pendingDeepLink) {

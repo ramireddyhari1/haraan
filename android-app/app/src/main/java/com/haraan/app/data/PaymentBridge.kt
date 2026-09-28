@@ -35,6 +35,9 @@ object PaymentBridge {
         pending = onResult
     }
 
+    /** True while a checkout is open and its result hasn't come back yet. */
+    val isAwaiting: Boolean get() = pending != null
+
     /** Called from the Activity's Razorpay listener; delivers to and clears the handler. */
     fun deliver(outcome: Outcome) {
         val handler = pending

@@ -40,14 +40,56 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Haraan.Splash">
         <activity
-            android:name=".MainActivity"
+            android:name=".HomeActivity"
             android:launchMode="singleTop"
+            android:exported="true" />
+
+        <!--
+          The home-screen icon. Exactly one of these three is enabled at a time; AppIcons.kt
+          flips them when a Pro or Hero member picks their tier's icon, and puts the default
+          back when the plan no longer includes it.
+
+          The default keeps the name ".MainActivity" on purpose: that was the launcher
+          component before the activity became HomeActivity, and launchers pin home-screen
+          shortcuts by component name. Renaming it would silently drop every installed
+          user's Haraan icon from their home screen on the update.
+        -->
+        <activity-alias
+            android:name=".MainActivity"
+            android:targetActivity=".HomeActivity"
+            android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LauncherPro"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_pro"
+            android:roundIcon="@mipmap/ic_launcher_pro_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LauncherHero"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_hero"
+            android:roundIcon="@mipmap/ic_launcher_hero_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!--
           A phone joining a match AS A CAMERA. Its own Activity on purpose: this flow has

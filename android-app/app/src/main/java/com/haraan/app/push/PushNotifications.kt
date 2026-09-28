@@ -10,7 +10,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.haraan.app.MainActivity
+import com.haraan.app.HomeActivity
 import com.haraan.app.R
 
 /**
@@ -55,7 +55,7 @@ object PushNotifications {
         if (!hasPermission(context)) return
         ensureChannel(context)
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = Intent(context, HomeActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (!deepLink.isNullOrBlank()) putExtra(EXTRA_DEEP_LINK, deepLink)
         }

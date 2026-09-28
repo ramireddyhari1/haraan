@@ -26,6 +26,10 @@ import com.haraan.app.data.PaymentBridge
 import com.haraan.app.data.RealtimeClient
 import com.haraan.app.data.RemoteBootstrap
 import com.haraan.app.data.RemoteConfigStore
+import com.haraan.app.data.TokenStore
+import com.haraan.app.data.membership.AppIcon
+import com.haraan.app.data.membership.AppIcons
+import com.haraan.app.data.membership.MembershipRepository
 import com.haraan.app.push.DeepLinkState
 import com.haraan.app.push.DeepLinks
 import com.haraan.app.push.PushNotifications
@@ -50,7 +54,7 @@ private const val WARMUP_FALLBACK_MS = 6000L
  * callbacks to the Activity, which forwards them to [PaymentBridge] so the checkout screen
  * that opened the sheet can confirm (or release) the reservation.
  */
-class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
+class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
   /**
    * Heavy third-party warm-ups, kicked off once the launch is visually done.
    *
@@ -64,6 +68,9 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
    */
   private val warmupsStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
+  /** Set by the warm-ups when a lapsed plan's icon must go; applied once we're backgrounded. */
+  @Volatile private var iconCorrection: AppIcon? = null
+
   private fun startDeferredWarmups() {
     if (!warmupsStarted.compareAndSet(false, true)) return
     lifecycleScope.launch(Dispatchers.IO) {
@@ -72,6 +79,12 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
       // works without it) and the token sync retries on the next launch.
       val preload = runCatching { Checkout.preload(applicationContext) }
       val push = runCatching { PushRegistrar.syncToken(applicationContext) }
+      // A Pro/Hero icon whose plan has lapsed goes back to the default — applied in onStop.
+      iconCorrection = runCatching {
+        AppIcons.lapsed(applicationContext, TokenStore.getSignedInToken(applicationContext)) { token ->
+          MembershipRepository().membership(token)
+        }
+      }.getOrNull()
       if (BuildConfig.DEBUG) {
         android.util.Log.i(
           "StartupTrace",
@@ -179,6 +192,17 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
         }
       }
     }
+  }
+
+  // Swapping the launcher alias can end the task on some OEM builds, so a lapsed plan's icon is
+  // only handed back once the member has left — never mid-payment (UPI apps and Razorpay's sheet
+  // stop this Activity too, and losing the task there would lose the payment result).
+  override fun onStop() {
+    super.onStop()
+    val fix = iconCorrection ?: return
+    if (isChangingConfigurations || PaymentBridge.isAwaiting) return
+    iconCorrection = null
+    AppIcons.apply(applicationContext, fix)
   }
 
   // A push tapped while the app is already running (singleTop) arrives here.

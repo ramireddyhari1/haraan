@@ -1674,7 +1674,7 @@ internal fun BookingSheet(
             submitting = false
           } else {
             // Arm the one-shot handler BEFORE opening the sheet — the result
-            // arrives via MainActivity → PaymentBridge.
+            // arrives via HomeActivity → PaymentBridge.
             com.haraan.app.data.PaymentBridge.await { outcome ->
               scope.launch {
                 when (outcome) {
