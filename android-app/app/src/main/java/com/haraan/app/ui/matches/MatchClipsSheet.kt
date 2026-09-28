@@ -751,6 +751,27 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                 }
             }
 
+            // THE FLIGHT, SIDE-ON — only from the camera standing side-on, the one angle
+            // where the picture's vertical is the ball's height. From behind the bowler's
+            // arm the same drawing would be a guess, so it is not offered there.
+            if (clip.role == com.haraan.app.data.MatchDeviceRole.BOWLER_ANALYSIS) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 18.dp)) {
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.1f)))
+                    Spacer(Modifier.height(16.dp))
+                    val track = clip.track
+                    if (track != null) {
+                        SideOnFlightView(track)
+                    } else {
+                        Text(
+                            "The side-on camera didn't pick up the ball in this clip, so there's no flight to draw.",
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                }
+            }
+
             // THE REVIEW.
             //
             // Under the footage, never instead of it. Seeing the ball again is most of

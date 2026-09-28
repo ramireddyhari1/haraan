@@ -33,6 +33,8 @@ data class QueuedClipMeta(
     val lastAttemptMs: Long = 0L,
     /** The scorer's BALL that armed this clip; null for a clip from the camera's own button. */
     val ballSeq: Int? = null,
+    /** What this phone's tracker saw while filming, as [clipTrackJson] wrote it. */
+    val trackJson: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -40,6 +42,7 @@ data class QueuedClipMeta(
         put("durationMs", durationMs)
         if (!overBall.isNullOrBlank()) put("overBall", overBall)
         if (ballSeq != null) put("ballSeq", ballSeq)
+        if (!trackJson.isNullOrBlank()) put("track", trackJson)
         put("enqueuedAtMs", enqueuedAtMs)
         put("retryCount", retryCount)
         put("lastAttemptMs", lastAttemptMs)
@@ -55,6 +58,7 @@ data class QueuedClipMeta(
             retryCount = json.optInt("retryCount", 0),
             lastAttemptMs = json.optLong("lastAttemptMs", 0L),
             ballSeq = json.optInt("ballSeq", 0).takeIf { it > 0 },
+            trackJson = json.optString("track").takeIf { it.isNotBlank() },
         )
     }
 }
@@ -242,6 +246,7 @@ class ClipUploadQueue(
         durationMs: Long,
         overBall: String?,
         ballSeq: Int? = null,
+        trackJson: String? = null,
     ) {
         if (!file.exists() || file.length() <= 0L) {
             runCatching { file.delete() }
@@ -268,6 +273,7 @@ class ClipUploadQueue(
             overBall = overBall,
             enqueuedAtMs = System.currentTimeMillis(),
             ballSeq = ballSeq,
+            trackJson = trackJson,
         )
 
         val metaFile = File(queueDir, "$clipId$EXT_META")
@@ -380,6 +386,7 @@ class ClipUploadQueue(
                 durationMs = meta.durationMs,
                 overBall = meta.overBall,
                 ballSeq = meta.ballSeq,
+                track = meta.trackJson,
             )
 
             when (result) {
@@ -477,4 +484,40 @@ class ClipUploadQueue(
             }
         }
     }
+}
+
+/**
+ * The delivery's track as the server stores it: `{v, aspect, bounce, points[[t,x,y,score]]}`.
+ *
+ * The longest continuous run only — see [com.haraan.app.vision.TrailGeometry.runs]. Two
+ * runs are two different things the tracker followed, and joining them would draw a path
+ * the ball never took. Times are the sensor's clock, relative to the first sighting.
+ *
+ * Null when there is nothing worth sending; the clip still uploads without it.
+ */
+internal fun clipTrackJson(
+    track: List<com.haraan.app.vision.BallSighting>,
+    aspect: Float,
+): String? {
+    if (aspect <= 0f) return null
+    val run = com.haraan.app.vision.TrailGeometry.runs(track).maxByOrNull { it.size } ?: return null
+    if (run.size < 3) return null
+    val kept = run.take(150)
+    val t0 = kept.first().timestampMs
+    val points = org.json.JSONArray()
+    kept.forEach { s ->
+        points.put(
+            org.json.JSONArray()
+                .put(s.timestampMs - t0)
+                .put(Math.round(s.x * 10_000) / 10_000.0)
+                .put(Math.round(s.y * 10_000) / 10_000.0)
+                .put(Math.round(s.trackingConfidence * 100) / 100.0),
+        )
+    }
+    return JSONObject()
+        .put("v", 1)
+        .put("aspect", aspect.toDouble())
+        .put("bounce", com.haraan.app.vision.BallPath.bounceIndex(kept, aspect) ?: JSONObject.NULL)
+        .put("points", points)
+        .toString()
 }

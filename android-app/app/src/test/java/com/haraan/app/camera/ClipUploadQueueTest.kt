@@ -30,6 +30,7 @@ class ClipUploadQueueTest {
         var lastDurationMs: Long? = null
         var lastOverBall: String? = null
         var lastBallSeq: Int? = null
+        var lastTrack: String? = null
 
         override suspend fun uploadClip(
             sessionToken: String,
@@ -37,8 +38,10 @@ class ClipUploadQueueTest {
             durationMs: Long,
             overBall: String?,
             ballSeq: Int?,
+            track: String?,
         ): ClipUploadResult {
             uploadCalls++
+            lastTrack = track
             lastBallSeq = ballSeq
             lastSessionToken = sessionToken
             lastFile = file
@@ -73,6 +76,28 @@ class ClipUploadQueueTest {
         assertEquals(meta.lastAttemptMs, parsed.lastAttemptMs)
         // The BALL number survives a process restart, so REVIEW still finds the clip.
         assertEquals(37, parsed.ballSeq)
+    }
+
+    @Test
+    fun `the camera's ball track survives the queue's disk round trip`() {
+        val track = """{"v":1,"aspect":1.7778,"bounce":2,"points":[[0,0.1,0.5,0.8],[33,0.2,0.6,0.7],[66,0.3,0.7,0.9],[99,0.4,0.62,0.9]]}"""
+        val meta = QueuedClipMeta(
+            id = "clip-2",
+            sessionToken = "TOK",
+            durationMs = 8000L,
+            overBall = "3.4",
+            enqueuedAtMs = 1000L,
+            trackJson = track,
+        )
+        val parsed = QueuedClipMeta.fromJson(org.json.JSONObject(meta.toJson().toString(2)))
+        assertEquals(track, parsed.trackJson)
+    }
+
+    @Test
+    fun `a clip with no track stores none`() {
+        val meta = QueuedClipMeta(id = "c", sessionToken = "T", durationMs = 1L, overBall = null, enqueuedAtMs = 1L)
+        assertFalse(meta.toJson().has("track"))
+        assertNull(QueuedClipMeta.fromJson(meta.toJson()).trackJson)
     }
 
     @Test
@@ -230,9 +255,10 @@ class ClipUploadQueueTest {
                 durationMs: Long,
                 overBall: String?,
                 ballSeq: Int?,
+                track: String?,
             ): ClipUploadResult {
                 uploadedOrder.add(overBall ?: "")
-                return super.uploadClip(sessionToken, file, durationMs, overBall, ballSeq)
+                return super.uploadClip(sessionToken, file, durationMs, overBall, ballSeq, track)
             }
         }
 

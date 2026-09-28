@@ -84,7 +84,49 @@ data class MatchClip(
     val reviewError: String? = null,
     /** The scorer's BALL that armed this clip. Null for a hand-started clip. */
     val ballSeq: Int? = null,
+    /** Which camera filmed it. Decides which drawings of the flight are honest. */
+    val role: MatchDeviceRole? = null,
+    /** What the camera's own tracker measured while filming. Null when it saw nothing. */
+    val track: ClipTrack? = null,
 )
+
+/**
+ * The camera phone's own ball track for one clip.
+ *
+ * MEASURED, not inferred: these are the sightings the on-phone tracker made while the
+ * clip was being filmed, stamped with the sensor's clock. x and y are 0..1 in the upright
+ * picture, and [aspect] is that picture's width / height, so across and down can be drawn
+ * at the same scale. [bounce] is the index where the ball stopped falling and started
+ * rising in the picture, when there was one.
+ */
+data class ClipTrack(
+    val aspect: Float,
+    val bounce: Int?,
+    val points: List<ClipTrackPoint>,
+)
+
+/** [score] ranks how ball-like the sighting was. Not a probability; never shown as one. */
+data class ClipTrackPoint(val tMs: Int, val x: Float, val y: Float, val score: Float)
+
+internal fun parseClipTrack(o: JSONObject?): ClipTrack? {
+    if (o == null) return null
+    val aspect = o.optDouble("aspect", 0.0).toFloat()
+    val arr = o.optJSONArray("points") ?: return null
+    if (aspect <= 0f) return null
+    val points = (0 until arr.length()).mapNotNull { i ->
+        val p = arr.optJSONArray(i) ?: return@mapNotNull null
+        if (p.length() < 3) return@mapNotNull null
+        ClipTrackPoint(
+            tMs = p.optInt(0),
+            x = p.optDouble(1).toFloat(),
+            y = p.optDouble(2).toFloat(),
+            score = if (p.length() > 3) p.optDouble(3).toFloat() else 0f,
+        )
+    }.filter { it.x in 0f..1f && it.y in 0f..1f }
+    if (points.size < 3) return null
+    val bounce = if (o.isNull("bounce")) null else o.optInt("bounce", -1).takeIf { it in points.indices }
+    return ClipTrack(aspect, bounce, points)
+}
 
 /** The clips list and where the BALL count stands, in one answer. */
 data class ClipsPage(
@@ -292,6 +334,9 @@ class MatchDeviceRepository {
                             reviewError = o.optString("reviewError")
                                 .takeIf { it.isNotBlank() && it != "null" },
                             ballSeq = o.optInt("ballSeq", 0).takeIf { it > 0 },
+                            role = o.optString("role").takeIf { it.isNotBlank() }
+                                ?.let { MatchDeviceRole.fromServer(it) },
+                            track = parseClipTrack(o.optJSONObject("track")),
                         ),
                     )
                 }

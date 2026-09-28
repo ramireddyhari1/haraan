@@ -199,6 +199,7 @@ open class CameraDeviceRepository {
         durationMs: Long,
         overBall: String?,
         ballSeq: Int? = null,
+        track: String? = null,
     ): ClipUploadResult = withContext(Dispatchers.IO) {
         val boundary = "----haraan" + System.currentTimeMillis()
         var connection: HttpURLConnection? = null
@@ -227,6 +228,7 @@ open class CameraDeviceRepository {
                 field("durationMs", durationMs.toString())
                 if (!overBall.isNullOrBlank()) field("overBall", overBall)
                 if (ballSeq != null && ballSeq > 0) field("ballSeq", ballSeq.toString())
+                if (!track.isNullOrBlank()) field("track", track)
 
                 out.write(
                     ("--$boundary\r\nContent-Disposition: form-data; name=\"clip\"; " +

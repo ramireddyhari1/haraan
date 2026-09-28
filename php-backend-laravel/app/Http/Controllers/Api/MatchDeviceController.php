@@ -310,6 +310,9 @@ final class MatchDeviceController extends Controller
             // The BALL this clip was armed by. Only a positive number is a ball; anything
             // else is a clip from the camera's own button.
             'ball_seq' => ((int) $request->input('ballSeq')) > 0 ? (int) $request->input('ballSeq') : null,
+            // What the camera's own tracker saw while filming. Optional and never a reason
+            // to refuse a clip: an older app sends none, and a garbled one is dropped.
+            'track' => \App\Support\ClipTrack::sanitise($request->input('track')),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -345,6 +348,7 @@ final class MatchDeviceController extends Controller
                 'overBall' => (string) ($c->over_ball ?? ''),
                 'ballSeq' => $c->ball_seq === null ? null : (int) $c->ball_seq,
                 'durationMs' => (int) $c->duration_ms,
+                'track' => \App\Support\ClipTrack::decode($c->track ?? null),
                 'recordedAt' => (string) $c->created_at,
                 'review' => $c->analysis === null ? null : json_decode((string) $c->analysis, true),
                 // Null means nobody has ever asked. The app treats that as "offer the

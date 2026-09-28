@@ -2089,6 +2089,9 @@ private fun CameraMode(
                         // The argument, not the state: by now the state may already name
                         // the next ball.
                         ballSeq = ballSeq,
+                        // What this phone saw of the ball, so the scorer can draw the
+                        // flight without asking a model to find it all over again.
+                        trackJson = clipTrackJson(vision.track(), uprightAspect),
                     )
                 },
             )
