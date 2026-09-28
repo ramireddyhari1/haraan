@@ -109,12 +109,11 @@ import com.haraan.app.ui.theme.HaraanColors
 //  This screen shows a clip, says which delivery it is, and — when somebody asks —
 //  what a model could see in the footage, factor by factor.
 //
-//  It still never says what the clip MEANS: no verdict, no line, no projected path.
-//  One uncalibrated phone at 30fps cannot adjudicate an LBW, and a screen that
-//  offered an answer here would be believed. So the review reports observations and
-//  is required to say when it cannot tell — which, on ground-level footage shot from
-//  wherever somebody could stand, is most of the time. The umpire's judgement is the
-//  feature; the footage and the read are what it is made from.
+//  The read is revealed broadcast-style (see ReviewReveal.kt), but it is the CAMERA'S
+//  read, not a decision. One uncalibrated phone at 30fps cannot adjudicate an LBW, so
+//  it only says OUT when every question came back for out and certain, and says so
+//  plainly when it cannot tell — which, on ground-level footage shot from wherever
+//  somebody could stand, is often. The umpire's judgement is still the feature.
 // ─────────────────────────────────────────────────────────────────────────────
 
 private val Panel = HaraanColors.Surface
@@ -1076,9 +1075,9 @@ private fun ReviewInProgress() {
  * the sequence an umpire actually decides in. A shuffled list of the same five facts reads
  * as a data dump; in this order it reads as somebody working through an appeal.
  *
- * There is no verdict line and no colour coding of good or bad. Green for "hitting" and
- * red for "missing" would be a decision rendered in paint, and this screen does not get to
- * make one — a factor the camera could not settle is simply set in grey and says so.
+ * The factors are shown as [ReviewReveal]: built one at a time, coloured by which way each
+ * points, ending in the camera's read. That read is deliberately hard to push to OUT — see
+ * [cameraReadOf] — and the line at the bottom still says the call stays with the players.
  */
 @Composable
 private fun DeliveryReviewPanel(
@@ -1109,52 +1108,22 @@ private fun DeliveryReviewPanel(
         }
         Spacer(Modifier.height(14.dp))
 
-        review.factors.forEachIndexed { i, factor ->
-            if (i > 0) {
-                Spacer(Modifier.height(9.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(Color.White.copy(alpha = 0.07f)),
-                )
-                Spacer(Modifier.height(9.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    factorLabel(factor.key),
-                    color = Color.White.copy(alpha = 0.45f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.1.sp,
-                    modifier = Modifier.width(86.dp),
-                )
-                Text(
-                    readingLabel(factor.key, factor.reading),
-                    // An unresolved factor is deliberately quiet. It is still information —
-                    // knowing the footage cannot answer is worth more than a confident
-                    // guess — but it must never carry the weight of one that is settled.
-                    color = if (factor.unknown) {
-                        Color.White.copy(alpha = 0.38f)
-                    } else {
-                        Color.White
-                    },
-                    fontSize = 14.5.sp,
-                    fontWeight = if (factor.unknown) FontWeight.Normal else FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                // Only a factor the model called unambiguous gets a mark, and the mark is
-                // a dot rather than a tick: a tick reads as "correct", and nothing here
-                // has been checked against anything.
-                if (!factor.unknown && factor.certain) {
-                    Box(
-                        Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF4ADE80)),
-                    )
-                }
-            }
+        // The read, built a question at a time. Replays on a tap, because the people round
+        // the phone ask to see it again every time.
+        var generation by remember { mutableStateOf(0) }
+        ReviewReveal(review = review, generation = generation)
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .pressable(onClick = { generation++ })
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Refresh, null, tint = Color.White, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Show the read again", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
         }
 
         review.notes?.let { note ->
