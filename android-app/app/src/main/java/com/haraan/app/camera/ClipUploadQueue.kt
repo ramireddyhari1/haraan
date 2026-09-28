@@ -498,6 +498,7 @@ class ClipUploadQueue(
 internal fun clipTrackJson(
     track: List<com.haraan.app.vision.BallSighting>,
     aspect: Float,
+    wickets: com.haraan.app.vision.LbwProjection? = null,
 ): String? {
     if (aspect <= 0f) return null
     val run = com.haraan.app.vision.TrailGeometry.runs(track).maxByOrNull { it.size } ?: return null
@@ -519,5 +520,25 @@ internal fun clipTrackJson(
         .put("aspect", aspect.toDouble())
         .put("bounce", com.haraan.app.vision.BallPath.bounceIndex(kept, aspect) ?: JSONObject.NULL)
         .put("points", points)
+        .apply { wickets?.let { put("wickets", wicketsJson(it)) } }
         .toString()
+}
+
+/**
+ * The camera's own answer to "would it have hit the stumps", sent with the clip so the
+ * scorer's REVIEW can show it the moment it opens, without waiting on a model.
+ *
+ * [note] is the projection's own sentence — the measured answer, or why there is none —
+ * cut to its first clause, because it lands on a chip.
+ */
+internal fun wicketsJson(p: com.haraan.app.vision.LbwProjection): JSONObject {
+    val note = when (p.verdict) {
+        com.haraan.app.vision.LbwVerdict.UNAVAILABLE -> p.basis
+        else -> p.limbs.firstOrNull()?.answer ?: p.basis
+    }.substringBefore(" — ").take(140)
+    return JSONObject()
+        .put("verdict", p.verdict.name)
+        .put("offsetCm", p.offsetM?.let { Math.round(it * 1000) / 10.0 } ?: JSONObject.NULL)
+        .put("uncertaintyCm", p.uncertaintyM?.let { Math.round(it * 1000) / 10.0 } ?: JSONObject.NULL)
+        .put("note", note)
 }

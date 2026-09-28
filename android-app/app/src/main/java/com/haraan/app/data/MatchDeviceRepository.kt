@@ -103,7 +103,34 @@ data class ClipTrack(
     val aspect: Float,
     val bounce: Int?,
     val points: List<ClipTrackPoint>,
+    /** The camera's own "would it have hit the stumps". Behind-the-arm camera only. */
+    val wickets: CameraWickets? = null,
 )
+
+/**
+ * The camera phone's projection onto the stumps, measured as it filmed.
+ *
+ * [verdict] is HITTING, MISSING, UMPIRES_CALL or UNAVAILABLE. [note] is the projection's
+ * own sentence: the answer in centimetres, or what it needed and did not have.
+ */
+data class CameraWickets(
+    val verdict: String,
+    val offsetCm: Double?,
+    val uncertaintyCm: Double?,
+    val note: String,
+)
+
+internal fun parseCameraWickets(o: JSONObject?): CameraWickets? {
+    val verdict = o?.optString("verdict")?.takeIf {
+        it in setOf("HITTING", "MISSING", "UMPIRES_CALL", "UNAVAILABLE")
+    } ?: return null
+    return CameraWickets(
+        verdict = verdict,
+        offsetCm = if (o.isNull("offsetCm")) null else o.optDouble("offsetCm").takeIf { !it.isNaN() },
+        uncertaintyCm = if (o.isNull("uncertaintyCm")) null else o.optDouble("uncertaintyCm").takeIf { !it.isNaN() },
+        note = o.optString("note").takeIf { it.isNotBlank() && it != "null" }.orEmpty(),
+    )
+}
 
 /** [score] ranks how ball-like the sighting was. Not a probability; never shown as one. */
 data class ClipTrackPoint(val tMs: Int, val x: Float, val y: Float, val score: Float)
@@ -125,7 +152,7 @@ internal fun parseClipTrack(o: JSONObject?): ClipTrack? {
     }.filter { it.x in 0f..1f && it.y in 0f..1f }
     if (points.size < 3) return null
     val bounce = if (o.isNull("bounce")) null else o.optInt("bounce", -1).takeIf { it in points.indices }
-    return ClipTrack(aspect, bounce, points)
+    return ClipTrack(aspect, bounce, points, parseCameraWickets(o.optJSONObject("wickets")))
 }
 
 /** The clips list and where the BALL count stands, in one answer. */

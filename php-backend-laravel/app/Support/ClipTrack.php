@@ -14,7 +14,10 @@ namespace App\Support;
  *
  * Shape, in and out:
  *   { "v": 1, "aspect": 1.7778, "bounce": 12|null,
- *     "points": [[tMs, x, y, score], ...] }
+ *     "points": [[tMs, x, y, score], ...],
+ *     "wickets": { "verdict": "HITTING", "offsetCm": 4.2, "uncertaintyCm": 3.0, "note": "…" } }
+ *
+ * "wickets" is optional and comes only from the camera behind the bowler's arm.
  *
  * x and y are 0..1 in the UPRIGHT analysis frame; aspect is that frame's width/height, so
  * a renderer can draw distances across and down at the same scale. tMs is the camera
@@ -67,12 +70,46 @@ final class ClipTrack
         $bounce = $data['bounce'] ?? null;
         $bounce = is_int($bounce) && $bounce >= 0 && $bounce < count($points) ? $bounce : null;
 
-        return json_encode([
+        $out = [
             'v' => 1,
             'aspect' => round($aspect, 4),
             'bounce' => $bounce,
             'points' => $points,
-        ]);
+        ];
+        $wickets = self::wickets($data['wickets'] ?? null);
+        if ($wickets !== null) {
+            $out['wickets'] = $wickets;
+        }
+
+        return json_encode($out);
+    }
+
+    /**
+     * The camera's own "would it have hit the stumps", when it sent one.
+     *
+     * Kept only in a shape the app can print: a known verdict, centimetres inside sane
+     * bounds, and a short plain-text note. Anything else is dropped rather than repaired —
+     * a verdict that has to be guessed at is not one to put on the scorer's screen.
+     */
+    private static function wickets(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+        $verdict = $raw['verdict'] ?? null;
+        if (! in_array($verdict, ['HITTING', 'MISSING', 'UMPIRES_CALL', 'UNAVAILABLE'], true)) {
+            return null;
+        }
+        $cm = static fn (mixed $v, float $lo, float $hi): ?float =>
+            is_numeric($v) && (float) $v >= $lo && (float) $v <= $hi ? round((float) $v, 1) : null;
+        $note = is_string($raw['note'] ?? null) ? trim(strip_tags($raw['note'])) : '';
+
+        return [
+            'verdict' => $verdict,
+            'offsetCm' => $cm($raw['offsetCm'] ?? null, -300.0, 300.0),
+            'uncertaintyCm' => $cm($raw['uncertaintyCm'] ?? null, 0.0, 300.0),
+            'note' => mb_substr($note, 0, 140),
+        ];
     }
 
     /** For the API: the stored JSON back as an array, or null. */

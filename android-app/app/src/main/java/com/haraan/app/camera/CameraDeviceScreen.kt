@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -2091,7 +2092,15 @@ private fun CameraMode(
                         ballSeq = ballSeq,
                         // What this phone saw of the ball, so the scorer can draw the
                         // flight without asking a model to find it all over again.
-                        trackJson = clipTrackJson(vision.track(), uprightAspect),
+                        trackJson = clipTrackJson(
+                            vision.track(),
+                            uprightAspect,
+                            // Only from behind the bowler's arm: side-on, the stumps are not
+                            // seen face-on and a projection across them means nothing.
+                            wickets = lastMetrics?.lbw?.takeIf {
+                                session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW
+                            },
+                        ),
                     )
                 },
             )
@@ -2210,6 +2219,11 @@ private fun CameraMode(
             // The backup: a tap during a ball the cue missed still files the clip under
             // that ball, so the scorer's REVIEW finds it.
             readout = readout,
+            // The camera's own answer, the moment the ball is done — the same one the
+            // scorer's REVIEW opens with. Behind the bowler's arm only.
+            wickets = lastMetrics?.lbw?.takeIf {
+                !recording && session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW
+            },
             onArm = { armDelivery(latestCue?.takeIf { it.inPlay }?.seq) },
         )
     }
@@ -2287,6 +2301,7 @@ private fun ShutterControl(
     canFilm: Boolean,
     landscape: Boolean,
     readout: DeliveryReadout?,
+    wickets: com.haraan.app.vision.LbwProjection?,
     onArm: () -> Unit,
 ) {
     val statusLine: @Composable () -> Unit = {
@@ -2307,6 +2322,7 @@ private fun ShutterControl(
     if (landscape) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically) {
             Column(horizontalAlignment = Alignment.End) {
+                WicketsChip(wickets)
                 DeliveryReadoutView(readout, alignEnd = true)
                 statusLine()
             }
@@ -2315,6 +2331,7 @@ private fun ShutterControl(
         }
     } else {
         Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+            WicketsChip(wickets)
             DeliveryReadoutView(readout, alignEnd = false)
             statusLine()
             Spacer(Modifier.height(16.dp))
@@ -2680,6 +2697,100 @@ private fun RecordingEdgeGlow(recording: Boolean, uprightAspect: Float) {
             topLeft = Offset(frame.left + line / 2f, frame.top + line / 2f),
             size = androidx.compose.ui.geometry.Size(frame.width - line, frame.height - line),
             style = Stroke(width = line),
+        )
+    }
+}
+
+/**
+ * WICKETS, on the camera phone, as soon as the ball is done.
+ *
+ * The broadcast's chip — a dark label cell and a coloured answer that wipes in — carrying
+ * the one LBW question this phone can measure. Red is hitting, green missing, amber too
+ * close to call, grey not judged; the line under it is the projection's own words, so a
+ * "not judged" always says what it needed ("no wicket locked", "only 3 sightings…").
+ *
+ * No haptic of its own: the clip ending already ticked, and one event gets one buzz.
+ */
+@Composable
+private fun WicketsChip(projection: com.haraan.app.vision.LbwProjection?) {
+    var shown by remember { mutableStateOf(projection) }
+    if (projection != null) shown = projection
+    val enter = remember { Animatable(0f) }
+    val wipe = remember { Animatable(0f) }
+    LaunchedEffect(projection) {
+        if (projection == null) {
+            enter.animateTo(0f, tween(180))
+            wipe.snapTo(0f)
+            return@LaunchedEffect
+        }
+        wipe.snapTo(0f)
+        enter.snapTo(0f)
+        launch { enter.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 420f)) }
+        delay(160)
+        wipe.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+    }
+    val p = shown ?: return
+    if (enter.value <= 0.01f && projection == null) return
+    val (word, tone) = when (p.verdict) {
+        com.haraan.app.vision.LbwVerdict.HITTING -> "Hitting" to Rec
+        com.haraan.app.vision.LbwVerdict.MISSING -> "Missing" to Good
+        com.haraan.app.vision.LbwVerdict.UMPIRES_CALL -> "Umpire's call" to Color(0xFFD97706)
+        com.haraan.app.vision.LbwVerdict.UNAVAILABLE -> "Not judged" to Color(0xFF475569)
+    }
+    val note = (if (p.verdict == com.haraan.app.vision.LbwVerdict.UNAVAILABLE) p.basis else p.limbs.firstOrNull()?.answer ?: p.basis)
+        .substringBefore(" — ")
+        .replaceFirstChar(Char::uppercase)
+    Column(
+        Modifier
+            .padding(bottom = 10.dp)
+            .graphicsLayer {
+                alpha = enter.value.coerceIn(0f, 1f)
+                translationY = (1f - enter.value) * 12.dp.toPx()
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(
+            Modifier
+                .height(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(8.dp)),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.fillMaxHeight().background(Color(0xF20B1220)).padding(horizontal = 11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("WICKETS", color = Color.White.copy(alpha = 0.78f), fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+            }
+            Box(Modifier.fillMaxHeight().width(132.dp).background(Color(0xF20B1220))) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { scaleX = wipe.value; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) }
+                        .background(tone),
+                )
+                Text(
+                    word,
+                    color = Color.White.copy(alpha = wipe.value.coerceIn(0f, 1f)),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 11.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            note,
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier
+                .widthIn(max = 260.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Scrim)
+                .padding(horizontal = 10.dp, vertical = 3.dp),
         )
     }
 }

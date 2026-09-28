@@ -70,4 +70,24 @@ class ClipTrackTest extends TestCase
 
         $this->assertCount(ClipTrack::MAX_POINTS, $out['points']);
     }
+
+    public function test_the_camera_wickets_read_is_kept_when_well_formed(): void
+    {
+        $body = json_encode(['aspect' => 1.7, 'points' => [[0, 0.1, 0.5], [10, 0.2, 0.6], [20, 0.3, 0.5]],
+            'wickets' => ['verdict' => 'HITTING', 'offsetCm' => 4.24, 'uncertaintyCm' => 3, 'note' => '<b>yes</b>, 4 cm from the middle stump']]);
+        $out = json_decode(ClipTrack::sanitise($body), true);
+
+        $this->assertSame('HITTING', $out['wickets']['verdict']);
+        $this->assertSame(4.2, $out['wickets']['offsetCm']);
+        $this->assertSame('yes, 4 cm from the middle stump', $out['wickets']['note']);
+    }
+
+    public function test_an_unknown_wickets_verdict_is_dropped(): void
+    {
+        $body = json_encode(['aspect' => 1.7, 'points' => [[0, 0.1, 0.5], [10, 0.2, 0.6], [20, 0.3, 0.5]],
+            'wickets' => ['verdict' => 'OUT', 'offsetCm' => 999]]);
+        $out = json_decode(ClipTrack::sanitise($body), true);
+
+        $this->assertArrayNotHasKey('wickets', $out);
+    }
 }

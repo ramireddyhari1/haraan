@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,38 +154,109 @@ private fun toneOf(read: CameraRead) = when (read) {
 private const val BEAT_MS = 430L
 
 /**
+ * One row as it stands right now: answered, or still waiting on the model.
+ *
+ * [fromCamera] marks the Wickets row when it came from the camera phone's own projection —
+ * measured while filming, so it is there the moment REVIEW opens.
+ */
+internal data class RevealSlot(val chip: RevealChip, val pending: Boolean, val fromCamera: Boolean = false)
+
+/**
+ * The five rows from whatever is known so far.
+ *
+ * WICKETS prefers the camera's measurement over the model's read of the video: the camera
+ * projected the actual track onto a locked wicket with an error bar, the model looked at
+ * pixels. When the camera could not judge, the model's answer is used, and failing both
+ * the row says so.
+ */
+internal fun revealSlotsOf(
+    review: DeliveryReview?,
+    wickets: com.haraan.app.data.CameraWickets?,
+    reading: Boolean,
+): List<RevealSlot> = ORDER.map { key ->
+    val fromCamera = if (key == "line") cameraWicketsChip(wickets) else null
+    val factor = review?.factors?.firstOrNull { it.key == key }
+    when {
+        fromCamera != null -> RevealSlot(fromCamera, pending = false, fromCamera = true)
+        factor != null -> RevealSlot(
+            RevealChip(chipLabel(key), chipValue(factor.reading), leanOf(factor), factor.certain && !factor.unknown),
+            pending = false,
+        )
+        reading -> RevealSlot(RevealChip(chipLabel(key), "Reading…", Lean.UNKNOWN, false), pending = true)
+        key == "line" && wickets != null ->
+            RevealSlot(RevealChip(chipLabel(key), "Not judged", Lean.UNKNOWN, false), pending = false, fromCamera = true)
+        else -> RevealSlot(RevealChip(chipLabel(key), "No read", Lean.UNKNOWN, false), pending = false)
+    }
+}
+
+/** The camera's verdict as a chip, or null when it could not judge. */
+internal fun cameraWicketsChip(w: com.haraan.app.data.CameraWickets?): RevealChip? = when (w?.verdict) {
+    "HITTING" -> RevealChip("WICKETS", "Hitting", Lean.OUT, certain = true)
+    "MISSING" -> RevealChip("WICKETS", "Missing", Lean.NOT_OUT, certain = true)
+    "UMPIRES_CALL" -> RevealChip("WICKETS", "Umpire's call", Lean.DEPENDS, certain = false)
+    else -> null
+}
+
+/**
  * The stack, under the footage and built from the bottom up — pitching first, the read
  * last and on top, the way the broadcast builds it.
+ *
+ * It does not wait for everything before it starts. All six rows arrive at once so the
+ * shape is there; every row whose answer is already known wipes in straight away — which,
+ * with a camera behind the arm, is WICKETS, measured on the phone as the ball was bowled —
+ * and the rest pulse "Reading…" until the model's read lands, then wipe in, in cricket's
+ * order. The read on top comes last, once nothing is left pending.
  *
  * [generation] replays it: bump it and the whole reveal runs again from nothing.
  */
 @Composable
-fun ReviewReveal(review: DeliveryReview, generation: Int, modifier: Modifier = Modifier) {
+fun ReviewReveal(
+    review: DeliveryReview?,
+    generation: Int,
+    modifier: Modifier = Modifier,
+    wickets: com.haraan.app.data.CameraWickets? = null,
+    reading: Boolean = false,
+) {
     val context = LocalContext.current
-    val chips = remember(review) { revealChipsOf(review) }
-    val read = remember(chips) { cameraReadOf(chips) }
+    val slots = remember(review, wickets, reading) { revealSlotsOf(review, wickets, reading) }
+    val anyPending = slots.any { it.pending }
+    val read = remember(slots) { cameraReadOf(slots.map { it.chip }) }
+    val readIndex = slots.size
 
-    // One entrance (slide + fade) and one wipe (the coloured value) per chip, plus the read.
-    val enter = remember(review, generation) { List(chips.size + 1) { Animatable(0f) } }
-    val wipe = remember(review, generation) { List(chips.size + 1) { Animatable(0f) } }
-    val pop = remember(review, generation) { Animatable(1f) }
-    val flash = remember(review, generation) { Animatable(0f) }
+    val enter = remember(generation) { List(slots.size + 1) { Animatable(0f) } }
+    val wipe = remember(generation) { List(slots.size + 1) { Animatable(0f) } }
+    val revealed = remember(generation) { androidx.compose.runtime.mutableStateListOf<Int>() }
+    val started = remember(generation) { androidx.compose.runtime.mutableStateOf(false) }
+    val pop = remember(generation) { Animatable(1f) }
+    val flash = remember(generation) { Animatable(0f) }
 
-    LaunchedEffect(review, generation) {
-        delay(350)
-        chips.indices.forEach { i ->
+    // The rows arrive, quickly, bottom first: the shape of the answer before the answer.
+    LaunchedEffect(generation) {
+        delay(250)
+        (0..readIndex).forEach { i ->
             launch { enter[i].animateTo(1f, spring(dampingRatio = 0.62f, stiffness = 420f)) }
-            delay(150)
-            // The value lands: one tick in the hand per question answered.
-            cricketThud(context, Thud.TICK)
+            delay(70)
+        }
+        delay(200)
+        started.value = true
+    }
+
+    // Each answer that is known and not yet shown lands, in order, a beat apart. Re-runs
+    // when the model's read arrives and turns "Reading…" rows into answers.
+    val availability = slots.map { !it.pending }
+    LaunchedEffect(generation, availability, started.value) {
+        if (!started.value) return@LaunchedEffect
+        for (i in slots.indices) {
+            if (i in revealed || slots[i].pending) continue
+            // One tick in the hand per question answered.
+            launch { cricketThud(context, Thud.TICK) }
             wipe[i].animateTo(1f, tween(190, easing = FastOutSlowInEasing))
+            revealed.add(i)
             delay(BEAT_MS - 190)
         }
+        if (anyPending || readIndex in revealed) return@LaunchedEffect
         // The pause before the read is the drama. Longer than a beat, on purpose.
         delay(380)
-        val last = chips.size
-        launch { enter[last].animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 380f)) }
-        delay(120)
         launch {
             pop.snapTo(0.86f)
             pop.animateTo(1f, spring(dampingRatio = 0.38f, stiffness = 420f))
@@ -200,13 +273,25 @@ fun ReviewReveal(review: DeliveryReview, generation: Int, modifier: Modifier = M
                 },
             )
         }
-        wipe[last].animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+        wipe[readIndex].animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+        revealed.add(readIndex)
     }
+
+    // "Reading…" breathes, so a waiting row reads as work in progress, not as an answer.
+    val breathe = androidx.compose.animation.core.rememberInfiniteTransition(label = "reading")
+    val readingAlpha by breathe.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.85f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            tween(700),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "readingAlpha",
+    )
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // Top of the stack is the read; below it, the questions in reverse, so the eye
         // reading down meets the answer first once it is all there.
-        val readIndex = chips.size
         Box(
             Modifier.padding(bottom = 4.dp).graphicsLayer {
                 alpha = enter[readIndex].value.coerceIn(0f, 1f)
@@ -218,16 +303,17 @@ fun ReviewReveal(review: DeliveryReview, generation: Int, modifier: Modifier = M
         ) {
             RevealRow(
                 label = "CAMERA'S READ",
-                value = read.word,
+                value = if (anyPending) "READING…" else read.word,
                 tone = toneOf(read),
                 wipe = wipe[readIndex].value,
                 big = true,
                 flash = flash.value,
                 faded = false,
+                waitingAlpha = if (anyPending) readingAlpha else null,
             )
         }
-        chips.indices.reversed().forEach { i ->
-            val chip = chips[i]
+        slots.indices.reversed().forEach { i ->
+            val slot = slots[i]
             Box(
                 Modifier.graphicsLayer {
                     alpha = enter[i].value.coerceIn(0f, 1f)
@@ -235,15 +321,17 @@ fun ReviewReveal(review: DeliveryReview, generation: Int, modifier: Modifier = M
                 },
             ) {
                 RevealRow(
-                    label = chip.label,
-                    value = chip.value,
-                    tone = toneOf(chip.lean),
+                    label = slot.chip.label,
+                    value = slot.chip.value,
+                    tone = toneOf(slot.chip.lean),
                     wipe = wipe[i].value,
                     big = false,
                     flash = 0f,
                     // A reading the model would not stand behind is drawn a shade quieter,
                     // so an unsure "in line" never carries the weight of a sure one.
-                    faded = !chip.certain && chip.lean != Lean.UNKNOWN,
+                    faded = !slot.chip.certain && slot.chip.lean != Lean.UNKNOWN,
+                    waitingAlpha = if (slot.pending) readingAlpha else null,
+                    badge = if (slot.fromCamera) "CAMERA" else null,
                 )
             }
         }
@@ -265,6 +353,8 @@ private fun RevealRow(
     big: Boolean,
     flash: Float,
     faded: Boolean,
+    waitingAlpha: Float? = null,
+    badge: String? = null,
 ) {
     val shape = RoundedCornerShape(if (big) 8.dp else 6.dp)
     Row(
@@ -307,9 +397,26 @@ private fun RevealRow(
                     }
                     .background(tone.copy(alpha = if (faded) 0.62f else 1f)),
             )
+            if (badge != null && wipe > 0.5f) {
+                // Where this answer came from: measured on the camera phone, not read off
+                // the video by a model. Small, but it is the reason the row is already here.
+                Text(
+                    badge,
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 10.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Black.copy(alpha = 0.22f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
+            }
             Text(
                 value,
-                color = Color.White.copy(alpha = wipe.coerceIn(0f, 1f)),
+                color = Color.White.copy(alpha = waitingAlpha ?: wipe.coerceIn(0f, 1f)),
                 fontSize = if (big) 17.sp else 13.5.sp,
                 fontWeight = if (big) FontWeight.Black else FontWeight.Bold,
                 letterSpacing = if (big) 0.6.sp else 0.sp,

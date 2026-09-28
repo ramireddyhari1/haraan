@@ -77,4 +77,50 @@ class ReviewRevealTest {
         val r = review(*plumb.reversedArray())
         assertEquals(listOf("PITCHING", "IMPACT", "BAT", "HEIGHT", "WICKETS"), revealChipsOf(r).map { it.label })
     }
+
+    private fun cam(verdict: String) = com.haraan.app.data.CameraWickets(verdict, 4.0, 3.0, "note")
+
+    @Test
+    fun `the camera's wickets answer is there while the model is still reading`() {
+        val slots = revealSlotsOf(review = null, wickets = cam("HITTING"), reading = true)
+        val wickets = slots.last()
+        assertEquals("Hitting", wickets.chip.value)
+        assertEquals(false, wickets.pending)
+        assertEquals(true, wickets.fromCamera)
+        assertEquals(true, slots.dropLast(1).all { it.pending })
+    }
+
+    @Test
+    fun `the camera's measurement outranks the model on wickets`() {
+        val r = review(*plumb.map { if (it.first == "line") "line" to "would_miss" else it }.toTypedArray())
+        val slots = revealSlotsOf(r, cam("HITTING"), reading = false)
+        assertEquals("Hitting", slots.last().chip.value)
+        assertEquals(CameraRead.OUT, cameraReadOf(slots.map { it.chip }))
+    }
+
+    @Test
+    fun `when the camera could not judge, the model's wickets answer is used`() {
+        val slots = revealSlotsOf(review(*plumb), cam("UNAVAILABLE"), reading = false)
+        assertEquals("Hitting", slots.last().chip.value)
+        assertEquals(false, slots.last().fromCamera)
+    }
+
+    @Test
+    fun `a camera that could not judge and no model read says not judged`() {
+        val slots = revealSlotsOf(null, cam("UNAVAILABLE"), reading = false)
+        assertEquals("Not judged", slots.last().chip.value)
+        assertEquals(CameraRead.CANT_SAY, cameraReadOf(slots.map { it.chip }))
+    }
+
+    @Test
+    fun `camera missing is a certain not out`() {
+        val slots = revealSlotsOf(review(*plumb), cam("MISSING"), reading = false)
+        assertEquals(CameraRead.NOT_OUT, cameraReadOf(slots.map { it.chip }))
+    }
+
+    @Test
+    fun `umpire's call from the camera never makes OUT`() {
+        val slots = revealSlotsOf(review(*plumb), cam("UMPIRES_CALL"), reading = false)
+        assertEquals(CameraRead.UMPIRES_CALL, cameraReadOf(slots.map { it.chip }))
+    }
 }

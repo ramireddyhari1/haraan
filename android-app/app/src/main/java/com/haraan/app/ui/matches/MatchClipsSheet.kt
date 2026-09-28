@@ -262,7 +262,14 @@ fun LastBallReviewSheet(matchId: String, onDismiss: () -> Unit) {
     }
 
     clip?.let { found ->
-        ClipPlayer(found, matchId, onClose = onDismiss)
+        ClipPlayer(
+            found,
+            matchId,
+            // REVIEW means "show me the read" — no second button to press. Not for the
+            // side-on camera, whose review is a read of the bowling action, not an appeal.
+            autoReview = found.role != com.haraan.app.data.MatchDeviceRole.BOWLER_ANALYSIS,
+            onClose = onDismiss,
+        )
         return
     }
     if (showAll) {
@@ -428,7 +435,7 @@ private fun videoImageLoader(context: android.content.Context): ImageLoader = re
  * everywhere to serve one sheet.
  */
 @Composable
-private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
+private fun ClipPlayer(clip: MatchClip, matchId: String, autoReview: Boolean = false, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val repo = remember { MatchDeviceRepository() }
     val scope = rememberCoroutineScope()
@@ -548,6 +555,31 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
         }
         status = ReviewStatus.FAILED
         failure = "The review is taking longer than expected. Try again."
+    }
+
+    // Asks the server for the model's read. Status goes PENDING first, which starts the
+    // poll above and puts "Reading…" in the reveal's rows while it runs.
+    fun startReview() {
+        failure = null
+        status = ReviewStatus.PENDING
+        scope.launch {
+            val token = TokenStore.getToken(ctx)
+            val state = if (TokenStore.isSignedIn(token)) {
+                runCatching { repo.requestReview(token!!, matchId, clip.id) }.getOrNull()
+            } else {
+                null
+            }
+            review = state?.review
+            failure = state?.error
+            // Null means the call itself never landed; FAILED stops the poll PENDING started.
+            status = state?.status ?: ReviewStatus.FAILED
+        }
+    }
+
+    // REVIEW opened this: start the read at once. Only for a clip nobody has asked about —
+    // a finished or running review is shown as it is, never bought twice.
+    LaunchedEffect(clip.id) {
+        if (autoReview && review == null && status == ReviewStatus.NONE) startReview()
     }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -784,13 +816,18 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
 
                 val current = review
-                when {
-                    current != null -> DeliveryReviewPanel(current)
-
-                    status == ReviewStatus.PENDING || status == ReviewStatus.PROCESSING ->
-                        ReviewInProgress()
-
-                    else -> Column {
+                val reading = status == ReviewStatus.PENDING || status == ReviewStatus.PROCESSING
+                val cameraWickets = clip.track?.wickets
+                if (current != null || reading || cameraWickets != null) {
+                    DeliveryReviewPanel(
+                        review = current,
+                        wickets = cameraWickets,
+                        reading = reading,
+                    )
+                }
+                if (current == null && !reading) {
+                    if (cameraWickets != null) Spacer(Modifier.height(16.dp))
+                    Column {
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -799,23 +836,7 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                                 .pressable(
                                     onClick = {
                                         view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
-                                        failure = null
-                                        status = ReviewStatus.PENDING
-                                        scope.launch {
-                                            val token = TokenStore.getToken(ctx)
-                                            val state = if (TokenStore.isSignedIn(token)) {
-                                                runCatching {
-                                                    repo.requestReview(token!!, matchId, clip.id)
-                                                }.getOrNull()
-                                            } else {
-                                                null
-                                            }
-                                            review = state?.review
-                                            failure = state?.error
-                                            // Null means the call itself never landed;
-                                            // FAILED stops the poll that PENDING started.
-                                            status = state?.status ?: ReviewStatus.FAILED
-                                        }
+                                        startReview()
                                     },
                                 )
                                 .padding(vertical = 15.dp),
@@ -828,7 +849,11 @@ private fun ClipPlayer(clip: MatchClip, matchId: String, onClose: () -> Unit) {
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (status == ReviewStatus.FAILED) "Try again" else "Review this ball",
+                                when {
+                                    status == ReviewStatus.FAILED -> "Try again"
+                                    cameraWickets != null -> "Read pitching and impact"
+                                    else -> "Review this ball"
+                                },
                                 color = Color.White,
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.Bold,
@@ -1102,8 +1127,10 @@ private fun ReviewInProgress() {
  */
 @Composable
 private fun DeliveryReviewPanel(
-    review: DeliveryReview,
+    review: DeliveryReview?,
     modifier: Modifier = Modifier,
+    wickets: com.haraan.app.data.CameraWickets? = null,
+    reading: Boolean = false,
 ) {
     Column(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1115,24 +1142,37 @@ private fun DeliveryReviewPanel(
                 letterSpacing = 1.4.sp,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                visibilityLabel(review.visibility).uppercase(),
-                color = if (review.visibility == "good") {
-                    Color.White.copy(alpha = 0.7f)
-                } else {
-                    Color(0xFFF5A623)
-                },
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.1.sp,
-            )
+            if (review != null) {
+                Text(
+                    visibilityLabel(review.visibility).uppercase(),
+                    color = if (review.visibility == "good") {
+                        Color.White.copy(alpha = 0.7f)
+                    } else {
+                        Color(0xFFF5A623)
+                    },
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.1.sp,
+                )
+            }
         }
         Spacer(Modifier.height(14.dp))
 
         // The read, built a question at a time. Replays on a tap, because the people round
         // the phone ask to see it again every time.
         var generation by remember { mutableStateOf(0) }
-        ReviewReveal(review = review, generation = generation)
+        ReviewReveal(review = review, generation = generation, wickets = wickets, reading = reading)
+        wickets?.note?.takeIf { it.isNotBlank() }?.let { note ->
+            Spacer(Modifier.height(8.dp))
+            // The camera's own sentence under its answer: the centimetres, or what it
+            // needed and did not have.
+            Text(
+                "Wickets, measured by the camera: " + note,
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+        }
         Spacer(Modifier.height(12.dp))
         Row(
             Modifier
@@ -1147,7 +1187,7 @@ private fun DeliveryReviewPanel(
             Text("Show the read again", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
         }
 
-        review.notes?.let { note ->
+        review?.notes?.let { note ->
             Spacer(Modifier.height(16.dp))
             Text(
                 note,
@@ -1157,7 +1197,7 @@ private fun DeliveryReviewPanel(
             )
         }
 
-        review.evidence?.let { evidence ->
+        review?.evidence?.let { evidence ->
             Spacer(Modifier.height(20.dp))
             DeliveryMap(evidence)
         }
