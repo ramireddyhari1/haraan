@@ -201,6 +201,63 @@ class MemberFeatureGatesTest extends TestCase
         $this->asMember($scorer)->postJson("/api/matches/{$match->id}/devices", ['role' => MatchDevice::ROLE_BOWLER])->assertOk();
     }
 
+    // ── matches.see_viewers (was the blue tick) ─────────────────────────────
+
+    public function test_pro_and_hero_see_who_is_watching_and_free_and_verified_do_not(): void
+    {
+        $match = $this->scoredMatch($this->player());
+
+        $this->postJson("/api/live-matches/{$match->id}/watching")->assertOk()->assertJsonPath('canSeeViewers', false);
+        $this->getJson("/api/live-matches/{$match->id}/viewers")->assertUnauthorized();
+
+        // A blue tick alone no longer opens the room.
+        $verified = $this->member();
+        $verified->forceFill(['is_verified' => true])->save();
+        $this->asMember($verified)->postJson("/api/live-matches/{$match->id}/watching")->assertJsonPath('canSeeViewers', false);
+        $this->asMember($verified)->getJson("/api/live-matches/{$match->id}/viewers")
+            ->assertForbidden()
+            ->assertJsonPath('code', 'upgrade_required')
+            ->assertJsonPath('feature', MemberFeature::MATCHES_SEE_VIEWERS);
+
+        foreach (['pro', 'hero'] as $code) {
+            $member = $this->member();
+            $this->paidSubscription($member, $code);
+            MemberEntitlements::flush();
+            $this->asMember($member)->postJson("/api/live-matches/{$match->id}/watching")->assertJsonPath('canSeeViewers', true);
+            $this->asMember($member)->getJson("/api/live-matches/{$match->id}/viewers")
+                ->assertOk()
+                ->assertJsonFragment(['is_you' => true]);
+        }
+    }
+
+    public function test_admin_can_give_free_members_the_viewer_list(): void
+    {
+        $match = $this->scoredMatch($this->player());
+        $free = $this->member();
+
+        MemberPlanEntitlement::query()
+            ->where('plan_id', $this->plan('free')->id)
+            ->where('feature_key', MemberFeature::MATCHES_SEE_VIEWERS)
+            ->update(['enabled' => true]);
+
+        $this->asMember($free)->getJson("/api/live-matches/{$match->id}/viewers")->assertOk();
+    }
+
+    // ── matches.shot_plotting (was the blue tick) ───────────────────────────
+
+    public function test_shot_plotting_follows_the_match_creators_plan(): void
+    {
+        $creator = $this->player();
+        $creator->forceFill(['is_verified' => true])->save();
+        $match = $this->scoredMatch($creator);
+
+        $this->getJson("/api/live-matches/{$match->id}")->assertOk()->assertJsonPath('shotPlotting', false);
+
+        $this->paidSubscription($creator, 'pro');
+        MemberEntitlements::flush();
+        $this->getJson("/api/live-matches/{$match->id}")->assertOk()->assertJsonPath('shotPlotting', true);
+    }
+
     // ── tournaments.active_hosted ───────────────────────────────────────────
 
     /** @return array<string, mixed> */

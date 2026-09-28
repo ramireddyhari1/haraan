@@ -33,6 +33,12 @@ final class MemberFeature
 
     public const MATCHES_CAMERA_ANGLES = 'matches.camera_angles';
 
+    /** Opening the "watching now" chip to see who is in the room. Enforced by LiveMatchController. */
+    public const MATCHES_SEE_VIEWERS = 'matches.see_viewers';
+
+    /** The scorer is asked where each four and six went (wagon wheel). Follows the match creator's plan. */
+    public const MATCHES_SHOT_PLOTTING = 'matches.shot_plotting';
+
     public const PROFILE_MEMBER_BADGE = 'profile.member_badge';
 
     public const SUPPORT_PRIORITY = 'support.priority';
@@ -69,6 +75,8 @@ final class MemberFeature
         self::AI_DELIVERY_REVIEW => ['type' => self::TYPE_QUOTA, 'label' => 'AI delivery reviews'],
         self::TOURNAMENTS_ACTIVE_HOSTED => ['type' => self::TYPE_LIMIT, 'label' => 'Tournaments you host'],
         self::MATCHES_CAMERA_ANGLES => ['type' => self::TYPE_LIMIT, 'label' => 'Camera angles per match'],
+        self::MATCHES_SEE_VIEWERS => ['type' => self::TYPE_BOOLEAN, 'label' => "See who's watching"],
+        self::MATCHES_SHOT_PLOTTING => ['type' => self::TYPE_BOOLEAN, 'label' => 'Shot plotting'],
         self::PROFILE_MEMBER_BADGE => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member badge'],
         self::SUPPORT_PRIORITY => ['type' => self::TYPE_BOOLEAN, 'label' => 'Priority support'],
         self::INSIGHTS_ADVANCED_SPORTS => ['type' => self::TYPE_LIMIT, 'label' => 'Advanced insights'],

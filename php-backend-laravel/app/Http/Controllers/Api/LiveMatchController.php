@@ -7,6 +7,8 @@ use App\Models\LiveMatch;
 use App\Models\MatchViewer;
 use App\Models\User;
 use App\Services\CricketInsights;
+use App\Services\Membership\MemberEntitlements;
+use App\Support\Membership\MemberFeature;
 use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
 use Illuminate\Http\JsonResponse;
@@ -315,7 +317,8 @@ class LiveMatchController extends Controller
             // Whether this viewer may open the audience list. Answered here rather than made
             // the app's business, so the rule lives in one place and the app can't award
             // itself the privilege by flipping a local flag.
-            'canSeeViewers' => $viewer !== null && (bool) $viewer->is_verified,
+            'canSeeViewers' => $viewer !== null
+                && app(MemberEntitlements::class)->allows($viewer, MemberFeature::MATCHES_SEE_VIEWERS),
         ]);
     }
 
@@ -323,8 +326,9 @@ class LiveMatchController extends Controller
      * Who is watching this match right now.
      * GET /api/live-matches/{id}/viewers
      *
-     * A verified account gets to see the room. Everybody else gets the number and nothing
-     * else — the count is public, the audience is not.
+     * A Pro or Hero member (matches.see_viewers, set per plan in /control) gets to see the
+     * room. Everybody else gets the number and nothing else — the count is public, the
+     * audience is not.
      *
      * Signed-in viewers appear as themselves: the same name, handle, photo and tick their
      * public profile already shows, and nothing that isn't on it. Everyone else appears as
@@ -362,14 +366,14 @@ class LiveMatchController extends Controller
         return $this->audience($match, $viewer);
     }
 
-    /** Assemble the audience, gated on the blue tick. */
+    /** Assemble the audience, gated on the member plan. */
     private function audience(LiveMatch $match, ?User $viewer): JsonResponse
     {
-        if ($viewer === null || !$viewer->is_verified) {
-            return response()->json([
-                'error' => 'Only verified accounts can see who is watching.',
-            ], 403);
+        if ($viewer === null) {
+            return response()->json(['error' => 'Sign in to see who is watching.'], 401);
         }
+        // Throws EntitlementDenied → the shared 403 upgrade_required body.
+        app(MemberEntitlements::class)->authorize($viewer, MemberFeature::MATCHES_SEE_VIEWERS);
 
         $rows = MatchViewer::query()
             ->where('match_id', $match->id)
@@ -596,9 +600,12 @@ class LiveMatchController extends Controller
         return [
             'creatorId' => (int) $match->user_id,
             'canScore' => $canScore,
-            'shotPlotting' => (bool) optional(
-                User::query()->find($match->user_id)
-            )->is_verified,
+            // The wagon-wheel prompt belongs to the match, so it follows the creator's plan,
+            // not whoever happens to be holding the scorer.
+            'shotPlotting' => app(MemberEntitlements::class)->allows(
+                User::query()->find($match->user_id),
+                MemberFeature::MATCHES_SHOT_PLOTTING,
+            ),
             'scoreBlocked' => $scoreBlocked,
             'isPrivate' => (bool) $match->is_private,
             'joinCode' => (string) ($match->join_code ?? ''),
