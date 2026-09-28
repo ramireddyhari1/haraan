@@ -142,6 +142,7 @@ import androidx.compose.material.icons.outlined.SportsFootball
 import androidx.compose.material.icons.filled.Stadium
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Whatshot
@@ -3854,6 +3855,8 @@ private fun CrexMatchesScreen(
   // "All" now, not "Cricket": sport is a filter and the honest default is everything.
   var selectedSport by remember { mutableStateOf("All") }
   var selectedTab by remember { mutableStateOf(0) }
+  // District/State rank one sport at a time: with "All" picked on the feeds they show cricket.
+  val boardSport = if (selectedSport == "All") "cricket" else selectedSport
   // Alerts open as a sheet over the board, the same one the header bell used.
   var showAlerts by remember { mutableStateOf(false) }
   // Player-to-player DMs. `showChatList` is the destination; `openThread` is the one
@@ -4222,10 +4225,13 @@ private fun CrexMatchesScreen(
           // Shown on Live/Finished (the feeds) and on District/State (the boards, which
           // rank by sport since the XP ledger started recording it). Scheduled keeps its
           // own Mine / Open-near-me toggle, and its cards carry a sport badge instead.
+          // The boards rank one sport at a time, so they get no "All" chip.
           if (selectedTab != 2) {
+            val isBoard = selectedTab == 3 || selectedTab == 4
             SportFilterRow(
-              selected = selectedSport,
+              selected = if (isBoard) boardSport else selectedSport,
               onSelected = { selectedSport = it },
+              showAll = !isBoard,
             )
           }
         }
@@ -4308,17 +4314,25 @@ private fun CrexMatchesScreen(
             when {
               scheduled == null -> item { GameHubFeedSkeleton() }
               scheduled.isEmpty() -> item {
-                CrexTabEmpty("No scheduled matches. Create one and pick \"Schedule\" to see it here.")
+                ScheduledEmpty(onCreate = { requireRankedAccess { showCreateWizard = true } })
               }
               else -> {
-                item { CrexLeagueTitle("Your scheduled matches") }
-                items(scheduled, key = { it.id }) { m ->
-                  ScheduledMatchCard(
-                    match = m,
-                    onStart = { startScheduledMatch(m) },
-                    onOpen = { onMatchClick(m.id) },
+                item {
+                  CrexLeagueTitle(
+                    "Your scheduled matches",
+                    trailing = if (scheduled.size == 1) "1 match" else "${scheduled.size} matches",
                   )
-                  Spacer(modifier = Modifier.height(10.dp))
+                }
+                items(scheduled, key = { it.id }) { m ->
+                  // animateItem: starting one (it leaves for Live) slides the rest up
+                  // instead of the list snapping shut under the finger.
+                  Box(Modifier.animateItem().padding(bottom = 12.dp)) {
+                    ScheduledMatchCard(
+                      match = m,
+                      onStart = { startScheduledMatch(m) },
+                      onOpen = { onMatchClick(m.id) },
+                    )
+                  }
                 }
               }
             }
@@ -4370,7 +4384,7 @@ private fun CrexMatchesScreen(
               isStateBoard = false,
               location = districtSummary?.district,
               onPlayerClick = { selectedLeaderboardPlayer = it },
-              sport = selectedSport,
+              sport = boardSport,
             )
           }
         } else if (selectedTab == 4) {
@@ -4379,7 +4393,7 @@ private fun CrexMatchesScreen(
               isStateBoard = true,
               location = districtSummary?.state,
               onPlayerClick = { selectedLeaderboardPlayer = it },
-              sport = selectedSport,
+              sport = boardSport,
             )
           }
         }
@@ -8090,7 +8104,7 @@ private fun ProfileShimmer() {
 }
 
 @Composable
-private fun CrexLeagueTitle(title: String) {
+private fun CrexLeagueTitle(title: String, trailing: String? = null) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
@@ -8114,20 +8128,24 @@ private fun CrexLeagueTitle(title: String) {
       letterSpacing = (-0.4).sp,
       modifier = Modifier.weight(1f),
     )
-    Text(
-      text = "See all",
-      color = Color(0xFF2563EB),
-      fontSize = 12.sp,
-      fontWeight = FontWeight.SemiBold,
-    )
+    // This used to be a blue "See all" that went nowhere — every list here is already the
+    // whole list. A plain count is the true thing to put in that corner.
+    if (trailing != null) {
+      Text(
+        text = trailing,
+        color = HaraanColors.TextMuted,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+      )
+    }
   }
 }
 
 /**
- * One row in the Scheduled tab: a match the creator hasn't started yet. Shows the two
- * sides with their crests, the kick-off time (or "Ready to start" for a play-now match
- * whose toss was skipped), and a Start button that runs the toss/opens the match. The
- * whole card opens the match detail; the Start button is the primary action.
+ * One row in the Scheduled tab: a match the creator hasn't started yet, laid out as a
+ * fixture — the two sides face each other across the kick-off, which is the one thing
+ * this list exists to answer. The whole card opens the match; Start is the only
+ * action, and it lands with the heavier COMMIT haptic because it flips the match live.
  */
 @Composable
 private fun ScheduledMatchCard(
@@ -8135,80 +8153,249 @@ private fun ScheduledMatchCard(
   onStart: () -> Unit,
   onOpen: () -> Unit,
 ) {
-  val blue = HaraanColors.EventsBlue
-  val green = HaraanColors.Success
-  // Parse the ISO kick-off into a friendly label; null (play-now, toss skipped) reads
-  // as "Ready to start". A parse failure degrades to the raw absence rather than crashing.
-  val whenLabel = remember(match.scheduledAtIso) {
-    val iso = match.scheduledAtIso
-    if (iso.isNullOrBlank()) "Ready to start"
-    else runCatching {
-      val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(iso)
-      java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(parsed!!)
-    }.getOrDefault("Scheduled")
+  // Re-read the clock every 30s so "In 12 min" counts down and a missed kick-off turns
+  // into "Was due" on its own, without a refresh. Play-now matches have no clock.
+  var now by remember { mutableStateOf(System.currentTimeMillis()) }
+  LaunchedEffect(match.scheduledAtIso) {
+    if (!match.scheduledAtIso.isNullOrBlank()) {
+      while (true) {
+        delay(30_000)
+        now = System.currentTimeMillis()
+      }
+    }
   }
-  val isReady = match.scheduledAtIso.isNullOrBlank()
+  val kickoff = remember(match.scheduledAtIso, now / 60_000) { kickoffFor(match.scheduledAtIso, now) }
+  val place = listOf(match.venue, match.locality)
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+    .distinct()
+    .joinToString(", ")
+  val shape = RoundedCornerShape(20.dp)
 
   Column(
     modifier = Modifier
+      // pressable first so the shadow and the fill sink together under the thumb.
+      .pressable(onClick = onOpen)
       .fillMaxWidth()
-      .shadow(6.dp, RoundedCornerShape(18.dp), spotColor = Color(0x141D4ED8))
-      .clip(RoundedCornerShape(18.dp))
-      .background(Color.White)
-      .clickable(onClick = onOpen)
-      .padding(15.dp),
+      .shadow(8.dp, shape, ambientColor = Color(0x0A0F172A), spotColor = Color(0x241D4ED8))
+      .clip(shape)
+      .background(Color.White),
   ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      ScheduledCrest(match.teamAEmblem, blue, match.teamA)
-      Spacer(Modifier.width(9.dp))
-      Text(
-        match.teamA.ifBlank { "Team A" },
-        color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
-        maxLines = 1, modifier = Modifier.weight(1f),
-      )
-      Text("vs", color = HaraanColors.TextMuted, fontSize = 12.sp)
-      Text(
-        match.teamB.ifBlank { "Team B" },
-        color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
-        maxLines = 1, textAlign = TextAlign.End, modifier = Modifier.weight(1f),
-      )
-      Spacer(Modifier.width(8.dp))
-      ScheduledCrest(match.teamBEmblem, Color(0xFFF59E0B), match.teamB)
-    }
-    Spacer(Modifier.height(11.dp))
-    SportBadge(match.sport)
-    Spacer(Modifier.height(11.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Icon(
-        if (isReady) Icons.Default.PlayArrow else Icons.Default.Event,
-        contentDescription = null,
-        tint = if (isReady) green else blue,
-        modifier = Modifier.size(16.dp),
-      )
-      Spacer(Modifier.width(6.dp))
-      Text(
-        whenLabel,
-        color = if (isReady) green else HaraanColors.TextSecondary,
-        fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.weight(1f),
-      )
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 13.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      SportBadge(match.sport)
+      Spacer(Modifier.weight(1f))
       if (match.isPrivate) {
-        Text("Private", color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(10.dp))
-      }
-      // Start is an action, so it wears the app's one action colour.
-      Row(
-        modifier = Modifier
-          .pressable(onClick = onStart)
-          .clip(RoundedCornerShape(12.dp))
-          .background(blue)
-          .padding(horizontal = 15.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Icon(Icons.Default.Lock, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(12.dp))
         Spacer(Modifier.width(4.dp))
-        Text("Start", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("Private", color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
       }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 14.dp),
+      verticalAlignment = Alignment.Top,
+    ) {
+      ScheduledSide(match.teamA.ifBlank { "Team A" }, match.teamAEmblem, HaraanColors.EventsBlue, match.squadA.size, Modifier.weight(1f))
+      KickoffBlock(kickoff, Modifier.widthIn(min = 96.dp).padding(top = 9.dp))
+      ScheduledSide(match.teamB.ifBlank { "Team B" }, match.teamBEmblem, Color(0xFFF59E0B), match.squadB.size, Modifier.weight(1f))
+    }
+
+    Box(
+      Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp)
+        .height(1.dp)
+        .background(Color(0xFFF1F5F9)),
+    )
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      if (place.isNotEmpty()) {
+        Icon(Icons.Default.Place, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(
+          place,
+          color = HaraanColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+          maxLines = 1, overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(10.dp))
+      } else {
+        Spacer(Modifier.weight(1f))
+      }
+      ScheduledStartButton(onStart)
+    }
+  }
+}
+
+/** One side of the fixture: crest, name, and how many players it actually has. */
+@Composable
+private fun ScheduledSide(name: String, emblem: String, accent: Color, squadSize: Int, modifier: Modifier) {
+  Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    ScheduledCrest(emblem, accent, name, size = 46.dp)
+    Spacer(Modifier.height(8.dp))
+    Text(
+      name,
+      color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+      letterSpacing = (-0.2).sp, textAlign = TextAlign.Center,
+      maxLines = 1, overflow = TextOverflow.Ellipsis,
+      modifier = Modifier.padding(horizontal = 4.dp),
+    )
+    Spacer(Modifier.height(2.dp))
+    Text(
+      when (squadSize) {
+        0 -> "No squad yet"
+        1 -> "1 player"
+        else -> "$squadSize players"
+      },
+      color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+    )
+  }
+}
+
+private enum class KickoffState { READY, SOON, LATER, DUE }
+
+/** What the centre of a scheduled card says: a small status line over one big value. */
+private data class Kickoff(val eyebrow: String, val value: String, val state: KickoffState)
+
+private fun kickoffFor(iso: String?, now: Long): Kickoff {
+  // Play-now match whose toss was skipped: no time to show, it's simply ready.
+  if (iso.isNullOrBlank()) return Kickoff("Ready", "vs", KickoffState.READY)
+  val at = listOf("yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    .firstNotNullOfOrNull { pattern ->
+      runCatching { java.text.SimpleDateFormat(pattern, java.util.Locale.US).parse(iso)?.time }.getOrNull()
+    }
+    ?: return Kickoff("Scheduled", "vs", KickoffState.LATER)
+  val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(at))
+  val minutes = (at - now) / 60_000
+  return when {
+    at < now -> {
+      val day = kickoffDay(at, now)
+      Kickoff(if (day == "Today") "Was due" else "Was due · $day", time, KickoffState.DUE)
+    }
+    minutes < 1 -> Kickoff("Starting now", time, KickoffState.SOON)
+    minutes < 60 -> Kickoff("In $minutes min", time, KickoffState.SOON)
+    else -> Kickoff(kickoffDay(at, now), time, KickoffState.LATER)
+  }
+}
+
+/** Today / Tomorrow / Yesterday, the weekday inside a week, else "4 Oct". */
+private fun kickoffDay(at: Long, now: Long): String {
+  fun midnight(ms: Long) = java.util.Calendar.getInstance().apply {
+    timeInMillis = ms
+    set(java.util.Calendar.HOUR_OF_DAY, 0)
+    set(java.util.Calendar.MINUTE, 0)
+    set(java.util.Calendar.SECOND, 0)
+    set(java.util.Calendar.MILLISECOND, 0)
+  }.timeInMillis
+  // Rounded, not truncated: a DST shift makes a calendar day 23 or 25 hours long.
+  val days = Math.round((midnight(at) - midnight(now)) / 86_400_000.0)
+  val date = java.util.Date(at)
+  return when (days) {
+    0L -> "Today"
+    1L -> "Tomorrow"
+    -1L -> "Yesterday"
+    in 2L..6L -> java.text.SimpleDateFormat("EEEE", java.util.Locale.getDefault()).format(date)
+    else -> java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(date)
+  }
+}
+
+@Composable
+private fun KickoffBlock(kickoff: Kickoff, modifier: Modifier) {
+  val tint = when (kickoff.state) {
+    KickoffState.READY -> HaraanColors.Success
+    KickoffState.SOON -> HaraanColors.EventsBlue
+    KickoffState.DUE -> Color(0xFFD97706)
+    KickoffState.LATER -> HaraanColors.TextMuted
+  }
+  val isVs = kickoff.value == "vs"
+  Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      // A dot only when the status asks for attention; "Tomorrow" is just a fact.
+      if (kickoff.state != KickoffState.LATER) {
+        Box(Modifier.size(6.dp).clip(CircleShape).background(tint))
+        Spacer(Modifier.width(5.dp))
+      }
+      Text(
+        kickoff.eyebrow.uppercase(),
+        color = tint, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.8.sp, maxLines = 1,
+      )
+    }
+    Spacer(Modifier.height(5.dp))
+    Text(
+      kickoff.value,
+      color = if (isVs) HaraanColors.TextMuted else HaraanColors.TextPrimary,
+      fontSize = if (isVs) 16.sp else 19.sp,
+      fontWeight = FontWeight.Black,
+      letterSpacing = (-0.5).sp,
+      maxLines = 1,
+    )
+  }
+}
+
+/** Start is an action, so it wears the app's one action colour, with a real lift. */
+@Composable
+private fun ScheduledStartButton(onStart: () -> Unit) {
+  val blue = HaraanColors.EventsBlue
+  val shape = RoundedCornerShape(12.dp)
+  Row(
+    modifier = Modifier
+      .pressable(haptic = com.haraan.app.ui.Feel.COMMIT, onClick = onStart)
+      .height(40.dp)
+      .shadow(6.dp, shape, ambientColor = blue.copy(alpha = 0.20f), spotColor = blue.copy(alpha = 0.45f))
+      .clip(shape)
+      .background(blue)
+      .padding(horizontal = 16.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(18.dp))
+    Spacer(Modifier.width(4.dp))
+    Text("Start", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+  }
+}
+
+/**
+ * The Scheduled tab with nothing on it. Says what goes here and hands over the one
+ * action that fills it, instead of a grey sentence telling you to go find Create.
+ */
+@Composable
+private fun ScheduledEmpty(onCreate: () -> Unit) {
+  val blue = HaraanColors.EventsBlue
+  Column(
+    Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 40.dp, bottom = 24.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    Box(
+      Modifier.size(56.dp).clip(CircleShape).background(blue.copy(alpha = 0.08f)),
+      contentAlignment = Alignment.Center,
+    ) {
+      Icon(Icons.Default.Event, null, tint = blue, modifier = Modifier.size(26.dp))
+    }
+    Spacer(Modifier.height(14.dp))
+    Text("Nothing scheduled yet", color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+    Spacer(Modifier.height(4.dp))
+    Text(
+      "Create a match and pick Schedule. It waits here until you start it.",
+      color = HaraanColors.TextMuted, fontSize = 12.5.sp, textAlign = TextAlign.Center,
+    )
+    Spacer(Modifier.height(18.dp))
+    Row(
+      modifier = Modifier
+        .pressable(onClick = onCreate)
+        .height(42.dp)
+        .clip(RoundedCornerShape(12.dp))
+        .background(blue)
+        .padding(horizontal = 18.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+      Spacer(Modifier.width(6.dp))
+      Text("Create match", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
     }
   }
 }
@@ -8263,32 +8450,54 @@ private fun MetaPill(text: String, color: Color, bg: Color, icon: ImageVector? =
 /** Mine / Open-near-me segmented toggle for the Scheduled tab; badges pending requests. */
 @Composable
 private fun ScheduledSubToggle(selected: Int, requestCount: Int, onSelect: (Int) -> Unit) {
-  Row(
+  val gap = 3.dp
+  BoxWithConstraints(
     Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
       .background(Color(0xFFEDF1F6))
       .padding(3.dp),
-    horizontalArrangement = Arrangement.spacedBy(3.dp),
   ) {
-    SubTabChip("Mine", selected == 0, requestCount, Modifier.weight(1f)) { onSelect(0) }
-    SubTabChip("Open near me", selected == 1, 0, Modifier.weight(1f)) { onSelect(1) }
+    // One white pill that SLIDES to the chosen side, rather than two chips that swap
+    // paint — the motion is what makes it read as a physical switch.
+    val segment = (maxWidth - gap) / 2
+    val pillX by animateDpAsState(
+      targetValue = if (selected == 0) 0.dp else segment + gap,
+      animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
+      label = "scheduledSubPill",
+    )
+    Box(
+      Modifier
+        .offset(x = pillX)
+        .width(segment)
+        .height(40.dp)
+        .shadow(3.dp, RoundedCornerShape(10.dp))
+        .clip(RoundedCornerShape(10.dp))
+        .background(Color.White),
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+      SubTabChip("Mine", selected == 0, requestCount, Modifier.weight(1f)) { onSelect(0) }
+      SubTabChip("Open near me", selected == 1, 0, Modifier.weight(1f)) { onSelect(1) }
+    }
   }
 }
 
 @Composable
 private fun SubTabChip(label: String, selected: Boolean, badge: Int, modifier: Modifier, onClick: () -> Unit) {
+  val labelColor by animateColorAsState(
+    if (selected) LightAccentBlue else Color(0xFF64748B),
+    animationSpec = tween(180),
+    label = "subTabLabel",
+  )
   Box(
     modifier
-      .then(if (selected) Modifier.shadow(3.dp, RoundedCornerShape(10.dp)) else Modifier)
-      .clip(RoundedCornerShape(10.dp))
-      .background(if (selected) Color.White else Color.Transparent)
-      .pressable(onClick = onClick)
-      .padding(vertical = 10.dp),
+      // Re-tapping the side you're on does nothing, so it shouldn't buzz either.
+      .pressable(haptic = if (selected) null else com.haraan.app.ui.Feel.SELECT, onClick = onClick)
+      .height(40.dp),
     contentAlignment = Alignment.Center,
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (selected) LightAccentBlue else Color(0xFF64748B))
+      Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = labelColor)
       if (badge > 0) {
         Spacer(Modifier.width(6.dp))
         Box(
@@ -9520,7 +9729,7 @@ private fun emptyFinishedLabel(sport: String): String =
  * one sport picks it once and the list obeys inside whichever tab they are on.
  */
 @Composable
-private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
+private fun SportFilterRow(selected: String, onSelected: (String) -> Unit, showAll: Boolean = true) {
   // (label shown, key the server uses, icon). The KEY is what gets selected: table tennis
   // is "table_tennis" on the wire, so filtering on the pretty label would quietly match
   // nothing and the board would look empty for that sport.
@@ -9534,11 +9743,14 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit) {
     Triple("Tennis", "tennis", Icons.Filled.SportsTennis),
     Triple("Table Tennis", "table_tennis", Icons.Filled.SportsTennis),
     Triple("Badminton", "badminton", Icons.Filled.SportsTennis),
-  )
+  ).filter { showAll || it.second != "All" }
+  // Fresh scroll per chip set: dropping "All" on the boards must not leave the row parked
+  // past the selected sport.
+  val scroll = androidx.compose.runtime.key(showAll) { rememberScrollState() }
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .horizontalScroll(rememberScrollState())
+      .horizontalScroll(scroll)
       // Asymmetric: normal breathing above (under the Live/Finished tabs); a little room
       // below for the chips' soft shadow while the "Matches near you" title stays close.
       .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
