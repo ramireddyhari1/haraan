@@ -1,7 +1,6 @@
 package com.haraan.app.ui.main
 
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
@@ -11,9 +10,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +21,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -50,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -209,26 +208,25 @@ private val NavAccent = HaraanColors.EventsBlue
 private val NavIdle = Color(0xFF677285)
 private val NavHairline = Color(0xFFE6EAF0)
 private val NavShadow = Color(0xFF0F1B33)
-
-private val BarHeight = 64.dp
-private val IconTop = 9.dp
-private val PillWidth = 54.dp
-private val PillHeight = 30.dp
+private val NavPill = NavAccent.copy(alpha = 0.10f)
 
 /**
  * The member app's floating bottom navigation.
  *
- * A white capsule inset from the screen edges, so the feed visibly scrolls beneath it.
- * One blue indicator lives on the bar and *travels* between slots on a spring, rather
- * than a lozenge popping in and out per item — the motion tells you where you went.
+ * Same shape and motion as the partner app's bar (`partner-app/.../HaraanBottomBar.kt`),
+ * in the member app's own colours: a white capsule instead of navy, and a blue-tint
+ * pill instead of a white one.
  *
- * Micro-interactions, all on the icon itself (no ripple):
- *  - the press squashes the glyph under the finger immediately,
- *  - the outline cross-dissolves into the filled variant as the indicator arrives,
- *  - the label warms from slate to blue on the same curve.
+ * The selected tab is a pill carrying its glyph and its name; every other tab is a
+ * glyph alone. Selection is drawn as width: each slot's weight springs between "icon"
+ * and "icon + word", so as one tab opens the last one closes, and the pill reads as
+ * one piece of material gliding across the bar rather than two things fading. The
+ * word fades in behind the glyph once there's room for it, so it never squeezes or
+ * wraps mid-flight.
  *
- * Tapping the tab you're already on still calls [onSelect] (Matches uses it to scroll
- * back to the top); the haptic fires only when the tab actually changes.
+ * Touch answers before the tab changes: the slot squashes under the finger (no
+ * ripple). Tapping the tab you're already on still calls [onSelect] (Matches uses it
+ * to scroll back to the top); the haptic fires only when the tab actually changes.
  */
 @Composable
 internal fun HaraanFloatingNav(
@@ -239,7 +237,8 @@ internal fun HaraanFloatingNav(
     hasUnreadAlerts: Boolean = false,
 ) {
     val view = LocalView.current
-    val shape = RoundedCornerShape(26.dp)
+    val shape = RoundedCornerShape(32.dp)
+    val index = selectedIndex.coerceIn(0, FloatingNavItems.lastIndex)
 
     Box(
         modifier
@@ -247,88 +246,76 @@ internal fun HaraanFloatingNav(
             .navigationBarsPadding()
             .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp)
     ) {
-        BoxWithConstraints(
+        Row(
             Modifier
                 .fillMaxWidth()
-                .height(BarHeight)
+                .height(64.dp)
                 // A wide, low-opacity tinted shadow reads as lift; the default grey
                 // elevation shadow reads as a Material card.
                 .shadow(
-                    elevation = 18.dp,
+                    elevation = 20.dp,
                     shape = shape,
-                    ambientColor = NavShadow.copy(alpha = 0.08f),
-                    spotColor = NavShadow.copy(alpha = 0.14f),
+                    clip = false,
+                    ambientColor = NavShadow.copy(alpha = 0.10f),
+                    spotColor = NavShadow.copy(alpha = 0.18f),
                 )
-                .background(Color.White, shape)
+                .clip(shape)
+                .background(Color.White)
                 .border(BorderStroke(1.dp, NavHairline), shape)
-                .padding(horizontal = 6.dp)
+                .padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            val slot = maxWidth / FloatingNavItems.size
-            val index = selectedIndex.coerceIn(0, FloatingNavItems.lastIndex)
-
-            // Near-critically damped: it glides and lands with the faintest settle,
-            // never wobbles past the neighbouring icon.
-            val pillX by animateDpAsState(
-                targetValue = slot * index + (slot - PillWidth) / 2,
-                animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
-                label = "nav-pill-x",
-            )
-            Box(
-                Modifier
-                    .offset(x = pillX, y = IconTop)
-                    .size(PillWidth, PillHeight)
-                    .background(NavAccent.copy(alpha = 0.10f), CircleShape)
-            )
-
-            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Top) {
-                FloatingNavItems.forEachIndexed { i, item ->
-                    val selected = i == index
-                    NavSlot(
-                        item = item,
-                        selected = selected,
-                        avatarUrl = if (item.label == "Player") avatarUrl else null,
-                        showDot = item.label == "Alerts" && hasUnreadAlerts,
-                        onClick = {
-                            if (!selected) view.performHapticFeedback(Feel.SELECT)
-                            onSelect(i)
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+            FloatingNavItems.forEachIndexed { i, item ->
+                val selected = i == index
+                NavSlot(
+                    item = item,
+                    selected = selected,
+                    avatarUrl = if (item.label == "Player") avatarUrl else null,
+                    showDot = item.label == "Alerts" && hasUnreadAlerts,
+                    onClick = {
+                        if (!selected) view.performHapticFeedback(Feel.SELECT)
+                        onSelect(i)
+                    },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun NavSlot(
+private fun RowScope.NavSlot(
     item: FloatingNavItem,
     selected: Boolean,
     avatarUrl: String?,
     showDot: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
 
-    val onRaw by animateFloatAsState(
+    // Slightly under-damped: the pill overshoots its width a touch and settles,
+    // which is the "glide and land" of the whole bar.
+    val on by animateFloatAsState(
         targetValue = if (selected) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 480f),
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
         label = "nav-on-${item.label}",
     )
-    // The spring settles with a hair of overshoot; alpha and colour must stay in range.
-    val on = onRaw.coerceIn(0f, 1f)
-    // Stiff so the squash lands under the finger, not after it.
+    // Stiff and nearly critically damped: the squash lands under the finger
+    // instead of bouncing after it.
     val squash by animateFloatAsState(
-        targetValue = if (pressed) 0.86f else 1f,
+        targetValue = if (pressed) 0.9f else 1f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessHigh),
         label = "nav-press-${item.label}",
     )
-    val tint = lerp(NavIdle, NavAccent, on)
+    // The spring overshoots a hair; alpha and colour must stay in range.
+    val open = on.coerceIn(0f, 1f)
 
-    Column(
-        modifier
+    Box(
+        Modifier
+            // Icon-only slots share the room; the open one takes about two and a
+            // half of them for its word.
+            .weight(1f + 1.6f * on.coerceAtLeast(0f))
             .fillMaxHeight()
             .selectable(
                 selected = selected,
@@ -337,69 +324,96 @@ private fun NavSlot(
                 role = Role.Tab,
                 onClick = onClick,
             )
-            .padding(top = IconTop),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top,
+            .graphicsLayer { scaleX = squash; scaleY = squash },
+        contentAlignment = Alignment.Center,
     ) {
+        // The pill. Scales and fades with the slot so it seems to travel with the
+        // width rather than pop.
         Box(
             Modifier
-                .size(PillWidth, PillHeight)
+                .fillMaxSize()
                 .graphicsLayer {
-                    scaleX = squash
-                    scaleY = squash
-                },
-            contentAlignment = Alignment.Center,
+                    alpha = open
+                    val s = 0.82f + 0.18f * open
+                    scaleX = s; scaleY = s
+                }
+                .clip(RoundedCornerShape(26.dp))
+                .background(NavPill),
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 10.dp),
         ) {
-            var avatarFailed by remember(avatarUrl) { mutableStateOf(false) }
-            if (!avatarUrl.isNullOrBlank() && !avatarFailed) {
-                // The Player tab is the account's own face. The ring does the job the
-                // glyph's fill does elsewhere: slate hairline at rest, blue when here.
-                AsyncImage(
-                    model = avatarUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    onError = { avatarFailed = true },
-                    modifier = Modifier
-                        .size(24.dp)
-                        .border(if (selected) 1.8.dp else 1.dp, if (selected) NavAccent else NavHairline, CircleShape)
-                        .padding(if (selected) 2.dp else 1.dp)
-                        .clip(CircleShape),
-                )
-            } else {
-                Icon(
-                    item.outline,
-                    contentDescription = null,
-                    tint = NavIdle,
-                    modifier = Modifier.size(23.dp).alpha(1f - on),
-                )
-                Icon(
-                    item.active,
-                    contentDescription = null,
-                    tint = NavAccent,
-                    modifier = Modifier.size(23.dp).alpha(on),
-                )
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                var avatarFailed by remember(avatarUrl) { mutableStateOf(false) }
+                if (!avatarUrl.isNullOrBlank() && !avatarFailed) {
+                    // The Player tab is the account's own face. The ring does the job
+                    // the glyph's fill does elsewhere: slate hairline at rest, blue when here.
+                    AsyncImage(
+                        model = avatarUrl,
+                        contentDescription = if (selected) null else item.label,
+                        contentScale = ContentScale.Crop,
+                        onError = { avatarFailed = true },
+                        modifier = Modifier
+                            .size(24.dp)
+                            .border(
+                                if (selected) 1.8.dp else 1.dp,
+                                lerp(NavHairline, NavAccent, open),
+                                CircleShape,
+                            )
+                            .padding(if (selected) 2.dp else 1.dp)
+                            .clip(CircleShape),
+                    )
+                } else {
+                    Icon(
+                        item.outline,
+                        contentDescription = if (selected) null else item.label,
+                        tint = NavIdle,
+                        modifier = Modifier.size(23.dp).graphicsLayer { alpha = 1f - open },
+                    )
+                    Icon(
+                        item.active,
+                        contentDescription = null,
+                        tint = NavAccent,
+                        modifier = Modifier.size(23.dp).graphicsLayer {
+                            alpha = open
+                            val s = 0.9f + 0.1f * on
+                            scaleX = s; scaleY = s
+                        },
+                    )
+                }
+                if (showDot) {
+                    Box(
+                        Modifier
+                            .align(Alignment.Center)
+                            .offset(x = 7.dp, y = (-8).dp)
+                            .size(9.dp)
+                            .background(Color.White, CircleShape)
+                            .padding(1.8.dp)
+                            .background(NavAccent, CircleShape)
+                    )
+                }
             }
-            if (showDot) {
-                Box(
-                    Modifier
-                        .align(Alignment.Center)
-                        .offset(x = 7.dp, y = (-8).dp)
-                        .size(9.dp)
-                        .background(Color.White, CircleShape)
-                        .padding(1.8.dp)
-                        .background(NavAccent, CircleShape)
+            // The word only takes space while the slot is opening, and only shows
+            // once it's mostly open, so it never clips.
+            if (on > 0.02f) {
+                Spacer(Modifier.width(7.dp * open))
+                Text(
+                    item.label,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.1).sp,
+                    color = lerp(NavIdle, NavAccent, open),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    modifier = Modifier.graphicsLayer {
+                        alpha = ((open - 0.45f) / 0.55f).coerceIn(0f, 1f)
+                        translationX = (1f - open) * -6.dp.toPx()
+                    },
                 )
             }
         }
-        Spacer(Modifier.height(3.dp))
-        Text(
-            item.label,
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
-            letterSpacing = 0.1.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = tint,
-            maxLines = 1,
-        )
     }
 }
