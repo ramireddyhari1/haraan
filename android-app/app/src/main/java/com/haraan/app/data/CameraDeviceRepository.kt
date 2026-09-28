@@ -25,10 +25,28 @@ data class CameraSession(
     val matchId: String,
     val matchTitle: String,
     val venue: String,
+    /** 1080p60, 1080p30 or 720p60, from /control. Known before the first frame is bound. */
+    val videoQuality: String = DEFAULT_VIDEO_QUALITY,
+    /** Hours to keep sent clips in the gallery, from /control. Null from an older server. */
+    val clipKeepHours: Int? = null,
 )
 
+/** What the camera records at when nobody has said otherwise: frame rate before pixels. */
+const val DEFAULT_VIDEO_QUALITY = "1080p60"
+
+internal fun videoQualityOf(raw: String?): String =
+    raw?.takeIf { it in setOf("1080p60", "1080p30", "720p60") } ?: DEFAULT_VIDEO_QUALITY
+
 /** What the camera learns each time it checks in. */
-data class CameraHeartbeat(val score: String, val overs: String, val matchStatus: String)
+data class CameraHeartbeat(
+    val score: String,
+    val overs: String,
+    val matchStatus: String,
+    /** Hours to keep a sent clip in the camera's gallery, set in /control. Null from an older server. */
+    val clipKeepHours: Int? = null,
+    /** The recording quality set in /control. Null from an older server. */
+    val videoQuality: String? = null,
+)
 
 /**
  * The scorer's BALL window, as the camera sees it. `seq` is the latest BALL's number;
@@ -136,6 +154,8 @@ open class CameraDeviceRepository {
             matchId = data.optString("matchId"),
             matchTitle = data.optString("matchTitle"),
             venue = data.optString("venue"),
+            videoQuality = videoQualityOf(data.optString("videoQuality")),
+            clipKeepHours = if (data.has("clipKeepHours")) data.optInt("clipKeepHours", -1).takeIf { it >= 0 } else null,
         )
     }
 
@@ -159,6 +179,8 @@ open class CameraDeviceRepository {
             score = data.optString("score"),
             overs = data.optString("overs"),
             matchStatus = data.optString("matchStatus"),
+            videoQuality = data.optString("videoQuality").takeIf { it.isNotBlank() }?.let { videoQualityOf(it) },
+            clipKeepHours = if (data.has("clipKeepHours")) data.optInt("clipKeepHours", -1).takeIf { it >= 0 } else null,
         )
     }
 

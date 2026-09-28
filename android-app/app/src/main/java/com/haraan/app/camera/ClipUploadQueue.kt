@@ -35,6 +35,8 @@ data class QueuedClipMeta(
     val ballSeq: Int? = null,
     /** What this phone's tracker saw while filming, as [clipTrackJson] wrote it. */
     val trackJson: String? = null,
+    /** When the scorer confirmed it (2xx). 0 while it is still waiting to go. */
+    val sentAtMs: Long = 0L,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -43,6 +45,7 @@ data class QueuedClipMeta(
         if (!overBall.isNullOrBlank()) put("overBall", overBall)
         if (ballSeq != null) put("ballSeq", ballSeq)
         if (!trackJson.isNullOrBlank()) put("track", trackJson)
+        if (sentAtMs > 0L) put("sentAtMs", sentAtMs)
         put("enqueuedAtMs", enqueuedAtMs)
         put("retryCount", retryCount)
         put("lastAttemptMs", lastAttemptMs)
@@ -59,8 +62,28 @@ data class QueuedClipMeta(
             lastAttemptMs = json.optLong("lastAttemptMs", 0L),
             ballSeq = json.optInt("ballSeq", 0).takeIf { it > 0 },
             trackJson = json.optString("track").takeIf { it.isNotBlank() },
+            sentAtMs = json.optLong("sentAtMs", 0L),
         )
     }
+}
+
+/**
+ * One clip as the camera phone's gallery shows it.
+ *
+ * Waiting clips come from the upload queue; sent ones from the kept folder, where they
+ * stay for the admin-set number of hours after the scorer has them.
+ */
+data class GalleryClip(
+    val id: String,
+    val file: File,
+    val overBall: String?,
+    val recordedAtMs: Long,
+    val durationMs: Long,
+    val state: State,
+    /** HITTING / MISSING / UMPIRES_CALL / UNAVAILABLE, from the camera's own projection. */
+    val wicketsVerdict: String?,
+) {
+    enum class State { WAITING, SENDING, SENT }
 }
 
 /**
@@ -120,6 +143,12 @@ class ClipUploadQueue(
         /** Maximum bytes allocated to the pending clip backlog (500 MB). */
         const val MAX_QUEUE_BYTES = 500L * 1024 * 1024
 
+        /** How long a sent clip stays on the phone when the server has not said. */
+        const val DEFAULT_KEEP_HOURS = 24
+
+        /** Sent clips never take more than this; the oldest go first (1.5 GB). */
+        const val MAX_KEPT_BYTES = 1_536L * 1024 * 1024
+
         const val EXT_VIDEO = ".mp4"
         const val EXT_META = ".meta.json"
         const val DIR_STAGING = "staging"
@@ -161,6 +190,24 @@ class ClipUploadQueue(
 
     val stagingDir = File(queueDir, DIR_STAGING)
 
+    /**
+     * Where a clip goes once the scorer has it, instead of being deleted: the camera
+     * phone's own gallery. Beside the queue rather than inside it, so nothing in here can
+     * ever be picked up for upload again.
+     */
+    val keptDir = File(queueDir.parentFile ?: queueDir, "${queueDir.name}_kept")
+
+    /**
+     * Hours a sent clip stays, from /control (Platform rules → Tournaments & matches), sent
+     * down with the heartbeat. 0 deletes a clip the moment the scorer confirms it.
+     */
+    @Volatile
+    var keepHours: Int = DEFAULT_KEEP_HOURS
+        private set
+
+    private val _gallery = MutableStateFlow<List<GalleryClip>>(emptyList())
+    val gallery: StateFlow<List<GalleryClip>> = _gallery.asStateFlow()
+
     private val queueJob = SupervisorJob(parentScope.coroutineContext[Job])
     private val scope = CoroutineScope(parentScope.coroutineContext + queueJob)
 
@@ -189,8 +236,120 @@ class ClipUploadQueue(
         queueDir.mkdirs()
         stagingDir.mkdirs()
         cleanupStagingDir()
+        pruneKept()
         refreshPendingCount()
         startWorker()
+    }
+
+    /** The admin's retention, as the heartbeat reports it. Applied to what is kept already. */
+    fun setKeepHours(hours: Int) {
+        val clamped = hours.coerceIn(0, 168)
+        if (clamped == keepHours) return
+        keepHours = clamped
+        pruneKept()
+        refreshGallery()
+    }
+
+    /**
+     * Drops sent clips past their time, then the oldest while over [MAX_KEPT_BYTES].
+     *
+     * Expiry is checked whenever the gallery is read and whenever this runs — at start-up,
+     * after each upload and when the setting changes — never by a timer that a killed app
+     * would miss. Waiting clips are never touched here: a clip the scorer does not have yet
+     * is not the gallery's to throw away.
+     */
+    fun pruneKept(nowMs: Long = System.currentTimeMillis()) {
+        val kept = loadKept().toMutableList()
+        val ttlMs = keepHours * 3_600_000L
+        kept.removeAll { (video, metaFile, meta) ->
+            val expired = keepHours <= 0 || nowMs - meta.sentAtMs >= ttlMs
+            if (expired) {
+                runCatching { video.delete() }
+                runCatching { metaFile.delete() }
+            }
+            expired
+        }
+        var total = kept.sumOf { it.first.length() }
+        while (total > MAX_KEPT_BYTES && kept.isNotEmpty()) {
+            val oldest = kept.removeAt(0)
+            total -= oldest.first.length()
+            runCatching { oldest.first.delete() }
+            runCatching { oldest.second.delete() }
+        }
+    }
+
+    /** Removes one SENT clip from the phone. A waiting clip cannot be deleted from here. */
+    fun deleteKept(id: String) {
+        runCatching { File(keptDir, "$id$EXT_VIDEO").delete() }
+        runCatching { File(keptDir, "$id$EXT_META").delete() }
+        refreshGallery()
+    }
+
+    private fun loadKept(): List<Triple<File, File, QueuedClipMeta>> {
+        val metas = keptDir.listFiles { f -> f.isFile && f.name.endsWith(EXT_META) } ?: return emptyList()
+        return metas.mapNotNull { metaFile ->
+            val id = metaFile.name.removeSuffix(EXT_META)
+            val video = File(keptDir, "$id$EXT_VIDEO")
+            val meta = runCatching { QueuedClipMeta.fromJson(JSONObject(metaFile.readText(Charsets.UTF_8))) }.getOrNull()
+            if (meta == null || !video.exists()) {
+                runCatching { metaFile.delete() }
+                runCatching { video.delete() }
+                null
+            } else {
+                Triple(video, metaFile, meta)
+            }
+        }.sortedBy { it.third.sentAtMs }
+    }
+
+    /** Waiting and sent clips, newest first, with anything past its time left out. */
+    fun refreshGallery(nowMs: Long = System.currentTimeMillis()) {
+        val ttlMs = keepHours * 3_600_000L
+        val waiting = loadPendingItems(excludeInFlight = false).map { (video, _, meta) ->
+            galleryClip(video, meta, if (inFlightClips.contains(meta.id)) GalleryClip.State.SENDING else GalleryClip.State.WAITING)
+        }
+        val sent = loadKept()
+            .filter { keepHours > 0 && nowMs - it.third.sentAtMs < ttlMs }
+            .map { (video, _, meta) -> galleryClip(video, meta, GalleryClip.State.SENT) }
+        _gallery.value = (waiting + sent).sortedByDescending { it.recordedAtMs }
+    }
+
+    private fun galleryClip(video: File, meta: QueuedClipMeta, state: GalleryClip.State) = GalleryClip(
+        id = meta.id,
+        file = video,
+        overBall = meta.overBall,
+        recordedAtMs = meta.enqueuedAtMs,
+        durationMs = meta.durationMs,
+        state = state,
+        wicketsVerdict = meta.trackJson?.let {
+            runCatching { JSONObject(it).optJSONObject("wickets")?.optString("verdict") }.getOrNull()
+        }?.takeIf { it.isNotBlank() },
+    )
+
+    /** The scorer has it. Into the gallery, or gone, depending on [keepHours]. */
+    private fun keepOrDelete(videoFile: File, metaFile: File, meta: QueuedClipMeta) {
+        if (keepHours <= 0) {
+            runCatching { videoFile.delete() }
+            runCatching { metaFile.delete() }
+            return
+        }
+        keptDir.mkdirs()
+        val keptVideo = File(keptDir, videoFile.name)
+        val moved = videoFile.renameTo(keptVideo) || runCatching {
+            videoFile.copyTo(keptVideo, overwrite = true)
+            videoFile.delete()
+        }.isSuccess
+        if (moved) {
+            runCatching {
+                File(keptDir, metaFile.name).writeText(
+                    meta.copy(sentAtMs = System.currentTimeMillis()).toJson().toString(2),
+                    Charsets.UTF_8,
+                )
+            }
+        } else {
+            runCatching { videoFile.delete() }
+        }
+        runCatching { metaFile.delete() }
+        pruneKept()
     }
 
     fun addListener(listener: UploadListener) {
@@ -335,6 +494,7 @@ class ClipUploadQueue(
     fun refreshPendingCount() {
         val count = loadPendingItems(excludeInFlight = false).size
         _status.update { it.copy(pendingCount = count) }
+        refreshGallery()
     }
 
     /**
@@ -379,6 +539,7 @@ class ClipUploadQueue(
                     pendingCount = loadPendingItems(excludeInFlight = false).size,
                 )
             }
+            refreshGallery()
 
             val result = repo.uploadClip(
                 sessionToken = meta.sessionToken,
@@ -391,9 +552,9 @@ class ClipUploadQueue(
 
             when (result) {
                 is ClipUploadResult.Success -> {
-                    // Confirmed 2xx by the scorer server: safely delete local review copies
-                    runCatching { videoFile.delete() }
-                    runCatching { metaFile.delete() }
+                    // Confirmed 2xx: it leaves the queue for good. Kept for the gallery for
+                    // the admin-set hours, or deleted now if that is 0.
+                    keepOrDelete(videoFile, metaFile, meta)
 
                     _status.update {
                         it.copy(
@@ -445,6 +606,7 @@ class ClipUploadQueue(
         } finally {
             inFlightClips.remove(meta.id)
             _status.update { it.copy(isUploading = inFlightClips.isNotEmpty()) }
+            refreshGallery()
         }
     }
 

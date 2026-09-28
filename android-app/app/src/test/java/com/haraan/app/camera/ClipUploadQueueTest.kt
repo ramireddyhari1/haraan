@@ -489,4 +489,64 @@ class ClipUploadQueueTest {
 
         queue.close()
     }
+
+    private suspend fun sentQueue(scope: kotlinx.coroutines.CoroutineScope, name: String): Pair<ClipUploadQueue, File> {
+        val queueDir = tempFolder.newFolder(name)
+        val queue = ClipUploadQueue(queueDir = queueDir, repo = FakeCameraDeviceRepository(ClipUploadResult.Success), parentScope = scope)
+        val video = queue.createClipFile().apply { writeBytes(ByteArray(500)) }
+        queue.enqueue(file = video, sessionToken = "S", durationMs = 7000L, overBall = "2.3",
+            trackJson = """{"v":1,"aspect":1.7,"points":[[0,0.1,0.5,1],[1,0.2,0.5,1],[2,0.3,0.5,1]],"wickets":{"verdict":"HITTING"}}""")
+        return queue to video
+    }
+
+    @Test
+    fun `a sent clip moves to the gallery instead of being deleted`() = runTest {
+        val (queue, video) = sentQueue(this, "kept_move")
+        assertEquals(ClipUploadResult.Success, queue.processNextPending())
+
+        assertTrue("kept for the gallery", File(queue.keptDir, video.name).exists())
+        val clip = queue.gallery.value.single()
+        assertEquals(GalleryClip.State.SENT, clip.state)
+        assertEquals("2.3", clip.overBall)
+        assertEquals("HITTING", clip.wicketsVerdict)
+        queue.close()
+    }
+
+    @Test
+    fun `keep hours of zero deletes a sent clip at once`() = runTest {
+        val (queue, video) = sentQueue(this, "kept_zero")
+        queue.setKeepHours(0)
+        queue.processNextPending()
+
+        assertFalse(File(queue.keptDir, video.name).exists())
+        assertTrue(queue.gallery.value.isEmpty())
+        queue.close()
+    }
+
+    @Test
+    fun `sent clips past their hours are pruned, waiting ones never are`() = runTest {
+        val (queue, video) = sentQueue(this, "kept_expiry")
+        queue.processNextPending()
+        // A second clip that is still waiting to go.
+        val waiting = queue.createClipFile().apply { writeBytes(ByteArray(300)) }
+        queue.enqueue(file = waiting, sessionToken = "S", durationMs = 5000L, overBall = "2.4")
+
+        queue.pruneKept(nowMs = System.currentTimeMillis() + 25 * 3_600_000L)
+        queue.refreshGallery(nowMs = System.currentTimeMillis() + 25 * 3_600_000L)
+
+        assertFalse("a day and an hour later the sent clip is gone", File(queue.keptDir, video.name).exists())
+        assertTrue("the waiting clip is untouched", File(queue.queueDir, waiting.name).exists())
+        assertEquals(listOf(GalleryClip.State.WAITING), queue.gallery.value.map { it.state })
+        queue.close()
+    }
+
+    @Test
+    fun `only a sent clip can be deleted from the gallery`() = runTest {
+        val (queue, video) = sentQueue(this, "kept_delete")
+        queue.processNextPending()
+        queue.deleteKept(video.nameWithoutExtension)
+        assertFalse(File(queue.keptDir, video.name).exists())
+        assertTrue(queue.gallery.value.isEmpty())
+        queue.close()
+    }
 }

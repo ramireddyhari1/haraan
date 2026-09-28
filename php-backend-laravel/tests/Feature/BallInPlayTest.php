@@ -101,6 +101,30 @@ final class BallInPlayTest extends TestCase
         self::assertNotSame($v1, $this->getJson("/api/live-matches/{$m->id}/pulse")->json('v'), 'an undo moves it too');
     }
 
+    public function test_the_heartbeat_tells_the_camera_how_long_to_keep_sent_clips(): void
+    {
+        [$m, , $creator] = $this->liveMatch();
+        $device = \App\Models\MatchDevice::create([
+            'match_id' => $m->id, 'role' => \App\Models\MatchDevice::ROLE_LBW,
+            'pair_token' => \App\Models\MatchDevice::freshToken(), 'token_expires_at' => now(),
+            'status' => \App\Models\MatchDevice::STATUS_CONNECTED, 'created_by' => $creator->id,
+        ]);
+        $session = \App\Models\MatchDevice::freshSessionToken();
+        $device->update(['session_token' => $session]);
+        $beat = fn () => $this->postJson('/api/match-devices/heartbeat', ['sessionToken' => $session])->assertOk()->json('data.clipKeepHours');
+
+        self::assertSame(24, $beat(), 'the default is a day');
+
+        // The admin changes it in /control; the next heartbeat carries the new value.
+        \App\Support\PlatformRules::save(['creation.camera_clip_keep_hours' => 6]);
+        self::assertSame(6, $beat());
+
+        $quality = fn () => $this->postJson('/api/match-devices/heartbeat', ['sessionToken' => $session])->json('data.videoQuality');
+        self::assertSame('1080p60', $quality(), '60 fps by default');
+        \App\Support\PlatformRules::save(['creation.camera_video_quality' => '720p60']);
+        self::assertSame('720p60', $quality());
+    }
+
     public function test_a_paired_camera_is_cued_per_ball_and_told_about_dead_balls(): void
     {
         [$m, $act, $creator] = $this->liveMatch();

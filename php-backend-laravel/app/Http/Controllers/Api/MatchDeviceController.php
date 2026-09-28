@@ -191,6 +191,9 @@ final class MatchDeviceController extends Controller
             'matchId' => (string) $device->match_id,
             'matchTitle' => $this->matchTitle($match),
             'venue' => (string) ($match?->venue ?? ''),
+            // Known before the first frame, so the camera binds at the right rate.
+            'videoQuality' => \App\Support\PlatformRules::string('creation.camera_video_quality'),
+            'clipKeepHours' => \App\Support\PlatformRules::int('creation.camera_clip_keep_hours'),
         ]]);
     }
 
@@ -216,6 +219,11 @@ final class MatchDeviceController extends Controller
             'score' => (string) ($match?->score_text ?? ''),
             'overs' => (string) ($match?->overs ?? ''),
             'matchStatus' => strtolower((string) ($match?->status ?? '')),
+            // How long the camera keeps a sent clip in its own gallery. Admin-set, in
+            // /control → Platform rules → Tournaments & matches.
+            'clipKeepHours' => \App\Support\PlatformRules::int('creation.camera_clip_keep_hours'),
+            // What the camera records at, from /control. Applied between balls.
+            'videoQuality' => \App\Support\PlatformRules::string('creation.camera_video_quality'),
         ]]);
     }
 

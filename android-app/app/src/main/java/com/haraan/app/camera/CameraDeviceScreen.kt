@@ -692,6 +692,9 @@ private fun CameraMode(
      */
     val uploadQueue = remember { ClipUploadQueue.getInstance(ctx) }
     val queueStatus by uploadQueue.status.collectAsState()
+    // The phone's own gallery: waiting clips, and sent ones for the admin-set hours.
+    val galleryClips by uploadQueue.gallery.collectAsState()
+    var showGallery by remember { mutableStateOf(false) }
 
     DisposableEffect(uploadQueue) {
         val listener = object : ClipUploadQueue.UploadListener {
@@ -718,6 +721,19 @@ private fun CameraMode(
 
     val executor = remember { Executors.newSingleThreadExecutor() }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+
+    /*
+     * RECORDING QUALITY, from /control.
+     *
+     * Known at join, re-read on every heartbeat, and applied only BETWEEN balls: a change
+     * that arrives while a clip is recording waits in [pendingQuality] until it finishes,
+     * because rebinding the camera mid-delivery would end the clip being filmed.
+     */
+    var videoQuality by remember { mutableStateOf(session.videoQuality) }
+    var pendingQuality by remember { mutableStateOf<String?>(null) }
+    // The frame rate the camera actually agreed to, not the one asked for — shown on REC.
+    var recordingFps by remember { mutableStateOf<Int?>(null) }
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
     // Held only so its target rotation can be corrected on a turn — see below.
     var analysisUseCase by remember { mutableStateOf<ImageAnalysis?>(null) }
 
@@ -1197,6 +1213,15 @@ private fun CameraMode(
 
     LaunchedEffect(Unit) { if (!granted) requestCameraPermission { granted = it } }
 
+    LaunchedEffect(pendingQuality, recording) {
+        val next = pendingQuality ?: return@LaunchedEffect
+        if (!recording) {
+            videoQuality = next
+            pendingQuality = null
+        }
+    }
+    LaunchedEffect(session.sessionToken) { session.clipKeepHours?.let { uploadQueue.setKeepHours(it) } }
+
     // Check in on a cadence matched to cricket, not to a chat app. Losing the pairing is
     // reported here rather than discovered when an upload fails.
     LaunchedEffect(session.sessionToken) {
@@ -1243,6 +1268,9 @@ private fun CameraMode(
             live = true
             score = beat.score
             overs = beat.overs
+            // The admin's retention for the gallery, applied to what is kept already.
+            beat.clipKeepHours?.let { uploadQueue.setKeepHours(it) }
+            beat.videoQuality?.let { if (it != videoQuality) pendingQuality = it }
             delay(20_000)
         }
     }
@@ -1265,19 +1293,27 @@ private fun CameraMode(
                          * the clip the scorer will actually receive.
                          */
                         view.scaleType = PreviewView.ScaleType.FIT_CENTER
-                        bindCamera(
-                            context,
-                            view,
-                            lifecycleOwner,
-                            analysisExecutor,
-                            analyzer,
-                        ) { capture, analysis ->
-                            videoCapture = capture
-                            analysisUseCase = analysis
-                        }
+                        previewView = view
                     }
                 },
             )
+            // Bound here rather than in the view's factory, so a new quality from /control
+            // rebinds the same view instead of needing a new screen.
+            LaunchedEffect(previewView, videoQuality) {
+                val target = previewView ?: return@LaunchedEffect
+                bindCamera(
+                    ctx,
+                    target,
+                    lifecycleOwner,
+                    analysisExecutor,
+                    analyzer,
+                    videoQuality,
+                ) { capture, analysis, fps ->
+                    videoCapture = capture
+                    analysisUseCase = analysis
+                    recordingFps = fps
+                }
+            }
         } else {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -1832,7 +1868,7 @@ private fun CameraMode(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (recording) {
-                    RecTimecode(recording = true)
+                    RecTimecode(recording = true, fps = recordingFps)
                 } else {
                     val (dot, words) = when {
                         thermalThrottled -> Warn to "Phone is hot · tracking paused"
@@ -1923,6 +1959,28 @@ private fun CameraMode(
                 ) { tint -> StumpsGlyph(Modifier.size(20.dp), tint) }
             }
             Row(railModifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) { tools() }
+
+            // ── The gallery, in the corner every camera keeps the last shot ──
+            GalleryButton(
+                latest = galleryClips.firstOrNull(),
+                waitingCount = galleryClips.count { it.state != GalleryClip.State.SENT },
+                onClick = {
+                    uploadQueue.refreshGallery()
+                    showGallery = true
+                },
+                modifier = if (landscape) {
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .displayCutoutPadding()
+                        .padding(end = 26.dp, bottom = 18.dp)
+                } else {
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 22.dp, bottom = 44.dp)
+                },
+            )
         }
 
         /*
@@ -2226,6 +2284,18 @@ private fun CameraMode(
             },
             onArm = { armDelivery(latestCue?.takeIf { it.inPlay }?.seq) },
         )
+
+        // A ball being filmed takes the screen back: the person holding the phone must see
+        // that it is recording, and the viewfinder is what they aim with.
+        LaunchedEffect(recording) { if (recording) showGallery = false }
+        if (showGallery) {
+            ClipGalleryOverlay(
+                clips = galleryClips,
+                keepHours = uploadQueue.keepHours,
+                onDelete = { uploadQueue.deleteKept(it.id) },
+                onClose = { showGallery = false },
+            )
+        }
     }
 }
 
@@ -2865,7 +2935,7 @@ private fun DeliveryReadoutView(readout: DeliveryReadout?, alignEnd: Boolean) {
  * The dot blinks at one hertz — the one blink on this screen, and only while it is true.
  */
 @Composable
-private fun RecTimecode(recording: Boolean) {
+private fun RecTimecode(recording: Boolean, fps: Int? = null) {
     var elapsedMs by remember { mutableStateOf(0L) }
     LaunchedEffect(recording) {
         val start = android.os.SystemClock.elapsedRealtime()
@@ -2906,6 +2976,11 @@ private fun RecTimecode(recording: Boolean) {
             // Tabular figures, so the time ticks without the pill twitching.
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         )
+        if (fps != null) {
+            Spacer(Modifier.width(9.dp))
+            // What the camera agreed to film at — never the number asked for.
+            Text("$fps fps", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
     }
 }
 
@@ -3236,7 +3311,8 @@ private fun bindCamera(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     analysisExecutor: java.util.concurrent.Executor,
     onFrame: ImageAnalysis.Analyzer,
-    onReady: (VideoCapture<Recorder>, ImageAnalysis) -> Unit,
+    videoQuality: String,
+    onReady: (VideoCapture<Recorder>, ImageAnalysis, Int) -> Unit,
 ) {
     val future = ProcessCameraProvider.getInstance(context)
     future.addListener({
@@ -3308,34 +3384,55 @@ private fun bindCamera(
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
             .also { it.setAnalyzer(analysisExecutor, onFrame) }
-        // FULL HD, and the comment that used to sit here was wrong.
-        //
-        // It said "SD is deliberate" while the code asked for Quality.HD, which is 720p -
-        // neither the SD it claimed nor the Full HD anybody assumed. A review is worth
-        // having only if the ball is visible in it, and at 720p across a maidan it often
-        // is not, so this now asks for what it should always have asked for.
-        //
-        // The fallback still steps down rather than up: a handset that cannot do 1080p
-        // should film the delivery at 720p, not refuse to film it.
-        val recorder = Recorder.Builder()
-            .setQualitySelector(
-                QualitySelector.from(
-                    Quality.FHD,
-                    androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.HD),
-                ),
-            )
-            .build()
-        val videoCapture = VideoCapture.withOutput(recorder)
-        runCatching {
+        /*
+         * FRAME RATE BEFORE PIXELS.
+         *
+         * At 30 fps a 130 km/h delivery moves about 1.2 m between frames, so the bounce and
+         * the pad are often between two of them. 60 halves that gap for the tracker and for
+         * frame-by-frame review; 4K would not, and would quadruple every upload. So the
+         * resolution stays at 1080p (720p on the smaller setting) and the rate goes up.
+         *
+         * A phone that cannot film 60 fps alongside preview and analysis drops to its default
+         * rather than refusing to film — and reports the rate it actually got, so REC never
+         * claims 60 on a phone doing 30.
+         */
+        val resolution = if (videoQuality == "720p60") Quality.HD else Quality.FHD
+        val wantFps = if (videoQuality == "1080p30") 30 else 60
+
+        fun buildCapture(fps: Int?): VideoCapture<Recorder> {
+            val recorder = Recorder.Builder()
+                .setQualitySelector(
+                    QualitySelector.from(
+                        resolution,
+                        // Steps down rather than up: a handset that cannot do the asked size
+                        // should film the delivery smaller, not refuse to film it.
+                        androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
+                    ),
+                )
+                .build()
+            return VideoCapture.Builder(recorder)
+                .apply { if (fps != null) setTargetFrameRate(android.util.Range(fps, fps)) }
+                .build()
+        }
+
+        fun bindWith(fps: Int?): Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>? = runCatching {
+            val capture = buildCapture(fps)
             provider.unbindAll()
-            provider.bindToLifecycle(
+            capture to provider.bindToLifecycle(
                 lifecycleOwner,
                 CameraSelector.DEFAULT_BACK_CAMERA,
                 preview,
-                videoCapture,
+                capture,
                 analysis,
             )
-            onReady(videoCapture, analysis)
+        }.getOrNull()
+
+        val high = if (wantFps > 30) bindWith(wantFps) else null
+        val supportsHigh = high?.second?.cameraInfo?.supportedFrameRateRanges
+            ?.any { it.lower <= wantFps && it.upper >= wantFps } == true
+        val bound = if (high != null && supportsHigh) high else bindWith(null)
+        if (bound != null) {
+            onReady(bound.first, analysis, if (bound === high) wantFps else 30)
         }
     }, ContextCompat.getMainExecutor(context))
 }
