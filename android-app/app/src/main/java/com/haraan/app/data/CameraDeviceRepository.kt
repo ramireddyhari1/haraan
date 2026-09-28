@@ -63,6 +63,28 @@ sealed interface ClipUploadResult {
  * memory for the life of the screen, and it stops working the moment the scorer
  * revokes the device.
  */
+/**
+ * Why a pairing did not happen, as a KIND rather than a sentence.
+ *
+ * The screen reading this belongs to a stranger at a boundary. Handing it the server's own
+ * words meant a framework 404 ("The route api/match-devices/… could not be found") was
+ * printed in red under the headline, so the screen writes its own copy per kind instead.
+ */
+class PairingProblem(val kind: Kind, cause: Throwable? = null) : Exception(kind.name, cause) {
+    enum class Kind { INVALID, EXPIRED, OFFLINE, SERVER }
+
+    companion object {
+        fun of(status: Int) = PairingProblem(
+            when (status) {
+                404 -> Kind.INVALID
+                // 410 is the server's "expired or already used".
+                409, 410 -> Kind.EXPIRED
+                else -> Kind.SERVER
+            },
+        )
+    }
+}
+
 open class CameraDeviceRepository {
 
     private val baseUrl: String = ApiConfig.BASE_URL
@@ -80,10 +102,12 @@ open class CameraDeviceRepository {
          * Safe here because a preview is a GET that changes nothing. claim() is NOT
          * retried: it spends the pairing code, and repeating it could burn a second one.
          */
-        val response = requestWithRetry("/api/match-devices/${code.uppercase()}/preview")
-        if (response.code !in 200..299) {
-            throw IllegalStateException(errorOf(response.body, "That pairing code is not valid."))
+        val response = try {
+            requestWithRetry("/api/match-devices/${code.uppercase()}/preview")
+        } catch (e: java.io.IOException) {
+            throw PairingProblem(PairingProblem.Kind.OFFLINE, e)
         }
+        if (response.code !in 200..299) throw PairingProblem.of(response.code)
         val data = JSONObject(response.body).getJSONObject("data")
         PairingPreview(
             role = MatchDeviceRole.fromServer(data.optString("role")),
@@ -98,10 +122,12 @@ open class CameraDeviceRepository {
             .put("token", code.uppercase())
             .put("deviceName", deviceName)
             .put("platform", "android")
-        val response = request("/api/match-devices/claim", "POST", body)
-        if (response.code !in 200..299) {
-            throw IllegalStateException(errorOf(response.body, "Couldn't join the match."))
+        val response = try {
+            request("/api/match-devices/claim", "POST", body)
+        } catch (e: java.io.IOException) {
+            throw PairingProblem(PairingProblem.Kind.OFFLINE, e)
         }
+        if (response.code !in 200..299) throw PairingProblem.of(response.code)
         val data = JSONObject(response.body).getJSONObject("data")
         CameraSession(
             sessionToken = data.optString("sessionToken"),

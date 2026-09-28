@@ -66,7 +66,8 @@ class CameraDeviceActivity : ComponentActivity() {
         fun pairingCodeFrom(uri: String?): String? {
             val raw = uri?.trim().orEmpty()
             if (raw.isEmpty()) return null
-            val last = raw.trimEnd('/').substringAfterLast('/')
+            // The path's last segment only: a query or fragment is never part of a code.
+            val last = raw.substringBefore('?').substringBefore('#').trimEnd('/').substringAfterLast('/')
             return last.takeIf { it.isNotBlank() && it.length in 6..32 }?.uppercase()
         }
     }

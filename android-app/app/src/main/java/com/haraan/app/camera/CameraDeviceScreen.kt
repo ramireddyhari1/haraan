@@ -53,6 +53,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,6 +81,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -128,6 +136,13 @@ private val Page = Color(0xFF0B1220)
 private val Accent = Color(0xFF2563EB)
 private val Rec = Color(0xFFDC2626)
 private val Good = Color(0xFF16A34A)
+private val Warn = Color(0xFFF59E0B)
+
+/** The one surface colour for chrome over footage: dark enough to hold white text in sun. */
+private val Scrim = Color(0x99000000)
+
+/** Selected-state blue, lifted so it reads on a dark scrim where #2563EB goes muddy. */
+private val SelectedBlue = Color(0xFF8DB0FF)
 
 @Composable
 fun CameraDeviceScreen(
@@ -141,10 +156,12 @@ fun CameraDeviceScreen(
 
     var preview by remember { mutableStateOf<PairingPreview?>(null) }
     var session by remember { mutableStateOf<CameraSession?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var problem by remember { mutableStateOf<JoinProblem?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // Bumped by "Try again", so the preview below runs once more.
+    var attempt by remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
-    LaunchedEffect(initialCode) {
+    LaunchedEffect(initialCode, attempt) {
         val code = initialCode
         if (code == "TEST" || code == "DEBUG" || (com.haraan.app.BuildConfig.DEBUG && code == null)) {
             session = com.haraan.app.data.CameraSession(
@@ -158,18 +175,22 @@ fun CameraDeviceScreen(
             return@LaunchedEffect
         }
         if (code == null) {
-            error = "That link is missing its pairing code."
+            problem = JoinProblem(
+                "This link has no code in it",
+                "Scan the QR code on the scorer's phone again, or ask them to share the link.",
+                canRetry = false,
+            )
             return@LaunchedEffect
         }
+        problem = null
         busy = true
         runCatching { repo.preview(code) }
             .onSuccess { preview = it }
-            .onFailure { error = it.message ?: "That pairing code is not valid." }
+            .onFailure { problem = joinProblemOf(it) }
         busy = false
     }
 
-    Box(Modifier.fillMaxSize()) {
-        CameraBackdrop()
+    Box(Modifier.fillMaxSize().background(Page)) {
         val joined = session
         when {
             joined != null -> CameraMode(
@@ -179,7 +200,11 @@ fun CameraDeviceScreen(
                 requestCameraPermission = requestCameraPermission,
                 onDropped = {
                     session = null
-                    error = "The scorer removed this camera from the match."
+                    problem = JoinProblem(
+                        "You've left the match",
+                        "The scorer removed this camera, or the connection was lost for over a minute. Scan a new code to film again.",
+                        canRetry = false,
+                    )
                 },
                 onExit = onExit,
             )
@@ -187,237 +212,429 @@ fun CameraDeviceScreen(
             else -> JoinPanel(
                 preview = preview,
                 busy = busy,
-                error = error,
+                problem = problem,
                 onJoin = {
                     val code = initialCode ?: return@JoinPanel
                     busy = true
-                    error = null
+                    problem = null
                     scope.launch {
                         runCatching { repo.claim(code, android.os.Build.MODEL ?: "Camera phone") }
                             .onSuccess { session = it }
-                            .onFailure { error = it.message ?: "Couldn't join the match." }
+                            .onFailure { problem = joinProblemOf(it) }
                         busy = false
                     }
                 },
+                onRetry = { attempt++ },
                 onExit = onExit,
             )
         }
     }
 }
 
-/** What you are about to join, before you join it. */
+/** Why this phone is not filming yet, in words written for the person holding it. */
+private data class JoinProblem(val title: String, val body: String, val canRetry: Boolean)
+
+private fun joinProblemOf(error: Throwable): JoinProblem {
+    val kind = (error as? com.haraan.app.data.PairingProblem)?.kind
+        ?: if (error is java.io.IOException) com.haraan.app.data.PairingProblem.Kind.OFFLINE
+        else com.haraan.app.data.PairingProblem.Kind.SERVER
+    return when (kind) {
+        com.haraan.app.data.PairingProblem.Kind.INVALID -> JoinProblem(
+            "This code doesn't work",
+            "Ask the scorer to open Add a camera and show you a new code.",
+            canRetry = false,
+        )
+        com.haraan.app.data.PairingProblem.Kind.EXPIRED -> JoinProblem(
+            "This code has expired",
+            "Codes work once and for a short time. Ask the scorer for a new one.",
+            canRetry = false,
+        )
+        com.haraan.app.data.PairingProblem.Kind.OFFLINE -> JoinProblem(
+            "No connection",
+            "Turn on mobile data or Wi-Fi on this phone, then try again.",
+            canRetry = true,
+        )
+        com.haraan.app.data.PairingProblem.Kind.SERVER -> JoinProblem(
+            "Haraan isn't answering",
+            "That's on our side, not yours. Give it a moment and try again.",
+            canRetry = true,
+        )
+    }
+}
+
+/**
+ * What you are about to join, before you join it.
+ *
+ * Built like the stock camera app a stranger already trusts rather than like a landing
+ * page: the picture on top is what this phone is about to film, and the words underneath
+ * are anchored to the bottom where the thumb is. The headline is the MATCH — the one line
+ * no other screen could print — not a description of the screen.
+ *
+ * The viewfinder in the picture is the loading state. It hunts while the code is being
+ * checked and locks onto the stumps, with a tick in the hand, when the match is found. On a
+ * problem it stays open and dim: nothing to lock onto.
+ */
 @Composable
 private fun JoinPanel(
     preview: PairingPreview?,
     busy: Boolean,
-    error: String?,
+    problem: JoinProblem?,
     onJoin: () -> Unit,
+    onRetry: () -> Unit,
     onExit: () -> Unit,
 ) {
+    val view = LocalView.current
+    val locked = preview != null && problem == null
+    LaunchedEffect(locked) { if (locked) view.performHapticFeedback(Feel.TICK) }
+
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+    val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val sceneHeight = if (sideways) 170.dp else (maxHeight * 0.6f).coerceIn(240.dp, 520.dp)
     Column(
         Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .displayCutoutPadding()
-            /*
-             * Scrolls, because this screen is now reachable sideways.
-             *
-             * Everything below — the mark, the headline, the role card, the disclaimer and
-             * two buttons — needs more height than a phone has in landscape. Centred and
-             * unscrollable, the bottom of it simply did not exist: the join button was off
-             * the screen for anybody who scanned the QR with their phone already turned,
-             * which is the natural way to hold a phone you are about to film with.
-             *
-             * Centre arrangement still holds while it fits, which is the portrait case.
-             */
+            .fillMaxWidth()
+            // Scrolls, because this screen is reachable sideways: somebody who scans the
+            // QR with the phone already turned must still be able to reach the button.
+            // At least a screen tall, so the text sits on the bottom edge when it fits.
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 26.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .heightIn(min = maxHeight),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        // Signed. Somebody who scanned a stranger's QR code is entitled to see whose
-        // software just opened on their phone, and a screen with no name on it is how
-        // anonymous software looks.
-        Staged(0) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(sceneHeight),
+        ) {
+            JoinScene(
+                role = preview?.role,
+                locked = locked,
+                failed = problem != null,
+                modifier = Modifier.fillMaxSize(),
+            )
+            // Signed: whoever scanned a stranger's code is entitled to see whose software
+            // just opened on their phone.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(start = 22.dp, end = 12.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Image(
                     painter = painterResource(R.drawable.haraan_logo_white),
                     contentDescription = "Haraan",
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.height(19.dp),
+                    modifier = Modifier.height(18.dp),
                 )
                 Spacer(Modifier.weight(1f))
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Accent.copy(alpha = 0.16f))
-                        .border(1.dp, Accent.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 11.dp, vertical = 5.dp),
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .clickableCapture(enabled = true, onClick = onExit)
+                        .semantics { contentDescription = "Close" },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        "MATCH CAMERA",
-                        color = Accent,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.1.sp,
-                    )
+                    ExitCrossGlyph(Modifier.size(14.dp), Ink.copy(alpha = 0.8f))
                 }
             }
         }
 
-        Spacer(Modifier.height(34.dp))
-        // The brackets close on OUR mark. That is the whole identity move on this screen:
-        // the camera idea and the brand in one object, instead of a stock glowing lens.
-        Staged(1) {
-            Box(contentAlignment = Alignment.Center) {
-                LensMark()
-                Image(
-                    painter = painterResource(R.drawable.ic_haraan_ribbon_mark),
-                    contentDescription = null,
-                    modifier = Modifier.height(40.dp),
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .displayCutoutPadding()
+                .padding(horizontal = 24.dp)
+                .padding(top = 8.dp, bottom = 20.dp),
+        ) {
+            Staged(0) {
+                Text(
+                    when {
+                        problem != null -> "MATCH CAMERA"
+                        preview == null -> "CHECKING THE CODE"
+                        else -> "YOU'RE JOINING"
+                    },
+                    color = if (problem != null) Ink.copy(alpha = 0.45f) else SelectedBlue,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.6.sp,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+
+            when {
+                problem != null -> {
+                    Staged(1) {
+                        Text(
+                            problem.title,
+                            color = Ink,
+                            fontSize = 30.sp,
+                            fontFamily = ArchivoDisplay,
+                            letterSpacing = (-0.8).sp,
+                            lineHeight = 34.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Staged(2) {
+                        Text(problem.body, color = Ink.copy(alpha = 0.66f), fontSize = 15.sp, lineHeight = 22.sp)
+                    }
+                }
+
+                preview == null -> {
+                    // The shape of what is coming, not a spinner: the lines land where the
+                    // match's name and ground will be.
+                    SkeletonBar(widthFraction = 0.78f, height = 30.dp)
+                    Spacer(Modifier.height(12.dp))
+                    SkeletonBar(widthFraction = 0.45f, height = 15.dp)
+                }
+
+                else -> {
+                    Staged(1) {
+                        Text(
+                            preview.matchTitle.ifBlank { "Your match" },
+                            color = Ink,
+                            fontSize = 30.sp,
+                            fontFamily = ArchivoDisplay,
+                            letterSpacing = (-0.8).sp,
+                            lineHeight = 34.sp,
+                        )
+                    }
+                    if (preview.venue.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Staged(2) {
+                            Text(preview.venue, color = Ink.copy(alpha = 0.55f), fontSize = 15.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(22.dp))
+                    Staged(3) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(
+                                Modifier
+                                    .padding(top = 2.dp)
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(Accent.copy(alpha = 0.18f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                StumpsGlyph(Modifier.size(18.dp), SelectedBlue)
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    "This phone becomes the ${preview.roleLabel.ifBlank { preview.role.label }.replaceFirstChar(Char::lowercase)}",
+                                    color = Ink.copy(alpha = 0.92f),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 20.sp,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    preview.role.blurb,
+                                    color = Ink.copy(alpha = 0.58f),
+                                    fontSize = 13.5.sp,
+                                    lineHeight = 19.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+            when {
+                problem?.canRetry == true -> PrimaryButton("Try again", enabled = !busy, onClick = onRetry)
+                problem != null -> PrimaryButton("Close", enabled = true, onClick = onExit)
+                else -> PrimaryButton(
+                    when {
+                        busy && preview != null -> "Joining…"
+                        preview == null -> "Join this match"
+                        else -> "Join as camera"
+                    },
+                    enabled = preview != null && !busy,
+                    onClick = onJoin,
+                )
+            }
+            if (problem == null) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "Films a short clip of each ball for the scorer. It doesn't make any decisions.",
+                    color = Ink.copy(alpha = 0.4f),
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
-        Spacer(Modifier.height(28.dp))
+    }
+}
+}
 
-        Staged(2) {
-            Text(
-                "Join as match camera",
-                color = Ink,
-                fontSize = 30.sp,
-                // The app's display face, the same one the scorer sets a total in. A
-                // headline in the system font is a headline that belongs to no product.
-                fontFamily = ArchivoDisplay,
-                letterSpacing = (-0.9).sp,
-                textAlign = TextAlign.Center,
+/** A placeholder line that breathes while the real one is on its way. */
+@Composable
+private fun SkeletonBar(widthFraction: Float, height: androidx.compose.ui.unit.Dp) {
+    val t = rememberInfiniteTransition(label = "skeleton")
+    val a by t.animateFloat(
+        0.06f,
+        0.13f,
+        infiniteRepeatable(tween(750, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "skeletonAlpha",
+    )
+    Box(
+        Modifier
+            .fillMaxWidth(widthFraction)
+            .height(height)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = a)),
+    )
+}
+
+/**
+ * The picture: a pitch at dusk, seen the way this phone will see it.
+ *
+ * Down the strip for the review camera, side-on for the bowler camera — the same two
+ * placements the scorer was shown when they made the code, so the two phones agree about
+ * where this one is meant to stand. Viewfinder brackets hunt over the far stumps and close
+ * on them on a spring once the match is found.
+ */
+@Composable
+private fun JoinScene(
+    role: com.haraan.app.data.MatchDeviceRole?,
+    locked: Boolean,
+    failed: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val lock by animateFloatAsState(
+        targetValue = if (locked) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 260f),
+        label = "lock",
+    )
+    val hunt = rememberInfiniteTransition(label = "hunt")
+    val drift by hunt.animateFloat(
+        -1f,
+        1f,
+        infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "drift",
+    )
+    val sideOn = role == com.haraan.app.data.MatchDeviceRole.BOWLER_ANALYSIS
+
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+
+        // Sky to outfield: dusk navy into turf, then into the page colour so the picture
+        // has no bottom edge.
+        drawRect(
+            Brush.verticalGradient(
+                0f to Color(0xFF14233F),
+                0.42f to Color(0xFF0E1A2E),
+                0.43f to Color(0xFF0F2A22),
+                0.8f to Color(0xFF0A1A17),
+                1f to Page,
+            ),
+        )
+        // Mowing bands on the outfield: the one texture that says "cricket ground".
+        val horizon = h * 0.43f
+        var band = 0
+        var y = horizon
+        while (y < h) {
+            val next = y + (6f + (y - horizon) * 0.16f)
+            if (band % 2 == 0) {
+                drawRect(
+                    Color.White.copy(alpha = 0.018f),
+                    topLeft = Offset(0f, y),
+                    size = androidx.compose.ui.geometry.Size(w, next - y),
+                )
+            }
+            band++
+            y = next
+        }
+
+        val strip = Color(0xFFC9B48A)
+        val stumpInk = Color(0xFFF1E7D0)
+        val target: Offset
+        if (!sideOn) {
+            // Down the pitch: a strip narrowing to the far wicket.
+            val cx = w / 2f
+            val farY = horizon + h * 0.08f
+            val nearY = h
+            drawPath(
+                Path().apply {
+                    moveTo(cx - w * 0.045f, farY)
+                    lineTo(cx + w * 0.045f, farY)
+                    lineTo(cx + w * 0.30f, nearY)
+                    lineTo(cx - w * 0.30f, nearY)
+                    close()
+                },
+                Brush.verticalGradient(
+                    listOf(strip.copy(alpha = 0.55f), strip.copy(alpha = 0.18f)),
+                    startY = farY,
+                    endY = nearY,
+                ),
             )
+            // Creases.
+            drawLine(stumpInk.copy(alpha = 0.5f), Offset(cx - w * 0.07f, farY + 6.dp.toPx()), Offset(cx + w * 0.07f, farY + 6.dp.toPx()), 1.dp.toPx())
+            val stumpH = h * 0.075f
+            listOf(-1, 0, 1).forEach { i ->
+                val x = cx + i * 4.5.dp.toPx()
+                drawLine(stumpInk, Offset(x, farY), Offset(x, farY - stumpH), 2.dp.toPx(), StrokeCap.Round)
+            }
+            drawLine(stumpInk, Offset(cx - 6.dp.toPx(), farY - stumpH - 1.5.dp.toPx()), Offset(cx + 6.dp.toPx(), farY - stumpH - 1.5.dp.toPx()), 1.6.dp.toPx(), StrokeCap.Round)
+            target = Offset(cx, farY - stumpH / 2f)
+        } else {
+            // Side-on: the strip runs across the frame, a wicket at each end.
+            val top = horizon + h * 0.2f
+            val bottom = top + h * 0.1f
+            drawRect(
+                strip.copy(alpha = 0.4f),
+                topLeft = Offset(w * 0.08f, top),
+                size = androidx.compose.ui.geometry.Size(w * 0.84f, bottom - top),
+            )
+            val stumpH = h * 0.12f
+            listOf(w * 0.18f, w * 0.82f).forEach { x ->
+                listOf(-1, 0, 1).forEach { i ->
+                    val sx = x + i * 3.dp.toPx()
+                    drawLine(stumpInk, Offset(sx, top + 6.dp.toPx()), Offset(sx, top + 6.dp.toPx() - stumpH), 2.dp.toPx(), StrokeCap.Round)
+                }
+            }
+            target = Offset(w * 0.5f, top - stumpH * 0.3f)
         }
 
-        when {
-            error != null -> {
-                Spacer(Modifier.height(14.dp))
-                Staged(3) {
-                    Text(error, color = Rec, fontSize = 15.sp, lineHeight = 21.sp, textAlign = TextAlign.Center)
-                }
-            }
+        // No bottom edge: the ground fades into the page the words sit on.
+        drawRect(
+            Brush.verticalGradient(
+                0f to Color.Transparent,
+                1f to Page,
+                startY = h * 0.62f,
+                endY = h,
+            ),
+            topLeft = Offset(0f, h * 0.62f),
+            size = androidx.compose.ui.geometry.Size(w, h * 0.38f),
+        )
 
-            preview == null -> {
-                Spacer(Modifier.height(16.dp))
-                Staged(3) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            color = Accent,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(15.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text("Checking the code…", color = Ink.copy(alpha = 0.65f), fontSize = 14.5.sp)
-                    }
-                }
-            }
-
-            else -> {
-                Spacer(Modifier.height(10.dp))
-                Staged(3) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            preview.matchTitle,
-                            color = Ink.copy(alpha = 0.92f),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                        )
-                        if (preview.venue.isNotBlank()) {
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                preview.venue,
-                                color = Ink.copy(alpha = 0.45f),
-                                fontSize = 13.5.sp,
-                                textAlign = TextAlign.Center,
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(26.dp))
-                Staged(4) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Panel.copy(alpha = 0.75f))
-                            // A lit top edge and a hairline: the difference between a
-                            // raised surface and a lighter rectangle.
-                            .border(
-                                1.dp,
-                                Brush.verticalGradient(
-                                    listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.03f)),
-                                ),
-                                RoundedCornerShape(20.dp),
-                            )
-                            .padding(20.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // The same short accent rule the profile's career cards use.
-                            // Small consistencies like this are what make two screens
-                            // look like one product.
-                            Box(
-                                Modifier
-                                    .width(3.dp)
-                                    .height(12.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(Accent),
-                            )
-                            Spacer(Modifier.width(9.dp))
-                            Text(
-                                "THIS PHONE BECOMES",
-                                color = Ink.copy(alpha = 0.42f),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.1.sp,
-                            )
-                        }
-                        Spacer(Modifier.height(9.dp))
-                        Text(
-                            preview.roleLabel,
-                            color = Accent,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.4).sp,
-                        )
-                        Spacer(Modifier.height(11.dp))
-                        Text(
-                            preview.role.blurb,
-                            color = Ink.copy(alpha = 0.62f),
-                            fontSize = 13.5.sp,
-                            lineHeight = 20.sp,
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Staged(5) {
-                    Text(
-                        "Records a short clip around each delivery and sends it to the scorer. " +
-                            "It does not decide anything.",
-                        color = Ink.copy(alpha = 0.38f),
-                        fontSize = 12.5.sp,
-                        lineHeight = 18.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
+        // The viewfinder. Wide and wandering while hunting; tight and still once locked.
+        val wander = (1f - lock) * (if (failed) 0f else 1f)
+        val centre = Offset(target.x + drift * 10.dp.toPx() * wander, target.y + drift * 4.dp.toPx() * wander)
+        val half = (if (sideOn) w * 0.36f else 40.dp.toPx()) * (1.4f - 0.4f * lock)
+        val halfH = (if (sideOn) h * 0.16f else 46.dp.toPx()) * (1.3f - 0.3f * lock)
+        val arm = 14.dp.toPx()
+        val ink = when {
+            failed -> Color.White.copy(alpha = 0.22f)
+            lock > 0.5f -> lerp(Color.White, Color(0xFF8DB0FF), lock)
+            else -> Color.White.copy(alpha = 0.7f)
         }
-
-        Spacer(Modifier.height(30.dp))
-        if (preview != null && error == null) {
-            Staged(6) {
-                PrimaryButton(if (busy) "Joining…" else "Join this match", enabled = !busy, onClick = onJoin)
-            }
-            Spacer(Modifier.height(12.dp))
+        val sw = 2.2.dp.toPx()
+        listOf(-1f to -1f, 1f to -1f, -1f to 1f, 1f to 1f).forEach { (sx, sy) ->
+            val p = Offset(centre.x + sx * half, centre.y + sy * halfH)
+            drawLine(ink, p, Offset(p.x - sx * arm, p.y), sw, StrokeCap.Round)
+            drawLine(ink, p, Offset(p.x, p.y - sy * arm), sw, StrokeCap.Round)
         }
-        Staged(7) { GhostButton("Close", onExit) }
+        // A focus dot at the centre once locked — the moment the picture is "taken".
+        if (lock > 0.05f) {
+            drawCircle(Color(0xFF8DB0FF).copy(alpha = lock.coerceIn(0f, 1f)), radius = 2.5.dp.toPx(), center = centre)
+        }
     }
 }
 
@@ -1507,325 +1724,216 @@ private fun CameraMode(
         /*
          * THE PANEL STANDS DOWN WHILE A WICKET IS BEING PLACED.
          *
-         * Found on a phone with three stumps in frame: this panel sits over the middle of
-         * the picture, and a Compose surface that handles its own touches eats every tap
-         * inside it. Every tap aimed at a stump did nothing at all, with nothing on screen
-         * to say why.
-         *
-         * Hidden rather than layered under the tap catcher, because while somebody is
-         * pointing at a wicket the whole picture IS the control, and a panel merely sitting
-         * underneath would still be covering the thing they are aiming at. The prompt and
-         * the way out are drawn separately below.
+         * Found on a phone with three stumps in frame: a Compose surface that handles its
+         * own touches eats every tap inside it, so every tap aimed at a stump under the
+         * chrome did nothing. While somebody is pointing at a wicket the whole picture IS
+         * the control; the prompt and the way out are drawn separately below.
          */
         /*
-         * SPORTS TECH STATUS PILL & MINIMAL CONTROLS
+         * THE CHROME, drawn the way a camera draws it.
          *
-         * Shows only simple, high-tech states: "Detecting stumps…", "Ready", or "Tracking delivery".
-         * All complex calculations continue running internally without cluttering the screen.
+         * What was here before was a broadcast costume: a "HAWK-EYE CALIBRATED" badge (a
+         * trademark, and a claim this screen's own header forbids), a hard-coded "60fps"
+         * the recorder never asked for, a three-column chyron that read "-- MPH" until a
+         * ball was measured — in miles, in a product that says km/h everywhere else — and
+         * cyan and gold "machined" dials with knurled grooves. Every piece of it was
+         * decoration pretending to be instrumentation.
+         *
+         * What replaces it is only what this phone actually knows: which role it is
+         * playing, the score the scorer last sent, whether the wicket is locked, and —
+         * while filming — how long it has been filming. One flat surface colour, no
+         * gradient rims, no forever-pulsing lights.
          */
         if (!wicketTapping) {
             val currentLock = wicketLock
             val isReady = currentLock != null && (
                 currentLock.state == com.haraan.app.vision.WicketTrackState.CONFIRMED ||
-                currentLock.source == com.haraan.app.vision.WicketLockSource.MANUAL
-            )
+                    currentLock.source == com.haraan.app.vision.WicketLockSource.MANUAL
+                )
+            val byHand = currentLock?.source == com.haraan.app.vision.WicketLockSource.MANUAL
 
-            // Tactile physical feedback the instant stumps lock into place
+            // Said in the hand the moment the wicket locks — once, on the way in.
             LaunchedEffect(isReady) {
-                if (isReady) {
-                    view.performHapticFeedback(Feel.COMMIT)
-                }
+                if (isReady) view.performHapticFeedback(Feel.COMMIT)
             }
 
-            val isTracking = recording || trackingLive
-            val statusColor = when {
-                isTracking -> Color(0xFFEF4444)
-                isReady -> Color(0xFF10B981)
-                else -> Color(0xFFF59E0B)
-            }
-            val statusText = when {
-                isTracking -> "Tracking delivery"
-                isReady -> "Ready"
-                else -> "Detecting stumps…"
-            }
-
-            val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")
-            val pulseAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.35f,
-                targetValue = 1.0f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(850, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "ledPulse",
-            )
-
-            // ─────────────────────────────────────────────────────────────────
-            // 1. UNIFIED BROADCAST TOP MASTER BAR (Zero Collision)
-            // ─────────────────────────────────────────────────────────────────
+            // ── Top: who this phone is, and the match it belongs to ──
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
                     .displayCutoutPadding()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                // Left: Camera identity & framerate badge
+                Box(Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xD90F172A))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Scrim)
+                        .padding(start = 11.dp, end = 13.dp, top = 7.dp, bottom = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Green is a semantic here, not decoration: the scorer can hear us.
                     Box(
-                        modifier = Modifier
-                            .size(6.5.dp)
+                        Modifier
+                            .size(7.dp)
                             .clip(CircleShape)
-                            .background(if (recording) Color(0xFFEF4444) else Color(0xFF10B981))
+                            .background(if (live) Good else Warn),
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "STUMP CAM",
-                        color = Color.White,
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.6.sp,
+                        session.roleLabel.ifBlank { "Match camera" },
+                        color = Ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = "60fps",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-
-                // Center: Optical Status Badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xE60A0E17))
-                        .border(
-                            1.dp,
-                            Brush.horizontalGradient(
-                                listOf(
-                                    statusColor.copy(alpha = 0.35f),
-                                    Color.White.copy(alpha = 0.15f),
-                                    statusColor.copy(alpha = 0.35f),
-                                )
-                            ),
-                            RoundedCornerShape(20.dp),
-                        )
-                        .padding(horizontal = 12.dp, vertical = 5.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.5.dp)
-                                .clip(CircleShape)
-                                .background(statusColor.copy(alpha = if (isReady) 1.0f else pulseAlpha))
-                        )
-                        Spacer(Modifier.width(6.dp))
+                    // The score the scorer last sent — the one line on this screen no
+                    // other camera app could print.
+                    if (score.isNotBlank()) {
                         Text(
-                            text = if (isReady) "HAWK-EYE CALIBRATED" else statusText.uppercase(),
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.6.sp,
+                            buildString {
+                                append("  ·  ")
+                                append(score)
+                                if (overs.isNotBlank()) append(" ($overs)")
+                            },
+                            color = Ink.copy(alpha = 0.62f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
                         )
                     }
                 }
-
-                // Right: Tuning gear & Exit cross
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Settings / Tuning toggle
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(if (showAdminPanel) Color(0xFF2563EB) else Color(0xD90F172A))
-                            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
-                            .clickableCapture(enabled = true) { showAdminPanel = !showAdminPanel },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        TuningGearGlyph(Modifier.size(13.dp), if (showAdminPanel) Color.White else Color(0xFF94A3B8))
-                    }
-
-                    // Dismiss / Exit button
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xD90F172A))
-                            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
-                            .clickableCapture(enabled = true, onClick = onExit),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ExitCrossGlyph(Modifier.size(11.dp), Color.White.copy(alpha = 0.85f))
-                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                ChromeIconButton(
+                    active = showAdminPanel,
+                    description = "Wicket diagnostics",
+                    onClick = { showAdminPanel = !showAdminPanel },
+                ) { tint -> TuningGearGlyph(Modifier.size(16.dp), tint) }
+                Spacer(Modifier.width(8.dp))
+                ChromeIconButton(active = false, description = "Leave", onClick = onExit) { tint ->
+                    ExitCrossGlyph(Modifier.size(13.dp), tint)
                 }
             }
 
-            // ─────────────────────────────────────────────────────────────────
-            // 2. FOX SPORTS BROADCAST TELEMETRY CHYRON (Below Top Bar)
-            // ─────────────────────────────────────────────────────────────────
-            val (speedVal, speedU) = when (val s = lastMetrics?.groundSpeed) {
-                is com.haraan.app.vision.MetricValue.Measured -> "%.0f".format(s.value * 0.621371) to "MPH"
-                else -> "--" to "MPH"
-            }
-            val (spinVal, spinU) = when (val t = lastMetrics?.turn) {
-                is com.haraan.app.vision.MetricValue.Measured -> "%.1f".format(kotlin.math.abs(t.value)) to "°"
-                else -> "--" to "°"
-            }
-            val (swingVal, swingU) = when (val sw = lastMetrics?.swing) {
-                is com.haraan.app.vision.MetricValue.Measured -> "%.1f".format(kotlin.math.abs(sw.value)) to "SF"
-                else -> "--" to "SF"
-            }
-
+            // ── Under it: REC while filming, otherwise what the phone is waiting on ──
             Column(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(Alignment.TopCenter)
                     .statusBarsPadding()
                     .displayCutoutPadding()
-                    .padding(top = 52.dp, start = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .padding(top = 62.dp, start = 14.dp, end = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                FoxSportsTelemetryChyron(
-                    speedValue = speedVal,
-                    speedUnit = speedU,
-                    spinValue = spinVal,
-                    spinUnit = spinU,
-                    swingValue = swingVal,
-                    swingUnit = swingU,
-                )
+                if (recording) {
+                    RecTimecode(recording = true)
+                } else {
+                    val (dot, words) = when {
+                        thermalThrottled -> Warn to "Phone is hot · tracking paused"
+                        byHand -> Good to "Wicket set by hand"
+                        isReady -> Good to "Wicket locked"
+                        else -> Ink.copy(alpha = 0.45f) to "Point at the far wicket"
+                    }
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Scrim)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(dot))
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            words,
+                            color = Ink.copy(alpha = 0.88f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
 
                 if (showAdminPanel) {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(10.dp))
                     WicketDiagnosticsPanel(
                         diagnostics = wicketDiagnostics,
                         lock = currentLock,
                         modifier = Modifier
-                            .widthIn(max = 280.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.85f))
-                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                            .padding(10.dp),
+                            .widthIn(max = 300.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.82f))
+                            .padding(12.dp),
                     )
                 }
             }
 
-            // ─────────────────────────────────────────────────────────────────
-            // 3. TACTILE MACHINED CAMERA TOOL RAIL (Middle-Left in Portrait, Bottom-Left in Landscape)
-            // ─────────────────────────────────────────────────────────────────
-            val toolRailModifier = if (landscape) {
+            // ── The last ball's numbers, down the left edge ──
+            if (!showAdminPanel) {
+                DeliveryMetricsStack(
+                    metrics = lastMetrics,
+                    stale = recording,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .displayCutoutPadding()
+                        .padding(start = 14.dp, top = if (landscape) 62.dp else 108.dp),
+                )
+            }
+
+            // ── The two tools, labelled, on the edge away from the shutter ──
+            val railModifier = if (landscape) {
                 Modifier
                     .align(Alignment.BottomStart)
                     .navigationBarsPadding()
                     .displayCutoutPadding()
-                    .padding(start = 16.dp, bottom = 18.dp)
+                    .padding(start = 18.dp, bottom = 18.dp)
             } else {
                 Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 14.dp)
+                    .align(Alignment.BottomStart)
+                    .navigationBarsPadding()
+                    .padding(start = 22.dp, bottom = 44.dp)
             }
-
-            Box(
-                modifier = toolRailModifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xD90F172A))
-                    .border(
-                        1.2.dp,
-                        Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.25f), Color.White.copy(alpha = 0.08f))
-                        ),
-                        RoundedCornerShape(24.dp),
-                    )
-                    .padding(vertical = 8.dp, horizontal = 5.dp),
-            ) {
-                val railButtons: @Composable () -> Unit = {
-                    MachinedDialButton(
-                        active = showGuide,
-                        activeColor = Color(0xFF00E5FF),
-                        onClick = { showGuide = !showGuide },
-                    ) { tint ->
-                        ReticleGlyph(Modifier.size(17.dp), tint)
-                    }
-
-                    // Knurled tactile separator grooves
-                    val grooveColor = Color.White.copy(alpha = 0.15f)
-                    if (landscape) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            repeat(3) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.2.dp)
-                                        .height(14.dp)
-                                        .background(grooveColor)
-                                )
-                            }
+            val manual = wicketDiagnostics.lockSource == com.haraan.app.vision.WicketLockSource.MANUAL
+            val tools: @Composable () -> Unit = {
+                ToolButton(
+                    label = "Guide",
+                    active = showGuide,
+                    onClick = { showGuide = !showGuide },
+                ) { tint -> PitchGlyph(Modifier.size(20.dp), tint) }
+                ToolButton(
+                    // Says what a tap will do, not what the state is called.
+                    label = if (manual) "Clear" else "Wicket",
+                    active = manual,
+                    onClick = {
+                        if (manual) {
+                            wicketTracker.clearManualLock()
+                            wicketLock = wicketTracker.lock()
+                            wicketDiagnostics = wicketTracker.diagnostics()
+                            wicketTaps = emptyList()
+                        } else {
+                            wicketTaps = emptyList()
+                            wicketTapping = true
                         }
-                    } else {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(2.5.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            repeat(3) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(14.dp)
-                                        .height(1.2.dp)
-                                        .background(grooveColor)
-                                )
-                            }
-                        }
-                    }
-
-                    MachinedDialButton(
-                        active = wicketDiagnostics.lockSource == com.haraan.app.vision.WicketLockSource.MANUAL,
-                        activeColor = Color(0xFFE2C48D),
-                        onClick = {
-                            if (wicketDiagnostics.lockSource == com.haraan.app.vision.WicketLockSource.MANUAL) {
-                                wicketTracker.clearManualLock()
-                                wicketLock = wicketTracker.lock()
-                                wicketDiagnostics = wicketTracker.diagnostics()
-                                wicketTaps = emptyList()
-                            } else {
-                                wicketTaps = emptyList()
-                                wicketTapping = true
-                            }
-                        },
-                    ) { tint ->
-                        CalibrationGlyph(Modifier.size(17.dp), tint)
-                    }
-                }
-
-                if (landscape) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        railButtons()
-                    }
-                } else {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        railButtons()
-                    }
-                }
+                    },
+                ) { tint -> StumpsGlyph(Modifier.size(20.dp), tint) }
             }
+            Row(railModifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) { tools() }
+        }
+
+        /*
+         * FILMING, SAID BY THE EDGES OF THE SCREEN.
+         *
+         * The person holding this phone is watching the bowler, not the screen, so the start
+         * of a clip has to reach the corner of their eye: the edges flash red twice, then
+         * keep a slow breath for as long as the clip runs. The picture itself gets a thin red
+         * line too, drawn on the footage rather than the letterbox.
+         */
+        if (granted) {
+            RecordingEdgeGlow(recording = recording, uprightAspect = uprightAspect)
         }
 
         // And what replaces it: the one instruction that matters, and the way out. Bottom
@@ -1900,6 +2008,15 @@ private fun CameraMode(
             lastMetrics = null
             trackingLive = true
             recording = true
+            /*
+             * Felt the moment filming starts — however it started.
+             *
+             * Most clips are armed by the scorer's BALL with nobody touching this phone, and
+             * those used to start in silence: the person holding it had to look to know. It
+             * is the same rising swell the scorer's thumb feels on BALL, so the two phones
+             * speak one language for "the ball is on".
+             */
+            scope.launch { com.haraan.app.ui.matches.cricketThud(ctx, com.haraan.app.ui.matches.Thud.DELIVERY) }
             val clipFile = uploadQueue.createClipFile()
             activeRecording = startClip(
                 context = ctx,
@@ -2034,65 +2151,42 @@ private fun CameraMode(
         val isUploading = queueStatus.isUploading
         val queueError = queueStatus.lastError
 
+        /*
+         * WHERE THE LAST BALL PITCHED, big, above the shutter.
+         *
+         * Speed, spin and swing live in the cards on the left; length is the one number
+         * measured in metres UP the pitch, and only when a pitch was calibrated, so it gets
+         * its own place and appears only when it exists.
+         */
+        val readout: DeliveryReadout? = lastBounce?.takeIf { !recording }?.let { bounce ->
+            DeliveryReadout(
+                figure = "%.1f".format(bounce.lengthM),
+                unit = "m",
+                detail = "Pitched ${bounce.length.spoken}",
+            )
+        }
         val status = when {
             // The point count is the only honest signal of whether vision is doing
             // anything, and it belongs where the person filming can see it.
-            recording && trackedPoints > 0 -> "Recording · $trackedPoints ball points$trackWord"
-            recording -> "Recording this delivery…"
+            recording && trackedPoints > 0 -> "Ball seen in $trackedPoints frames$trackWord"
+            recording -> "Filming this ball"
             uploadError != null -> uploadError!!
             // Said out loud rather than left to a small coloured dot. Somebody holding
             // this phone at the boundary needs to know the difference between "idle" and
             // "the scorer has stopped hearing from me".
             !live -> "Reconnecting to the match…"
-            /*
-             * One line, and only after a delivery.
-             *
-             * The rest of a pitch map belongs to the scorer and the player, not to somebody
-             * standing at a boundary holding a phone. What earns its place here is the
-             * confirmation that the calibration under it is working — which is why the
-             * spoken length comes first and the number second, and why there is no tile,
-             * no card and no second row.
-             */
-            /*
-             * THE DELIVERY'S ONE LINE, and what gets to be in it.
-             *
-             * A speed goes first when there is one, because it is the number everybody at
-             * a ground asks for and it only exists when the wicket lock was measurable AND
-             * the camera was square enough to the flight to see the motion at all — so its
-             * presence is itself the confirmation that the setup is right. The length comes
-             * next, because it is the only thing on this screen measured in metres up the
-             * pitch. Nothing else fits, and a second row here would be a scoreboard on a
-             * screen whose job is to film.
-             */
-            lastMetrics?.groundSpeed is com.haraan.app.vision.MetricValue.Measured ->
-                with(lastMetrics!!.groundSpeed as com.haraan.app.vision.MetricValue.Measured) {
-                    buildString {
-                        append("%.0f km/h".format(value))
-                        val turn = lastMetrics?.turn
-                        if (turn is com.haraan.app.vision.MetricValue.Measured &&
-                            kotlin.math.abs(turn.value) >= 2.0
-                        ) {
-                            append(" · turned %.0f°".format(kotlin.math.abs(turn.value)))
-                        }
-                        lastBounce?.let { append(" · ${it.length.spoken}") }
-                    }
-                }
-
-            lastBounce != null -> with(lastBounce!!) {
-                "Pitched ${length.spoken} · ${"%.1f".format(lengthM)} m"
-            }
             // Said plainly, and said with what still works. A phone that has gone quiet
             // about the ball while the operator can see it is filming invites the guess
             // that the whole thing has broken.
-            thermalThrottled -> "Phone's hot · still filming, tracking paused"
+            thermalThrottled -> "Still filming · tracking paused to cool down"
             queueError != null && pendingCount > 0 -> "Upload paused · $pendingCount pending"
             isUploading && pendingCount > 1 -> "Sending clip to scorer · $pendingCount queued"
             isUploading -> "Sending to the scorer…"
             pendingCount > 0 && clipsSent > 0 -> "$clipsSent sent · $pendingCount queued"
             pendingCount > 0 -> "$pendingCount queued · waiting to send"
-            trackedPoints > 0 -> "$clipsSent sent · $trackedPoints ball points$trackWord"
+            trackedPoints > 0 -> "$clipsSent sent · ball seen in $trackedPoints frames$trackWord"
             clipsSent > 0 -> "$clipsSent sent · films on the scorer's BALL"
-            else -> "Films when the scorer taps BALL · or tap here"
+            else -> "Films on the scorer's BALL · or tap to film"
         }
         ShutterControl(
             modifier = Modifier
@@ -2112,160 +2206,13 @@ private fun CameraMode(
             landscape = landscape,
             // The backup: a tap during a ball the cue missed still files the clip under
             // that ball, so the scorer's REVIEW finds it.
+            readout = readout,
             onArm = { armDelivery(latestCue?.takeIf { it.inPlay }?.seq) },
         )
     }
 }
 
-/**
- * The status line and the shutter — everything on the filming screen that is not the
- * picture, kept together because they are read together.
- *
- * Two arrangements of the same two things. Portrait stacks them along the bottom edge;
- * landscape lays them along the right edge, status first, shutter outermost. In both the
- * disc ends up on the short edge nearest the hand, and in neither does it sit over the
- * middle of the pitch.
- */
-@Composable
-private fun ShutterControl(
-    modifier: Modifier,
-    status: String,
-    isError: Boolean,
-    recording: Boolean,
-    canFilm: Boolean,
-    landscape: Boolean,
-    onArm: () -> Unit,
-) {
-    val view = LocalView.current
-
-    /*
-     * THE SHUTTER.
-     *
-     * The whole disc is the button. It used to be a 30dp square sitting inside an 84dp
-     * ring, so the thing that LOOKED like the target was some seven times the area of the
-     * thing that actually took a tap — on the one screen in the app built to be worked
-     * without looking at it. A thumb landing on the ring did nothing, silently, while a
-     * bowler ran in, and the operator had no way to tell that from a camera that had
-     * stopped responding.
-     *
-     * It also refuses a press while a clip is still being filmed, instead of
-     * letting one land on a control that cannot act on it.
-     */
-    val shutter = remember { MutableInteractionSource() }
-    val shutterPressed by shutter.collectIsPressedAsState()
-    val shutterScale by animateFloatAsState(
-        targetValue = if (shutterPressed && canFilm) 0.93f else 1f,
-        animationSpec = spring(dampingRatio = 0.5f, stiffness = 900f),
-        label = "shutterScale",
-    )
-
-    val statusLine: @Composable () -> Unit = {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xD90A0E17))
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-        ) {
-            Text(
-                status,
-                color = if (isError) Rec else Color.White.copy(alpha = 0.90f),
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.3.sp,
-                modifier = if (landscape) Modifier.widthIn(max = 230.dp) else Modifier,
-                textAlign = if (landscape) TextAlign.End else TextAlign.Center,
-            )
-        }
-    }
-
-    val disc: @Composable () -> Unit = {
-        Box(
-            Modifier
-                // First in the chain, so the disc itself dips rather than its contents
-                // shrinking inside a ring that stays where it was.
-                .graphicsLayer { scaleX = shutterScale; scaleY = shutterScale }
-                .size(76.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        listOf(Color(0xFF222B3D), Color(0xFF0F1523)),
-                    )
-                )
-                .border(
-                    2.5.dp,
-                    Brush.sweepGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.85f),
-                            Color(0xFF64748B),
-                            Color.White.copy(alpha = 0.85f),
-                            Color(0xFF475569),
-                            Color.White.copy(alpha = 0.85f),
-                        ),
-                    ),
-                    CircleShape,
-                )
-                .clickable(
-                    interactionSource = shutter,
-                    indication = null,
-                    enabled = canFilm,
-                ) {
-                    // Filming started. The heaviest note this screen has, because it is
-                    // the only action on it that commits.
-                    view.performHapticFeedback(Feel.COMMIT)
-                    onArm()
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            if (recording) {
-                CircularProgressIndicator(
-                    color = Rec,
-                    strokeWidth = 3.dp,
-                    modifier = Modifier.size(34.dp),
-                )
-                Box(
-                    Modifier
-                        .size(14.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Rec),
-                )
-            } else {
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (canFilm) {
-                                Brush.radialGradient(
-                                    listOf(Color(0xFFFF4D4D), Rec),
-                                )
-                            } else {
-                                Brush.radialGradient(
-                                    listOf(Rec.copy(alpha = 0.35f), Rec.copy(alpha = 0.20f)),
-                                )
-                            }
-                        ),
-                )
-            }
-        }
-    }
-
-    if (landscape) {
-        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-            statusLine()
-            Spacer(Modifier.width(16.dp))
-            disc()
-        }
-    } else {
-        Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-            statusLine()
-            Spacer(Modifier.height(14.dp))
-            disc()
-        }
-    }
-}
-
-/** The one commitment on the screen: lit, gradient-filled, and it dips under a thumb. */
+/** The one commitment on the screen: solid brand blue, and it dips under a thumb. */
 @Composable
 private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -2280,12 +2227,7 @@ private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) 
             .fillMaxWidth()
             .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
             .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.horizontalGradient(
-                    if (enabled) listOf(Color(0xFF3B82F6), Color(0xFF2563EB))
-                    else listOf(Color(0xFF1E293B), Color(0xFF1E293B)),
-                ),
-            )
+            .background(if (enabled) Accent else Color(0xFF1E293B))
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -2325,106 +2267,651 @@ private fun GhostButton(label: String, onClick: () -> Unit) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HANDCRAFTED BROADCAST SPORTS-TECH GLYPHS (Precision Canvas Paths)
-// ─────────────────────────────────────────────────────────────────────────────
-
+/**
+ * The status line and the shutter — everything on the filming screen that is not the
+ * picture, kept together because they are read together.
+ *
+ * Two arrangements of the same things. Portrait stacks them along the bottom edge;
+ * landscape lays them along the right edge, shutter outermost. In both the disc ends up on
+ * the short edge nearest the hand, and in neither does it sit over the middle of the pitch.
+ */
 @Composable
-private fun VelocityGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFF00E5FF)) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val stroke = with(density) { 1.5.dp.toPx() }
-        val path1 = Path().apply {
-            moveTo(w * 0.15f, h * 0.20f)
-            lineTo(w * 0.52f, h * 0.50f)
-            lineTo(w * 0.15f, h * 0.80f)
-        }
-        val path2 = Path().apply {
-            moveTo(w * 0.45f, h * 0.20f)
-            lineTo(w * 0.82f, h * 0.50f)
-            lineTo(w * 0.45f, h * 0.80f)
-        }
-        drawPath(path1, tint.copy(alpha = 0.45f), style = Stroke(width = stroke, cap = StrokeCap.Round))
-        drawPath(path2, tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
-    }
-}
-
-@Composable
-private fun SpinGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFFA855F7)) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val r = kotlin.math.min(w, h) * 0.36f
-        val c = Offset(w / 2f, h / 2f)
-        val stroke = with(density) { 1.5.dp.toPx() }
-        drawArc(
-            color = tint,
-            startAngle = 35f,
-            sweepAngle = 275f,
-            useCenter = false,
-            topLeft = Offset(c.x - r, c.y - r),
-            size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
-            style = Stroke(width = stroke, cap = StrokeCap.Round),
+private fun ShutterControl(
+    modifier: Modifier,
+    status: String,
+    isError: Boolean,
+    recording: Boolean,
+    canFilm: Boolean,
+    landscape: Boolean,
+    readout: DeliveryReadout?,
+    onArm: () -> Unit,
+) {
+    val statusLine: @Composable () -> Unit = {
+        Text(
+            status,
+            color = if (isError) Color(0xFFFF8A8A) else Ink.copy(alpha = 0.92f),
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = if (landscape) TextAlign.End else TextAlign.Center,
+            modifier = Modifier
+                .then(if (landscape) Modifier.widthIn(max = 230.dp) else Modifier)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Scrim)
+                .padding(horizontal = 14.dp, vertical = 7.dp),
         )
-        val arrow = Path().apply {
-            moveTo(c.x + r * 0.70f, c.y - r * 0.72f)
-            lineTo(c.x + r * 1.05f, c.y - r * 0.22f)
-            lineTo(c.x + r * 0.42f, c.y - r * 0.38f)
-            close()
+    }
+
+    if (landscape) {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            Column(horizontalAlignment = Alignment.End) {
+                DeliveryReadoutView(readout, alignEnd = true)
+                statusLine()
+            }
+            Spacer(Modifier.width(18.dp))
+            ShutterDisc(recording = recording, canFilm = canFilm, onArm = onArm)
         }
-        drawPath(arrow, tint)
+    } else {
+        Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+            DeliveryReadoutView(readout, alignEnd = false)
+            statusLine()
+            Spacer(Modifier.height(16.dp))
+            ShutterDisc(recording = recording, canFilm = canFilm, onArm = onArm)
+        }
+    }
+}
+
+/**
+ * THE SHUTTER, built the way every camera the operator has ever held builds one.
+ *
+ * A white ring and a red disc. Filming, the disc closes into a rounded square — the stop
+ * shape — and the ring fills red clockwise across the clip window, so how long is left is
+ * read at a glance instead of guessed from an indeterminate spinner (a spinner says
+ * "loading", which is the wrong thing to say about a camera that is filming).
+ *
+ * The morph runs on a spring, not a tween: it overshoots a hair and settles, which is what
+ * makes a flat drawing read as a part that moved. It is driven by state, so a clip armed by
+ * the scorer's BALL — with nobody touching the phone — animates exactly like a tap would.
+ *
+ * The whole disc takes the tap. A press while a clip is running is refused IN THE HAND with
+ * the reject note, rather than landing on a disabled control in silence.
+ */
+@Composable
+private fun ShutterDisc(recording: Boolean, canFilm: Boolean, onArm: () -> Unit) {
+    val view = LocalView.current
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 700f),
+        label = "shutterPress",
+    )
+    val morph by animateFloatAsState(
+        targetValue = if (recording) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
+        label = "shutterMorph",
+    )
+    val window = remember { Animatable(0f) }
+    LaunchedEffect(recording) {
+        if (recording) {
+            window.snapTo(0f)
+            window.animateTo(1f, tween(REVIEW_CLIP_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
+        } else {
+            window.animateTo(0f, tween(260))
+        }
+    }
+    val ready = canFilm || recording
+
+    Box(
+        Modifier
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .size(80.dp)
+            .clip(CircleShape)
+            .clickable(interactionSource = press, indication = null) {
+                if (canFilm) {
+                    // No haptic here: arming plays the "ball is on" swell itself, for a tap
+                    // and for the scorer's cue alike. One event, one buzz.
+                    onArm()
+                } else {
+                    view.performHapticFeedback(Feel.REMOVE)
+                }
+            }
+            .semantics { contentDescription = if (recording) "Filming" else "Film this ball" },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val ringW = 4.dp.toPx()
+            val r = size.minDimension / 2f - ringW / 2f
+            // Shadow under the ring, so it holds its edge against a sunlit outfield.
+            drawCircle(Color.Black.copy(alpha = 0.28f), radius = r + ringW, style = Stroke(ringW))
+            drawCircle(
+                Color.White.copy(alpha = if (ready) 0.95f - 0.55f * morph else 0.4f),
+                radius = r,
+                style = Stroke(ringW),
+            )
+            if (window.value > 0f) {
+                drawArc(
+                    Rec,
+                    startAngle = -90f,
+                    sweepAngle = 360f * window.value,
+                    useCenter = false,
+                    topLeft = Offset(center.x - r, center.y - r),
+                    size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
+                    style = Stroke(ringW, cap = StrokeCap.Round),
+                )
+            }
+
+            // Disc → rounded square. Size and corner both ride the one spring.
+            val full = size.minDimension - 18.dp.toPx()
+            val stop = 30.dp.toPx()
+            val side = full + (stop - full) * morph
+            val corner = side / 2f + (7.dp.toPx() - side / 2f) * morph
+            drawRoundRect(
+                color = if (ready) Rec else Rec.copy(alpha = 0.35f),
+                topLeft = Offset(center.x - side / 2f, center.y - side / 2f),
+                size = androidx.compose.ui.geometry.Size(side, side),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(corner, corner),
+            )
+        }
+    }
+}
+
+/**
+ * One of the delivery's numbers, ready to draw.
+ *
+ * [value] is null when the phone could not measure it — never a zero, never a guess.
+ * [note] is what a tap on the card reveals: how the number was got, or what it still needs.
+ */
+private data class MetricCardData(
+    val label: String,
+    val value: Double?,
+    val decimals: Int,
+    val unit: String,
+    val note: String,
+)
+
+private fun metricCards(metrics: com.haraan.app.vision.FlightMetrics?): List<MetricCardData> {
+    fun reason(m: com.haraan.app.vision.MetricValue?, waiting: String) = when (m) {
+        is com.haraan.app.vision.MetricValue.Unavailable -> "Needs ${m.reason.removePrefix("needs ")}"
+        null -> waiting
+        else -> null
+    }
+    val speed = metrics?.groundSpeed
+    val turn = metrics?.turn
+    val swing = metrics?.swing
+    // Swing is in metres once a wicket lock gives the picture a scale; without one it is a
+    // fraction of the frame, which is not a distance and is not printed as one.
+    val swingCm = (swing as? com.haraan.app.vision.MetricValue.Measured)?.takeIf { it.unit == "m" }?.value?.times(100)
+        ?: (swing as? com.haraan.app.vision.MetricValue.Estimated)?.takeIf { it.unit == "m" }?.value?.times(100)
+    return listOf(
+        MetricCardData(
+            label = "Speed",
+            value = (speed as? com.haraan.app.vision.MetricValue.Measured)?.value,
+            decimals = 0,
+            unit = "km/h",
+            note = reason(speed, "After the next ball")
+                ?: "Over the ground, scaled by the stumps",
+        ),
+        MetricCardData(
+            label = "Spin",
+            value = (turn as? com.haraan.app.vision.MetricValue.Measured)?.value?.let { kotlin.math.abs(it) },
+            decimals = 1,
+            unit = "°",
+            note = reason(turn, "After the next ball")
+                ?: "How far it turned off the pitch",
+        ),
+        MetricCardData(
+            label = "Swing",
+            value = swingCm?.let { kotlin.math.abs(it) },
+            decimals = 0,
+            unit = "cm",
+            note = reason(swing, "After the next ball")
+                ?: if (swingCm == null) "Lock the wicket to measure in cm" else "Sideways movement before the bounce",
+        ),
+    )
+}
+
+/**
+ * THE DELIVERY'S NUMBERS, stacked down the left edge like a broadcast graphic.
+ *
+ * Built to feel like a readout that LANDS rather than text that changes:
+ *  - a new ball's numbers count up from nothing, card after card, 90 ms apart;
+ *  - each card pops on a spring as its number arrives, and its edge flashes brand blue;
+ *  - while the next ball is being filmed, the old numbers dim instead of vanishing, so the
+ *    stack never jumps and the operator can still read the last ball;
+ *  - a press dips the card under the finger with a tick, and opens it to say how the number
+ *    was measured — or, for a dash, what it needs.
+ *
+ * A dash is a dash. The cards never print a zero or a placeholder figure for something the
+ * phone did not see.
+ */
+@Composable
+private fun DeliveryMetricsStack(
+    metrics: com.haraan.app.vision.FlightMetrics?,
+    stale: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val cards = metricCards(metrics)
+    Column(modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        cards.forEachIndexed { index, card ->
+            MetricCard(card = card, stale = stale, delayMs = index * 90L, generation = metrics)
+        }
     }
 }
 
 @Composable
-private fun TrajectoryGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFF10B981)) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val stroke = with(density) { 1.6.dp.toPx() }
-        val arc = Path().apply {
-            moveTo(w * 0.18f, h * 0.82f)
-            cubicTo(w * 0.28f, h * 0.35f, w * 0.65f, h * 0.22f, w * 0.82f, h * 0.38f)
+private fun MetricCard(
+    card: MetricCardData,
+    stale: Boolean,
+    delayMs: Long,
+    generation: Any?,
+) {
+    val view = LocalView.current
+    var open by remember { mutableStateOf(false) }
+    val shown = remember { Animatable(0f) }
+    val pop = remember { Animatable(1f) }
+    val flash = remember { Animatable(0f) }
+
+    // A new delivery's value: count up, pop, flash. Keyed on the metrics object, so the same
+    // number arriving twice (two balls at 118) still lands twice.
+    LaunchedEffect(generation, card.value) {
+        val target = card.value
+        if (target == null) {
+            shown.snapTo(0f)
+            return@LaunchedEffect
         }
-        drawPath(arc, tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
-        drawCircle(tint, radius = with(density) { 2.dp.toPx() }, center = Offset(w * 0.82f, h * 0.38f))
+        delay(delayMs)
+        shown.snapTo(0f)
+        launch { flash.snapTo(1f); flash.animateTo(0f, tween(900)) }
+        launch {
+            pop.snapTo(0.92f)
+            pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 520f))
+        }
+        shown.animateTo(target.toFloat(), tween(650, easing = FastOutSlowInEasing))
+    }
+
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        if (pressed) 0.94f else 1f,
+        spring(dampingRatio = 0.5f, stiffness = 800f),
+        label = "cardPress",
+    )
+    val dim by animateFloatAsState(if (stale) 0.4f else 1f, tween(260), label = "stale")
+    val shape = RoundedCornerShape(14.dp)
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .widthIn(min = 108.dp, max = 190.dp)
+            .graphicsLayer {
+                val s = pressScale * pop.value
+                scaleX = s
+                scaleY = s
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+            }
+            .clip(shape)
+            .background(Color(0xA8070B14))
+            .border(
+                1.dp,
+                lerp(Color.White.copy(alpha = 0.10f), Color(0xFF8DB0FF), flash.value),
+                shape,
+            )
+            .clickable(interactionSource = press, indication = null) {
+                view.performHapticFeedback(Feel.SELECT)
+                open = !open
+            }
+            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
+            .padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                card.label.uppercase(),
+                color = Color.White.copy(alpha = 0.58f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.1.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            // A small chevron that turns as the card opens: it says the card has more.
+            val turn by animateFloatAsState(if (open) 180f else 0f, spring(stiffness = 600f), label = "chev")
+            Canvas(Modifier.size(9.dp).graphicsLayer { rotationZ = turn }) {
+                val c = Color.White.copy(alpha = 0.45f)
+                val s = 1.4.dp.toPx()
+                drawLine(c, Offset(size.width * 0.15f, size.height * 0.35f), Offset(size.width * 0.5f, size.height * 0.7f), s, StrokeCap.Round)
+                drawLine(c, Offset(size.width * 0.5f, size.height * 0.7f), Offset(size.width * 0.85f, size.height * 0.35f), s, StrokeCap.Round)
+            }
+        }
+        Spacer(Modifier.height(3.dp))
+        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.graphicsLayer { alpha = dim }) {
+            if (card.value == null) {
+                Text(
+                    "—",
+                    color = Color.White.copy(alpha = 0.32f),
+                    fontSize = 24.sp,
+                    fontFamily = ArchivoDisplay,
+                )
+            } else {
+                Text(
+                    "%.${card.decimals}f".format(shown.value),
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontFamily = ArchivoDisplay,
+                    letterSpacing = (-0.4).sp,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    card.unit,
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+        }
+        if (open) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                card.note,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
     }
 }
 
+/**
+ * The red edge that says "filming".
+ *
+ * Start: two sharp flashes, like a camera's tally light catching — the shape of it is what
+ * makes it read as an EVENT and not a colour change. Then a slow breath, 0.35 to 0.65, so a
+ * glance at any moment of the clip still finds it lit. Stop: a quick fade.
+ *
+ * Drawn as a glow soaking in from all four screen edges, which is what peripheral vision
+ * picks up; a thin line alone is invisible from the corner of the eye in daylight.
+ */
 @Composable
-private fun ReticleGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
-    Canvas(modifier = modifier) {
+private fun RecordingEdgeGlow(recording: Boolean, uprightAspect: Float) {
+    val glow = remember { Animatable(0f) }
+    LaunchedEffect(recording) {
+        if (!recording) {
+            glow.animateTo(0f, tween(300))
+            return@LaunchedEffect
+        }
+        repeat(2) {
+            glow.animateTo(1f, tween(70))
+            glow.animateTo(0.2f, tween(170))
+        }
+        glow.animateTo(0.65f, tween(220))
+        while (true) {
+            glow.animateTo(0.35f, tween(850, easing = FastOutSlowInEasing))
+            glow.animateTo(0.65f, tween(850, easing = FastOutSlowInEasing))
+        }
+    }
+    if (glow.value <= 0.01f) return
+    Canvas(Modifier.fillMaxSize()) {
+        val a = glow.value
+        val depth = 34.dp.toPx()
         val w = size.width
         val h = size.height
-        val c = Offset(w / 2f, h / 2f)
-        val r = kotlin.math.min(w, h) * 0.32f
-        drawCircle(tint.copy(alpha = 0.55f), radius = r, center = c, style = Stroke(width = with(density) { 1.2.dp.toPx() }))
-        val tickLen = kotlin.math.min(w, h) * 0.18f
-        val strokeW = with(density) { 1.3.dp.toPx() }
-        drawLine(tint, Offset(c.x, c.y - r - tickLen), Offset(c.x, c.y - r + with(density) { 2.dp.toPx() }), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawLine(tint, Offset(c.x, c.y + r - with(density) { 2.dp.toPx() }), Offset(c.x, c.y + r + tickLen), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawLine(tint, Offset(c.x - r - tickLen, c.y), Offset(c.x - r + with(density) { 2.dp.toPx() }, c.y), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawLine(tint, Offset(c.x + r - with(density) { 2.dp.toPx() }, c.y), Offset(c.x + r + tickLen, c.y), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawCircle(tint, radius = with(density) { 1.6.dp.toPx() }, center = c)
+        val hot = Rec.copy(alpha = 0.75f * a)
+        val none = Color.Transparent
+        drawRect(Brush.verticalGradient(listOf(hot, none), startY = 0f, endY = depth), size = androidx.compose.ui.geometry.Size(w, depth))
+        drawRect(
+            Brush.verticalGradient(listOf(none, hot), startY = h - depth, endY = h),
+            topLeft = Offset(0f, h - depth),
+            size = androidx.compose.ui.geometry.Size(w, depth),
+        )
+        drawRect(Brush.horizontalGradient(listOf(hot, none), startX = 0f, endX = depth), size = androidx.compose.ui.geometry.Size(depth, h))
+        drawRect(
+            Brush.horizontalGradient(listOf(none, hot), startX = w - depth, endX = w),
+            topLeft = Offset(w - depth, 0f),
+            size = androidx.compose.ui.geometry.Size(depth, h),
+        )
+        // And the footage's own edge, crisp.
+        val frame = frameRect(w, h, uprightAspect)
+        val line = 2.5.dp.toPx()
+        drawRect(
+            Rec.copy(alpha = (0.5f + 0.5f * a).coerceAtMost(1f)),
+            topLeft = Offset(frame.left + line / 2f, frame.top + line / 2f),
+            size = androidx.compose.ui.geometry.Size(frame.width - line, frame.height - line),
+            style = Stroke(width = line),
+        )
     }
 }
 
+/** What the last delivery measured. [figure] is the big number; [unit] sits beside it. */
+private data class DeliveryReadout(val figure: String, val unit: String, val detail: String)
+
+/**
+ * The delivery, landed.
+ *
+ * Arrives on a spring and leaves on a fade — it rises from the status line like the number
+ * came out of it. Holds the last value while it leaves, so the text does not blank a frame
+ * before the fade has started.
+ */
 @Composable
-private fun CalibrationGlyph(modifier: Modifier = Modifier, tint: Color = Color(0xFFFACC15)) {
-    Canvas(modifier = modifier) {
+private fun DeliveryReadoutView(readout: DeliveryReadout?, alignEnd: Boolean) {
+    var shown by remember { mutableStateOf(readout) }
+    if (readout != null) shown = readout
+    val presence by animateFloatAsState(
+        targetValue = if (readout != null) 1f else 0f,
+        animationSpec = if (readout != null) spring(dampingRatio = 0.7f, stiffness = 380f) else tween(200),
+        label = "readout",
+    )
+    val value = shown ?: return
+    if (presence <= 0.01f) return
+    val legible = androidx.compose.ui.text.TextStyle(
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), Offset(0f, 1.5f), 8f),
+    )
+    Column(
+        Modifier
+            .graphicsLayer {
+                alpha = presence.coerceIn(0f, 1f)
+                translationY = (1f - presence) * 14.dp.toPx()
+            }
+            .padding(bottom = 10.dp),
+        horizontalAlignment = if (alignEnd) Alignment.End else Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                value.figure,
+                color = Color.White,
+                fontSize = 46.sp,
+                fontFamily = ArchivoDisplay,
+                letterSpacing = (-1.2).sp,
+                style = legible,
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                value.unit,
+                color = Color.White.copy(alpha = 0.78f),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                style = legible,
+                modifier = Modifier.padding(bottom = 9.dp),
+            )
+        }
+        if (value.detail.isNotBlank()) {
+            Text(
+                value.detail,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+                style = legible,
+            )
+        }
+    }
+}
+
+/**
+ * REC and the running time, the way a camera says it is filming.
+ *
+ * The dot blinks at one hertz — the one blink on this screen, and only while it is true.
+ */
+@Composable
+private fun RecTimecode(recording: Boolean) {
+    var elapsedMs by remember { mutableStateOf(0L) }
+    LaunchedEffect(recording) {
+        val start = android.os.SystemClock.elapsedRealtime()
+        while (recording) {
+            elapsedMs = android.os.SystemClock.elapsedRealtime() - start
+            delay(200)
+        }
+    }
+    val blinkOn = (elapsedMs / 500) % 2 == 0L
+    val seconds = elapsedMs / 1000
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Scrim)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(Rec.copy(alpha = if (blinkOn) 1f else 0.25f)),
+        )
+        Spacer(Modifier.width(7.dp))
+        Text(
+            "REC",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            "%02d:%02d".format(seconds / 60, seconds % 60),
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            // Tabular figures, so the time ticks without the pill twitching.
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/** A round control in the top bar: dark glass at rest, brand blue while its panel is open. */
+@Composable
+private fun ChromeIconButton(
+    active: Boolean,
+    description: String,
+    onClick: () -> Unit,
+    glyph: @Composable (tint: Color) -> Unit,
+) {
+    Box(
+        Modifier
+            .pressable()
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (active) Accent else Scrim)
+            .clickableCapture(enabled = true, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        glyph(Color.White.copy(alpha = if (active) 1f else 0.9f))
+    }
+}
+
+/**
+ * One of the two tools, with its name under it.
+ *
+ * Labelled because an unlabelled icon on this screen is a riddle handed to a stranger at a
+ * boundary. Selected is a blue tint and a blue edge, the app's selection language — a solid
+ * fill would read as a second shutter.
+ */
+@Composable
+private fun ToolButton(
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    glyph: @Composable (tint: Color) -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .pressable()
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(if (active) Accent.copy(alpha = 0.30f) else Scrim)
+                .border(1.5.dp, if (active) SelectedBlue else Color.Transparent, CircleShape)
+                .clickableCapture(enabled = true, onClick = onClick)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            glyph(if (active) SelectedBlue else Color.White.copy(alpha = 0.92f))
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            style = androidx.compose.ui.text.TextStyle(
+                shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 1f), 6f),
+            ),
+        )
+    }
+}
+
+/** Dips under the finger and springs back — the difference between a drawing and a part. */
+@Composable
+private fun Modifier.pressable(): Modifier {
+    // Reads the press from the pointer directly, so it composes with clickableCapture's
+    // own interaction source without the two fighting over one.
+    var down by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (down) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 800f),
+        label = "press",
+    )
+    return this
+        .graphicsLayer { scaleX = scale; scaleY = scale }
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                down = true
+                waitForUpOrCancellation()
+                down = false
+            }
+        }
+}
+
+// ───────────────────────────────────────────────────────────── Glyphs ─────
+
+/** The aiming guide's own picture: a pitch narrowing away, with its two creases. */
+@Composable
+private fun PitchGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    Canvas(modifier) {
         val w = size.width
         val h = size.height
-        val bolt = Path().apply {
-            moveTo(w * 0.58f, h * 0.12f)
-            lineTo(w * 0.28f, h * 0.52f)
-            lineTo(w * 0.52f, h * 0.52f)
-            lineTo(w * 0.42f, h * 0.88f)
-            lineTo(w * 0.72f, h * 0.46f)
-            lineTo(w * 0.48f, h * 0.46f)
-            close()
+        val s = 1.6.dp.toPx()
+        val nearL = Offset(w * 0.14f, h * 0.86f)
+        val nearR = Offset(w * 0.86f, h * 0.86f)
+        val farL = Offset(w * 0.36f, h * 0.16f)
+        val farR = Offset(w * 0.64f, h * 0.16f)
+        drawLine(tint, nearL, farL, s, StrokeCap.Round)
+        drawLine(tint, nearR, farR, s, StrokeCap.Round)
+        drawLine(tint, nearL, nearR, s, StrokeCap.Round)
+        drawLine(tint, farL, farR, s, StrokeCap.Round)
+    }
+}
+
+/** Three stumps and the bails: the thing the wicket tool places. */
+@Composable
+private fun StumpsGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val s = 1.7.dp.toPx()
+        listOf(0.28f, 0.5f, 0.72f).forEach { x ->
+            drawLine(tint, Offset(w * x, h * 0.28f), Offset(w * x, h * 0.88f), s, StrokeCap.Round)
         }
-        drawPath(bolt, tint)
+        drawLine(tint, Offset(w * 0.22f, h * 0.16f), Offset(w * 0.78f, h * 0.16f), s, StrokeCap.Round)
     }
 }
 
@@ -2433,17 +2920,12 @@ private fun TuningGearGlyph(modifier: Modifier = Modifier, tint: Color = Color.W
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val strokeW = with(density) { 1.2.dp.toPx() }
-        val r = with(density) { 2.dp.toPx() }
-        // 3 horizontal slider bars with tuning knobs
-        drawLine(tint.copy(alpha = 0.40f), Offset(w * 0.12f, h * 0.28f), Offset(w * 0.88f, h * 0.28f), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawCircle(tint, radius = r, center = Offset(w * 0.38f, h * 0.28f))
-
-        drawLine(tint.copy(alpha = 0.40f), Offset(w * 0.12f, h * 0.52f), Offset(w * 0.88f, h * 0.52f), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawCircle(tint, radius = r, center = Offset(w * 0.68f, h * 0.52f))
-
-        drawLine(tint.copy(alpha = 0.40f), Offset(w * 0.12f, h * 0.76f), Offset(w * 0.88f, h * 0.76f), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawCircle(tint, radius = r, center = Offset(w * 0.32f, h * 0.76f))
+        val strokeW = 1.4.dp.toPx()
+        val r = 2.2.dp.toPx()
+        listOf(0.26f to 0.36f, 0.52f to 0.68f, 0.78f to 0.30f).forEach { (y, knob) ->
+            drawLine(tint.copy(alpha = 0.45f), Offset(w * 0.1f, h * y), Offset(w * 0.9f, h * y), strokeW, StrokeCap.Round)
+            drawCircle(tint, radius = r, center = Offset(w * knob, h * y))
+        }
     }
 }
 
@@ -2452,238 +2934,9 @@ private fun ExitCrossGlyph(modifier: Modifier = Modifier, tint: Color = Color.Wh
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val strokeW = with(density) { 1.8.dp.toPx() }
-        drawLine(tint, Offset(w * 0.22f, h * 0.22f), Offset(w * 0.78f, h * 0.78f), strokeWidth = strokeW, cap = StrokeCap.Round)
-        drawLine(tint, Offset(w * 0.78f, h * 0.22f), Offset(w * 0.22f, h * 0.78f), strokeWidth = strokeW, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun TelemetryItem(
-    label: String,
-    value: String,
-    unit: String,
-    accentColor: Color,
-    glyph: @Composable () -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            glyph()
-            Spacer(Modifier.width(3.dp))
-            Text(
-                text = label,
-                color = Color(0xFF94A3B8),
-                fontSize = 7.5.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
-            )
-        }
-        Spacer(Modifier.height(2.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = value,
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-            )
-            Spacer(Modifier.width(2.dp))
-            Text(
-                text = unit,
-                color = accentColor,
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 1.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun FoxSportsTelemetryChyron(
-    speedValue: String,
-    speedUnit: String,
-    spinValue: String,
-    spinUnit: String,
-    swingValue: String,
-    swingUnit: String,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xE60A0E17))
-            .border(
-                1.dp,
-                Brush.horizontalGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.20f),
-                        Color.White.copy(alpha = 0.06f),
-                    )
-                ),
-                RoundedCornerShape(10.dp),
-            )
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            // Speed column
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    VelocityGlyph(Modifier.size(10.dp), Color(0xFFE2C48D))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "SPEED",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                    )
-                }
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = speedValue,
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Spacer(Modifier.width(3.dp))
-                    Text(
-                        text = speedUnit,
-                        color = Color(0xFF94A3B8),
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-
-            Box(Modifier.width(1.dp).height(26.dp).background(Color.White.copy(alpha = 0.12f)))
-
-            // Spin column
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SpinGlyph(Modifier.size(10.dp), Color(0xFFE2C48D))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "SPIN",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                    )
-                }
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = spinValue,
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        text = spinUnit,
-                        color = Color(0xFF94A3B8),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-
-            Box(Modifier.width(1.dp).height(26.dp).background(Color.White.copy(alpha = 0.12f)))
-
-            // Swing column
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TrajectoryGlyph(Modifier.size(10.dp), Color(0xFFE2C48D))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "SWING",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                    )
-                }
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = swingValue,
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Spacer(Modifier.width(3.dp))
-                    Text(
-                        text = swingUnit,
-                        color = Color(0xFF94A3B8),
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MachinedDialButton(
-    active: Boolean,
-    activeColor: Color = Color(0xFF00E5FF),
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    content: @Composable (tint: Color) -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.90f else 1.0f,
-        animationSpec = spring(stiffness = 600f),
-        label = "machined_dial_scale",
-    )
-
-    Box(
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .size(42.dp)
-            .clip(CircleShape)
-            .background(
-                if (active) {
-                    Brush.radialGradient(
-                        listOf(activeColor.copy(alpha = 0.30f), Color(0xF20A0E17)),
-                    )
-                } else {
-                    Brush.radialGradient(
-                        listOf(Color(0xFF1E293B), Color(0xF20A0E17)),
-                    )
-                }
-            )
-            .border(
-                1.dp,
-                if (active) {
-                    Brush.sweepGradient(listOf(activeColor, Color.White.copy(alpha = 0.5f), activeColor))
-                } else {
-                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.30f), Color.White.copy(alpha = 0.08f)))
-                },
-                CircleShape,
-            )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        content(if (active) activeColor else Color.White.copy(alpha = 0.90f))
+        val strokeW = 1.8.dp.toPx()
+        drawLine(tint, Offset(w * 0.18f, h * 0.18f), Offset(w * 0.82f, h * 0.82f), strokeW, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.82f, h * 0.18f), Offset(w * 0.18f, h * 0.82f), strokeW, StrokeCap.Round)
     }
 }
 
