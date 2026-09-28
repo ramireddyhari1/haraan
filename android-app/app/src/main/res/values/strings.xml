@@ -45,7 +45,7 @@
     <string name="toss_no_players">No players added — a default name will be used.</string>
     <string name="toss_line_fmt">%1$s won the toss &amp; chose to %2$s.</string>
     <string name="toss_tap_hint">Tap to flip — the coin picks who won</string>
-    <string name="toss_won_fmt">%1$s won the toss 🪙</string>
+    <string name="toss_won_fmt">%1$s won the toss</string>
     <string name="toss_coin_editable">Set by the coin — tap a team to change</string>
     <string name="toss_pick_hint">Flip the coin, then pick a choice to continue</string>
     <string name="toss_opening_lineup">Opening lineup</string>
@@ -59,5 +59,20 @@
     <string name="toss_status_striker">On strike · faces the first ball</string>
     <string name="toss_status_non_striker">At the other end</string>
     <string name="toss_status_bowler">New ball · opens the attack</string>
+    <string name="toss_tap_to_toss">Tap the coin to toss</string>
+    <string name="toss_won_by">Toss won by</string>
+    <string name="toss_chose_to">Chose to</string>
+    <string name="toss_order_fmt">%1$s bat first · %2$s bowl</string>
+    <string name="toss_need_winner">Who won the toss?</string>
+    <string name="toss_need_choice">Bat or bowl?</string>
+    <string name="toss_next_openers">Pick opening players</string>
+    <string name="toss_batting">Batting</string>
+    <string name="toss_bowling">Bowling</string>
+    <string name="toss_swap_ends">Swap ends</string>
+    <string name="toss_choose_fmt">Choose %1$s · %2$s</string>
+    <string name="toss_not_picked">Not picked</string>
+    <string name="toss_guest">Guest</string>
+    <string name="toss_pick_striker">Pick a striker</string>
+    <string name="toss_pick_bowler">Pick the opening bowler</string>
     <string name="toss_tap_to_choose">Tap a player to choose</string>
 </resources>
