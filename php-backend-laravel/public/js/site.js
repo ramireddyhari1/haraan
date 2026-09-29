@@ -731,6 +731,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Pulse hero's own switch (site/gamehub.blade): same slide-on-tap as above.
+    document.querySelectorAll('.mhub__switch').forEach(sw => {
+        const tabs = Array.from(sw.querySelectorAll('.mhub__switch-tab'));
+        tabs.forEach((tab, i) => {
+            tab.addEventListener('click', () => {
+                if (tab.classList.contains('is-on')) return;
+                tabs.forEach(t => { t.classList.remove('is-on'); t.setAttribute('aria-selected', 'false'); });
+                tab.classList.add('is-on');
+                tab.setAttribute('aria-selected', 'true');
+                sw.classList.toggle('is-right', i === tabs.length - 1);
+                try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) { /* ignore */ }
+            });
+        });
+    });
+
     /** Update footer lord-icon colors to match current mode */
     function updateFooterLordIcon(mode) {
         try {

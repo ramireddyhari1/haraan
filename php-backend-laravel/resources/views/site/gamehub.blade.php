@@ -72,8 +72,10 @@
         </form>
 
         {{-- The app's PulseSegmentedSwitch: a translucent track with a white active
-             pill. Real links here, since the web's two lanes are two pages. --}}
-        <div class="mhub__switch" role="tablist" aria-label="Events or Pulse">
+             pill. Real links here, since the web's two lanes are two pages.
+             The pill is one thumb that slides on tap (site.js), same as the Events header. --}}
+        <div class="mhub__switch is-right" role="tablist" aria-label="Events or Pulse">
+            <span class="mhub__switch-thumb" aria-hidden="true"></span>
             <a class="mhub__switch-tab" href="/events" role="tab" aria-selected="false">Events</a>
             <a class="mhub__switch-tab is-on" href="/gamehub" role="tab" aria-selected="true">Pulse</a>
         </div>
