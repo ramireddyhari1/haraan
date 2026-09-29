@@ -31,10 +31,21 @@
                 scan tickets at the gate and watch your earnings in real time.
             </p>
 
-            <ul class="hrn-authbrand__chips">
-                <li><span class="hrn-authbrand__chip-ic">₹</span> Live earnings</li>
-                <li><span class="hrn-authbrand__chip-ic">⚡</span> Instant check-in</li>
-                <li><span class="hrn-authbrand__chip-ic">◎</span> One dashboard</li>
+            {{-- What the console does — a spec row, not pills: these aren't
+                 tappable, so they mustn't look like buttons. --}}
+            <ul class="hrn-authbrand__feats">
+                <li>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5.5-5.5 4 4L21 7"/><path d="M15 7h6v6"/></svg>
+                    <span>Live earnings</span>
+                </li>
+                <li>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M4 12h16"/></svg>
+                    <span>Gate check-in</span>
+                </li>
+                <li>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="5" rx="1.5"/><rect x="13" y="11" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/></svg>
+                    <span>One console</span>
+                </li>
             </ul>
         </div>
 
@@ -108,14 +119,13 @@
         display: block;
     }
     .hrn-authbrand-rtag {
-        font-family: "Segoe Script", "Bradley Hand", "Snell Roundhand",
-                     "Brush Script MT", cursive;
-        font-size: 1.2rem;
-        font-weight: 400;
+        font-size: 0.62rem;
+        font-weight: 800;
+        letter-spacing: 0.34em;
+        margin-right: -0.34em;   /* the tracking after the last letter */
         line-height: 1;
         color: #2f6bff;
-        padding-right: 0.2rem;
-        transform: rotate(-4deg);
+        text-transform: uppercase;
     }
     .dark .hrn-authbrand-rbrand,
     :root.dark .hrn-authbrand-rbrand { opacity: 0.95; }
@@ -262,24 +272,46 @@
         line-height: 1.55; color: rgba(224,232,255,0.78);
         max-width: 30rem; margin: 0;
     }
-    .hrn-authbrand__chips {
-        list-style: none; margin: 1.6rem 0 0; padding: 0;
-        display: flex; flex-wrap: wrap; gap: 0.6rem;
+    /* Feature spec row — hairline-ruled columns with drawn line icons. */
+    .hrn-authbrand__feats {
+        list-style: none; margin: 1.75rem 0 0; padding: 1.1rem 0 0;
+        display: grid; grid-template-columns: repeat(3, auto); justify-content: start;
+        border-top: 1px solid rgba(255,255,255,0.12);
+        max-width: 30rem;
     }
-    .hrn-authbrand__chips li {
-        display: inline-flex; align-items: center; gap: 0.5rem;
-        font-size: 0.82rem; font-weight: 600; color: #e6edff;
-        padding: 0.5rem 0.85rem; border-radius: 999px;
-        background: rgba(255,255,255,0.08);
-        border: 1px solid rgba(255,255,255,0.14);
-        backdrop-filter: blur(6px);
+    .hrn-authbrand__feats li {
+        display: flex; align-items: center; gap: 0.55rem;
+        padding: 0 1.25rem;
+        font-size: 0.84rem; font-weight: 600; letter-spacing: -0.005em;
+        color: rgba(234,240,255,0.92);
+        white-space: nowrap;
     }
-    .hrn-authbrand__chip-ic {
-        display: inline-grid; place-items: center;
-        width: 1.15rem; height: 1.15rem; border-radius: 50%;
-        font-size: 0.72rem; font-weight: 800;
-        background: rgba(56,132,255,0.35); color: #fff;
+    .hrn-authbrand__feats li:first-child { padding-left: 0; }
+    .hrn-authbrand__feats li + li { border-left: 1px solid rgba(255,255,255,0.12); }
+    .hrn-authbrand__feats svg {
+        width: 1.15rem; height: 1.15rem; flex: none;
+        fill: none; stroke: #8fb4ff; stroke-width: 1.75;
+        stroke-linecap: round; stroke-linejoin: round;
     }
+
+    /* Entrance — content settles in, top to bottom, once. */
+    @keyframes hrn-rise {
+        from { opacity: 0; transform: translate3d(0, 10px, 0); }
+        to   { opacity: 1; transform: none; }
+    }
+    .hrn-authbrand__top,
+    .hrn-authbrand__headline,
+    .hrn-authbrand__sub,
+    .hrn-authbrand__feats li,
+    .hrn-authbrand__mock {
+        animation: hrn-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    }
+    .hrn-authbrand__headline { animation-delay: 0.06s; }
+    .hrn-authbrand__sub { animation-delay: 0.12s; }
+    .hrn-authbrand__feats li:nth-child(1) { animation-delay: 0.2s; }
+    .hrn-authbrand__feats li:nth-child(2) { animation-delay: 0.26s; }
+    .hrn-authbrand__feats li:nth-child(3) { animation-delay: 0.32s; }
+    .hrn-authbrand__mock { animation-delay: 0.38s; }
 
     /* Floating console mock */
     .hrn-authbrand__mock {
@@ -345,44 +377,70 @@
         }
         .hrn-authbrand__mock { display: none; }         /* keep the band tight */
         .hrn-authbrand__foot { display: none; }
-        .hrn-authbrand__chips { margin-top: 1.05rem; gap: 0.5rem; }
+        .hrn-authbrand__inner { padding-bottom: 3.4rem; } /* room for the card overlap */
+        .hrn-authbrand__feats {
+            margin-top: 1.1rem; padding-top: 0.95rem;
+            grid-template-columns: repeat(3, 1fr); max-width: none;
+        }
+        .hrn-authbrand__feats li {
+            flex-direction: column; align-items: flex-start; gap: 0.4rem;
+            padding: 0 0.85rem; font-size: 0.78rem;
+        }
 
-        /* Form tucks directly under the band (no big centred dead-space). */
+        /* Form card rides up over the band's rounded edge — reads as a sheet
+           laid on top, not a second page stacked below. */
         .fi-simple-layout:has(.hrn-authbrand) .fi-simple-main-ctn {
             flex: 1;
             align-items: flex-start;
             justify-content: flex-start;
-            padding: 2rem 1.35rem 2.5rem;
+            position: relative;
+            z-index: 2;
+            margin-top: -2.1rem;
+            padding: 0 1rem 2.5rem;
+        }
+        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
+            animation: hrn-sheet 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+        }
+        @keyframes hrn-sheet {
+            from { opacity: 0; transform: translate3d(0, 28px, 0); }
+            to   { opacity: 1; transform: none; }
         }
         .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
             max-width: 26rem;
             margin: 0 auto;
         }
-        /* Give the sign-in form a real card on mobile so it reads as premium. */
-        .fi-simple-layout:has(.hrn-authbrand) .fi-simple-page {
+        /* Give the sign-in form a real card on mobile so it reads as premium.
+           (Filament v4 paints the card on main.fi-simple-main.) */
+        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
             background: #fff;
-            border: 1px solid rgba(15, 23, 42, 0.07);
-            border-radius: 1.25rem;
-            box-shadow: 0 24px 50px -30px rgba(15, 23, 42, 0.35);
-            padding: 1.75rem 1.5rem;
+            border: 1px solid rgba(15, 23, 42, 0.06);
+            border-radius: 1.4rem;
+            box-shadow:
+                0 1px 2px rgba(15, 23, 42, 0.04),
+                0 8px 20px -10px rgba(10, 23, 56, 0.18),
+                0 30px 60px -32px rgba(10, 23, 56, 0.4);
+            padding: 1.6rem 1.35rem 1.4rem;
             gap: 1.5rem;
         }
-        .dark .fi-simple-layout:has(.hrn-authbrand) .fi-simple-page,
-        :root.dark .fi-simple-layout:has(.hrn-authbrand) .fi-simple-page {
+        .dark .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main,
+        :root.dark .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
             background: #131a2a;
             border-color: rgba(255, 255, 255, 0.08);
         }
     }
 
     @media (max-width: 480px) {
-        .hrn-authbrand__inner { padding: 1.35rem 1.35rem 1.75rem; }
+        .hrn-authbrand__inner { padding: 1.35rem 1.35rem 3.25rem; }
         .hrn-authbrand__headline { font-size: 1.55rem; }
         .hrn-authbrand__sub { font-size: 0.86rem; }
-        .hrn-authbrand__chips li { font-size: 0.76rem; padding: 0.42rem 0.7rem; }
+        .hrn-authbrand__feats li { font-size: 0.74rem; padding: 0 0.7rem; }
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .hrn-authbrand__glow { animation: none; }
+        .hrn-authbrand__glow,
+        .hrn-authbrand__top, .hrn-authbrand__headline, .hrn-authbrand__sub,
+        .hrn-authbrand__feats li, .hrn-authbrand__mock,
+        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main { animation: none; }
     }
 
     /* Right column background follows the theme (light default / dark panel). */
