@@ -1781,12 +1781,9 @@
        with the back button present it's a second door to the same room. */
     body:has(.pagebar) .aprof-doc__back { display: none; }
 
-    /* Support & Notifications get the same .pagebar (back + "Support"/"Notifications"
-       title) as the account pages, so their greeting topbar is already hidden above.
-       Their own in-content page header now just repeats that title, so drop it on the
-       phone — the pagebar carries it. Desktop keeps the topbar and shows this head as
-       normal. */
-    body:has(.pagebar) .support-page__head,
+    /* Notifications gets the same .pagebar (back + title) as the account pages, so
+       its greeting topbar is already hidden above. Its in-content page header just
+       repeats that title, so drop it on the phone. Desktop shows it as normal. */
     body:has(.pagebar) .notif-page__head { display: none; }
 }
 

@@ -155,6 +155,40 @@ class SupportChatTest extends TestCase
             ->assertJsonPath('messages.0.from', 'admin');
     }
 
+    public function test_the_web_chat_sends_with_fetch_and_gets_the_message_back(): void
+    {
+        $user = $this->user();
+
+        $this->actingAs($user)
+            ->postJson('/support/messages', ['body' => 'Sent without a reload'])
+            ->assertOk()
+            ->assertJsonPath('message.body', 'Sent without a reload')
+            ->assertJsonPath('message.from', 'user');
+    }
+
+    public function test_seen_turns_true_only_once_the_team_opens_the_thread(): void
+    {
+        $user   = $this->user();
+        $thread = app(SupportChat::class)->postUserMessage($user, 'hello?');
+
+        $this->actingAs($user)->getJson('/support/poll')->assertJsonPath('seen', false);
+
+        // What EditSupportThread::afterFill does when an admin opens it.
+        $thread->forceFill(['admin_unread_count' => 0])->save();
+
+        $this->actingAs($user)->getJson('/support/poll')->assertJsonPath('seen', true);
+    }
+
+    public function test_the_support_page_text_comes_from_control(): void
+    {
+        \App\Models\AppSetting::set(\App\Support\SupportPageCopy::storageKey('reply_time'), 'We answer before 9pm.', \App\Support\SupportPageCopy::GROUP);
+
+        $this->actingAs($this->user())
+            ->get('/support')
+            ->assertOk()
+            ->assertSee('We answer before 9pm.');
+    }
+
     public function test_the_inbox_lanes_require_a_signed_in_user(): void
     {
         $this->get('/support')->assertRedirect();
