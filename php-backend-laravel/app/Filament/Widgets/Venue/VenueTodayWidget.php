@@ -29,14 +29,15 @@ class VenueTodayWidget extends StatsOverviewWidget
 
     protected static bool $isLazy = false;
 
+    // A desk glances at this; a minute is fresh enough and spares the server a
+    // query burst every five seconds per open tab.
+    protected ?string $pollingInterval = '60s';
+
     protected function getStats(): array
     {
+        // Today's money is the dashboard hero's headline (same ledger, same
+        // day), so this row starts at the sheet rather than repeating it.
         $today = Carbon::today();
-        $yesterday = $today->copy()->subDay();
-
-        $revenueToday = $this->collectedOn($today);
-        $revenueYesterday = $this->collectedOn($yesterday);
-        $growth = $this->growth($revenueToday, $revenueYesterday);
 
         $bookingsToday = (clone $this->liveBookings())->whereDate('slot_date', $today)->count();
         $started = (clone $this->liveBookings())
@@ -52,15 +53,6 @@ class VenueTodayWidget extends StatsOverviewWidget
             ->count(DB::raw('coalesce(guest_phone, user_id)'));
 
         return [
-            Stat::make("Today's revenue", $this->inr($revenueToday))
-                ->description($growth === null
-                    ? 'Collected so far today'
-                    : sprintf('%s%s vs yesterday', $growth >= 0 ? '+' : '', $growth . '%'))
-                ->descriptionIcon($growth !== null && $growth < 0
-                    ? 'heroicon-m-arrow-trending-down'
-                    : 'heroicon-m-arrow-trending-up')
-                ->color($growth !== null && $growth < 0 ? 'danger' : 'success'),
-
             Stat::make("Today's bookings", (string) $bookingsToday)
                 ->description($bookingsToday === 0
                     ? 'Nothing on the sheet yet'
@@ -86,15 +78,6 @@ class VenueTodayWidget extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-users')
                 ->color('primary'),
         ];
-    }
-
-    /** Money that actually arrived on a given day, from the payment ledger. */
-    private function collectedOn(Carbon $day): float
-    {
-        return (float) DB::table('booking_payments')
-            ->whereIn('booking_id', $this->bookings()->select('bookings.id'))
-            ->whereDate('collected_at', $day)
-            ->sum('amount');
     }
 
     /**

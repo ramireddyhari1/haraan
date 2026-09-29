@@ -1,0 +1,505 @@
+/*
+ * Haraan Partner console — the partner's own skin over the shared Filament theme.
+ *
+ * Loaded only by PartnerPanelProvider (HEAD_END), and every rule is scoped to
+ * `.fi-panel-partner` (Filament puts it on <body>), so /control and /employee
+ * never see any of it. Plain CSS on purpose: no Vite rebuild on deploy.
+ *
+ * Direction: a calm paper desk. White surfaces on a cool canvas, hairlines
+ * instead of boxes-in-boxes, one blue (#2563EB) for everything you can press,
+ * green only for money that has actually landed. Motion is short and physical
+ * (things press in, numbers count up once, cards settle in on first view) and
+ * then everything holds still.
+ */
+
+/* The shared theme writes its component overrides inside `@layer components`
+   with !important — and a layered !important beats any unlayered one. Joining
+   the same layer puts us back on plain specificity + source order, which we
+   win: every rule here carries `.fi-panel-partner` and loads after the theme. */
+@layer components {
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+.fi-panel-partner {
+    --p-canvas: #f4f6fa;
+    --p-surface: #ffffff;
+    --p-line: #e6e9f0;
+    --p-line-soft: #eef1f6;
+    --p-ink: #0f172a;
+    --p-ink-2: #334155;
+    --p-ink-3: #64748b;
+    --p-ink-4: #94a3b8;
+    --p-blue: #2563eb;
+    --p-blue-press: #1d4ed8;
+    --p-blue-soft: #eef3ff;
+    --p-blue-line: #d6e2fd;
+    --p-green: #0f9d63;
+    --p-green-soft: #e8f7ef;
+    --p-amber: #b45309;
+    --p-amber-soft: #fff6e8;
+    --p-red: #dc2626;
+    --p-radius: 16px;
+    --p-radius-sm: 11px;
+    --p-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 1px 1px rgba(15, 23, 42, .02);
+    --p-shadow-lift: 0 10px 24px -14px rgba(15, 23, 42, .22), 0 2px 4px rgba(15, 23, 42, .04);
+    --p-ease: cubic-bezier(.2, .8, .2, 1);
+    --p-spring: cubic-bezier(.34, 1.56, .64, 1);
+
+    /* Re-point the shared theme's variables at the partner palette. */
+    --hrn-brand: var(--p-blue);
+    --hrn-brand-strong: var(--p-blue-press);
+    --hrn-brand-soft: var(--p-blue-soft);
+    --hrn-brand-ring: rgba(37, 99, 235, .22);
+    --hrn-canvas: var(--p-canvas);
+
+    --sb-width: 16.5rem;
+    --sb-bg: #ffffff;
+    --sb-border: var(--p-line);
+    --sb-header-bg: #ffffff;
+    --sb-footer-bg: #ffffff;
+    --sb-item-radius: 10px;
+    --sb-item-text: #475569;
+    --sb-item-hover-bg: #f3f5f9;
+    --sb-item-hover-text: var(--p-ink);
+    --sb-item-active-bg: var(--p-blue-soft);
+    --sb-item-active-text: #1e3a8a;
+    --sb-item-active-border: transparent;
+    --sb-item-active-indicator: var(--p-blue);
+    --sb-item-active-shadow: none;
+    --sb-icon: #8391a7;
+    --sb-icon-hover: var(--p-ink-2);
+    --sb-icon-active: var(--p-blue);
+    --sb-group-label: #9aa4b5;
+    --sb-badge-active-bg: #dbe6fe;
+    --sb-badge-active-text: var(--p-blue-press);
+
+    --hrn-header-bg: rgba(255, 255, 255, .78);
+    --hrn-header-border: rgba(230, 233, 240, .9);
+    --hrn-header-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+
+    background: var(--p-canvas) !important;
+    color: var(--p-ink);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    font-feature-settings: "cv11", "ss01";
+}
+
+/* ── Shell: sidebar ─────────────────────────────────────────────────────── */
+.fi-panel-partner .hrn-pbrand {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .35rem .25rem .2rem;
+    text-decoration: none;
+}
+.fi-panel-partner .hrn-pbrand-mark { height: 1.7rem; width: auto; display: block; }
+.fi-panel-partner .hrn-pbrand-tag {
+    font-size: .625rem;
+    font-weight: 700;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--p-ink-3);
+    padding-left: .6rem;
+    border-left: 1px solid var(--p-line);
+    line-height: 1.3;
+}
+.fi-panel-partner .hrn-ws-header-ctn { padding-bottom: .25rem; }
+
+.fi-panel-partner .fi-sidebar-item-btn.hrn-sb-item-btn {
+    min-height: 2.25rem !important;
+    padding: .4rem .6rem !important;
+    font-size: .84rem !important;
+    font-weight: 540 !important;
+}
+.fi-panel-partner .fi-sidebar-item.fi-active > .fi-sidebar-item-btn.hrn-sb-item-btn,
+.fi-panel-partner .fi-sidebar-item.hrn-sb-item-active > .fi-sidebar-item-btn.hrn-sb-item-btn {
+    font-weight: 640 !important;
+}
+.fi-panel-partner .hrn-sb-indicator { left: -.55rem; width: 3px; height: 18px; top: calc(50% - 9px); }
+.fi-panel-partner .hrn-sb-group-label {
+    font-size: .66rem !important;
+    letter-spacing: .12em !important;
+    font-weight: 700 !important;
+}
+.fi-panel-partner .hrn-sb-search-trigger { border-radius: 10px !important; }
+
+/* The one "+ Create" CTA — blue, like every pressable thing here. */
+.fi-panel-partner .hrn-create-cta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .45rem;
+    margin: .25rem .1rem .75rem;
+    padding: .62rem .9rem;
+    border-radius: 11px;
+    background: var(--p-blue);
+    color: #fff !important;
+    font-size: .85rem;
+    font-weight: 650;
+    text-decoration: none;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 6px 14px -8px rgba(37, 99, 235, .7);
+    transition: background-color .15s var(--p-ease), transform .12s var(--p-ease);
+}
+.fi-panel-partner .hrn-create-cta:hover { background: var(--p-blue-press); }
+.fi-panel-partner .hrn-create-cta svg { width: 1rem; height: 1rem; }
+
+/* ── Shell: topbar ──────────────────────────────────────────────────────── */
+/* The sidebar already carries the wordmark on desktop; one mark per screen. */
+@media (min-width: 1024px) {
+    .fi-panel-partner .fi-topbar .hrn-topbar-logo,
+    .fi-panel-partner .fi-topbar a.hrn-topbar-logo { display: none !important; }
+}
+/* The shared topbar's brand anchor is the operator lockup; the partner shell
+   has its own (sidebar on desktop, centred .hrn-topbar-logo on phones). */
+.fi-panel-partner .hrn-topbar-brand-anchor-ctn { display: none !important; }
+/* "LIVE" is an environment badge for operators; partners only have one. */
+.fi-panel-partner .hrn-anchor-env { display: none !important; }
+.fi-panel-partner .fi-topbar.hrn-glass-topbar:hover { border-color: var(--hrn-header-border) !important; }
+
+/* ── Page chrome ────────────────────────────────────────────────────────── */
+.fi-panel-partner .fi-header-heading {
+    font-size: 1.55rem !important;
+    font-weight: 720 !important;
+    letter-spacing: -.025em !important;
+    color: var(--p-ink) !important;
+}
+.fi-panel-partner .fi-header-subheading { color: var(--p-ink-3) !important; }
+
+/* ── Surfaces ───────────────────────────────────────────────────────────── */
+.fi-panel-partner .fi-section:not(.fi-section-not-contained),
+.fi-panel-partner .fi-ta-ctn,
+.fi-panel-partner .fi-wi-chart .fi-section {
+    background: var(--p-surface) !important;
+    border: 1px solid var(--p-line) !important;
+    border-radius: var(--p-radius) !important;
+    box-shadow: var(--p-shadow) !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+}
+.fi-panel-partner .fi-section-header-heading {
+    font-size: .95rem !important;
+    font-weight: 680 !important;
+    letter-spacing: -.012em !important;
+    color: var(--p-ink) !important;
+}
+.fi-panel-partner .fi-section-header-description { color: var(--p-ink-3) !important; font-size: .8rem !important; }
+
+/* Stats: one ledger strip divided by hairlines, not a grid of boxed tiles.
+   The 1px gap over a line-coloured ground draws every divider at once, at any
+   column count the widget picks. */
+.fi-panel-partner .fi-wi-stats-overview .fi-section-content {
+    gap: 1px !important;
+    padding: 0 !important;
+    background: var(--p-line) !important;
+    border: 1px solid var(--p-line) !important;
+    border-radius: var(--p-radius) !important;
+    overflow: hidden;
+    box-shadow: var(--p-shadow);
+}
+.fi-panel-partner .fi-wi-stats-overview .fi-section,
+.fi-panel-partner .fi-wi-stats-overview .fi-section-content-ctn {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+.fi-panel-partner .fi-wi-stats-overview-stat {
+    background: var(--p-surface) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 1.05rem 1.2rem 1.1rem !important;
+    height: 100%;
+    transition: background-color .18s var(--p-ease);
+}
+.fi-panel-partner .fi-wi-stats-overview-stat:hover { background: #fbfcfe !important; }
+.fi-panel-partner .fi-wi-stats-overview-stat-label {
+    font-size: .7rem !important;
+    font-weight: 700 !important;
+    letter-spacing: .09em !important;
+    text-transform: uppercase;
+    color: var(--p-ink-3) !important;
+}
+.fi-panel-partner .fi-wi-stats-overview-stat-value {
+    font-size: 1.7rem !important;
+    font-weight: 740 !important;
+    letter-spacing: -.03em !important;
+    color: var(--p-ink) !important;
+    font-variant-numeric: tabular-nums;
+    margin-top: .3rem !important;
+}
+.fi-panel-partner .fi-wi-stats-overview-stat-description { font-size: .78rem !important; font-weight: 520 !important; }
+/* The per-stat mini icons (a red grid, a green tick, a banknote…) read as
+   decoration; the words and the number already say it. */
+.fi-panel-partner .fi-wi-stats-overview-stat-description .fi-icon,
+.fi-panel-partner .fi-wi-stats-overview-stat-description > svg { display: none !important; }
+
+@media (max-width: 639px) {
+    /* Two stats per row on a phone — one per row turned a 4-stat strip into a
+       full screen of scrolling. An odd one out takes the whole last row. */
+    .fi-panel-partner .fi-wi-stats-overview .fi-section-content {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+    .fi-panel-partner .fi-wi-stats-overview .fi-section-content > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .fi-panel-partner .fi-wi-stats-overview-stat { padding: .85rem .9rem .9rem !important; }
+    .fi-panel-partner .fi-wi-stats-overview-stat-value { font-size: 1.35rem !important; }
+    .fi-panel-partner .fi-wi-stats-overview-stat-label { font-size: .64rem !important; letter-spacing: .07em !important; }
+    .fi-panel-partner .fi-wi-stats-overview-stat-description { font-size: .72rem !important; }
+}
+
+/* Tables */
+.fi-panel-partner .fi-ta-header-cell-label,
+.fi-panel-partner .fi-ta-header-cell {
+    font-size: .7rem !important;
+    letter-spacing: .08em !important;
+    text-transform: uppercase;
+    color: var(--p-ink-3) !important;
+    font-weight: 700 !important;
+}
+.fi-panel-partner .fi-ta-row { transition: background-color .15s var(--p-ease); }
+.fi-panel-partner .fi-ta-row:hover { background: #f8faff !important; }
+.fi-panel-partner .fi-ta-content-grid .fi-ta-record {
+    border-radius: 14px !important;
+    transition: transform .2s var(--p-ease), box-shadow .2s var(--p-ease);
+}
+@media (hover: hover) {
+    .fi-panel-partner .fi-ta-content-grid .fi-ta-record:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--p-shadow-lift) !important;
+    }
+}
+
+/* Empty tables get the drawn desk instead of a grey icon in a circle. */
+.fi-panel-partner .fi-ta-empty-state { padding-block: 2.75rem 3rem !important; }
+.fi-panel-partner .fi-ta-empty-state-icon-bg {
+    width: 150px !important;
+    height: 104px !important;
+    border-radius: 0 !important;
+    background: url("/images/partner/empty-desk.svg") center / contain no-repeat !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+}
+.fi-panel-partner .fi-ta-empty-state-icon-bg > * { display: none !important; }
+.fi-panel-partner .fi-ta-empty-state-heading {
+    font-size: 1rem !important;
+    font-weight: 680 !important;
+    color: var(--p-ink) !important;
+}
+
+/* Recent-bookings empty state uses the same drawn desk as the tables. */
+.fi-panel-partner .prb-empty-art { display: block; width: 150px; height: auto; margin: 0 auto 12px; }
+
+/* Inputs and selects */
+.fi-panel-partner .fi-input-wrp {
+    border-radius: 11px !important;
+    transition: box-shadow .15s var(--p-ease);
+}
+
+/* ── Buttons: blue, and they press ─────────────────────────────────────── */
+.fi-panel-partner .fi-btn {
+    border-radius: 11px !important;
+    font-weight: 620 !important;
+    transition: transform .12s var(--p-ease), background-color .15s var(--p-ease), box-shadow .15s var(--p-ease) !important;
+}
+.fi-panel-partner .fi-btn.fi-color-primary:not(.fi-outlined) {
+    background: var(--p-blue) !important;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 6px 14px -9px rgba(37, 99, 235, .8) !important;
+}
+.fi-panel-partner .fi-btn.fi-color-primary:not(.fi-outlined):hover { background: var(--p-blue-press) !important; }
+
+/* Anything pressable sinks a little under the finger (feel.js adds .is-pressed
+   on pointerdown so it also works for touch, where :active is unreliable). */
+.fi-panel-partner .is-pressed { transform: scale(.97) !important; transition-duration: .06s !important; }
+.fi-panel-partner .fi-sidebar-item-btn.is-pressed { transform: scale(.985) !important; }
+
+/* ── The hero ───────────────────────────────────────────────────────────── */
+.fi-panel-partner .pqh {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 23rem);
+    gap: 1.5rem;
+    align-items: stretch;
+    padding: 1.35rem;
+    padding-left: 1.6rem;
+    background: var(--p-surface);
+    border: 1px solid var(--p-line);
+    border-radius: 20px;
+    box-shadow: var(--p-shadow);
+}
+.fi-panel-partner .pqh-copy { display: flex; flex-direction: column; min-width: 0; padding-block: .25rem; }
+.fi-panel-partner .pqh-date {
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--p-ink-4);
+}
+.fi-panel-partner .pqh-greet {
+    margin-top: .3rem;
+    font-size: 1.15rem;
+    font-weight: 650;
+    letter-spacing: -.015em;
+    color: var(--p-ink-2);
+}
+.fi-panel-partner .pqh-money { display: flex; align-items: baseline; flex-wrap: wrap; gap: .1rem .6rem; margin-top: .9rem; }
+.fi-panel-partner .pqh-amt {
+    font-size: clamp(2.2rem, 4.2vw, 3.1rem);
+    font-weight: 760;
+    letter-spacing: -.045em;
+    line-height: 1;
+    color: var(--p-ink);
+    font-variant-numeric: tabular-nums;
+}
+.fi-panel-partner .pqh-amt-lab { font-size: .9rem; font-weight: 560; color: var(--p-ink-3); }
+.fi-panel-partner .pqh-facts {
+    margin-top: .7rem;
+    font-size: .88rem;
+    line-height: 1.55;
+    color: var(--p-ink-3);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .25rem .55rem;
+}
+.fi-panel-partner .pqh-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    font-weight: 680;
+    font-variant-numeric: tabular-nums;
+}
+.fi-panel-partner .pqh-delta svg { width: .7rem; height: .7rem; fill: currentColor; }
+.fi-panel-partner .pqh-delta.is-up { color: var(--p-green); }
+.fi-panel-partner .pqh-delta.is-down { color: var(--p-amber); }
+.fi-panel-partner .pqh-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: auto; padding-top: 1.35rem; }
+.fi-panel-partner .pqh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    min-height: 2.6rem;
+    padding: 0 1rem;
+    border-radius: 11px;
+    font-size: .86rem;
+    font-weight: 620;
+    text-decoration: none;
+    color: var(--p-ink-2);
+    background: var(--p-surface);
+    border: 1px solid var(--p-line);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    transition: transform .12s var(--p-ease), border-color .15s var(--p-ease), background-color .15s var(--p-ease);
+}
+.fi-panel-partner .pqh-btn:hover { border-color: #cfd6e3; background: #fafbfd; }
+.fi-panel-partner .pqh-btn.is-primary {
+    color: #fff;
+    background: var(--p-blue);
+    border-color: var(--p-blue);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 8px 16px -10px rgba(37, 99, 235, .85);
+}
+.fi-panel-partner .pqh-btn.is-primary:hover { background: var(--p-blue-press); border-color: var(--p-blue-press); }
+.fi-panel-partner .pqh-btn-ic { width: 1.05rem; height: 1.05rem; color: currentColor; opacity: .85; }
+
+.fi-panel-partner .pqh-art {
+    position: relative;
+    min-height: 12rem;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #dfe9f8;
+}
+.fi-panel-partner .pqh-art .hrn-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+@media (max-width: 767px) {
+    .fi-panel-partner .pqh {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        padding: .7rem .7rem 1.1rem;
+    }
+    .fi-panel-partner .pqh-art { order: -1; min-height: 9.5rem; border-radius: 13px; }
+    .fi-panel-partner .pqh-copy { padding: 0 .55rem; }
+    .fi-panel-partner .pqh-actions { display: grid; grid-template-columns: 1fr 1fr; }
+    .fi-panel-partner .pqh-btn { justify-content: center; min-height: 3rem; padding: 0 .7rem; white-space: nowrap; font-size: .84rem; }
+    .fi-panel-partner .pqh-btn.is-primary:first-child:nth-last-child(odd) { grid-column: 1 / -1; }
+}
+
+/* The alert ribbon above the hero — a hairline row, not a banner. */
+.fi-panel-partner .pqa-alert { border-radius: 12px !important; background: var(--p-surface) !important; border-color: var(--p-line) !important; color: var(--p-ink-2) !important; box-shadow: var(--p-shadow); }
+.fi-panel-partner .pqa-alert-info .pqa-alert-ic { background: var(--p-blue-soft) !important; color: var(--p-blue) !important; }
+.fi-panel-partner .pqa-alert-hot .pqa-alert-ic { background: #fff1e7 !important; color: #c2410c !important; }
+.fi-panel-partner .pqa-alert-cta { color: var(--p-blue); font-weight: 680 !important; }
+.fi-panel-partner .pqa-alert-cta::after { content: ""; display: inline-block; width: .42rem; height: .42rem; margin-left: .4rem; border: solid currentColor; border-width: 1.6px 1.6px 0 0; transform: translateY(-1px) rotate(45deg); }
+
+/* The period control: one compact "Showing ▾" on the right, not a full-width bar. */
+.fi-panel-partner [wire\:partial="table-filters-form"] {
+    display: flex !important;
+    justify-content: flex-end;
+    margin-top: .25rem;
+}
+.fi-panel-partner [wire\:partial="table-filters-form"] > .fi-grid-col { width: 15.5rem; max-width: 100%; }
+.fi-panel-partner [wire\:partial="table-filters-form"] .fi-fo-field {
+    display: flex !important;
+    align-items: center;
+    gap: .6rem;
+}
+.fi-panel-partner [wire\:partial="table-filters-form"] .fi-fo-field-label-ctn { flex: none; }
+.fi-panel-partner [wire\:partial="table-filters-form"] .fi-fo-field-label-content {
+    font-size: .78rem !important;
+    font-weight: 600 !important;
+    color: var(--p-ink-3) !important;
+}
+.fi-panel-partner [wire\:partial="table-filters-form"] .fi-fo-field-content-col { flex: 1; }
+@media (max-width: 767px) {
+    .fi-panel-partner [wire\:partial="table-filters-form"] > .fi-grid-col { width: 100%; }
+}
+
+/* ── Scene motion (one entrance, then still) ────────────────────────────── */
+.fi-panel-partner .hrn-ball { animation: hrn-ball-in 1.3s var(--p-ease) .35s both; }
+.fi-panel-partner .hrn-ball-spin { animation: hrn-ball-spin 1.3s var(--p-ease) .35s both; }
+@keyframes hrn-ball-in { from { transform: translateX(-120px); opacity: 0; } 12% { opacity: 1; } to { transform: none; } }
+@keyframes hrn-ball-spin { from { transform: rotate(-540deg); } to { transform: none; } }
+.fi-panel-partner .hrn-beam { transform-box: fill-box; transform-origin: 50% 0; animation: hrn-beam 1.6s var(--p-ease) .2s both; }
+.fi-panel-partner .hrn-beam-l { --r: -14deg; }
+.fi-panel-partner .hrn-beam-c { --r: 10deg; }
+.fi-panel-partner .hrn-beam-r { --r: 14deg; }
+@keyframes hrn-beam { from { transform: rotate(var(--r)); opacity: 0; } to { transform: none; } }
+.fi-panel-partner .hrn-flood { animation: hrn-flood .9s ease-out .15s both; }
+@keyframes hrn-flood { from { opacity: 0; } }
+.fi-panel-partner .hrn-steam path { stroke-dasharray: 22; animation: hrn-steam 2.4s ease-in-out 3 both; }
+.fi-panel-partner .hrn-steam path:nth-child(2) { animation-delay: .5s; }
+.fi-panel-partner .hrn-steam path:nth-child(3) { animation-delay: 1s; }
+@keyframes hrn-steam { 0% { stroke-dashoffset: 22; opacity: 0; } 40% { opacity: .9; } 100% { stroke-dashoffset: -22; opacity: 0; } }
+
+/* ── Page motion ────────────────────────────────────────────────────────── */
+/* Cards settle in on first view. Only armed when feel.js has run (html.hrn-feel),
+   so without JS nothing is ever hidden. */
+html.hrn-feel .fi-panel-partner .hrn-pre { opacity: 0; transform: translateY(10px); }
+html.hrn-feel .fi-panel-partner .hrn-in {
+    transition: opacity .45s var(--p-ease), transform .55s var(--p-ease);
+    transition-delay: var(--hrn-d, 0ms);
+}
+
+/* SPA page swap: the new page rises a few pixels instead of snapping. */
+.fi-panel-partner .fi-main.hrn-page-in { animation: hrn-page-in .32s var(--p-ease) both; }
+@keyframes hrn-page-in { from { opacity: .001; transform: translateY(6px); } }
+
+/* Top progress line while a page is on its way. */
+#hrn-progress {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: 2px;
+    z-index: 100;
+    pointer-events: none;
+    background: var(--p-blue, #2563eb);
+    transform-origin: 0 50%;
+    transform: scaleX(0);
+    opacity: 0;
+}
+#hrn-progress.is-on { opacity: 1; transform: scaleX(.72); transition: transform 2.4s cubic-bezier(.1, .7, .2, 1), opacity .1s; }
+#hrn-progress.is-done { opacity: 0; transform: scaleX(1); transition: transform .2s ease-out, opacity .3s ease .15s; }
+
+@media (prefers-reduced-motion: reduce) {
+    .fi-panel-partner *, .fi-panel-partner *::before, .fi-panel-partner *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
+    html.hrn-feel .fi-panel-partner .hrn-pre { opacity: 1; transform: none; }
+}
+
+} /* @layer components */

@@ -245,13 +245,15 @@
             {{ \Filament\Support\Facades\FilamentView::renderHook(\Filament\View\PanelsRenderHook::GLOBAL_SEARCH_AFTER) }}
 
             <div class="hrn-header-cluster">
-                {{-- Realtime WebSocket Indicator --}}
+                {{-- Realtime WebSocket Indicator — an operator's diagnostic, not a partner's. --}}
+                @if (filament()->getId() !== 'partner')
                 <div class="hrn-ws-badge" title="Reverb WebSocket Engine: Connected & Active">
                     <span class="hrn-ws-dot">
                         <span class="hrn-ws-dot-ping"></span>
                     </span>
                     <span class="hrn-ws-label">Reverb</span>
                 </div>
+                @endif
 
                 @if (filament()->auth()->check())
                     @if (filament()->hasDatabaseNotifications() && filament()->getDatabaseNotificationsPosition() === \Filament\Enums\DatabaseNotificationsPosition::Topbar)

@@ -15,6 +15,8 @@ use Filament\Widgets\Widget;
  */
 class ShiftSessionsExecutiveHeroWidget extends Widget
 {
+    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
 
     protected string $view = 'filament.resources.shifts.widgets.shift-sessions-executive-hero';

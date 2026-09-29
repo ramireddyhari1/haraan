@@ -25,7 +25,15 @@ class VenuePeakHoursWidget extends ChartWidget
 
     protected static bool $isLazy = false;
 
+    // A 30-day pattern doesn't move while you watch it.
+    protected ?string $pollingInterval = null;
+
     protected ?string $heading = 'Peak hours';
+
+    protected ?string $description = 'Bookings by start time, last 30 days';
+
+    // A standing pattern, not the headline — keep it a strip, not a wall.
+    protected ?string $maxHeight = '220px';
 
     protected int | string | array $columnSpan = 'full';
 
@@ -67,12 +75,23 @@ class VenuePeakHoursWidget extends ChartWidget
     {
         $hours = $this->hourCounts();
 
+        // The busy hours carry the brand blue; the rest recede to a tint, so the
+        // eye lands on "when the venue sells" before reading any axis.
+        $max = max($hours) ?: 0;
+        $colors = array_map(
+            fn (int $n): string => $max > 0 && $n >= $max * 0.75 ? '#2563EB' : '#C7D7FB',
+            array_values($hours),
+        );
+
         return [
             'datasets' => [[
                 'label' => 'Bookings',
                 'data' => array_values($hours),
-                'backgroundColor' => '#0A66FF',
-                'borderRadius' => 4,
+                'backgroundColor' => $colors,
+                'hoverBackgroundColor' => '#1D4ED8',
+                'borderRadius' => 6,
+                'borderSkipped' => false,
+                'maxBarThickness' => 28,
             ]],
             'labels' => array_map(fn (int $h): string => $this->label($h), array_keys($hours)),
         ];
@@ -82,8 +101,13 @@ class VenuePeakHoursWidget extends ChartWidget
     {
         return [
             'plugins' => ['legend' => ['display' => false]],
+            'animation' => ['duration' => 700, 'easing' => 'easeOutQuart'],
             'scales' => [
-                'y' => ['beginAtZero' => true, 'ticks' => ['precision' => 0]],
+                'x' => ['grid' => ['display' => false], 'border' => ['display' => false],
+                    'ticks' => ['color' => '#8A93A6', 'font' => ['size' => 11], 'maxRotation' => 0, 'autoSkipPadding' => 10]],
+                'y' => ['beginAtZero' => true, 'border' => ['display' => false],
+                    'grid' => ['color' => 'rgba(15,23,42,0.06)'],
+                    'ticks' => ['precision' => 0, 'color' => '#8A93A6', 'font' => ['size' => 11], 'maxTicksLimit' => 5]],
             ],
         ];
     }

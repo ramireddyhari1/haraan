@@ -15,6 +15,8 @@ use Filament\Widgets\Widget;
  */
 class WaitlistExecutiveHeroWidget extends Widget
 {
+    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
 
     protected string $view = 'filament.resources.waitlist.widgets.waitlist-executive-hero';

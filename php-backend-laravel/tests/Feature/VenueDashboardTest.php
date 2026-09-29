@@ -137,8 +137,10 @@ class VenueDashboardTest extends TestCase
         app(BookingLedger::class)->collect($booking, 500, 'upi');
 
         $this->inPartnerPanel($partner, function () use ($booking): void {
-            $revenue = $this->statValue(new VenueTodayWidget, 0);
-            $this->assertSame('₹500', $revenue, 'Only the advance has actually been collected.');
+            // Today's money is the dashboard hero's headline (VenueTodayWidget
+            // starts at the sheet so the figure isn't shown twice).
+            $today = (new \App\Filament\Widgets\Partner\PartnerQuickActionsWidget)->getToday();
+            $this->assertSame(500.0, $today['revenue'], 'Only the advance has actually been collected.');
 
             $pending = $this->statValue(new VenueMoneyHealthWidget, 0);
             $this->assertSame('₹3,900', $pending, 'The balance is what is pending.');

@@ -11,8 +11,7 @@
     <div class="prb">
         <div class="prb-head">
             <div class="prb-title">
-                <span class="prb-live" aria-hidden="true"></span>
-                Recent bookings
+                                Recent bookings
             </div>
             @if ($allUrl)
                 <a href="{{ $allUrl }}" class="prb-all">View all <span aria-hidden="true">→</span></a>
@@ -21,7 +20,7 @@
 
         @if (empty($bookings))
             <div class="prb-empty">
-                <div class="prb-empty-ic">🎟️</div>
+                <img src="{{ asset('images/partner/empty-desk.svg') }}" alt="" class="prb-empty-art" width="150" height="104">
                 <div class="prb-empty-t">No bookings yet</div>
                 <div class="prb-empty-d">Bookings from the app and walk-ins will appear here as they come in.</div>
             </div>
@@ -65,7 +64,7 @@
         .prb-live::after{content:"";position:absolute;inset:-3px;border-radius:50%;
             border:1px solid rgba(18,183,106,.5);animation:prb-ping 1.8s ease-out infinite;}
         @keyframes prb-ping{0%{transform:scale(.7);opacity:.9}100%{transform:scale(2.1);opacity:0}}
-        .prb-all{font-size:12.5px;font-weight:700;color:#0a7d4e;text-decoration:none;white-space:nowrap;
+        .prb-all{font-size:12.5px;font-weight:700;color:#2563eb;text-decoration:none;white-space:nowrap;
             transition:opacity .12s;}
         .prb-all:hover{opacity:.7;}
 

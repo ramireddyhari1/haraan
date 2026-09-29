@@ -35,6 +35,25 @@ class PartnerRevenueTrendWidget extends ChartWidget
     // Render eagerly — on the short dashboard grid a lazy chart never intersects.
     protected static bool $isLazy = false;
 
+    // Money over weeks; it doesn't need re-querying every five seconds.
+    protected ?string $pollingInterval = null;
+
+    /** A flat zero line doesn't deserve 260px of the dashboard. */
+    public function getMaxHeight(): ?string
+    {
+        return array_sum($this->getCachedData()['datasets'][0]['data'] ?? []) > 0 ? $this->maxHeight : '120px';
+    }
+
+    public function getDescription(): ?string
+    {
+        $days = $this->windowDays();
+        $total = array_sum($this->getCachedData()['datasets'][0]['data'] ?? []);
+
+        return $total > 0
+            ? "Paid bookings by day, last {$days} days"
+            : "No paid bookings in the last {$days} days — the line starts with the first sale.";
+    }
+
     /** Money widget — desk staff need the 'reports' capability to see it. */
     public static function canView(): bool
     {

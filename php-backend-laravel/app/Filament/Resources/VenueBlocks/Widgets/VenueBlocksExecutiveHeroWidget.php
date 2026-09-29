@@ -15,6 +15,8 @@ use Filament\Widgets\Widget;
  */
 class VenueBlocksExecutiveHeroWidget extends Widget
 {
+    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
 
     protected string $view = 'filament.resources.venue-blocks.widgets.venue-blocks-executive-hero';

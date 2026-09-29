@@ -11,7 +11,10 @@ use App\Filament\Resources\Bookings\BookingResource;
 use App\Filament\Resources\Events\EventResource;
 use App\Filament\Resources\Venues\VenueResource;
 use App\Models\Event;
+use App\Support\BusinessClock;
+use App\Support\PartnerLane;
 use Filament\Widgets\Widget;
+use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -49,14 +52,39 @@ class PartnerQuickActionsWidget extends Widget
     }
 
     /**
-     * Live figures for the greeting hero: what's landed *today*, plus this-week
-     * momentum vs the previous seven days. Lane-aware and partner-scoped, so it's
-     * always the operator's own money.
+     * Live figures for the greeting hero: the money that landed today, and how
+     * that compares — vs yesterday on a branch (a desk's rhythm is daily), vs
+     * the previous seven days for an organiser (ticket sales run in weeks).
      *
-     * @return array{revenue:float, count:int, weekDelta:int|null, isEvent:bool}
+     * Branch lanes read the payment ledger, exactly like VenueTodayWidget: a
+     * ₹4,400 slot with a ₹500 advance has put ₹500 in the drawer, not ₹4,400.
+     *
+     * @return array{revenue:float, count:int, delta:int|null, deltaLabel:string, isEvent:bool}
      */
     public function getToday(): array
     {
+        if (! $this->isEventLane()) {
+            $today = Carbon::today();
+            $collected = fn (Carbon $day): float => (float) DB::table('booking_payments')
+                ->whereIn('booking_id', $this->scopedVenueBookingQuery()->select('bookings.id'))
+                ->whereDate('collected_at', $day)
+                ->sum('amount');
+
+            $rev = $collected($today);
+            $prev = $collected($today->copy()->subDay());
+
+            return [
+                'revenue' => $rev,
+                'count' => (int) (clone $this->scopedVenueBookingQuery())
+                    ->whereNotIn(DB::raw('lower(status)'), ['cancelled', 'canceled', 'expired', 'refunded'])
+                    ->whereDate('slot_date', $today)
+                    ->count(),
+                'delta' => $prev > 0 ? (int) round((($rev - $prev) / $prev) * 100) : null,
+                'deltaLabel' => 'vs yesterday',
+                'isEvent' => false,
+            ];
+        }
+
         $startToday = now()->startOfDay();
 
         $today = (clone $this->laneBookings())
@@ -65,7 +93,6 @@ class PartnerQuickActionsWidget extends Widget
             ->selectRaw('COALESCE(SUM(total_amount), 0) as rev, COUNT(*) as cnt')
             ->first();
 
-        // This week vs the seven days before it — one momentum read people love.
         $weekStart = now()->startOfDay()->subDays(6);
         $prevStart = $weekStart->copy()->subDays(7);
         $rows = (clone $this->laneBookings())
@@ -86,8 +113,34 @@ class PartnerQuickActionsWidget extends Widget
         return [
             'revenue' => (float) ($today->rev ?? 0),
             'count' => (int) ($today->cnt ?? 0),
-            'weekDelta' => $prev > 0 ? (int) round((($cur - $prev) / $prev) * 100) : null,
-            'isEvent' => $this->isEventLane(),
+            'delta' => $prev > 0 ? (int) round((($cur - $prev) / $prev) * 100) : null,
+            'deltaLabel' => 'this week',
+            'isEvent' => true,
+        ];
+    }
+
+    /**
+     * What the drawn scene shows: the partner's kind of place, lit by the real
+     * local hour (the app clock is UTC — see BusinessClock).
+     *
+     * @return array{kind:string, phase:string}
+     */
+    public function getScene(): array
+    {
+        $h = (int) BusinessClock::now()->format('G');
+
+        return [
+            'kind' => match (auth()->user()?->partnerLane()) {
+                PartnerLane::GAMEHUB => 'turf',
+                PartnerLane::CAFE => 'cafe',
+                default => 'stage',
+            },
+            'phase' => match (true) {
+                $h >= 5 && $h < 10 => 'morning',
+                $h >= 10 && $h < 17 => 'day',
+                $h >= 17 && $h < 19 => 'evening',
+                default => 'night',
+            },
         ];
     }
 
@@ -140,8 +193,8 @@ class PartnerQuickActionsWidget extends Widget
     public function getGreeting(): string
     {
         $name = auth()->user()?->name ?: 'there';
-        $hour = (int) now()->format('G');
-        $part = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
+        $hour = (int) BusinessClock::now()->format('G');
+        $part = $hour >= 4 && $hour < 12 ? 'Good morning' : ($hour >= 12 && $hour < 17 ? 'Good afternoon' : 'Good evening');
 
         return "$part, " . str($name)->before(' ');
     }
@@ -242,45 +295,41 @@ class PartnerQuickActionsWidget extends Widget
     }
 
     /**
-     * A slim "today at a glance" strip below the hero: money in, volume, check-ins,
-     * and (event lane) views today — the live snapshot an operator scans first.
-     * Lane-aware + partner-scoped.
+     * The quieter facts under the hero figure, as one sentence of true numbers
+     * rather than a grid of boxed counters. Only facts with something to say
+     * are kept; a zero-views line on a fresh account is noise.
      *
-     * @return array<int, array{icon:string, value:string, label:string, sub:string}>
+     * @return array<int, string>
      */
-    public function getTodayStrip(): array
+    public function getFacts(): array
     {
         $start = now()->startOfDay();
-
-        $today = (clone $this->laneBookings())
-            ->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->where('created_at', '>=', $start)
-            ->selectRaw('COALESCE(SUM(total_amount), 0) as rev, COUNT(*) as cnt')
-            ->first();
+        $facts = [];
 
         $checkins = (int) (clone $this->laneBookings())
             ->where('checked_in_at', '>=', $start)
             ->sum(DB::raw('COALESCE(checked_in_count, 1)'));
 
-        $tiles = [
-            ['icon' => 'heroicon-o-banknotes', 'accent' => 'green', 'value' => $this->inr((float) ($today->rev ?? 0)), 'label' => 'Earned', 'sub' => 'today'],
-            ['icon' => 'heroicon-o-ticket', 'accent' => 'blue', 'value' => number_format((int) ($today->cnt ?? 0)), 'label' => $this->isEventLane() ? 'Tickets' : 'Bookings', 'sub' => 'today'],
-            ['icon' => 'heroicon-o-check-badge', 'accent' => 'indigo', 'value' => number_format($checkins), 'label' => 'Check-ins', 'sub' => 'today'],
-        ];
-
         if ($this->isEventLane()) {
-            $views = (int) (clone $this->scopedEventViewQuery())
-                ->where('created_at', '>=', $start)
-                ->count();
-            $tiles[] = ['icon' => 'heroicon-o-eye', 'accent' => 'violet', 'value' => number_format($views), 'label' => 'Views', 'sub' => 'today'];
-        } else {
-            $newWk = (int) (clone $this->laneBookings())
-                ->where('created_at', '>=', now()->startOfDay()->subDays(6))
-                ->count();
-            $tiles[] = ['icon' => 'heroicon-o-calendar-days', 'accent' => 'violet', 'value' => number_format($newWk), 'label' => 'New', 'sub' => '7 days'];
+            if ($checkins > 0) {
+                $facts[] = number_format($checkins) . ' checked in';
+            }
+            $views = (int) (clone $this->scopedEventViewQuery())->where('created_at', '>=', $start)->count();
+            if ($views > 0) {
+                $facts[] = number_format($views) . ' page ' . str('view')->plural($views);
+            }
+
+            return $facts;
         }
 
-        return $tiles;
+        $newWk = (int) (clone $this->laneBookings())
+            ->where('created_at', '>=', now()->startOfDay()->subDays(6))
+            ->count();
+        if ($newWk > 0) {
+            $facts[] = number_format($newWk) . ' new this week';
+        }
+
+        return $facts;
     }
 
     /** ₹18,42,900 — Indian grouping. */

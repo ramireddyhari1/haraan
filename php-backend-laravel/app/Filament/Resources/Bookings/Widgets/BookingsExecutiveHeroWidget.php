@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\DB;
  */
 class BookingsExecutiveHeroWidget extends Widget
 {
+    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
 
     protected string $view = 'filament.resources.bookings.widgets.bookings-executive-hero';

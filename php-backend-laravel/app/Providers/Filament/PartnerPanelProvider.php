@@ -71,6 +71,24 @@ class PartnerPanelProvider extends PanelProvider
             scopes: PartnerLogin::class,
         );
 
+        // The partner skin + feel layer (public/css/partner/console.css and
+        // public/js/partner/feel.js). Plain files, not the Vite theme, so the
+        // partner console can be restyled without touching /control's compiled
+        // CSS or running a build on deploy. `?v=` is the file time, so an edit
+        // busts the browser cache on its own.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            function (): string {
+                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
+                    return '';
+                }
+                $v = fn (string $path): int => @filemtime(public_path($path)) ?: 1;
+
+                return '<link rel="stylesheet" href="' . e(asset('css/partner/console.css')) . '?v=' . $v('css/partner/console.css') . '">'
+                    . '<script src="' . e(asset('js/partner/feel.js')) . '?v=' . $v('js/partner/feel.js') . '" defer></script>';
+            },
+        );
+
         // Premium visual theme for the Event create/edit wizard — same overrides the
         // control panel uses, scoped to those two pages so the partner's event-creation
         // experience is just as polished without restyling the rest of the console.
@@ -286,13 +304,17 @@ class PartnerPanelProvider extends PanelProvider
             // bare "simple" layout, which read like the panel had dropped away).
             ->profile(\App\Filament\Pages\Partner\PartnerProfile::class, isSimple: false)
             ->colors([
-                // Keep interaction colour consistent with the control and
-                // employee workspaces; status green is never used as navigation.
-                'primary' => Color::Indigo,
+                // Haraan blue (#2563EB) — every pressable thing in the partner
+                // console is this one colour; green is kept for money that landed.
+                'primary' => Color::Blue,
             ])
             // Day theme only — no dark mode, so the profile menu's light/dark/system
             // switch disappears and the console always renders on the light palette.
             ->darkMode(false)
+            // Page changes swap the content in place (Livewire navigate) instead
+            // of a full reload — the sidebar, topbar and scroll position of the
+            // nav stay put, which is most of what makes the console feel fast.
+            ->spa()
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
             ->pages([
@@ -316,6 +338,13 @@ class PartnerPanelProvider extends PanelProvider
             ->widgets([
                 AccountWidget::class,
             ])
+            // The dashboard picks its widgets per lane (Dashboard::getWidgets()),
+            // but Livewire can only answer a widget's follow-up request (polling,
+            // a chart refresh, the period filter) if the class is registered as a
+            // component. Unregistered, every poll came back "419 Page expired".
+            ->discoverWidgets(in: app_path('Filament/Widgets/Partner'), for: 'App\Filament\Widgets\Partner')
+            ->discoverWidgets(in: app_path('Filament/Widgets/Venue'), for: 'App\Filament\Widgets\Venue')
+            ->discoverWidgets(in: app_path('Filament/Widgets/Cafe'), for: 'App\Filament\Widgets\Cafe')
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,

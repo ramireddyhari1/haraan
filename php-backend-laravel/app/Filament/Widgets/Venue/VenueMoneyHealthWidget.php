@@ -26,6 +26,9 @@ class VenueMoneyHealthWidget extends StatsOverviewWidget
 
     protected static bool $isLazy = false;
 
+    // Month-level money; a minute-old view is plenty.
+    protected ?string $pollingInterval = '60s';
+
     protected function getStats(): array
     {
         $due = $this->balanceDue();

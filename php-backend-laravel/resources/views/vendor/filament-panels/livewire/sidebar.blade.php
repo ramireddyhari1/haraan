@@ -26,6 +26,12 @@
             <header class="fi-sidebar-header hrn-ws-panel" x-data="{ switcherOpen: false }" x-on:keydown.escape.window="switcherOpen = false">
                 {{ \Filament\Support\Facades\FilamentView::renderHook(\Filament\View\PanelsRenderHook::SIDEBAR_LOGO_BEFORE) }}
 
+                {{-- Partners get their own quiet brand block: the workspace switcher below
+                     links into /control and names the admin console, neither of which a
+                     partner can (or should) open. --}}
+                @if (filament()->getId() === 'partner')
+                    @include('filament.partner.sidebar-brand')
+                @else
                 <div class="hrn-ws-card-wrapper hrn-ws-identity-container">
                     <button
                         type="button"
@@ -185,6 +191,8 @@
                         </div>
                     </div>
                 </div>
+
+                @endif
 
                 {{ \Filament\Support\Facades\FilamentView::renderHook(\Filament\View\PanelsRenderHook::SIDEBAR_LOGO_AFTER) }}
             </header>

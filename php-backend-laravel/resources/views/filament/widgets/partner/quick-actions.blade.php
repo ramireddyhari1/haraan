@@ -11,57 +11,63 @@
         $rest = preg_replace('/\B(?=(\d{2})+(?!\d))/', ',', $rest);
         return $sign . '₹' . $rest . ',' . $last3;
     };
-    $unit = $t['isEvent'] ? 'booking' : 'booking';
     $alert = $this->getAlert();
     $next = $this->getNextEvent();
 @endphp
 
 <x-filament-widgets::widget>
     @if ($alert)
-        <a href="{{ $alert['url'] }}" class="pqa-alert pqa-alert-{{ $alert['tone'] }}">
+        <a href="{{ $alert['url'] }}" wire:navigate class="pqa-alert pqa-alert-{{ $alert['tone'] }}">
             <span class="pqa-alert-ic"><x-filament::icon :icon="$alert['icon']" /></span>
             <span class="pqa-alert-tx">{{ $alert['text'] }}</span>
-            <span class="pqa-alert-cta">{{ $alert['cta'] }} →</span>
+            <span class="pqa-alert-cta">{{ $alert['cta'] }}</span>
         </a>
     @endif
 
-    <div class="pqa">
-        <div class="pqa-hi">
-            <div class="pqa-greet">{{ $this->getGreeting() }} 👋</div>
-            <div class="pqa-today">
-                <span class="pqa-amt">{{ $inr($t['revenue']) }}</span>
-                <span class="pqa-today-lab">earned today</span>
+    {{-- The hero. A light card, not a dark slab: the date, who it's for, the one
+         figure that matters today, a sentence of the other true numbers, and the
+         partner's own place drawn on the right under the real sky. --}}
+    <section class="pqh">
+        <div class="pqh-copy">
+            <div class="pqh-date">{{ \App\Support\BusinessClock::now()->format('l, j F') }}</div>
+            <h2 class="pqh-greet">{{ $this->getGreeting() }}</h2>
+
+            <div class="pqh-money">
+                <span class="pqh-amt" data-count-to="{{ (int) round($t['revenue']) }}" data-count-prefix="₹">{{ $inr($t['revenue']) }}</span>
+                <span class="pqh-amt-lab">{{ $t['isEvent'] ? 'sold today' : 'collected today' }}</span>
             </div>
-            <div class="pqa-meta">
-                <span class="pqa-chip">{{ $t['count'] }} {{ \Illuminate\Support\Str::plural($unit, $t['count']) }} today</span>
-                @if ($t['weekDelta'] !== null)
-                    <span class="pqa-chip pqa-mom {{ $t['weekDelta'] < 0 ? 'is-down' : 'is-up' }}">
-                        {{ $t['weekDelta'] < 0 ? '▼' : '▲' }} {{ abs($t['weekDelta']) }}% this week
+
+            @php
+                $facts = $this->getFacts();
+                array_unshift($facts, $t['isEvent']
+                    ? trans_choice('{0} No tickets yet today|{1} 1 ticket today|[2,*] :n tickets today', $t['count'], ['n' => number_format($t['count'])])
+                    : trans_choice("{0} Nothing on today's sheet yet|{1} 1 booking on today's sheet|[2,*] :n bookings on today's sheet", $t['count'], ['n' => number_format($t['count'])]));
+            @endphp
+            <p class="pqh-facts">
+                @if ($t['delta'] !== null)
+                    <span class="pqh-delta {{ $t['delta'] < 0 ? 'is-down' : 'is-up' }}">
+                        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="{{ $t['delta'] < 0 ? 'M6 9.5 2 4.5h8z' : 'M6 2.5l4 5H2z' }}"/></svg>
+                        {{ abs($t['delta']) }}% {{ $t['deltaLabel'] }}
                     </span>
                 @endif
+                {{ implode(' · ', $facts) }}
+            </p>
+
+            <div class="pqh-actions">
+                @foreach ($this->getActions() as $action)
+                    <a href="{{ $action['url'] }}" wire:navigate @class(['pqh-btn', 'is-primary' => $action['primary'] ?? false]) data-haptic>
+                        <x-filament::icon :icon="$action['icon']" class="pqh-btn-ic" />
+                        <span>{{ $action['label'] }}</span>
+                    </a>
+                @endforeach
             </div>
         </div>
 
-        <div class="pqa-actions">
-            @foreach ($this->getActions() as $action)
-                <a href="{{ $action['url'] }}" @class(['pqa-btn', 'pqa-btn-primary' => $action['primary'] ?? false])>
-                    <x-filament::icon :icon="$action['icon']" class="pqa-ic" />
-                    <span>{{ $action['label'] }}</span>
-                </a>
-            @endforeach
+        @php $scene = $this->getScene(); @endphp
+        <div class="pqh-art" aria-hidden="true">
+            <x-partner.scene :kind="$scene['kind']" :phase="$scene['phase']" />
         </div>
-    </div>
-
-    {{-- "Today at a glance" strip — live snapshot below the hero. --}}
-    <div class="pqt">
-        @foreach ($this->getTodayStrip() as $tile)
-            <div class="pqt-tile" data-accent="{{ $tile['accent'] }}">
-                <span class="pqt-ic"><x-filament::icon :icon="$tile['icon']" /></span>
-                <span class="pqt-val">{{ $tile['value'] }}</span>
-                <span class="pqt-lab">{{ $tile['label'] }} <span class="pqt-sub">· {{ $tile['sub'] }}</span></span>
-            </div>
-        @endforeach
-    </div>
+    </section>
 
     {{-- Next-event spotlight: poster + countdown + sell-through + one-tap check-in. --}}
     @if ($next)
@@ -109,26 +115,6 @@
         .pqa-alert-info{background:#eef4ff;border-color:#d3e0fb;color:#1e50e6;}
         .pqa-alert-info .pqa-alert-ic{background:#dbe7fd;color:#1e50e6;}
 
-        /* "Today at a glance" strip — white tiles with a tinted icon chip per metric. */
-        .pqt{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;}
-        .pqt-tile{background:#fff;border:1px solid #e9ecf2;border-radius:14px;padding:13px 14px;
-            display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(11,18,32,.05);
-            transition:box-shadow .15s,transform .05s;}
-        .pqt-tile:hover{box-shadow:0 6px 16px -8px rgba(11,18,32,.18);transform:translateY(-1px);}
-        .pqt-ic{width:32px;height:32px;border-radius:10px;display:flex;align-items:center;
-            justify-content:center;margin-bottom:9px;}
-        .pqt-ic svg{width:18px;height:18px;stroke-width:1.9;}
-        .pqt-val{font-size:21px;font-weight:800;color:#0b1220;letter-spacing:-.02em;
-            font-variant-numeric:tabular-nums;line-height:1.1;}
-        .pqt-lab{font-size:12px;font-weight:600;color:#374151;margin-top:2px;}
-        .pqt-sub{color:#9aa2b1;font-weight:500;}
-        /* Per-metric accent chips. */
-        .pqt-tile[data-accent="green"]  .pqt-ic{background:#e6f7ef;color:#0f9d63;}
-        .pqt-tile[data-accent="blue"]   .pqt-ic{background:#e8f0ff;color:#2f6bff;}
-        .pqt-tile[data-accent="indigo"] .pqt-ic{background:#ecedfe;color:#5257e0;}
-        .pqt-tile[data-accent="violet"] .pqt-ic{background:#f3ecfe;color:#7c3aed;}
-        @media (max-width:640px){.pqt{grid-template-columns:1fr 1fr;}}
-
         /* Next-event spotlight card. */
         .pns{display:flex;align-items:center;gap:14px;margin-top:12px;background:#fff;
             border:1px solid #e7e9ee;border-radius:15px;padding:12px 14px;
@@ -160,52 +146,5 @@
             .pns-bar{max-width:none;}
         }
 
-        /* Gradient "hero" band — same blue aurora as the partner sign-in, so the
-           console opens with the brand feel the login set up. Always-dark, so it
-           reads identically in light and dark theme. */
-        .pqa{position:relative;overflow:hidden;isolation:isolate;
-            display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
-            border-radius:18px;padding:20px 22px;
-            background:
-                radial-gradient(900px 380px at 12% -40%, rgba(59,130,246,.55), transparent 60%),
-                radial-gradient(700px 340px at 106% 0%, rgba(99,102,241,.45), transparent 60%),
-                linear-gradient(150deg,#0a1738 0%,#0b1c46 52%,#0a1230 100%);
-            box-shadow:0 18px 40px -22px rgba(10,23,56,.7),0 0 0 1px rgba(255,255,255,.06);}
-        .pqa::before{content:"";position:absolute;inset:0;z-index:-1;opacity:.16;
-            background-image:linear-gradient(rgba(255,255,255,.5) 1px,transparent 1px),
-                linear-gradient(90deg,rgba(255,255,255,.5) 1px,transparent 1px);
-            background-size:40px 40px;
-            -webkit-mask-image:radial-gradient(120% 100% at 20% 0%,#000 30%,transparent 72%);
-            mask-image:radial-gradient(120% 100% at 20% 0%,#000 30%,transparent 72%);}
-        .pqa-greet{font-size:16px;font-weight:700;letter-spacing:-.01em;color:rgba(224,232,255,.82);}
-        .pqa-today{display:flex;align-items:baseline;gap:8px;margin-top:5px;}
-        .pqa-amt{font-size:32px;font-weight:800;letter-spacing:-.03em;color:#fff;line-height:1.02;
-            font-variant-numeric:tabular-nums;}
-        .pqa-today-lab{font-size:13px;font-weight:600;color:rgba(224,232,255,.66);}
-        .pqa-meta{display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap;}
-        .pqa-chip{font-size:12px;font-weight:600;color:#eaf0ff;
-            padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.10);
-            box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);font-variant-numeric:tabular-nums;}
-        .pqa-mom.is-up{color:#7ff0bd;background:rgba(16,185,129,.16);box-shadow:inset 0 0 0 1px rgba(16,185,129,.3);}
-        .pqa-mom.is-down{color:#ffcf9a;background:rgba(245,158,11,.16);box-shadow:inset 0 0 0 1px rgba(245,158,11,.3);}
-        .pqa-actions{display:flex;gap:10px;flex-wrap:wrap;}
-        .pqa-btn{display:inline-flex;align-items:center;gap:7px;
-            font-size:13.5px;font-weight:600;color:#eaf0ff;text-decoration:none;
-            padding:10px 15px;border-radius:11px;
-            background:rgba(255,255,255,.09);backdrop-filter:blur(6px);
-            box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);transition:background .15s,transform .05s;}
-        .pqa-btn:hover{background:rgba(255,255,255,.16);}
-        .pqa-btn:active{transform:translateY(1px);}
-        .pqa-btn-primary{color:#fff;background-image:linear-gradient(180deg,#2f6bff,#1e50e6);
-            box-shadow:0 8px 18px -8px rgba(37,99,235,.6);}
-        .pqa-btn-primary:hover{background-image:linear-gradient(180deg,#3a74ff,#2456ea);}
-        .pqa-ic{width:18px;height:18px;}
-
-        @media (max-width:640px){
-            .pqa{padding:16px;border-radius:16px;}
-            .pqa-actions{width:100%;}
-            .pqa-btn{flex:1 1 auto;justify-content:center;}
-        }
-        @media (prefers-reduced-motion:reduce){.pqa::before{opacity:.12;}}
     </style>
 </x-filament-widgets::widget>
