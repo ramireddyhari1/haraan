@@ -1,8 +1,7 @@
 package com.haraan.app.ui.rewards
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -15,14 +14,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -31,10 +28,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -82,7 +79,17 @@ internal fun ResultHeader(result: ResultUi, stage: Int, animate: Boolean) {
                 letterSpacing = 1.6.sp,
                 modifier = Modifier.rise(stage >= 1),
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(4.dp))
+
+            // The result as an object: drops in, lands on the haptic, rocks when tapped.
+            ResultIllustration(
+                outcome = result.outcome,
+                sport = result.sport,
+                play = stage >= 2,
+                animate = animate,
+                modifier = Modifier.fillMaxWidth().height(136.dp),
+            )
+            Spacer(Modifier.height(6.dp))
 
             // Outcome Hero Pill
             Column(
@@ -115,10 +122,16 @@ internal fun ResultHeader(result: ResultUi, stage: Int, animate: Boolean) {
                     modifier = Modifier.weight(1f).rise(stage >= 1),
                 )
 
+                // The score lands a beat after the picture, slightly oversized, and settles.
+                val slam by animateFloatAsState(
+                    if (!animate || stage >= 3) 1f else 1.22f,
+                    spring(dampingRatio = 0.45f, stiffness = 420f),
+                    label = "scoreSlam",
+                )
                 ScoreBanner(
                     home = result.home,
                     away = result.away,
-                    modifier = Modifier.rise(stage >= 2),
+                    modifier = Modifier.rise(stage >= 3).graphicsLayer { scaleX = slam; scaleY = slam },
                 )
 
                 ClubColumn(
@@ -130,7 +143,7 @@ internal fun ResultHeader(result: ResultUi, stage: Int, animate: Boolean) {
             // Athlete's Personal Match Impact
             result.impact?.let { impact ->
                 Spacer(Modifier.height(20.dp))
-                PlayerImpactCard(impact, Modifier.rise(stage >= 3))
+                PlayerImpactCard(impact, shown = stage >= 3, animate = animate, modifier = Modifier.rise(stage >= 3))
             }
         }
     }
@@ -169,385 +182,11 @@ private fun OutcomePill(outcome: Outcome, word: String) {
 }
 
 @Composable
-private fun PlayerImpactCard(impact: PlayerImpactUi, modifier: Modifier = Modifier) {
+private fun PlayerImpactCard(impact: PlayerImpactUi, shown: Boolean, animate: Boolean, modifier: Modifier = Modifier) {
     if (impact.isPotm) {
-        PotmPrestigeCard(impact, modifier)
+        PotmCard(impact, shown, animate, modifier)
     } else {
         PersonalImpactCard(impact, modifier)
-    }
-}
-
-@Composable
-private fun PotmPrestigeCard(impact: PlayerImpactUi, modifier: Modifier = Modifier) {
-    val goldRimBrush = Brush.linearGradient(
-        listOf(
-            Color(0xFFF59E0B),
-            Color(0x80FDE68A),
-            Color(0xFFD97706),
-            Color(0x40F59E0B),
-        )
-    )
-    val cardBg = Brush.linearGradient(
-        listOf(
-            Color(0xFF0B1220),
-            Color(0xFF141E33),
-            Color(0xFF0F172A),
-        )
-    )
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(14.dp, RoundedCornerShape(20.dp), ambientColor = Color(0x35F59E0B), spotColor = Color(0x30000000))
-            .clip(RoundedCornerShape(20.dp))
-            .background(cardBg)
-            .border(1.5.dp, goldRimBrush, RoundedCornerShape(20.dp))
-    ) {
-        // Stadium illumination spotlight behind athlete portrait
-        Canvas(Modifier.matchParentSize()) {
-            drawCircle(
-                Brush.radialGradient(
-                    listOf(Color(0x25F59E0B), Color.Transparent),
-                    center = Offset(size.width * 0.16f, size.height * 0.40f),
-                    radius = size.width * 0.55f,
-                ),
-                radius = size.width * 0.55f,
-                center = Offset(size.width * 0.16f, size.height * 0.40f),
-            )
-        }
-
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 16.dp)
-        ) {
-            // Crown / Eyebrow Row
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x33F59E0B))
-                            .border(1.dp, Color(0x99F59E0B), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.EmojiEvents,
-                            contentDescription = "POTM",
-                            tint = Color(0xFFFDE68A),
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "PLAYER OF THE MATCH",
-                        color = Color(0xFFFDE68A),
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 11.sp,
-                        letterSpacing = 1.6.sp,
-                    )
-                }
-
-                val badgeText = when {
-                    !impact.impactScore.isNullOrBlank() -> "★ ${impact.impactScore} IMPACT"
-                    else -> "MATCH WINNER"
-                }
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0x26F59E0B))
-                        .border(1.dp, Color(0x55F59E0B), RoundedCornerShape(50))
-                        .padding(horizontal = 9.dp, vertical = 3.dp),
-                ) {
-                    Text(
-                        badgeText,
-                        color = Color(0xFFFBBF24),
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        letterSpacing = 0.8.sp,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            // Athlete Showcase Row
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Athlete Portrait Medallion
-                Box(
-                    Modifier.size(62.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // Outer metallic gold rim
-                    Box(
-                        Modifier
-                            .size(62.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.sweepGradient(
-                                    listOf(
-                                        Color(0xFFF59E0B),
-                                        Color(0xFFFDE68A),
-                                        Color(0xFFD97706),
-                                        Color(0xFFF59E0B),
-                                    )
-                                )
-                            )
-                            .padding(2.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF0F172A)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val photoUrl = ApiConfig.mediaUrl(impact.playerPhoto)
-                        if (!photoUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = photoUrl,
-                                contentDescription = impact.playerName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            )
-                        } else {
-                            Image(
-                                painter = painterResource(R.drawable.player_gold),
-                                contentDescription = impact.playerName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            )
-                        }
-                    }
-
-                    // Gold star badge pinned at bottom-end
-                    Box(
-                        Modifier
-                            .size(19.dp)
-                            .align(Alignment.BottomEnd)
-                            .offset(x = 2.dp, y = 2.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF59E0B))
-                            .border(1.5.dp, Color(0xFF0F172A), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Star,
-                            null,
-                            tint = Color(0xFF0F172A),
-                            modifier = Modifier.size(11.dp),
-                        )
-                    }
-                }
-
-                Spacer(Modifier.width(14.dp))
-
-                // Name and Team affiliation
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        impact.playerName.ifBlank { "Player of the Match" },
-                        color = Color.White,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 17.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Crest(impact.teamShort, impact.teamLogo, 18.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            impact.teamName.ifBlank { impact.teamShort },
-                            color = Color(0xFFCBD5E1),
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.5.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            " · ",
-                            color = Color(0xFF64748B),
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                        )
-                        Text(
-                            impact.role.ifBlank { "ALL-ROUNDER" },
-                            color = Color(0xFFF59E0B),
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            letterSpacing = 0.6.sp,
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            // Subtle gold hairline separator
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                Color(0x00F59E0B),
-                                Color(0x40F59E0B),
-                                Color(0x18FFFFFF),
-                                Color(0x00FFFFFF),
-                            )
-                        )
-                    )
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Sports Performance Scorecard
-            val hasBat = impact.battingLine != null
-            val hasBowl = impact.bowlingLine != null
-
-            if (hasBat || hasBowl) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (hasBat) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "BATTING",
-                                color = Color(0xFF94A3B8),
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 9.5.sp,
-                                letterSpacing = 1.2.sp,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.Bottom) {
-                                Text(
-                                    impact.battingLine.orEmpty(),
-                                    color = Color.White,
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 21.sp,
-                                )
-                                Text(
-                                    " runs",
-                                    color = Color(0xFFCBD5E1),
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(bottom = 2.dp, start = 2.dp),
-                                )
-                            }
-                            impact.battingDetail?.let {
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    it,
-                                    color = Color(0xFF34D399),
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 11.sp,
-                                )
-                            }
-                        }
-                    }
-
-                    if (hasBat && hasBowl) {
-                        Box(
-                            Modifier
-                                .padding(horizontal = 12.dp)
-                                .width(1.dp)
-                                .height(38.dp)
-                                .background(Color(0x22FFFFFF))
-                        )
-                    }
-
-                    if (hasBowl) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "BOWLING",
-                                color = Color(0xFF94A3B8),
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 9.5.sp,
-                                letterSpacing = 1.2.sp,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                impact.bowlingLine.orEmpty(),
-                                color = Color.White,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 21.sp,
-                            )
-                            impact.bowlingDetail?.let {
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    it,
-                                    color = Color(0xFF60A5FA),
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 11.sp,
-                                )
-                            }
-                        }
-                    } else if (hasBat) {
-                        Box(
-                            Modifier
-                                .padding(horizontal = 12.dp)
-                                .width(1.dp)
-                                .height(38.dp)
-                                .background(Color(0x22FFFFFF))
-                        )
-                        Column(Modifier.weight(0.8f)) {
-                            Text(
-                                "IMPACT",
-                                color = Color(0xFF94A3B8),
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 9.5.sp,
-                                letterSpacing = 1.2.sp,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "${impact.impactScore ?: "85.0"} pts",
-                                color = Color(0xFFFDE68A),
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 18.sp,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "Matchwinning",
-                                color = Color(0xFFCBD5E1),
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 11.sp,
-                            )
-                        }
-                    }
-                }
-            } else if (impact.chips.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    impact.chips.forEach { chip ->
-                        DarkStatTile(chip.label, chip.value, Modifier.weight(1f))
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -721,38 +360,6 @@ private fun PersonalImpactCard(impact: PlayerImpactUi, modifier: Modifier = Modi
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun DarkStatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0x1AFFFFFF))
-            .border(1.dp, Color(0x20FFFFFF), RoundedCornerShape(10.dp))
-            .padding(horizontal = 6.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            label,
-            color = Color(0xFF94A3B8),
-            fontFamily = PlusJakartaSans,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.5.sp,
-            letterSpacing = 1.sp,
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            value,
-            color = Color.White,
-            fontFamily = PlusJakartaSans,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = if (value.length > 9) 12.sp else 13.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
     }
 }
 

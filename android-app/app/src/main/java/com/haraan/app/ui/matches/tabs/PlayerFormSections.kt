@@ -112,21 +112,11 @@ fun AnalyseSection(
     }
 
     Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(CrexColors.Border.copy(alpha = 0.55f)))
-        Spacer(Modifier.height(18.dp))
-
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "FORM",
-                color = CrexColors.TextMuted,
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.4.sp,
-                modifier = Modifier.weight(1f),
-            )
+            SectionHead("Player form", Modifier.weight(1f))
             DisciplineSwitch(mode) { mode = it }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(2.dp))
 
         TeamTabs(squads.map { it.first }, teamIndex) { teamIndex = it }
         Spacer(Modifier.height(16.dp))

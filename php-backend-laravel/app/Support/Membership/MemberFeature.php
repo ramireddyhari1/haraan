@@ -39,6 +39,9 @@ final class MemberFeature
     /** The scorer is asked where each four and six went (wagon wheel). Follows the match creator's plan. */
     public const MATCHES_SHOT_PLOTTING = 'matches.shot_plotting';
 
+    /** The scorer is asked which shot each four and six was (cover drive, pull…). Follows the match creator's plan. */
+    public const MATCHES_SHOT_TYPES = 'matches.shot_types';
+
     public const PROFILE_MEMBER_BADGE = 'profile.member_badge';
 
     /**
@@ -85,6 +88,7 @@ final class MemberFeature
         self::MATCHES_CAMERA_ANGLES => ['type' => self::TYPE_LIMIT, 'label' => 'Camera angles per match'],
         self::MATCHES_SEE_VIEWERS => ['type' => self::TYPE_BOOLEAN, 'label' => "See who's watching"],
         self::MATCHES_SHOT_PLOTTING => ['type' => self::TYPE_BOOLEAN, 'label' => 'Shot plotting'],
+        self::MATCHES_SHOT_TYPES => ['type' => self::TYPE_BOOLEAN, 'label' => 'Shot types'],
         self::PROFILE_MEMBER_BADGE => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member badge'],
         self::APP_ICON_PRO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Pro app icon'],
         self::APP_ICON_HERO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Hero app icon'],

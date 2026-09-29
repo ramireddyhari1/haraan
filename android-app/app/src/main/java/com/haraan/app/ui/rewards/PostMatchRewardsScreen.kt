@@ -36,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +48,6 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.haraan.app.data.rewards.MatchRewards
 import com.haraan.app.push.DeepLinkState
-import com.haraan.app.ui.Feel
 import com.haraan.app.ui.theme.PlusJakartaSans
 import kotlinx.coroutines.delay
 
@@ -96,7 +94,6 @@ fun PostMatchRewardsScreen(
 private fun RewardsBoard(data: MatchRewards, state: PostMatchRewardsState, vm: PostMatchRewardsViewModel, onClose: () -> Unit) {
     val ui = remember(data) { RewardScreenMapper.map(data) }
     val context = LocalContext.current
-    val view = LocalView.current
     val animate = state.animateEntrance
 
     // Staged entrance: eyebrow+crests → score → result word → XP → rewards → progress.
@@ -108,9 +105,10 @@ private fun RewardsBoard(data: MatchRewards, state: PostMatchRewardsState, vm: P
         }
         stage = 1
         delay(70); stage = 2
-        delay(90); stage = 3
-        if (ui.result.outcome == Outcome.WON) view.performHapticFeedback(Feel.COMMIT)
-        delay(110); stage = 4
+        // The illustration drops at stage 2 and fires its own haptic on contact
+        // (ResultIllustration → resultThud); give it time to land before the score slams in.
+        delay(420); stage = 3
+        delay(260); stage = 4
         delay(100); stage = 5
         delay(80); stage = 6
         delay(180)

@@ -1789,9 +1789,12 @@ private fun CameraMode(
                 )
             val byHand = currentLock?.source == com.haraan.app.vision.WicketLockSource.MANUAL
 
-            // Said in the hand the moment the wicket locks — once, on the way in.
+            // Said in the hand the moment the wicket locks — once, on the way in. Through the
+            // Vibrator, not performHapticFeedback: MIUI and other skins mute View haptics when
+            // the system "touch feedback" toggle is off, and the lock went unfelt.
+            val lockContext = LocalContext.current
             LaunchedEffect(isReady) {
-                if (isReady) view.performHapticFeedback(Feel.COMMIT)
+                if (isReady) com.haraan.app.ui.matches.cricketThud(lockContext, com.haraan.app.ui.matches.Thud.FOUR)
             }
 
             // ── Top: who this phone is, and the match it belongs to ──
@@ -3339,10 +3342,12 @@ private fun bindCamera(
          * purely so somebody can check the aim. 720p is indistinguishable at arm's length
          * on a viewfinder and is a third of the pixels.
          *
-         * The analysis stream is sized smaller still, because the tracker's first act is to
-         * scale whatever it is handed down to 480px wide. Handing it 1080p means moving a
-         * megabyte out of the hardware buffer to throw away three quarters of it; handing
-         * it 640x360 asks the camera to do that scaling in silicon built for it.
+         * The analysis stream is 720p, not the 640x360 the ball tracker alone would need.
+         * That smaller size starved the STUMP detector, which is built for a 960-wide frame:
+         * held upright, 640x360 is 360 px across, a stump is a pixel or two, and three of
+         * them never survive the threshold. On a real phone the wicket was simply never
+         * found. 720p gives it 720 px upright (1280 sideways, scaled to 960), and the ball,
+         * pitch and motion engines still scale their own copy down to 480/320 as before.
          *
          * Neither touches the recording. The clip stays FHD, because that is the artefact
          * a review is built on.
@@ -3379,7 +3384,7 @@ private fun bindCamera(
          * it, and it yields.
          */
         val analysis = ImageAnalysis.Builder()
-            .setResolutionSelector(sizedFor(android.util.Size(640, 360)))
+            .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()

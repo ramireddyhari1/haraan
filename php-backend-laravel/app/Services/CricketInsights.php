@@ -123,7 +123,7 @@ final class CricketInsights
                     'striker' => $nameOf($p['striker_id'] ?? null),
                     'nonStriker' => $nameOf($p['non_striker_id'] ?? null),
                     'bowler' => $nameOf($p['bowler_id'] ?? null),
-                    'stand' => ['runs' => 0, 'balls' => 0, 'a' => '', 'b' => ''],
+                    'stand' => $this->freshStand('', '', 0, 0, 0),
                     // Every run type counted, so the breakdown is tallied rather than inferred.
                     'tally' => ['dots' => 0, 'ones' => 0, 'twos' => 0, 'threes' => 0,
                                 'fours' => 0, 'sixes' => 0, 'extras' => 0],
@@ -132,6 +132,8 @@ final class CricketInsights
                     // every ball scored before the picker existed and every one skipped —
                     // the wheel draws what was seen, never what was assumed.
                     'shots' => [],
+                    // Named strokes, only where the scorer named one. Keyed by stroke.
+                    'shotTypes' => [],
                 ];
                 $cur['stand']['a'] = $cur['striker'];
                 $cur['stand']['b'] = $cur['nonStriker'];
@@ -167,6 +169,16 @@ final class CricketInsights
             $total = $runsOffBat + $extras;
             $cur['runs'] += $total;
             $cur['stand']['runs'] += $total;
+            // Each batter's share of the stand: runs off their own bat, and every ball they
+            // faced except a wide. Extras belong to the stand but to neither batter.
+            $side = $cur['striker'] !== '' && $cur['striker'] === $cur['stand']['a'] ? 'a'
+                : ($cur['striker'] !== '' && $cur['striker'] === $cur['stand']['b'] ? 'b' : null);
+            if ($side !== null) {
+                $cur['stand'][$side . 'Runs'] += $runsOffBat;
+                if ($type !== 'wide') {
+                    $cur['stand'][$side . 'Balls']++;
+                }
+            }
 
             $overIndex = intdiv($cur['legalBalls'], 6);
             $cur['overRuns'][$overIndex] = ($cur['overRuns'][$overIndex] ?? 0) + $total;
@@ -220,7 +232,25 @@ final class CricketInsights
                     // present — the wheel falls back to the region's centre for those.
                     'x' => isset($p['x']) ? round((float) $p['x'], 3) : null,
                     'y' => isset($p['y']) ? round((float) $p['y'], 3) : null,
+                    'shot' => \App\Support\CricketShots::normalise($p['shot'] ?? null),
                 ];
+            }
+
+            // The stroke, when the scorer named one from the fixed list. Unknown keys count
+            // for nothing — an unrecognised stroke is not shown as a guess at one.
+            $stroke = $type === 'runs' && $runsOffBat > 0 ? \App\Support\CricketShots::normalise($p['shot'] ?? null) : null;
+            if ($stroke !== null) {
+                $cur['shotTypes'][$stroke] ??= [
+                    'type' => $stroke, 'label' => \App\Support\CricketShots::label($stroke),
+                    'shots' => 0, 'runs' => 0, 'fours' => 0, 'sixes' => 0,
+                ];
+                $cur['shotTypes'][$stroke]['shots']++;
+                $cur['shotTypes'][$stroke]['runs'] += $runsOffBat;
+                if ($runsOffBat === 4) {
+                    $cur['shotTypes'][$stroke]['fours']++;
+                } elseif ($runsOffBat === 6) {
+                    $cur['shotTypes'][$stroke]['sixes']++;
+                }
             }
 
             if ($type === 'runs') {
@@ -237,10 +267,14 @@ final class CricketInsights
 
             if ($wicket) {
                 $cur['wickets']++;
-                $cur['partnerships'][] = $cur['stand'];
+                $ended = $cur['stand'];
+                $ended['endRuns'] = $cur['runs'];
+                $ended['endWkts'] = $cur['wickets'];
+                $ended['endBalls'] = $cur['legalBalls'];
+                $cur['partnerships'][] = $ended;
                 $newName = $nameOf($p['new_batsman_id'] ?? null);
                 $cur['striker'] = $newName;
-                $cur['stand'] = ['runs' => 0, 'balls' => 0, 'a' => $newName, 'b' => $cur['nonStriker']];
+                $cur['stand'] = $this->freshStand($newName, $cur['nonStriker'], $cur['runs'], $cur['wickets'], $cur['legalBalls']);
             }
 
             // Strike rotation, so the next ball is attributed to the right batter.
@@ -267,6 +301,26 @@ final class CricketInsights
      * @param array<string,mixed> $cur
      * @return array<string,mixed>
      */
+    /**
+     * A new stand between [a] and [b], opened with the innings at the given score.
+     *
+     * @return array<string,mixed>
+     */
+    private function freshStand(string $a, string $b, int $runs, int $wickets, int $balls): array
+    {
+        return [
+            'runs' => 0, 'balls' => 0, 'a' => $a, 'b' => $b,
+            'aRuns' => 0, 'aBalls' => 0, 'bRuns' => 0, 'bBalls' => 0,
+            'startRuns' => $runs, 'startWkts' => $wickets, 'startBalls' => $balls,
+        ];
+    }
+
+    /** @return array{runs:int,wickets:int,overs:string} */
+    private function scoreAt(int $runs, int $wickets, int $balls): array
+    {
+        return ['runs' => $runs, 'wickets' => $wickets, 'overs' => intdiv($balls, 6) . '.' . ($balls % 6)];
+    }
+
     private function summarise(array $cur): array
     {
         $overs = $cur['overRuns'];
@@ -357,6 +411,9 @@ final class CricketInsights
         if (($cur['stand']['runs'] ?? 0) > 0 || ($cur['stand']['balls'] ?? 0) > 0) {
             $unbroken = $cur['stand'];
             $unbroken['unbroken'] = true;
+            $unbroken['endRuns'] = $cur['runs'];
+            $unbroken['endWkts'] = $cur['wickets'];
+            $unbroken['endBalls'] = $legal;
             $stands[] = $unbroken;
         }
         $partnerships = [];
@@ -368,6 +425,14 @@ final class CricketInsights
                 'balls' => (int) $st['balls'],
                 'batters' => $pair === [] ? '' : implode(' & ', $pair),
                 'unbroken' => (bool) ($st['unbroken'] ?? false),
+                // Who made what inside the stand, and where the innings was when it began
+                // and ended. Added fields only: older apps read none of them.
+                'split' => array_values(array_filter([
+                    ($st['a'] ?? '') !== '' ? ['name' => $st['a'], 'runs' => (int) ($st['aRuns'] ?? 0), 'balls' => (int) ($st['aBalls'] ?? 0)] : null,
+                    ($st['b'] ?? '') !== '' ? ['name' => $st['b'], 'runs' => (int) ($st['bRuns'] ?? 0), 'balls' => (int) ($st['bBalls'] ?? 0)] : null,
+                ])),
+                'start' => $this->scoreAt((int) ($st['startRuns'] ?? 0), (int) ($st['startWkts'] ?? 0), (int) ($st['startBalls'] ?? 0)),
+                'end' => $this->scoreAt((int) ($st['endRuns'] ?? 0), (int) ($st['endWkts'] ?? 0), (int) ($st['endBalls'] ?? 0)),
             ];
         }
         $best = null;
@@ -414,6 +479,13 @@ final class CricketInsights
 
                 return array_values($z);
             })($cur['shots']),
+            // Named strokes, most runs first. Empty until a scorer names one.
+            'shotTypes' => (static function (array $types): array {
+                $list = array_values($types);
+                usort($list, static fn (array $a, array $b): int => [$b['runs'], $b['shots']] <=> [$a['runs'], $a['shots']]);
+
+                return $list;
+            })($cur['shotTypes'] ?? []),
             'bestOver' => $bestOver,
             'bestPartnership' => $best,
             'fours' => (int) $cur['fours'],

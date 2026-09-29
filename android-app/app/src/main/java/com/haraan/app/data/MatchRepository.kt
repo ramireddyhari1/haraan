@@ -193,7 +193,16 @@ data class Stand(
   val balls: Int,
   val batters: String,
   val unbroken: Boolean,
+  /** Each batter's runs and balls inside the stand. Empty from a server that predates it. */
+  val split: List<StandShare> = emptyList(),
+  /** Where the innings stood when the stand began and ended; null from an older server. */
+  val start: ScoreAt? = null,
+  val end: ScoreAt? = null,
 )
+
+data class StandShare(val name: String, val runs: Int, val balls: Int)
+
+data class ScoreAt(val runs: Int, val wickets: Int, val overs: String)
 
 /** One bowler against one batter, over the balls actually bowled between them. */
 data class FaceOff(
@@ -273,7 +282,12 @@ data class InningsInsight(
   val breakdown: ScoringBreakdown,
   val shots: List<Shot>,
   val shotZones: List<ShotZone>,
+  /** Strokes the scorer named, most runs first. Empty until one is named. */
+  val shotTypes: List<ShotTypeStat> = emptyList(),
 )
+
+/** One named stroke across an innings. [type] is a ShotKind key. */
+data class ShotTypeStat(val type: String, val label: String, val shots: Int, val runs: Int, val fours: Int, val sixes: Int)
 
 /** The Insights payload: real figures, plus prose when there is any. */
 data class MatchInsights(
@@ -1241,6 +1255,15 @@ class MatchRepository(
                 balls = o.optInt("balls"),
                 batters = o.optString("batters"),
                 unbroken = o.optBoolean("unbroken"),
+                split = o.optJSONArray("split").mapObjects { s ->
+                  StandShare(s.optString("name"), s.optInt("runs"), s.optInt("balls"))
+                },
+                start = o.optJSONObject("start")?.let { s ->
+                  ScoreAt(s.optInt("runs"), s.optInt("wickets"), s.optString("overs"))
+                },
+                end = o.optJSONObject("end")?.let { s ->
+                  ScoreAt(s.optInt("runs"), s.optInt("wickets"), s.optString("overs"))
+                },
               )
             },
             faceoffs = n.optJSONArray("faceoffs").mapObjects { o ->
@@ -1265,6 +1288,16 @@ class MatchRepository(
             },
             shotZones = n.optJSONArray("shotZones").mapObjects { o ->
               ShotZone(zone = o.optInt("zone"), shots = o.optInt("shots"), runs = o.optInt("runs"))
+            },
+            shotTypes = n.optJSONArray("shotTypes").mapObjects { o ->
+              ShotTypeStat(
+                type = o.optString("type"),
+                label = o.optString("label"),
+                shots = o.optInt("shots"),
+                runs = o.optInt("runs"),
+                fours = o.optInt("fours"),
+                sixes = o.optInt("sixes"),
+              )
             },
             breakdown = (n.optJSONObject("breakdown") ?: JSONObject()).let { b ->
               ScoringBreakdown(

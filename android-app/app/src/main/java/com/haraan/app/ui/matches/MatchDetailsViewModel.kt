@@ -187,6 +187,7 @@ class MatchDetailsViewModel : ViewModel() {
             battingTeam = o.optInt("battingTeam", 1),
             scoreBlocked = o.optName("scoreBlocked"),
             shotPlotting = o.optBoolean("shotPlotting", false),
+            shotTypes = o.optBoolean("shotTypes", false),
             innings = o.optInt("innings", 1),
             homeSquad = squad(o.optJSONArray("homeSquad")),
             awaySquad = squad(o.optJSONArray("awaySquad")),

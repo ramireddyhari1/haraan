@@ -171,6 +171,8 @@ data class MatchUiState(
      * by a verified account. See LiveMatchController for why the gate exists.
      */
     val shotPlotting: Boolean = false,
+    /** The scorer is asked which stroke each boundary was. Follows the creator's plan. */
+    val shotTypes: Boolean = false,
     /**
      * Why scoring would be refused despite [canScore] — currently only "profile_incomplete".
      * Blank when nothing is in the way. Lets the Score button explain itself instead of

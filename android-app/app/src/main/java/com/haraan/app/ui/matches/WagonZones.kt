@@ -1,6 +1,19 @@
 package com.haraan.app.ui.matches
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import com.haraan.app.ui.animations.pressScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -78,22 +91,25 @@ fun wagonZoneAngle(zone: Int): Float =
 @Composable
 fun WagonZonePicker(
     shot: String,
+    /** Ask where it landed (shot plotting on this match's plan). */
+    askZone: Boolean = true,
+    /** Ask which stroke it was (shot types on this match's plan). */
+    askStroke: Boolean = false,
     /**
-     * Where the ball actually finished, as a fraction of the ground's radius from the
-     * batter: x to the off/leg, y up/down the ground, each roughly -1..1. The ZONE is
-     * derived from the same tap so the region roll-ups still work, but the point is what
-     * gets drawn — a wagon wheel that snapped every shot to one of eight spokes would be a
-     * chart of the picker rather than a chart of the innings.
+     * What was captured, or null when the scorer skipped everything. Zone and point come
+     * from the ground tap; the stroke from the second step. Either may be absent.
      */
-    onPick: (zone: Int, x: Float, y: Float) -> Unit,
-    onSkip: () -> Unit,
+    onDone: (ShotPlot?) -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var hovered by remember { mutableStateOf(-1) }
     // Where the scorer last touched, so the tap is visibly acknowledged before the sheet
-    // closes. A picker that vanishes with no mark leaves you unsure it registered.
+    // moves on. A picker that vanishes with no mark leaves you unsure it registered.
     var marker by remember { mutableStateOf<Offset?>(null) }
+    // The ground tap, held while the stroke is chosen.
+    var plotted by remember { mutableStateOf<ShotPlot?>(null) }
+    var stage by remember { mutableStateOf(if (askZone) 0 else 1) }
 
     val accent = if (shot == "6") Color(0xFFD97706) else Color(0xFF2563EB)
 
@@ -103,7 +119,20 @@ fun WagonZonePicker(
         cricketThud(ctx, if (shot == "6") Thud.SIX else Thud.FOUR)
     }
 
-    Dialog(onDismissRequest = onSkip, properties = DialogProperties(dismissOnClickOutside = true)) {
+    fun onPick(zone: Int, x: Float, y: Float) {
+        plotted = ShotPlot(zone, x, y)
+        if (askStroke) {
+            scope.launch {
+                // Let the marker land before the sheet moves on.
+                kotlinx.coroutines.delay(220)
+                stage = 1
+            }
+        } else {
+            onDone(plotted)
+        }
+    }
+
+    Dialog(onDismissRequest = { onDone(plotted) }, properties = DialogProperties(dismissOnClickOutside = true)) {
         Column(
             modifier = Modifier
                 .clip(RoundedCornerShape(22.dp))
@@ -119,6 +148,16 @@ fun WagonZonePicker(
                 letterSpacing = 1.6.sp,
             )
             Spacer(Modifier.height(4.dp))
+            AnimatedContent(
+                targetState = stage,
+                transitionSpec = {
+                    (slideInHorizontally(spring(dampingRatio = 0.85f, stiffness = 380f)) { it / 3 } + fadeIn()) togetherWith
+                        (slideOutHorizontally { -it / 3 } + fadeOut())
+                },
+                label = "pickerStage",
+            ) { st ->
+                if (st == 0) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 "Tap where it landed",
                 color = Color(0xFF0F172A),
@@ -219,6 +258,15 @@ fun WagonZonePicker(
                 }
             }
 
+                    }
+                } else {
+                    StrokeStage(accent, plotted?.zone) { kind ->
+                        scope.launch { cricketThud(ctx, if (shot == "6") Thud.SIX else Thud.FOUR) }
+                        onDone(plotted?.copy(stroke = kind.key) ?: ShotPlot(stroke = kind.key))
+                    }
+                }
+            }
+
             Spacer(Modifier.height(14.dp))
             Text(
                 "Skip",
@@ -229,8 +277,62 @@ fun WagonZonePicker(
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFFF1F5F9))
                     .padding(horizontal = 26.dp, vertical = 11.dp)
-                    .pointerInput(Unit) { detectTapGestures { onSkip() } },
+                    .pointerInput(Unit) { detectTapGestures { onDone(plotted) } },
             )
+        }
+    }
+}
+
+/**
+ * Which stroke was it — each one drawn and playing itself as the sheet arrives, with the
+ * strokes that usually go where the ball went already at the top.
+ */
+@Composable
+private fun StrokeStage(accent: Color, zone: Int?, onPick: (ShotKind) -> Unit) {
+    val kinds = remember(zone) { ShotKind.likelyFor(zone) }
+    val likely = if (zone != null) 3 else 0
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "What shot?",
+            color = Color(0xFF0F172A),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Black,
+        )
+        Spacer(Modifier.height(14.dp))
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.width(284.dp).heightIn(max = 400.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(kinds.size) { i ->
+                val kind = kinds[i]
+                val source = remember { MutableInteractionSource() }
+                val top = i < likely
+                Column(
+                    Modifier
+                        .pressScale(source)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (top) accent.copy(alpha = 0.08f) else Color(0xFFF6F8FB))
+                        .then(
+                            if (top) Modifier.border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                            else Modifier
+                        )
+                        .clickable(interactionSource = source, indication = null) { onPick(kind) }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    ShotFigure(kind, if (top) accent else Color(0xFF64748B), Modifier.size(56.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        kind.label,
+                        color = Color(0xFF0F172A),
+                        fontSize = 11.5.sp,
+                        fontWeight = if (top) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
     }
 }

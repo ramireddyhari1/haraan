@@ -94,8 +94,11 @@ private val ScRed = Color(0xFFDC2626)
 private val ScFour = Color(0xFF2563EB)
 private val ScSix = Color(0xFFD97706)
 
-/** A recorded shot: which region, and exactly where inside it. */
-data class ShotPlot(val zone: Int, val x: Float, val y: Float)
+/**
+ * A recorded shot: which region, exactly where inside it, and which stroke it was. Any of
+ * them may be absent — the scorer can skip either question.
+ */
+data class ShotPlot(val zone: Int? = null, val x: Float? = null, val y: Float? = null, val stroke: String? = null)
 
 private data class ScorerBatter(val name: String, val runs: Int, val balls: Int)
 private data class ScorerBowler(val name: String, val balls: Int, val runs: Int, val wickets: Int)
@@ -132,6 +135,8 @@ private data class ScorerState(
      * attached to its accuracy. Everyone else scores exactly as before, with no extra tap.
      */
     val shotPlotting: Boolean = false,
+    /** Whether the scorer is also asked WHICH stroke each boundary was (its own plan feature). */
+    val shotTypes: Boolean = false,
     /** Where and when — shown under the toss line so the scorer can confirm the fixture. */
     val venue: String = "",
     val startLabel: String = "",
@@ -319,7 +324,7 @@ fun ScoringScreen(
                 val token = scoringToken() ?: return@launch
                 persistLock.withLock {
                     if (event != "UNDO" && !ensureStarted(token, after)) return@withLock
-                    val action = scoreActionFor(event, after, battingSquad, plot?.zone, plot?.x, plot?.y) ?: return@withLock
+                    val action = scoreActionFor(event, after, battingSquad, plot?.zone, plot?.x, plot?.y, plot?.stroke) ?: return@withLock
                     val sent2 = repo.sendScoreAction(token, matchId, action)
                     if (!sent2.ok) {
                         Toast.makeText(ctx, sent2.refusal ?: "Score didn't save — check connection.", Toast.LENGTH_LONG).show()
@@ -411,6 +416,8 @@ private fun scoreActionFor(
     /** Exact landing point, fractions of the ground radius. Null when not captured. */
     shotX: Float? = null,
     shotY: Float? = null,
+    /** The stroke the scorer named, a ShotKind key. The server ignores unknown keys. */
+    stroke: String? = null,
 ): JSONObject? =
     when (event) {
         "0", "1", "2", "3", "4", "5", "6" -> JSONObject().put("type", "runs").put("value", event.toInt())
@@ -424,6 +431,7 @@ private fun scoreActionFor(
                         it.put("y", Math.round(shotY * 1000f) / 1000.0)
                     }
                 }
+                if (stroke != null && event != "0" && ShotKind.of(stroke) != null) it.put("shot", stroke)
             }
         "WD" -> JSONObject().put("type", "wide").put("value", 1)
         "NB" -> JSONObject().put("type", "noball").put("runs_off_bat", 0)
@@ -466,6 +474,7 @@ private fun seedFrom(d: MatchUiState): ScorerState {
         team2Name = d.team2FullName.ifBlank { d.team2 },
         battedFirst = d.battingTeam.takeIf { it == 1 || it == 2 } ?: 1,
         shotPlotting = d.shotPlotting,
+        shotTypes = d.shotTypes,
         venue = d.venue,
         startLabel = d.startLabel,
         startIsScheduled = d.startIsScheduled,
@@ -537,6 +546,7 @@ private fun ScorerLoaded(
     // The boundary waiting on a direction. Null when nothing is pending.
     var pendingShot by remember { mutableStateOf<String?>(null) }
     val shotPlotting = seed.shotPlotting
+    val shotTypes = seed.shotTypes
     var pickingOpening by remember { mutableStateOf(false) }
 
     // Innings tracking. `transitioned` = the user started the 2nd innings in THIS session,
@@ -662,7 +672,7 @@ private fun ScorerLoaded(
         // A boundary asks where it went, once, before it is scored. `zone` being non-null
         // means that question has already been answered (or skipped with -1), so this does
         // not loop.
-        if ((ev == "4" || ev == "6") && shot == null && !asked && shotPlotting) {
+        if ((ev == "4" || ev == "6") && shot == null && !asked && (shotPlotting || shotTypes)) {
             pendingShot = ev
             return
         }
@@ -684,14 +694,12 @@ private fun ScorerLoaded(
     pendingShot?.let { shot ->
         WagonZonePicker(
             shot = shot,
-            onPick = { z, x, y ->
+            askZone = shotPlotting,
+            askStroke = shotTypes,
+            onDone = { plot ->
                 pendingShot = null
-                apply(shot, ShotPlot(z, x, y), asked = true)
-            },
-            onSkip = {
-                pendingShot = null
-                // Scored exactly as before, with no shot attached and no second prompt.
-                apply(shot, null, asked = true)
+                // A full skip scores exactly as before, with nothing attached and no second prompt.
+                apply(shot, plot, asked = true)
             },
         )
     }

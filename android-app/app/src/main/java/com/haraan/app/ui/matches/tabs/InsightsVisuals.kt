@@ -95,8 +95,6 @@ internal fun ballInk(token: String): Pair<Color, Color> = when (token.trim().low
  */
 @Composable
 internal fun OverStrip(inn: InningsInsight) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     Column {
         inn.progress.forEachIndexed { i, over ->
             if (i > 0) Spacer(Modifier.height(9.dp))
@@ -112,42 +110,12 @@ internal fun OverStrip(inn: InningsInsight) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        .horizontalScroll(rememberScrollState())
+                        // Room for the raised balls' shadows, which a scroller clips.
+                        .padding(vertical = 3.dp, horizontal = 1.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    over.balls.forEach { token ->
-                        val (bg, fg) = ballInk(token)
-                        Box(
-                            modifier = Modifier
-                                .size(width = if (token.length > 1) 30.dp else 26.dp, height = 26.dp)
-                                .clip(if (token.length > 1) RoundedCornerShape(9.dp) else CircleShape)
-                                .background(bg)
-                                // Touch a ball and feel what it was. A six under your thumb
-                                // is two knocks, a wicket three — the delivery played back
-                                // rather than merely listed.
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                ) { scope.launch { cricketThud(ctx, ballThud(token)) } }
-                                .then(
-                                    if (bg == Color(0xFFF4F7FB))
-                                        Modifier.border(
-                                            1.dp,
-                                            CrexColors.Border,
-                                            if (token.length > 1) RoundedCornerShape(9.dp) else CircleShape
-                                        )
-                                    else Modifier
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                token,
-                                color = fg,
-                                fontSize = if (token.length > 1) 9.5.sp else 11.5.sp,
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
-                    }
+                    over.balls.forEach { token -> BallChip(token, 27.dp) }
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -368,159 +336,3 @@ internal fun GroundBackdrop(accent: Color, modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * The wagon wheel.
- *
- * Every line on this is a shot a scorer watched and recorded. There is no inference and no
- * filler: a boundary whose direction was skipped simply is not here, and an innings scored
- * before the picker existed draws an empty ground that says so. That restraint is the whole
- * point — a wheel with invented dots would be the most convincing lie on the screen, and it
- * would make every honest figure beside it suspect.
- *
- * Shots fan out WITHIN their region rather than stacking on the zone's centre line. Eight
- * boundaries through cover are eight strokes, and a single thick line through the middle of
- * the sector would hide how many there were. The fan is deterministic — seeded from the
- * shot's index — so the wheel is identical on every recomposition instead of shimmering.
- *
- * A six reaches the rope; a four stops just inside it. That is not decoration: it is the
- * one piece of information the runs already carry, drawn instead of written.
- */
-@Composable
-internal fun WagonWheel(inn: InningsInsight) {
-    val shots = inn.shots
-
-    Column {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f),
-            contentAlignment = Alignment.Center,
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                val r = minOf(size.width, size.height) / 2f
-                val c = Offset(size.width / 2f, size.height / 2f)
-
-                // Outfield, rope, ring, pitch.
-                drawCircle(Color(0xFFEFF6F0), radius = r * 0.97f, center = c)
-                drawCircle(
-                    Color(0xFFCBD5E1), radius = r * 0.97f, center = c,
-                    style = Stroke(width = 2f),
-                )
-                drawCircle(
-                    Color(0xFFDDE5EE), radius = r * 0.55f, center = c,
-                    style = Stroke(width = 1.2f),
-                )
-                repeat(8) { i ->
-                    val a = Math.toRadians((i * 45.0) + 22.5 - 90.0).toFloat()
-                    drawLine(
-                        color = Color(0x14000000),
-                        start = c,
-                        end = Offset(c.x + cos(a) * r * 0.97f, c.y + sin(a) * r * 0.97f),
-                        strokeWidth = 1f,
-                    )
-                }
-                drawRoundRect(
-                    color = Color(0xFFE7D7B8),
-                    topLeft = Offset(c.x - r * 0.035f, c.y - r * 0.16f),
-                    size = Size(r * 0.07f, r * 0.32f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f),
-                )
-
-                // The shots themselves.
-                shots.forEachIndexed { i, sh ->
-                    val colour = if (sh.runs >= 6) CrexColors.SixBall else CrexColors.FourBall
-
-                    // The point the scorer actually tapped. Shots captured before points
-                    // existed carry only a region, so those fall back to a deterministic
-                    // fan inside their wedge — spread rather than stacked, because eight
-                    // boundaries through cover are eight strokes.
-                    val end = if (sh.x != null && sh.y != null) {
-                        Offset(c.x + sh.x * r * 0.97f, c.y + sh.y * r * 0.97f)
-                    } else {
-                        val spread = (((i * 37) % 31) / 31f - 0.5f) * 0.62f
-                        val a = wagonZoneAngle(sh.zone) + spread
-                        val reach = if (sh.runs >= 6) 0.95f else 0.82f
-                        Offset(c.x + cos(a) * r * reach, c.y + sin(a) * r * reach)
-                    }
-
-                    drawLine(
-                        color = colour.copy(alpha = 0.85f),
-                        start = c,
-                        end = end,
-                        strokeWidth = if (sh.runs >= 6) 3.2f else 2.4f,
-                        cap = StrokeCap.Round,
-                    )
-                    drawCircle(
-                        color = colour,
-                        radius = if (sh.runs >= 6) 4.5f else 3.2f,
-                        center = end,
-                    )
-                }
-
-                drawCircle(Color(0xFF0F172A), radius = 4.5f, center = c)
-            }
-
-            if (shots.isEmpty()) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "No shot directions recorded",
-                        color = CrexColors.TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "The scorer is asked where each boundary went",
-                        color = CrexColors.TextMuted,
-                        fontSize = 11.sp,
-                    )
-                }
-            }
-        }
-
-        if (shots.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(9.dp).clip(CircleShape).background(CrexColors.FourBall))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "${shots.count { it.runs == 4 }} fours",
-                        color = CrexColors.TextSecondary, fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(9.dp).clip(CircleShape).background(CrexColors.SixBall))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "${shots.count { it.runs >= 6 }} sixes",
-                        color = CrexColors.TextSecondary, fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-
-            // Strongest scoring regions, named the way a commentator would.
-            val top = inn.shotZones.sortedByDescending { it.runs }.take(3)
-            if (top.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                top.forEachIndexed { i, z ->
-                    if (i > 0) Spacer(Modifier.height(7.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            WAGON_ZONES.getOrElse(z.zone) { "Region" },
-                            color = CrexColors.TextPrimary, fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            "${z.runs} runs  ·  ${z.shots} shot${if (z.shots == 1) "" else "s"}",
-                            color = CrexColors.TextSecondary, fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}

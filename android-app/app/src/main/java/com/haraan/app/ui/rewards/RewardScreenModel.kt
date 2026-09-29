@@ -38,7 +38,14 @@ data class PlayerImpactUi(
     val battingDetail: String? = null,
     val bowlingLine: String? = null,
     val bowlingDetail: String? = null,
-    val impactScore: String? = null,
+    /** Scorecard notation: "64 (38)" — runs (balls). */
+    val batFigure: String? = null,
+    /** "SR 168.4" — only when balls are known. */
+    val batNote: String? = null,
+    /** "2/28 (4)" — wickets/runs (overs). */
+    val bowlFigure: String? = null,
+    /** "Econ 7.00" */
+    val bowlNote: String? = null,
     val chips: List<StatChip> = emptyList(),
 )
 
@@ -56,6 +63,8 @@ data class ResultUi(
     val shareText: String,
     val shareUrl: String?,
     val impact: PlayerImpactUi? = null,
+    /** Raw sport key ("cricket", "table_tennis") — picks the result illustration's ball. */
+    val sport: String = "",
 )
 
 data class TeamUi(
@@ -70,7 +79,18 @@ data class TeamUi(
 
 enum class XpState { SETTLED, PENDING, NOT_ELIGIBLE }
 
-data class XpUi(val state: XpState, val xp: Int?, val ranked: Boolean, val bonus: Int, val explanation: String)
+data class XpUi(
+    val state: XpState,
+    val xp: Int?,
+    val ranked: Boolean,
+    val bonus: Int,
+    val explanation: String,
+    /** "Mon 5 Oct, 8:00 PM" — when the result locks, if the server set a window. */
+    val deadline: String? = null,
+    val bonusTotal: Int = 0,
+    val yourTeam: String = "",
+    val oppTeam: String = "",
+)
 
 data class VerificationUi(val yourCaptain: Boolean, val opposition: Boolean, val needsOrganiser: Boolean)
 
@@ -201,12 +221,16 @@ object RewardScreenMapper {
             val assignedTeamLogo = imp.teamLogo?.takeIf { it.isNotBlank() }
                 ?: if (side == "home") home.logo else away.logo
 
-            val impactScore = if (didBat || didBowl) {
-                val rPts = (imp.runs ?: 0) * 1.0
-                val wPts = (imp.wickets ?: 0) * 25.0
-                val bonus = if (imp.isPotm) 15.0 else 0.0
-                val total = rPts + wPts + bonus
-                String.format(Locale.US, "%.1f", total)
+            // Figures exactly as a scorecard prints them; no derived "impact" number — the
+            // player can check every digit here against the scorecard.
+            val oversText = imp.oversBowled?.takeIf { it > 0.0 }?.let { o -> if (o % 1.0 == 0.0) "${o.toInt()}" else "$o" }
+            val batFigure = if (didBat) "${imp.runs ?: 0}" + (imp.balls?.takeIf { it > 0 }?.let { " ($it)" } ?: "") else null
+            val batNote = if (didBat && imp.runs != null && (imp.balls ?: 0) > 0) {
+                "SR " + String.format(Locale.US, "%.1f", imp.runs * 100.0 / imp.balls!!)
+            } else null
+            val bowlFigure = if (didBowl) "${imp.wickets ?: 0}/${imp.runsConceded ?: 0}" + (oversText?.let { " ($it)" } ?: "") else null
+            val bowlNote = if (didBowl && imp.runsConceded != null && (imp.oversBowled ?: 0.0) > 0.0) {
+                "Econ " + String.format(Locale.US, "%.2f", imp.runsConceded / imp.oversBowled!!)
             } else null
 
             if (chips.isNotEmpty() || imp.isPotm) {
@@ -224,7 +248,10 @@ object RewardScreenMapper {
                     battingDetail = batDetail,
                     bowlingLine = bowlLine,
                     bowlingDetail = bowlDetail,
-                    impactScore = impactScore,
+                    batFigure = batFigure,
+                    batNote = batNote,
+                    bowlFigure = bowlFigure,
+                    bowlNote = bowlNote,
                     chips = chips,
                 )
             } else null
@@ -243,7 +270,13 @@ object RewardScreenMapper {
             "not_eligible" -> XpState.NOT_ELIGIBLE
             else -> XpState.PENDING
         }
-        val xp = XpUi(xpState, data.competitiveXp.xp, data.competitiveXp.isRanked == true, data.bonusXp.thisMatch, data.competitiveXp.explanation)
+        val xp = XpUi(
+            xpState, data.competitiveXp.xp, data.competitiveXp.isRanked == true, data.bonusXp.thisMatch, data.competitiveXp.explanation,
+            deadline = data.competitiveXp.deadline?.let(::deadlineLabel),
+            bonusTotal = data.bonusXp.total,
+            yourTeam = if (side == "away") away.name else home.name,
+            oppTeam = if (side == "away") home.name else away.name,
+        )
 
         val lockedOnResult = data.rewards.locked.any { "verification" in it.lockReasons }
         val trustTooLow = data.rewards.locked.any { it.statusReason == "trust_too_low" }
@@ -271,6 +304,7 @@ object RewardScreenMapper {
                 shareText = "${home.short} ${home.score}–${away.score} ${away.short} · $word on Haraan",
                 shareUrl = m.shareUrl,
                 impact = impactUi,
+                sport = m.sport.lowercase(Locale.ENGLISH),
             ),
             xp = xp,
             verification = verification,
@@ -301,6 +335,20 @@ object RewardScreenMapper {
             else -> "Play once a week to start a streak."
         }
         return NextActionUi(headline, nudge, "Play again", NextActionKind.CREATE_MATCH, "Book a turf", NextActionKind.BOOK_TURF)
+    }
+
+    /**
+     * "2026-10-05T20:00:00+05:30" → "Mon 5 Oct, 8:00 PM", read as the wall clock in the string
+     * (the server sends business time). Anything that isn't ISO is shown as sent.
+     */
+    internal fun deadlineLabel(raw: String): String? {
+        if (raw.isBlank()) return null
+        val m = Regex("""^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})""").find(raw) ?: return raw
+        val (y, mo, d, h, mi) = m.destructured
+        val cal = Calendar.getInstance().apply { clear(); set(y.toInt(), mo.toInt() - 1, d.toInt()) }
+        val hour = h.toInt()
+        val h12 = if (hour % 12 == 0) 12 else hour % 12
+        return "${dayLabel(cal)}, $h12:$mi ${if (hour < 12) "AM" else "PM"}"
     }
 
     internal fun dayLabel(d: Calendar): String =

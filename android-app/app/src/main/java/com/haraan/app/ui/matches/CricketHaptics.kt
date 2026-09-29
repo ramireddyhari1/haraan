@@ -74,7 +74,8 @@ enum class Thud {
     DELIVERY,
 }
 
-private fun vibratorFor(context: Context): Vibrator? = try {
+/** Shared with the post-match result, which buzzes through the same rules. */
+internal fun vibratorFor(context: Context): Vibrator? = try {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
     } else {

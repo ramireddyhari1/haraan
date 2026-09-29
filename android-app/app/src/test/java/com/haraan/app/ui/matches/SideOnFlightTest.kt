@@ -74,4 +74,29 @@ class SideOnFlightTest {
         // A bounce index outside the points is dropped, not trusted.
         assertNull(parseClipTrack(JSONObject("""{"aspect":1.7,"bounce":9,"points":[[0,0.1,0.4],[1,0.2,0.4],[2,0.3,0.4]]}"""))!!.bounce)
     }
+
+    @Test
+    fun `the clock starts at zero and never runs backwards`() {
+        assertEquals(listOf(0, 33, 33, 70), flightTimesOf(listOf(1000, 1033, 1020, 1070)))
+    }
+
+    @Test
+    fun `a stopped clock is replaced by an even frame rate`() {
+        assertEquals(listOf(0, 33, 66), flightTimesOf(listOf(500, 500, 500)))
+    }
+
+    @Test
+    fun `the ball moves on the sensor's clock, not per frame`() {
+        // Fast then slow: the first gap is 20 ms, the second 80 ms.
+        val times = listOf(0, 20, 100)
+        assertEquals(1f, indexAtTime(times, 20f), 1e-6f)
+        assertEquals(1.5f, indexAtTime(times, 60f), 1e-6f)
+        assertEquals(0f, indexAtTime(times, -5f), 0f)
+        assertEquals(2f, indexAtTime(times, 500f), 0f)
+    }
+
+    @Test
+    fun `sightings sharing a stamp are passed over, not divided by`() {
+        assertEquals(2f, indexAtTime(listOf(0, 33, 33, 66), 33f), 1e-6f)
+    }
 }

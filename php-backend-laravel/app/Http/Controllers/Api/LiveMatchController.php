@@ -606,6 +606,11 @@ class LiveMatchController extends Controller
                 User::query()->find($match->user_id),
                 MemberFeature::MATCHES_SHOT_PLOTTING,
             ),
+            // Naming the shot behind a boundary: its own plan feature, on the same terms.
+            'shotTypes' => app(MemberEntitlements::class)->allows(
+                User::query()->find($match->user_id),
+                MemberFeature::MATCHES_SHOT_TYPES,
+            ),
             'scoreBlocked' => $scoreBlocked,
             'isPrivate' => (bool) $match->is_private,
             'joinCode' => (string) ($match->join_code ?? ''),
