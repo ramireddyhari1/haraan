@@ -4,65 +4,71 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\GameHub\Pages;
 
+use App\Filament\Clusters\GameHub\Concerns\SummarisesVenues;
 use App\Filament\Clusters\GameHub\GameHubCluster;
+use App\Models\ShiftSession;
+use App\Models\User;
 use BackedEnum;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Carbon;
 
 /**
- * Enterprise Staff Operations Command:
- * Court marshals, on-duty venue managers, match referees,
- * shift rosters, and field safety compliance monitoring.
+ * Desk staff: the accounts that exist, who has a drawer open right now, and
+ * today's shifts. "On duty" means an open shift session — the only record of
+ * someone actually working — not a roster of names.
  */
 class GameHubStaff extends Page
 {
+    use SummarisesVenues;
+
     protected static ?string $cluster = GameHubCluster::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-identification';
 
-    protected static ?string $title = 'Staff Operations';
+    protected static ?string $title = 'Staff';
 
     protected static ?string $navigationLabel = 'Staff operations';
 
     protected static ?int $navigationSort = 10;
 
-    protected string $view = 'filament.clusters.game-hub.staff';
+    protected string $view = 'filament.clusters.game-hub.summary-page';
 
     public static function canAccess(): bool
     {
         return auth()->user()?->canManage('gamehub') ?? false;
     }
 
-    public function getTelemetry(): array
+    public function getPanels(): array
     {
-        return [
-            'on_duty_count' => 14,
-            'total_staff' => 22,
-            'attendance_rate' => '100%',
-            'shifts_today' => 18,
-            'safety_score' => '100% Incident Free',
-            'roles' => [
-                ['name' => 'Court Marshals', 'count' => 6, 'duty' => 4],
-                ['name' => 'Certified Referees', 'count' => 8, 'duty' => 5],
-                ['name' => 'Front-Desk Cashiers', 'count' => 5, 'duty' => 3],
-                ['name' => 'Facility Technicians', 'count' => 3, 'duty' => 2],
-            ],
-            'staff_roster' => [
-                ['name' => 'Vikram Singh', 'role' => 'Lead Court Marshal', 'venue' => 'Main Arena Turf A', 'shift' => '06:00 - 14:00', 'status' => 'On Duty', 'score' => '99.4%'],
-                ['name' => 'Kavita Rao', 'role' => 'National Referee', 'venue' => 'Badminton Court 3', 'shift' => '14:00 - 22:00', 'status' => 'On Duty', 'score' => '98.8%'],
-                ['name' => 'Rajesh Sharma', 'role' => 'Front-Desk Cashier', 'venue' => 'Main Reception', 'shift' => '08:00 - 16:00', 'status' => 'On Duty', 'score' => '100%'],
-                ['name' => 'Deepak Verma', 'role' => 'Turf Maintenance Tech', 'venue' => 'Box Cricket 1-2', 'shift' => '06:00 - 14:00', 'status' => 'Break', 'score' => '97.5%'],
-                ['name' => 'Pooja Nair', 'role' => 'Match Scorer & Ops', 'venue' => 'Football Turf B', 'shift' => '16:00 - 00:00', 'status' => 'Upcoming', 'score' => '99.0%'],
-            ],
-        ];
-    }
+        $staff = User::query()->whereNotNull('parent_partner_id');
+        if (($owner = static::partnerId()) !== null) {
+            $staff->where('parent_partner_id', $owner);
+        }
+        $staffCount = (clone $staff)->count();
 
-    public function pingStaff(): void
-    {
-        Notification::make()
-            ->title('Ops Alert Broadcasted')
-            ->body('Shift handover alert sent to all 14 on-duty staff devices.')
-            ->success()
-            ->send();
+        $shifts = fn () => static::ownVenues(ShiftSession::query());
+        $open = $shifts()->open()->with(['staff:id,name', 'venue:id,name'])->orderBy('opened_at')->get();
+        $today = $shifts()->where(fn ($q) => $q->whereDate('opened_at', Carbon::today())->orWhereDate('closed_at', Carbon::today()))->count();
+        $closedToday = $shifts()->whereDate('closed_at', Carbon::today());
+        $off = (clone $closedToday)->where(fn ($q) => $q->where('variance', '>=', 1)->orWhere('variance', '<=', -1))->count();
+
+        return [[
+            'title' => 'Staff',
+            'stats' => [
+                ['label' => 'Staff accounts', 'value' => number_format($staffCount)],
+                ['label' => 'On duty now', 'value' => number_format($open->count()), 'sub' => 'with a drawer open'],
+                ['label' => 'Shifts today', 'value' => number_format($today)],
+                ['label' => 'Closed off-balance', 'value' => number_format($off), 'sub' => 'today, counted ≠ expected', 'tone' => $off > 0 ? 'warn' : null],
+            ],
+            'list' => [
+                'title' => 'On duty now',
+                'rows' => $open->map(fn (ShiftSession $s): array => [
+                    'primary' => $s->staff?->name ?? 'Unassigned',
+                    'secondary' => $s->venue?->name,
+                    'trailing' => $s->opened_at ? 'since ' . $s->opened_at->format('g:i A') : '',
+                ])->all(),
+                'empty' => 'Nobody has a shift open right now.',
+            ],
+        ]];
     }
 }

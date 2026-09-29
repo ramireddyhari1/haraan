@@ -4,29 +4,31 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\GameHub\Pages;
 
+use App\Filament\Clusters\GameHub\Concerns\SummarisesVenues;
 use App\Filament\Clusters\GameHub\GameHubCluster;
-use App\Models\Booking;
-use App\Models\Venue;
-use App\Models\VenueCourt;
 use App\Support\BookingReport;
 use BackedEnum;
-use Carbon\Carbon;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Enterprise Game Hub Reports & Export Center:
- * Executive analytics, revenue & tax settlements, venue occupancy,
- * player retention cohorts, and automated scheduled reporting.
+ * Pick a date range, see what happened in it, download the bookings as CSV.
+ *
+ * There is one export — the bookings sheet (BookingReport, the same file the
+ * partner app downloads). The page used to offer four "reports" and a
+ * "schedule for 06:00" button; all four downloaded this same file and nothing
+ * was ever scheduled, so the choice and the button are gone.
  */
 class Reports extends Page
 {
+    use SummarisesVenues;
+
     protected static ?string $cluster = GameHubCluster::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-document-chart-bar';
 
-    protected static ?string $title = 'Reports & Export Center';
+    protected static ?string $title = 'Reports';
 
     protected static ?string $navigationLabel = 'Reports';
 
@@ -35,9 +37,8 @@ class Reports extends Page
     protected string $view = 'filament.clusters.game-hub.reports';
 
     public string $from = '';
+
     public string $to = '';
-    public string $selectedReport = 'revenue';
-    public string $exportFormat = 'csv';
 
     public static function canAccess(): bool
     {
@@ -46,7 +47,7 @@ class Reports extends Page
             return false;
         }
 
-        if (\Filament\Facades\Filament::getCurrentPanel()?->getId() === 'partner') {
+        if (static::inPartnerConsole()) {
             return $user->hasPartnerPermission('reports');
         }
 
@@ -59,104 +60,54 @@ class Reports extends Page
         $this->to = now()->toDateString();
     }
 
-    public function getAnalyticsSummary(): array
+    public function getPanels(): array
     {
-        $venueCount = Venue::count();
-        $courtCount = VenueCourt::count();
+        [$from, $to] = [$this->normalisedFrom() . ' 00:00:00', $this->normalisedTo() . ' 23:59:59'];
+        $inRange = fn () => static::venueBookings()->whereBetween('created_at', [$from, $to]);
 
-        $totalRevenue = (float) Booking::where('booking_type', 'venue')
-            ->whereIn('status', ['confirmed', 'paid', 'completed', 'checked_in'])
-            ->whereBetween('created_at', [$this->normalisedFrom() . ' 00:00:00', $this->normalisedTo() . ' 23:59:59'])
-            ->sum('total_amount');
+        $total = $inRange()->count();
+        $paid = $inRange()->whereIn(DB::raw('lower(status)'), self::PAID);
+        $value = (float) (clone $paid)->sum('total_amount');
+        $paidCount = (clone $paid)->count();
+        $cancelled = $inRange()->whereIn(DB::raw('lower(status)'), self::CANCELLED)->count();
+        $collected = (float) DB::table('booking_payments')
+            ->whereIn('booking_id', static::venueBookings()->select('id'))
+            ->whereBetween('collected_at', [$from, $to])
+            ->sum('amount');
+        $players = (clone $paid)->distinct()->count(DB::raw("coalesce(nullif(guest_phone, ''), user_id)"));
 
-        $bookingCount = Booking::where('booking_type', 'venue')
-            ->whereBetween('created_at', [$this->normalisedFrom() . ' 00:00:00', $this->normalisedTo() . ' 23:59:59'])
-            ->count();
-
-        return [
-            'gross_revenue' => '₹' . number_format($totalRevenue > 0 ? $totalRevenue : 1845200),
-            'total_bookings' => number_format($bookingCount > 0 ? $bookingCount : 1240),
-            'avg_utilization' => '82.4%',
-            'player_retention' => '74.2%',
-            'scheduled_jobs' => 3,
-            'venues_monitored' => $venueCount > 0 ? $venueCount : 8,
-            'courts_monitored' => $courtCount > 0 ? $courtCount : 28,
-        ];
+        return [[
+            'title' => 'In this range',
+            'window' => date('j M Y', strtotime($from)) . ' – ' . date('j M Y', strtotime($to)),
+            'stats' => [
+                ['label' => 'Bookings made', 'value' => number_format($total), 'sub' => number_format($paidCount) . ' paid or confirmed'],
+                ['label' => 'Booked value', 'value' => self::inr($value)],
+                ['label' => 'Collected', 'value' => self::inr($collected), 'sub' => 'payment ledger, net of refunds'],
+                ['label' => 'Cancelled', 'value' => self::pct($cancelled, $total), 'sub' => number_format($cancelled) . ' of ' . number_format($total)],
+                ['label' => 'Players', 'value' => number_format($players)],
+            ],
+        ]];
     }
 
-    public function getReportCategories(): array
-    {
-        return [
-            [
-                'id' => 'revenue',
-                'title' => 'Executive Revenue & Settlement Ledger',
-                'description' => 'Gross turn-over, GST liabilities (18%), partner net payouts, refund clawbacks, and gateway fee splits.',
-                'frequency' => 'Daily / Weekly / Monthly',
-                'icon' => 'currency-rupee',
-                'last_generated' => 'Today, 06:00 IST',
-                'records' => '1,420 rows',
-            ],
-            [
-                'id' => 'venue_occupancy',
-                'title' => 'Venue & Court Utilization Matrix',
-                'description' => 'Peak vs non-peak hourly distributions, dark court-hours, maintenance downtime, and slot yield efficiency.',
-                'frequency' => 'Weekly',
-                'icon' => 'chart-bar',
-                'last_generated' => 'Yesterday, 23:59 IST',
-                'records' => '896 rows',
-            ],
-            [
-                'id' => 'player_retention',
-                'title' => 'Player Cohorts & Customer Retention',
-                'description' => 'New vs repeat players, churn risk scores, booking frequency, average spend per player, and loyalty tiers.',
-                'frequency' => 'Monthly',
-                'icon' => 'user-group',
-                'last_generated' => '1st of this month',
-                'records' => '3,140 players',
-            ],
-            [
-                'id' => 'shifts_audit',
-                'title' => 'Shift Reconciliation & Cash Drawer Audit',
-                'description' => 'Front-desk shift logs, counter POS collections, cash variance discrepancies, and staff attendance correlation.',
-                'frequency' => 'Per Shift / Daily',
-                'icon' => 'scale',
-                'last_generated' => 'Today, 14:00 IST',
-                'records' => '142 shifts',
-            ],
-        ];
-    }
-
+    /** Rows the CSV will contain for the chosen range. */
     public function rowCount(): int
     {
-        return count(BookingReport::rows((int) auth()->id(), $this->normalisedFrom(), $this->normalisedTo()));
+        return count(BookingReport::rows(static::partnerId(), $this->normalisedFrom(), $this->normalisedTo()));
     }
 
     public function download(): StreamedResponse
     {
         $from = $this->normalisedFrom();
         $to = $this->normalisedTo();
-        $csv = BookingReport::csv((int) auth()->id(), $from, $to);
-
-        Notification::make()
-            ->title('Report Exported')
-            ->body("Report for {$from} to {$to} generated successfully.")
-            ->success()
-            ->send();
+        // Partner console: the owner's bookings (staff resolve to their owner).
+        // /control: every venue booking.
+        $csv = BookingReport::csv(static::partnerId(), $from, $to);
 
         return response()->streamDownload(
             fn () => print ($csv),
-            "gamehub_report_{$this->selectedReport}_{$from}_to_{$to}.csv",
+            "haraan_bookings_{$from}_to_{$to}.csv",
             ['Content-Type' => 'text/csv'],
         );
-    }
-
-    public function scheduleReport(): void
-    {
-        Notification::make()
-            ->title('Automated Report Scheduled')
-            ->body("The {$this->selectedReport} report has been added to the automated morning dispatch at 06:00 IST.")
-            ->success()
-            ->send();
     }
 
     private function normalisedFrom(): string

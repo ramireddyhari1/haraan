@@ -4,63 +4,96 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\GameHub\Pages;
 
+use App\Filament\Clusters\GameHub\Concerns\SummarisesVenues;
 use App\Filament\Clusters\GameHub\GameHubCluster;
+use App\Models\MessageLog;
 use BackedEnum;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Enterprise Automated Operations Notifications:
- * Instant WhatsApp slot confirmations with QR passes, match start reminders,
- * rain/weather alerts, waitlist releases, and staff shift summaries.
+ * What the platform actually tried to send (WhatsApp, SMS, email, push) and
+ * what happened to it — read from message_log, which records every attempt,
+ * including the ones that never left because a channel was off or unset.
+ * That's the useful part: a quiet week of failed tickets shows up here.
  */
 class GameHubNotifications extends Page
 {
+    use SummarisesVenues;
+
     protected static ?string $cluster = GameHubCluster::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-bell-alert';
 
-    protected static ?string $title = 'Operational Notifications';
+    protected static ?string $title = 'Messages sent';
 
     protected static ?string $navigationLabel = 'Notifications';
 
     protected static ?int $navigationSort = 13;
 
-    protected string $view = 'filament.clusters.game-hub.notifications';
+    protected string $view = 'filament.clusters.game-hub.summary-page';
+
+    private const CHANNEL_NAMES = ['whatsapp' => 'WhatsApp', 'sms' => 'SMS', 'email' => 'Email', 'push' => 'App push', 'fcm' => 'App push', 'instagram' => 'Instagram'];
 
     public static function canAccess(): bool
     {
         return auth()->user()?->canManage('gamehub') ?? false;
     }
 
-    public function getTelemetry(): array
+    private function logs(): Builder
     {
-        return [
-            'total_sent_today' => '2,450',
-            'delivery_rate' => '99.8%',
-            'avg_latency' => '1.2s',
-            'failed_count' => 5,
-            'channels' => [
-                ['name' => 'WhatsApp Business API', 'pct' => 64, 'volume' => '1,568 alerts', 'color' => '#10b981'],
-                ['name' => 'Transactional SMS', 'pct' => 24, 'volume' => '588 alerts', 'color' => '#059669'],
-                ['name' => 'Mobile App Push (FCM)', 'pct' => 12, 'volume' => '294 alerts', 'color' => '#0d9488'],
-            ],
-            'templates' => [
-                ['title' => 'Instant QR Slot Pass', 'channel' => 'WhatsApp', 'trigger' => 'Post-Payment Confirmation', 'deliverability' => '99.9%', 'status' => 'Active'],
-                ['title' => '2h Pre-Match Reminder', 'channel' => 'Push + SMS', 'trigger' => 'T-120 mins before slot', 'deliverability' => '99.7%', 'status' => 'Active'],
-                ['title' => 'Waitlist Slot Claim Alert', 'channel' => 'WhatsApp Priority', 'trigger' => 'Cancellation Event', 'deliverability' => '100%', 'status' => 'Active'],
-                ['title' => 'Rain Check Reschedule', 'channel' => 'SMS Broadcast', 'trigger' => 'Weather Alert', 'deliverability' => '99.5%', 'status' => 'Active'],
-                ['title' => 'Shift Balance Summary', 'channel' => 'Email + WhatsApp', 'trigger' => 'Shift Close-out', 'deliverability' => '100%', 'status' => 'Active'],
-            ],
-        ];
+        $q = MessageLog::query()->where('created_at', '>=', now()->subDays(7));
+
+        return ($id = static::partnerId()) !== null ? $q->where('partner_id', $id) : $q;
     }
 
-    public function testBroadcast(): void
+    public function getPanels(): array
     {
-        Notification::make()
-            ->title('Test Notification Sent')
-            ->body('Gateway ping successful across WhatsApp, SMS, and FCM channels.')
-            ->success()
-            ->send();
+        $out = fn () => $this->logs()->where('direction', '!=', 'in');
+
+        $sent = $out()->where('status', MessageLog::STATUS_SENT)->count();
+        $failed = $out()->where('status', MessageLog::STATUS_FAILED)->count();
+        $notSent = $out()->whereIn('status', [MessageLog::STATUS_DISABLED, MessageLog::STATUS_UNCONFIGURED, MessageLog::STATUS_UNROUTABLE])->count();
+        $received = $this->logs()->where('status', MessageLog::STATUS_RECEIVED)->count();
+        $attempts = $sent + $failed + $notSent;
+
+        $byChannel = $out()->where('status', MessageLog::STATUS_SENT)
+            ->selectRaw('lower(channel) as c, COUNT(*) as n')
+            ->groupBy('c')
+            ->pluck('n', 'c')
+            ->mapWithKeys(fn ($n, $c) => [self::CHANNEL_NAMES[$c] ?? ucfirst((string) $c) => (int) $n])
+            ->all();
+
+        $problems = $out()
+            ->whereIn('status', [MessageLog::STATUS_FAILED, MessageLog::STATUS_DISABLED, MessageLog::STATUS_UNCONFIGURED, MessageLog::STATUS_UNROUTABLE])
+            ->latest()
+            ->limit(5)
+            ->get();
+
+        return [[
+            'title' => 'Messages',
+            'window' => 'Last 7 days',
+            'stats' => [
+                ['label' => 'Delivered to provider', 'value' => number_format($sent), 'sub' => self::pct($sent, $attempts) . ' of attempts'],
+                ['label' => 'Failed', 'value' => number_format($failed), 'sub' => 'rejected by the provider', 'tone' => $failed > 0 ? 'warn' : null],
+                ['label' => 'Never sent', 'value' => number_format($notSent), 'sub' => 'channel off, not set up, or bad number', 'tone' => $notSent > 0 ? 'warn' : null],
+                ['label' => 'Replies in', 'value' => number_format($received)],
+            ],
+            'split' => ['label' => 'Delivered, by channel', 'parts' => self::parts($byChannel, money: false)],
+            'list' => [
+                'title' => 'Latest that didn\'t go out',
+                'rows' => $problems->map(fn (MessageLog $m): array => [
+                    'primary' => str((string) ($m->template_key ?: $m->category ?: 'message'))->replace(['_', '.'], ' ')->ucfirst()->toString(),
+                    'secondary' => collect([
+                        self::CHANNEL_NAMES[strtolower((string) $m->channel)] ?? $m->channel,
+                        // Only the tail of the number — enough to recognise, not to copy.
+                        $m->recipient ? '…' . substr(preg_replace('/\D/', '', (string) $m->recipient) ?: (string) $m->recipient, -4) : null,
+                        $m->error ? str((string) $m->error)->limit(60)->toString() : $m->status,
+                    ])->filter()->join(' · '),
+                    'trailing' => $m->created_at?->diffForHumans(short: true) ?? '',
+                ])->all(),
+                'empty' => 'Every message in the last 7 days went out.',
+            ],
+        ]];
     }
 }

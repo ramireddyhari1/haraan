@@ -4,66 +4,92 @@ declare(strict_types=1);
 
 namespace App\Filament\Clusters\GameHub\Pages;
 
+use App\Filament\Clusters\GameHub\Concerns\SummarisesVenues;
 use App\Filament\Clusters\GameHub\GameHubCluster;
+use App\Models\MemberSubscription;
 use App\Models\User;
 use BackedEnum;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Enterprise Members & Players Operations Center:
- * Player tiers (Elite, Pro, Casual), active season passes,
- * lifetime loyalty points, and attendance frequency tracking.
+ * The people who play at the venues: how many, how many come back, who's new,
+ * and the regulars ranked by what they've actually spent. A player is a phone
+ * number for desk walk-ins (they have no account) and an account otherwise.
  */
 class GameHubMembers extends Page
 {
+    use SummarisesVenues;
+
     protected static ?string $cluster = GameHubCluster::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-user-group';
 
-    protected static ?string $title = 'Members & Players';
+    protected static ?string $title = 'Players';
 
     protected static ?string $navigationLabel = 'Members & players';
 
     protected static ?int $navigationSort = 9;
 
-    protected string $view = 'filament.clusters.game-hub.members';
+    protected string $view = 'filament.clusters.game-hub.summary-page';
 
     public static function canAccess(): bool
     {
         return auth()->user()?->canManage('gamehub') ?? false;
     }
 
-    public function getTelemetry(): array
+    public function getPanels(): array
     {
-        $userCount = User::count();
+        // Walk-ins are booked under the owner's account, so the guest phone is
+        // the better identity whenever there is one.
+        $who = "coalesce(nullif(guest_phone, ''), 'u' || user_id)";
+        $since = now()->subDays(90);
+        $live = fn () => static::venueBookings()
+            ->whereNotIn(DB::raw('lower(status)'), [...self::CANCELLED, 'expired'])
+            ->where('created_at', '>=', $since);
 
-        return [
-            'total_players' => $userCount > 0 ? $userCount : 4820,
-            'active_members' => 1240,
-            'passholders' => 380,
-            'loyalty_points' => '1,84,500 pts',
-            'tiers' => [
-                ['name' => 'Elite Pass', 'count' => 380, 'pct' => 8, 'color' => '#10b981'],
-                ['name' => 'Pro Squad', 'count' => 1060, 'pct' => 22, 'color' => '#059669'],
-                ['name' => 'Casual Walk-In', 'count' => 3380, 'pct' => 70, 'color' => '#64748b'],
-            ],
-            'top_players' => [
-                ['name' => 'Rohan Varma', 'phone' => '+91 98840 12345', 'tier' => 'Elite Pass', 'matches' => 46, 'hours' => '92 hrs', 'spent' => '₹42,800', 'points' => '4,280'],
-                ['name' => 'Aditya Reddy', 'phone' => '+91 97110 54321', 'tier' => 'Pro Squad', 'matches' => 38, 'hours' => '76 hrs', 'spent' => '₹34,500', 'points' => '3,450'],
-                ['name' => 'Kiran Rao', 'phone' => '+91 99401 88776', 'tier' => 'Elite Pass', 'matches' => 35, 'hours' => '70 hrs', 'spent' => '₹31,900', 'points' => '3,190'],
-                ['name' => 'Siddharth Nair', 'phone' => '+91 98450 33221', 'tier' => 'Pro Squad', 'matches' => 29, 'hours' => '58 hrs', 'spent' => '₹26,400', 'points' => '2,640'],
-                ['name' => 'Manoj Kumar', 'phone' => '+91 96001 99882', 'tier' => 'Casual Walk-In', 'matches' => 24, 'hours' => '48 hrs', 'spent' => '₹21,600', 'points' => '2,160'],
-            ],
+        $perPlayer = $live()
+            ->selectRaw("{$who} as who, COUNT(*) as n, MIN(created_at) as first_at, SUM(total_amount) as spent, MAX(user_id) as uid, MAX(guest_name) as gname")
+            ->groupBy('who')
+            ->get();
+
+        $players = $perPlayer->count();
+        $repeat = $perPlayer->where('n', '>=', 2)->count();
+        $firstSeen = static::venueBookings()
+            ->selectRaw("{$who} as who, MIN(created_at) as first_at")
+            ->groupBy('who')
+            ->pluck('first_at', 'who');
+        $new = $perPlayer->filter(fn ($p) => ($firstSeen[$p->who] ?? null) >= now()->subDays(30)->toDateTimeString())->count();
+
+        $top = $perPlayer->sortByDesc('spent')->take(5);
+        $names = User::whereIn('id', $top->pluck('uid')->filter())->pluck('name', 'id');
+
+        $stats = [
+            ['label' => 'Players', 'value' => number_format($players), 'sub' => 'booked in the last 90 days'],
+            ['label' => 'Came back', 'value' => self::pct($repeat, $players), 'sub' => number_format($repeat) . ' booked twice or more'],
+            ['label' => 'New', 'value' => number_format($new), 'sub' => 'first booking in the last 30 days'],
         ];
-    }
 
-    public function creditPoints(): void
-    {
-        Notification::make()
-            ->title('Loyalty Points Credited')
-            ->body('Bonus 500 loyalty points issued to top active players.')
-            ->success()
-            ->send();
+        // Haraan memberships are an app-wide product — only meaningful in /control.
+        if (! static::inPartnerConsole()) {
+            $stats[] = ['label' => 'Pro & Hero members', 'value' => number_format(
+                MemberSubscription::where('status', MemberSubscription::STATUS_ACTIVE)->count()
+            ), 'sub' => 'active paid memberships'];
+        }
+
+        return [[
+            'title' => 'Players',
+            'window' => 'Last 90 days',
+            'stats' => $stats,
+            'list' => [
+                'title' => 'Regulars by spend',
+                'rows' => $top->map(fn ($p): array => [
+                    'primary' => $p->gname ?: ($names[$p->uid] ?? 'Player'),
+                    'secondary' => number_format((int) $p->n) . ' ' . str('booking')->plural((int) $p->n),
+                    'trailing' => self::inr((float) $p->spent),
+                ])->values()->all(),
+                'empty' => 'No bookings in the last 90 days.',
+            ],
+        ]];
     }
 }

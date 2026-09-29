@@ -16,15 +16,22 @@ use App\Models\Venue;
 class BookingReport
 {
     /** @return array<int, array<string, string>> */
-    public static function rows(int $partnerId, string $from, string $to, string $by = 'booked'): array
+    public static function rows(?int $partnerId, string $from, string $to, string $by = 'booked'): array
     {
-        $eventIds = Event::query()->where('partner_id', $partnerId)->pluck('id');
-        $venueIds = Venue::query()->where('partner_id', $partnerId)->pluck('id');
+        $bookings = Booking::query();
 
-        $bookings = Booking::query()
-            ->where(function ($q) use ($eventIds, $venueIds): void {
+        if ($partnerId === null) {
+            // The platform view (/control GameHub reports): every venue booking.
+            $bookings->where('booking_type', 'venue');
+        } else {
+            $eventIds = Event::query()->where('partner_id', $partnerId)->pluck('id');
+            $venueIds = Venue::query()->where('partner_id', $partnerId)->pluck('id');
+            $bookings->where(function ($q) use ($eventIds, $venueIds): void {
                 $q->whereIn('event_id', $eventIds)->orWhereIn('venue_id', $venueIds);
-            })
+            });
+        }
+
+        $bookings = $bookings
             // 'booked' = when the booking was made; 'played' = the date it is for (slot_date).
             ->whereDate($by === 'played' ? 'slot_date' : 'created_at', '>=', $from)
             ->whereDate($by === 'played' ? 'slot_date' : 'created_at', '<=', $to)
@@ -64,7 +71,7 @@ class BookingReport
     }
 
     /** Render the report as a CSV string. */
-    public static function csv(int $partnerId, string $from, string $to, string $by = 'booked'): string
+    public static function csv(?int $partnerId, string $from, string $to, string $by = 'booked'): string
     {
         $out = fopen('php://temp', 'r+');
         fputcsv($out, self::headers());
