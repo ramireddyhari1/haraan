@@ -338,6 +338,7 @@ a {
 	#mobileNavBackdrop,
 	.mobile-nav__close,
 	.app-greet,
+	.topbar__hint,
 	.mobile-action-btn {
 		display: none !important;
 	}

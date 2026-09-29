@@ -37,14 +37,7 @@
          white feed), the brand, one TRUE line about what follows, and a real
          action. The line is only claimed when there are curated picks to back it —
          `for_you` is an admin-set placement, so "hand-picked" is a fact, not copy. --}}
-    <section class="mband">
-        <span class="mband__rule" aria-hidden="true"></span>
-        <span class="mband__glow" aria-hidden="true"></span>
-        <span class="mband__brand">
-            <img src="{{ asset('images/haraan-logo-white.png') }}" alt="Haraan">
-            <span class="mband__tag">Special</span>
-        </span>
-    </section>
+    @include('site.partials.mband')
 
     {{-- The app's feed opens with the sponsored slot (AdSpaceBanner), NOT a greeting —
          the header already says hello, and a second "Hello 👋 / Discover in <city>" was

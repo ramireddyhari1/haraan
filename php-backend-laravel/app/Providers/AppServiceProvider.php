@@ -13,6 +13,7 @@ use Filament\Resources\Pages\CreateRecord;
 use Filament\Tables\Table;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
@@ -72,8 +73,40 @@ class AppServiceProvider extends ServiceProvider
             $view->with([
                 'headerSupportUnread' => $user ? app(SupportChat::class)->unreadFor($user) : 0,
                 'headerBellUnread'    => $user ? $this->unreadNotifications($user) : 0,
+                'headerSearchHints'   => $this->searchHints(),
             ]);
         });
+    }
+
+    /**
+     * Names the mobile search field cycles through ("Search for 'Gaurav Gupta Live'").
+     * Only real, bookable things: upcoming published events, soonest first.
+     * Cached briefly because it runs on every page that renders the header. An empty
+     * list means the field keeps its plain placeholder, never an invented example.
+     *
+     * @return list<string>
+     */
+    private function searchHints(): array
+    {
+        try {
+            return Cache::remember('site:search-hints', now()->addMinutes(10), function (): array {
+                $events = Event::query()
+                    ->whereRaw('lower(status) = ?', ['published'])
+                    ->notFinished()
+                    ->orderBy('date')
+                    ->limit(4)
+                    ->pluck('title');
+
+                return $events
+                    ->map(fn ($name): string => trim((string) $name))
+                    ->filter(fn (string $name): bool => $name !== '' && mb_strlen($name) <= 60)
+                    ->unique()
+                    ->values()
+                    ->all();
+            });
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**

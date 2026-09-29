@@ -136,21 +136,31 @@
     html { font-size: 15px; }
     body { font-size: 15px; }
 
-    /* --- HEADER / TOPBAR --- */
-    /* --- HEADER / TOPBAR --- */
+    /* --- HEADER / TOPBAR ------------------------------------------------------
+       The header behaves like a native app bar instead of a pinned slab: the
+       greeting row scrolls away with the page and the search + Events/Pulse
+       switch stay pinned. That is plain `position: sticky` with a NEGATIVE top
+       equal to the greeting row's footprint — the compositor does it, so there is
+       no scroll JS, no height animation and no scroll-anchoring jump.
+         footprint = padding-top 10 + greeting 40 + row-gap 10 = 60
+         top: -52px  → 8px of air stays above the pinned search field.
+       If you change any of those three numbers, change --topbar-tuck with them. */
     .topbar {
-        padding: 10px 0 8px;
+        --topbar-tuck: -52px;
+        padding: 10px 0 10px;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
         position: sticky;
-        top: 0;
+        top: var(--topbar-tuck);
         z-index: 100;
         background: #ffffff;
-        border-bottom: 1px solid #e2e8f0;
-        transition: box-shadow 180ms ease, border-color 180ms ease;
+        border-bottom: 1px solid transparent;
+        transition: box-shadow 200ms ease, border-color 200ms ease;
     }
-    /* Subtle elevation on scroll */
+    /* Pinned state: a hairline + a soft, short shadow — the bar lifts off the feed. */
     .topbar.is-scrolled {
-        border-bottom-color: rgba(226, 232, 240, 0.8);
-        box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
+        border-bottom-color: rgba(226, 232, 240, 0.9);
+        box-shadow: 0 6px 14px -10px rgba(15, 23, 42, 0.18);
     }
     .topbar__inner {
         display: grid;
@@ -161,21 +171,44 @@
             "search"
             "buttons";
         align-items: center;
-        row-gap: 9px;
-        padding: 2px 0 2px;
+        row-gap: 10px;
+        padding: 0;
+    }
+    /* Every header control: no grey tap flash, no 300ms double-tap wait. */
+    .topbar a,
+    .topbar button,
+    .topbar input {
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
     }
 
-    /* --- APP-MATCHED GREETING HEADER ---------------------------------------
-       Refined 42px avatar with crisp border ring, personalized greeting with tight
-       letterspacing, sleek location trigger, and harmonized 36px icon buttons. */
+    /* --- GREETING ROW (the app's GreetingHeader) ------------------------------
+       Icons are bare glyphs on 40px round hit areas, like a native toolbar.
+       The earlier bordered grey squircles made three buttons look like three
+       form fields. Presses are fast in (70ms) and slow out (240ms) — that
+       asymmetry is what makes a tap feel like it landed. */
     .app-greet {
         grid-area: greet;
         justify-self: stretch;
         width: 100%;
+        height: 40px;
         display: flex;
         align-items: center;
-        gap: 11px;
+        gap: 10px;
         min-width: 0;
+    }
+    /* The greeting fades as it tucks under the top edge, instead of being
+       guillotined. Scroll-driven, so it runs on the compositor; browsers without
+       scroll timelines just see it slide away. */
+    @supports (animation-timeline: scroll()) {
+        .topbar .app-greet {
+            animation: greet-tuck linear both;
+            animation-timeline: scroll(root block);
+            animation-range: 0 52px;
+        }
+        @keyframes greet-tuck {
+            to { opacity: 0; transform: translateY(-6px) scale(0.98); }
+        }
     }
 
     /* The old desktop pill and account actions are hidden on mobile */
@@ -184,27 +217,29 @@
 
     .app-greet__avatar {
         position: relative;
-        width: 42px;
-        height: 42px;
+        width: 40px;
+        height: 40px;
         flex-shrink: 0;
         border-radius: 50%;
-        background: #f1f5f9;
-        border: 2px solid #ffffff;
-        box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08), 0 2px 5px rgba(15, 23, 42, 0.06);
+        background: #EEF2F7;
+        /* White gap + hairline ring: reads as a photo mounted on the page. */
+        box-shadow: 0 0 0 2px #ffffff, 0 0 0 3px #E2E8F0;
+        margin-left: 1px;
         display: flex;
         align-items: center;
         justify-content: center;
         overflow: hidden;
         text-decoration: none;
-        transition: transform 0.15s ease;
+        transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
     .app-greet__avatar:active {
-        transform: scale(0.96);
+        transform: scale(0.93);
+        transition-duration: 70ms;
     }
     .app-greet__initial {
-        font-size: 17px;
+        font-size: 16px;
         font-weight: 700;
-        color: #0f172a;
+        color: #1E3A8A;
         line-height: 1;
     }
     /* Guest / named-less fallback */
@@ -224,14 +259,14 @@
         display: flex;
         flex-direction: column;
         justify-content: center;
-        gap: 2px;
+        gap: 1px;
     }
     .app-greet__hey {
-        font-size: 16.5px;
-        font-weight: 750;
-        letter-spacing: -0.025em;
-        line-height: 1.25;
-        color: #0f172a;
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: -0.022em;
+        line-height: 1.22;
+        color: #0F172A;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -241,66 +276,69 @@
         align-items: center;
         align-self: flex-start;
         max-width: 100%;
-        gap: 3.5px;
-        color: #64748b;
+        gap: 3px;
+        margin-left: -1px;
+        padding: 1px 0;
+        color: #475569;
         text-decoration: none;
-        transition: color 0.15s ease;
+        transition: opacity 240ms ease;
     }
     .app-greet__loc:active {
-        color: #0f172a;
+        opacity: 0.55;
+        transition-duration: 70ms;
     }
     .app-greet__pin {
-        color: #64748b;
+        color: #2563EB;
         flex-shrink: 0;
     }
     .app-greet__loc-text {
-        font-size: 12.5px;
-        font-weight: 500;
+        font-size: 13px;
+        font-weight: 600;
         line-height: 1.2;
-        max-width: 160px;
+        max-width: 170px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
     .app-greet__chevron {
-        color: #94a3b8;
+        color: #94A3B8;
         flex-shrink: 0;
+        margin-top: 1px;
     }
 
-    /* Harmonized Utility Icons */
     .app-greet__icons {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 0;
+        margin-right: -8px; /* optical: the glyph, not its hit area, meets the 16px edge */
         flex-shrink: 0;
     }
     .app-greet__icon {
         position: relative;
-        width: 36px;
-        height: 36px;
-        border-radius: 10px;
-        background: #f8fafc;
-        border: 1px solid rgba(226, 232, 240, 0.85);
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: #334155;
+        color: #0F172A;
         text-decoration: none;
-        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        transition: background-color 240ms ease, transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
+    .app-greet__icon svg { width: 22px; height: 22px; stroke-width: 1.7; }
     .app-greet__icon:active {
-        background: #f1f5f9;
-        border-color: #cbd5e1;
-        transform: scale(0.96);
+        background-color: rgba(15, 23, 42, 0.07);
+        transform: scale(0.9);
+        transition-duration: 70ms;
     }
     .app-greet__dot {
         position: absolute;
-        top: 5px;
-        right: 5px;
-        width: 7px;
-        height: 7px;
+        top: 8px;
+        right: 8px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
-        background: #ef4444;
+        background: #EF4444;
         box-shadow: 0 0 0 2px #ffffff;
     }
 
@@ -323,104 +361,187 @@
     }
     .brand__text { display: none; }
 
-    /* Redesigned Search Bar: modern 12px squircle, soft recessed tone, crisp 1px border */
+    /* --- SEARCH -------------------------------------------------------------
+       A white field that sits ON the page (hairline + a short contact shadow),
+       not a grey recess punched into it. The rotating hint names things that
+       are really on sale ("Search for ‘Gaurav Gupta Live’") — see
+       AppServiceProvider::searchHints and the roller in site.js. */
     .topbar__search {
         grid-area: search;
+        position: relative;
         display: flex;
         align-items: center;
-        gap: 9px;
-        min-height: 42px;
-        background: #f8fafc;
-        border-radius: 12px;
-        padding: 0 12px;
-        border: 1px solid #e2e8f0;
-        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.02);
+        gap: 10px;
+        min-height: 46px;
+        background: #ffffff;
+        border-radius: 14px;
+        padding: 0 14px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px -8px rgba(15, 23, 42, 0.12);
         width: 100%;
         max-width: none;
         z-index: 8;
         margin-top: 0;
-        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        transition: border-color 180ms ease, box-shadow 180ms ease, transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .topbar__search:active:not(:focus-within) {
+        transform: scale(0.985);
+        transition-duration: 70ms;
     }
     .topbar__search:focus-within {
-        background: #ffffff;
-        border-color: #2563eb;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+        border-color: #2563EB;
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
     }
     .topbar__search .search-icon {
         display: flex;
         align-items: center;
-        color: #64748b;
+        color: #0F172A;
         width: 18px;
         height: 18px;
         flex-shrink: 0;
         justify-content: center;
     }
-    .topbar__search-input { 
-        font-size: 14px;
-        font-weight: 400;
-        padding: 0 2px;
+    .topbar__search-input {
+        font-size: 15px; /* ≥15px: iOS zooms the page on focus below 16px-ish */
+        font-weight: 500;
+        padding: 0;
+        height: 44px;
         flex: 1;
+        min-width: 0;
         border: none;
         background: transparent;
         outline: none;
-        color: #0f172a;
+        color: #0F172A;
         letter-spacing: -0.01em;
     }
     .topbar__search-input::placeholder {
-        color: #94a3b8;
-        font-size: 14px;
-        font-weight: 400;
+        color: #94A3B8;
+        font-size: 14.5px;
+        font-weight: 500;
+    }
+    /* With a hint, the native placeholder only appears once the field is
+       focused (the hint gets out of the way on focus). */
+    .topbar__search:has(.topbar__hint) .topbar__search-input:not(:focus)::placeholder { color: transparent; }
+
+    .topbar__search .topbar__hint {
+        position: absolute;
+        left: 42px;
+        right: 14px;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        pointer-events: none;
+        font-size: 14.5px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        color: #94A3B8;
+        white-space: nowrap;
+        overflow: hidden;
+        transition: opacity 140ms ease;
+    }
+    .topbar__search:focus-within .topbar__hint,
+    .topbar__search.has-value .topbar__hint { opacity: 0; }
+    .topbar__hint-lead { flex-shrink: 0; }
+    /* The roll window is exactly one line tall; words enter from below and leave
+       upward (site.js swaps them), like a ticker drum rather than a cross-fade. */
+    .topbar__hint-roll {
+        position: relative;
+        display: block;
+        flex: 1;
+        min-width: 0;
+        height: 20px;
+        overflow: hidden;
+    }
+    .topbar__hint-word {
+        position: absolute;
+        left: 0;
+        top: 0;
+        max-width: 100%;
+        line-height: 20px;
+        color: #64748B;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 420ms ease;
+    }
+    .topbar__hint-word.is-in   { transform: translateY(100%); opacity: 0; transition: none; }
+    .topbar__hint-word.is-out  { transform: translateY(-100%); opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+        .topbar__hint-word { transition: opacity 200ms ease !important; transform: none !important; }
     }
 
-    /* Sophisticated Segmented Control (Events / Pulse) */
+    /* --- EVENTS / PULSE SWITCH ---------------------------------------------
+       One white thumb that SLIDES between the tabs (with a touch of overshoot,
+       like a physical toggle), rather than two tabs swapping backgrounds. The
+       active tab is server-rendered (layout.blade), so the thumb is in place on
+       first paint; site.js only moves it on tap. Both labels share one weight so
+       nothing reflows when the selection changes — only the ink does. */
     .topbar .mobile-action-buttons {
         grid-area: buttons;
+        position: relative;
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 3px;
+        gap: 0;
         margin-top: 0;
         width: 100%;
-        background: #f1f5f9;
+        background: #EEF2F7;
         padding: 3px;
-        border-radius: 10px;
-        border: 1px solid rgba(226, 232, 240, 0.8);
+        border-radius: 12px;
+        border: 0;
         height: 40px;
         align-items: stretch;
+        isolation: isolate;
     }
-    .mobile-action-btn {
+    .mobile-action-thumb {
+        position: absolute;
+        z-index: 0;
+        top: 3px;
+        bottom: 3px;
+        left: 3px;
+        width: calc(50% - 3px);
+        border-radius: 9px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 3px 8px -2px rgba(15, 23, 42, 0.1);
+        transition: transform 340ms cubic-bezier(0.34, 1.32, 0.64, 1);
+        will-change: transform;
+    }
+    .mobile-action-buttons.is-right .mobile-action-thumb { transform: translateX(100%); }
+    @media (prefers-reduced-motion: reduce) {
+        .mobile-action-thumb { transition-duration: 1ms; }
+    }
+    .mobile-action-btn,
+    .mobile-action-btn.is-active,
+    .mobile-action-btn.is-active.mobile-action-btn--events,
+    .mobile-action-btn.is-active.mobile-action-btn--gamehub {
+        position: relative;
+        z-index: 1;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 0 12px;
         min-height: unset;
         height: 100%;
-        border-radius: 7px;
+        border-radius: 9px;
         border: none;
-        font-size: 13.5px;
-        font-weight: 500;
+        box-shadow: none;
+        background: transparent;
+        font-size: 14px;
+        font-weight: 600;
         letter-spacing: -0.01em;
         cursor: pointer;
         text-transform: none;
         text-decoration: none;
         text-align: center;
-        color: #64748b;
-        background: transparent;
-        transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
-        -webkit-tap-highlight-color: transparent;
+        color: #64748B;
+        transition: color 200ms ease, transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
-    .mobile-action-btn:active {
-        color: #0f172a;
-    }
-
-    /* Active Segment: clean elevated tactile white slab with subtle shadow */
     .mobile-action-btn.is-active,
     .mobile-action-btn.is-active.mobile-action-btn--events,
-    .mobile-action-btn.is-active.mobile-action-btn--gamehub {
-        background: #ffffff;
-        color: #0f172a;
-        font-weight: 600;
-        border: 0.5px solid rgba(15, 23, 42, 0.04);
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+    .mobile-action-btn.is-active.mobile-action-btn--gamehub { color: #0F172A; }
+    .mobile-action-btn:active {
+        transform: scale(0.95);
+        transition-duration: 70ms;
     }
 
     /* Hide desktop nav & hamburger */
@@ -843,71 +964,53 @@
         box-sizing: border-box;
     }
 
-    /* Centered brand lockup at the top of the feed (user-placed: between the
-       Events/GameHub tabs and "For You") — black wordmark with the blue
-       calligraphy flourish BESIDE it, dropped slightly below the baseline
-       like a signature (user: beside + a bit down, not underneath). */
-    /* Brand band — a rounded gradient card inset from the page edges, contents
-       centred (user-specified). It sits INSIDE .mhome's padding rather than
-       bleeding to the viewport: rounded corners only read as corners when there
-       is page either side of them.
-       Holds the lockup alone — the strapline and CTA were removed on request, so
-       the padding is tuned to sit the wordmark in the optical centre of the card
-       rather than leaving the hole they used to fill. */
+    /* Brand band ("Haraan · SPECIAL") — a rounded card inset from the page edges,
+       contents centred (user-specified), flat Events blue #2563EB (user's call —
+       never a colour gradient here).
+       Its one texture is the brand's own three-piece H, set large at the right and
+       cropped top and bottom, like the emblem on a membership card. It replaced a stack of
+       generic ornaments (graph-paper grid + glow + sheen + gradient rule) that
+       read as template decoration. Depth is white-only light, so the hue never
+       shifts: a top-edge highlight and one soft light from the top-left. */
     .mband {
         position: relative; overflow: hidden;
-        margin: 4px 0 10px; padding: 20px 20px 21px;
-        border-radius: 20px;
-        /* Events blue — the exact value of the Events tab pill above it (user's
-           call: keep the reworked lockup, put the brand blue back as the fill).
-           It stopped reading as an empty coloured box once the band lost ~30px of
-           height and the lockup was tightened, so the slab problem was proportion
-           and lockup, not the colour. FLAT — never reintroduce a colour gradient
-           here; it drifts off-brand. Depth comes from the overlays below. */
-        background: #2563EB;
-        /* A defined edge — premium surfaces have one; a borderless slab floats. */
+        margin: 6px 0 12px; padding: 19px 20px 20px;
+        border-radius: 18px;
+        background:
+            radial-gradient(90% 140% at 0% 0%, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 60%),
+            #2563EB;
         box-shadow:
-            inset 0 0 0 1px rgba(255, 255, 255, 0.14),
-            0 10px 24px -14px rgba(37, 99, 235, 0.55);
+            inset 0 1px 0 rgba(255, 255, 255, 0.22),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+            0 1px 2px rgba(30, 58, 138, 0.2),
+            0 12px 24px -16px rgba(37, 99, 235, 0.7);
         color: #fff;
         text-align: center;
     }
-    /* Hairline along the top edge — the same device as the mobile footer, so the
-       band belongs to the existing language. Light on the blue fill: a blue rule
-       on a blue surface is invisible. */
-    .mband__rule {
-        position: absolute; top: 0; left: 0; right: 0; height: 2px;
-        background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.30) 24%, rgba(255,255,255,0.62) 52%, rgba(255,255,255,0.30) 78%, transparent 100%);
+    .mband__mark {
+        position: absolute;
+        right: 2px;
+        top: 50%;
+        height: 92px;
+        width: auto;
+        transform: translateY(-50%);
+        fill: rgba(255, 255, 255, 0.11);
+        pointer-events: none;
     }
-    /* Line grid behind the lockup — the same device as the venue-map texture card
-       on the event page, so the pattern is part of the existing language rather
-       than a new ornament. Sized to a 26px box at 16% white — raised from 7%,
-       which was so faint the texture read as a rendering artifact rather than
-       structure. Still masked away from the centre so it never fights the
-       wordmark; the fade starts tighter now so more of the grid survives. */
-    .mband::before {
-        content: ''; position: absolute; inset: 0; pointer-events: none;
-        background-image:
-            linear-gradient(rgba(255,255,255,0.16) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.16) 1px, transparent 1px);
-        background-size: 26px 26px, 26px 26px;
-        -webkit-mask-image: radial-gradient(ellipse at 50% 50%, transparent 6%, #000 58%);
-        mask-image: radial-gradient(ellipse at 50% 50%, transparent 6%, #000 58%);
-    }
-    /* A single diagonal sheen across the top-left corner — one highlight, the way
-       a real surface catches light. */
-    .mband::after {
-        content: ''; position: absolute; inset: 0; pointer-events: none;
-        /* One diagonal sheen off the top-left, the way a real surface catches
-           light. Kept faint — on ink it only has to suggest a plane. */
-        background: linear-gradient(118deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 30%, transparent 56%);
-    }
-    /* Soft light source above the lockup so the fill isn't one dead plane. A pale
-       blue tint — white overlays lift #2563EB without shifting its hue. */
-    .mband__glow {
-        position: absolute; top: -150px; left: 50%; transform: translateX(-50%);
-        width: 340px; height: 280px; border-radius: 50%; pointer-events: none;
-        background: radial-gradient(circle, rgba(219,234,254,0.30) 0%, rgba(219,234,254,0.10) 44%, rgba(219,234,254,0) 72%);
+    /* A few pixels of parallax as the band scrolls through the viewport — the
+       emblem sits "under" the surface. Compositor-only; skipped where scroll
+       timelines or motion aren't available. */
+    @supports (animation-timeline: view()) {
+        @media (prefers-reduced-motion: no-preference) {
+            .mband__mark {
+                animation: mband-drift linear both;
+                animation-timeline: view();
+            }
+            @keyframes mband-drift {
+                from { transform: translateY(-42%); }
+                to   { transform: translateY(-58%); }
+            }
+        }
     }
     .mband__brand {
         position: relative; z-index: 1;
@@ -920,16 +1023,13 @@
        qualifier read as part of the mark instead of a sticker beside it. */
     .mband__brand::before {
         content: ''; width: 1px; height: 15px; order: 1;
-        background: linear-gradient(180deg, transparent, rgba(255,255,255,0.28), transparent);
+        background: rgba(255, 255, 255, 0.34);
     }
-    .mband__tag { order: 2; }
-    /* Tighter tracking than the old 0.3em — wide-spaced micro-caps floating in a
-       big box is exactly what read as cheap. Sized and weighted to sit as the
-       wordmark's qualifier, optically aligned to its cap height. */
     .mband__tag {
+        order: 2;
         font-size: 9.5px; font-weight: 700; line-height: 1;
         letter-spacing: 0.16em; text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.86);
+        color: rgba(255, 255, 255, 0.9);
         margin-top: 1px;
     }
 
@@ -1041,8 +1141,12 @@
         border-bottom-color: transparent;
         transition: background-color 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
     }
+    /* Solid, not the desktop's frosted --surface: with the greeting tucked under
+       the top edge, a backdrop blur smeared the poster behind it into the bar, and
+       a full-width blur re-rasterises every scroll frame on low-end phones. */
     .topbar.topbar--events.is-scrolled {
-        background: var(--surface, #fff);
+        background: #ffffff;
+        border-bottom-color: rgba(226, 232, 240, 0.9);
     }
 
     /* --- Greeting --- */

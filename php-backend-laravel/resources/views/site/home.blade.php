@@ -11,14 +11,7 @@
 @endphp
 <div class="mhome">
     {{-- Centered brand lockup at the top of the feed (matches /events). --}}
-    <section class="mband">
-        <span class="mband__rule" aria-hidden="true"></span>
-        <span class="mband__glow" aria-hidden="true"></span>
-        <span class="mband__brand">
-            <img src="{{ asset('images/haraan-logo-white.png') }}" alt="Haraan">
-            <span class="mband__tag">Special</span>
-        </span>
-    </section>
+    @include('site.partials.mband')
     <div class="mhome__greet">
         <div>
             <p class="mhome__hi">Hello 👋</p>

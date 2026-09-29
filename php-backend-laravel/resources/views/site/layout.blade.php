@@ -284,12 +284,26 @@
                     aria-expanded="false"
                     aria-controls="searchSuggest"
                 >
+                {{-- Phone-only rotating hint: "Search for 'Gaurav Gupta Live'". Names come
+                     from what is actually on sale (AppServiceProvider::searchHints), so the
+                     hint doubles as a teaser. With none, the plain placeholder stays. --}}
+                @if(!empty($headerSearchHints))
+                    <span class="topbar__hint" aria-hidden="true" data-search-hints='@json($headerSearchHints)'>
+                        <span class="topbar__hint-lead">Search for</span>
+                        <span class="topbar__hint-roll"><span class="topbar__hint-word">‘{{ $headerSearchHints[0] }}’</span></span>
+                    </span>
+                @endif
                 <div class="search-suggest" id="searchSuggest" role="listbox" hidden></div>
             </form>
 
-            <div class="mobile-action-buttons">
-                <a href="/events" class="mobile-action-btn mobile-action-btn--events">Events</a>
-                <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub">Pulse</a>
+            {{-- Active tab is rendered on the server so the thumb is already in place on
+                 the first paint (it used to be set by JS, which flashed an empty track).
+                 The thumb is one element that slides; tabs only change their ink. --}}
+            @php $onPulse = request()->is('gamehub*'); @endphp
+            <div class="mobile-action-buttons {{ $onPulse ? 'is-right' : '' }}">
+                <span class="mobile-action-thumb" aria-hidden="true"></span>
+                <a href="/events" class="mobile-action-btn mobile-action-btn--events {{ $onPulse ? '' : 'is-active' }}" @unless($onPulse) aria-current="page" @endunless>Events</a>
+                <a href="/gamehub" class="mobile-action-btn mobile-action-btn--gamehub {{ $onPulse ? 'is-active' : '' }}" @if($onPulse) aria-current="page" @endif>Pulse</a>
             </div>
 
             <nav class="topnav" aria-label="Primary">

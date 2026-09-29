@@ -21,6 +21,12 @@
     // placeholder. A logged-out visitor was getting "Hey there!" over a bogus
     // "T" avatar (first letter of "there"), which reads as unfinished.
     $gFirstName = trim(strtok(trim($gUser->name ?? ''), ' '));
+    // Names typed in caps ("HARIHARAN") or lowercase read as a shout / a typo in a
+    // greeting. Only normalise those two cases — a deliberate "McKenzie" or "DeSouza"
+    // is left exactly as the person wrote it.
+    if ($gFirstName !== '' && ($gFirstName === mb_strtoupper($gFirstName) || $gFirstName === mb_strtolower($gFirstName))) {
+        $gFirstName = mb_convert_case(mb_strtolower($gFirstName), MB_CASE_TITLE);
+    }
     $gGreeting  = $gIsGuest
         ? 'Welcome to Haraan'
         : 'Hey ' . ($gFirstName !== '' ? $gFirstName : 'there') . '!';

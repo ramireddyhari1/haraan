@@ -563,6 +563,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /* ------------------------------------------------------------------ */
+    /*  Rotating search hint ("Search for 'Gaurav Gupta Live'")            */
+    /* ------------------------------------------------------------------ */
+    // Names come from the server (real events/venues on sale). The old word rolls
+    // up and out while the next rolls in from below; paused while the tab is
+    // hidden, while the field is in use, and entirely under reduced motion.
+    const hintEl = document.querySelector('.topbar__hint[data-search-hints]');
+    if (hintEl) {
+        const hintForm  = hintEl.closest('.topbar__search');
+        const hintInput = hintForm ? hintForm.querySelector('.topbar__search-input') : null;
+        const hintRoll  = hintEl.querySelector('.topbar__hint-roll');
+        let hints = [];
+        try { hints = JSON.parse(hintEl.dataset.searchHints || '[]'); } catch (e) { hints = []; }
+        const syncValue = () => hintForm && hintForm.classList.toggle('has-value', !!(hintInput && hintInput.value));
+        if (hintInput) { hintInput.addEventListener('input', syncValue); syncValue(); }
+
+        const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (hints.length > 1 && hintRoll && !still) {
+            let i = 0;
+            setInterval(() => {
+                if (document.hidden || (hintForm && hintForm.matches(':focus-within, .has-value'))) return;
+                const current = hintRoll.querySelector('.topbar__hint-word:not(.is-out)');
+                i = (i + 1) % hints.length;
+                const next = document.createElement('span');
+                next.className = 'topbar__hint-word is-in';
+                next.textContent = '‘' + hints[i] + '’';
+                hintRoll.appendChild(next);
+                next.getBoundingClientRect(); // commit the start position before animating
+                next.classList.remove('is-in');
+                if (current) {
+                    current.classList.add('is-out');
+                    setTimeout(() => current.remove(), 450);
+                }
+            }, 2800);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  Header search autocomplete (live suggestions)                      */
     /* ------------------------------------------------------------------ */
     const searchForm  = document.querySelector('.topbar__search');
@@ -672,8 +709,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // next page loads (no preventDefault, so no slide-then-flash double action).
         mobileActionBtns.forEach(btn => {
             btn.addEventListener('click', () => {
+                if (btn.classList.contains('is-active')) return;
                 mobileActionBtns.forEach(b => b.classList.remove('is-active'));
                 btn.classList.add('is-active');
+                mobileActionWrap.classList.toggle('is-right', btn.classList.contains('mobile-action-btn--gamehub'));
+                // A short tick where the platform supports it (Android Chrome), so the
+                // switch lands like the app's. Silently absent on iOS.
+                try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) { /* ignore */ }
             });
         });
         // Ensure initial body mode reflects the active button on load
