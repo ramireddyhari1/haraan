@@ -4,73 +4,81 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\VenueBookings\Widgets;
 
+use App\Filament\Widgets\ListSummaryWidget;
 use App\Models\Booking;
-use Carbon\Carbon;
-use Filament\Widgets\Widget;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Enterprise Venue Bookings & Payments Executive Command Hero:
- * Funnel analytics, conversion & cancellation rates, coupon metrics,
- * payment rail split (UPI, Cards, NetBanking, Cash), and 7-day revenue forecast.
+ * Venue bookings list summary: the last 30 days as recorded, money as the
+ * payment ledger saw it (an advance is what was collected, not the invoice),
+ * and the slots already booked for the coming week.
  */
-class VenueBookingsExecutiveHeroWidget extends Widget
+class VenueBookingsExecutiveHeroWidget extends ListSummaryWidget
 {
-    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+    private const METHOD_NAMES = ['cash' => 'Cash', 'upi' => 'UPI', 'card' => 'Card', 'razorpay' => 'Online (Razorpay)', 'online' => 'Online'];
 
-    use \App\Filament\Concerns\RefreshesOnContentUpdate;
-
-    protected string $view = 'filament.resources.venue-bookings.widgets.venue-bookings-executive-hero';
-
-    protected int | string | array $columnSpan = 'full';
-
-    protected static bool $isLazy = false;
-
-    public function getTelemetry(): array
+    public function getSummary(): array
     {
-        $base = fn () => Booking::where('booking_type', 'venue');
+        $since = now()->subDays(30);
+        $venue = fn () => Booking::query()->where('booking_type', 'venue');
+        $recent = fn () => $venue()->where('created_at', '>=', $since);
 
-        $totalCount = $base()->count();
-        $paidCount = $base()->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed', 'checked_in'])->count();
-        $cancelledCount = $base()->whereIn(DB::raw('lower(status)'), ['cancelled', 'canceled', 'refunded'])->count();
+        $total = $recent()->count();
+        $paid = $recent()->whereIn(DB::raw('lower(status)'), self::PAID)->count();
+        $cancelled = $recent()->whereIn(DB::raw('lower(status)'), self::CANCELLED)->count();
 
-        $conversionRate = $totalCount > 0 ? round(($paidCount / max(1, $totalCount)) * 100, 1) : 92.4;
-        $cancellationRate = $totalCount > 0 ? round(($cancelledCount / max(1, $totalCount)) * 100, 1) : 2.1;
+        $byMethod = DB::table('booking_payments')
+            ->whereIn('booking_id', $venue()->select('id'))
+            ->where('collected_at', '>=', $since)
+            ->where('amount', '>', 0)
+            ->selectRaw('lower(method) as m, SUM(amount) as total')
+            ->groupBy('m')
+            ->pluck('total', 'm');
+        $collected = (float) $byMethod->sum();
 
-        $dbGmv = (float) $base()->whereIn(DB::raw('lower(status)'), ['confirmed', 'paid', 'completed'])->sum('total_amount');
-        $gmv = $dbGmv > 0 ? $dbGmv : 842000.00;
+        $withCoupon = $recent()->whereNotNull('coupon_code')->where('coupon_code', '!=', '');
+        $couponUses = (clone $withCoupon)->count();
+        $couponOff = (float) (clone $withCoupon)->sum('discount');
+
+        $rows = [];
+        $today = Carbon::today();
+        $ahead = $venue()
+            ->whereNotIn(DB::raw('lower(status)'), [...self::CANCELLED, 'expired'])
+            ->whereBetween('slot_date', [$today->toDateString(), $today->copy()->addDays(6)->toDateString()])
+            ->selectRaw('date(slot_date) as d, COUNT(*) as n')
+            ->groupBy('d')
+            ->pluck('n', 'd');
+        foreach (range(0, 6) as $i) {
+            $day = $today->copy()->addDays($i);
+            $n = (int) ($ahead[$day->toDateString()] ?? 0);
+            $rows[] = [
+                'primary' => $i === 0 ? 'Today' : ($i === 1 ? 'Tomorrow' : $day->format('l')),
+                'secondary' => $day->format('j M'),
+                'trailing' => $n === 0 ? 'none yet' : number_format($n) . ' ' . str('slot')->plural($n),
+            ];
+        }
 
         return [
-            'total_bookings' => $totalCount > 0 ? $totalCount : 1420,
-            'paid_bookings' => $paidCount > 0 ? $paidCount : 1312,
-            'conversion_rate' => $conversionRate . '%',
-            'conversion_sub' => '+3.2% vs last month',
-            'cancellation_rate' => $cancellationRate . '%',
-            'cancellation_count' => $cancelledCount > 0 ? $cancelledCount : 18,
-            'refunded_amount' => '₹18,400 total refunds',
-            'gmv' => '₹' . number_format($gmv),
-            'funnel' => [
-                'views' => 14280,
-                'cart' => 3840,
-                'checkout' => 2120,
-                'confirmed' => $paidCount > 0 ? $paidCount : 1940,
+            'title' => 'Venue bookings',
+            'window' => 'Last 30 days',
+            'stats' => [
+                ['label' => 'Bookings', 'value' => number_format($total), 'sub' => number_format($paid) . ' confirmed or paid'],
+                ['label' => 'Collected', 'value' => self::inr($collected), 'sub' => 'from the payment ledger', 'tone' => $collected > 0 ? 'good' : null],
+                ['label' => 'Cancelled', 'value' => self::pct($cancelled, $total), 'sub' => number_format($cancelled) . ' of ' . number_format($total),
+                    'tone' => $total >= 10 && $cancelled / $total >= 0.08 ? 'warn' : null],
+                ['label' => 'Coupons used', 'value' => number_format($couponUses), 'sub' => $couponUses > 0 ? self::inr($couponOff) . ' off in all' : null],
             ],
-            'coupons' => [
-                'total_discount' => '₹48,600',
-                'redemptions' => 284,
-                'usage_rate' => '14.8%',
-                'top_code' => 'TURFPRO20',
+            'split' => [
+                'label' => 'How the money came in',
+                'parts' => self::parts(collect($byMethod)
+                    ->mapWithKeys(fn ($v, $m) => [self::METHOD_NAMES[$m] ?? ucfirst((string) $m) => (float) $v])
+                    ->all()),
             ],
-            'payment_split' => [
-                ['name' => 'UPI (GPay / PhonePe)', 'pct' => 68, 'amount' => '₹5,72,560', 'color' => '#10b981'],
-                ['name' => 'Credit / Debit Cards', 'pct' => 22, 'amount' => '₹1,85,240', 'color' => '#059669'],
-                ['name' => 'Net Banking', 'pct' => 7, 'amount' => '₹58,940', 'color' => '#0d9488'],
-                ['name' => 'Cash & Desk POS', 'pct' => 3, 'amount' => '₹25,260', 'color' => '#64748b'],
-            ],
-            'forecast' => [
-                'projected_7d' => '₹4,85,000',
-                'weekend_occupancy' => '94%',
-                'confidence' => '96% AI Confidence',
+            'list' => [
+                'title' => 'Booked for the next 7 days',
+                'rows' => $rows,
+                'empty' => 'Nothing booked for the coming week yet.',
             ],
         ];
     }

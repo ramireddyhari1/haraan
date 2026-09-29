@@ -4,57 +4,72 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Shifts\Widgets;
 
+use App\Filament\Widgets\ListSummaryWidget;
 use App\Models\ShiftSession;
-use Carbon\Carbon;
-use Filament\Widgets\Widget;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Enterprise Shift & Cash Drawer Reconciliation Executive Hero:
- * Cash drawer totals, shift reconciliation status, POS terminal summary,
- * staff shift performance scorecards, and cash variance discrepancy alerts.
+ * Shifts list summary: the drawers open right now and what has gone through
+ * them, today's closed shifts and their counted variance, and who is on duty.
  */
-class ShiftSessionsExecutiveHeroWidget extends Widget
+class ShiftSessionsExecutiveHeroWidget extends ListSummaryWidget
 {
-    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+    private const METHOD_NAMES = ['cash' => 'Cash', 'upi' => 'UPI', 'card' => 'Card'];
 
-    use \App\Filament\Concerns\RefreshesOnContentUpdate;
-
-    protected string $view = 'filament.resources.shifts.widgets.shift-sessions-executive-hero';
-
-    protected int | string | array $columnSpan = 'full';
-
-    protected static bool $isLazy = false;
-
-    public function getTelemetry(): array
+    public function getSummary(): array
     {
-        $today = Carbon::today();
+        $open = ShiftSession::open()->with(['staff:id,name', 'venue:id,name'])->orderBy('opened_at')->get();
+        $openIds = $open->pluck('id');
 
-        $openCount = ShiftSession::whereNull('closed_at')->count();
-        $closedToday = ShiftSession::whereNotNull('closed_at')
-            ->whereDate('closed_at', $today)
-            ->count();
+        $taken = DB::table('booking_payments')
+            ->whereIn('shift_session_id', $openIds)
+            ->selectRaw('lower(method) as m, SUM(amount) as total')
+            ->groupBy('m')
+            ->pluck('total', 'm');
 
-        $displayOpen = $openCount > 0 ? $openCount : 4;
-        $displayClosed = $closedToday > 0 ? $closedToday : 6;
+        $float = (float) $open->sum('opening_float');
+        $cash = (float) ($taken['cash'] ?? 0);
+
+        $closedToday = ShiftSession::whereNotNull('closed_at')->whereDate('closed_at', Carbon::today());
+        $closedCount = (clone $closedToday)->count();
+        $variance = (float) (clone $closedToday)->sum('variance');
+
+        $perShift = DB::table('booking_payments')
+            ->whereIn('shift_session_id', $openIds)
+            ->selectRaw('shift_session_id, SUM(amount) as total, COUNT(*) as n')
+            ->groupBy('shift_session_id')
+            ->get()
+            ->keyBy('shift_session_id');
 
         return [
-            'open_shifts' => $displayOpen,
-            'closed_today' => $displayClosed,
-            'cash_in_drawers' => '₹28,450',
-            'opening_float' => '₹8,000',
-            'pos_collections' => '₹1,42,800',
-            'total_counter_turnover' => '₹1,71,250',
-            'variance_status' => '₹0 Net Variance',
-            'variance_grade' => '100% Balanced & Audited',
-            'staff_scorecard' => [
-                ['name' => 'Rajesh M.', 'terminal' => 'Main Arena Desk', 'transactions' => 48, 'amount' => '₹34,200', 'variance' => '₹0', 'status' => 'Active'],
-                ['name' => 'Sanya K.', 'terminal' => 'Turf 2 Counter', 'transactions' => 36, 'amount' => '₹22,800', 'variance' => '₹0', 'status' => 'Active'],
-                ['name' => 'Arun P.', 'terminal' => 'Evening Shift Lead', 'transactions' => 52, 'amount' => '₹46,100', 'variance' => '₹0', 'status' => 'Active'],
+            'title' => 'Shifts & cash drawers',
+            'stats' => [
+                ['label' => 'Open drawers', 'value' => number_format($open->count())],
+                ['label' => 'Cash expected', 'value' => self::inr($float + $cash), 'sub' => self::inr($float) . ' float + ' . self::inr($cash) . ' taken'],
+                ['label' => 'Closed today', 'value' => number_format($closedCount)],
+                ['label' => 'Variance today', 'value' => $closedCount > 0 ? self::inr($variance) : '—',
+                    'sub' => $closedCount > 0 ? 'counted vs expected' : 'no shift closed yet',
+                    'tone' => $closedCount > 0 && abs($variance) >= 1 ? 'warn' : null],
             ],
-            'pos_rails' => [
-                ['name' => 'Counter UPI QR', 'pct' => 62, 'amount' => '₹88,536', 'color' => '#10b981'],
-                ['name' => 'Swipe POS Terminal', 'pct' => 21, 'amount' => '₹29,988', 'color' => '#059669'],
-                ['name' => 'Physical Currency (INR)', 'pct' => 17, 'amount' => '₹24,276', 'color' => '#0d9488'],
+            'split' => [
+                'label' => 'Taken in open shifts',
+                'parts' => self::parts(collect($taken)
+                    ->mapWithKeys(fn ($v, $m) => [self::METHOD_NAMES[$m] ?? ucfirst((string) $m) => (float) $v])
+                    ->all()),
+            ],
+            'list' => [
+                'title' => 'On duty',
+                'rows' => $open->map(function (ShiftSession $s) use ($perShift): array {
+                    $p = $perShift[$s->id] ?? null;
+
+                    return [
+                        'primary' => $s->staff?->name ?? 'Unassigned',
+                        'secondary' => collect([$s->venue?->name, $s->opened_at ? 'since ' . $s->opened_at->format('g:i A') : null])->filter()->join(' · ') ?: null,
+                        'trailing' => $p ? self::inr((float) $p->total) . ' · ' . $p->n . ' ' . str('payment')->plural((int) $p->n) : 'nothing taken yet',
+                    ];
+                })->all(),
+                'empty' => 'No drawer is open right now.',
             ],
         ];
     }

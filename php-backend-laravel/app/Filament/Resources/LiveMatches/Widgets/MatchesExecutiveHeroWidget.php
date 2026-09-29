@@ -4,98 +4,66 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\LiveMatches\Widgets;
 
+use App\Filament\Widgets\ListSummaryWidget;
 use App\Models\LiveMatch;
-use Carbon\Carbon;
-use Filament\Widgets\Widget;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Enterprise Live Matches Executive Command Hero:
- * Real-time match telemetry, live referee/official tracking,
- * score feed monitor, and tournament integration status.
+ * Matches list summary: what is live, scheduled and finished, by sport, and
+ * the matches being scored right now. When nothing is live it says so — it
+ * never fills the space with sample fixtures.
  */
-class MatchesExecutiveHeroWidget extends Widget
+class MatchesExecutiveHeroWidget extends ListSummaryWidget
 {
-    use \App\Filament\Concerns\HiddenFromPartnerConsole;
+    private const LIVE = ['live', 'in_progress'];
 
-    use \App\Filament\Concerns\RefreshesOnContentUpdate;
+    private const SCHEDULED = ['scheduled', 'upcoming'];
 
-    protected string $view = 'filament.resources.live-matches.widgets.matches-executive-hero';
+    private const DONE = ['completed', 'finished'];
 
-    protected int | string | array $columnSpan = 'full';
-
-    protected static bool $isLazy = false;
-
-    public function getTelemetry(): array
+    public function getSummary(): array
     {
-        $today = Carbon::today();
+        $count = fn (array $statuses): int => LiveMatch::whereIn(DB::raw('lower(status)'), $statuses)->count();
 
-        $totalMatches = LiveMatch::count();
-        $liveCount = LiveMatch::whereIn('status', ['LIVE', 'live', 'IN_PROGRESS', 'in_progress'])->count();
-        $upcomingCount = LiveMatch::whereIn('status', ['UPCOMING', 'upcoming', 'SCHEDULED', 'scheduled'])->count();
-        $completedCount = LiveMatch::whereIn('status', ['COMPLETED', 'completed', 'FINISHED', 'finished'])->count();
+        $live = $count(self::LIVE);
+        $scheduled = $count(self::SCHEDULED);
+        $done = $count(self::DONE);
+        $doneThisWeek = LiveMatch::whereIn(DB::raw('lower(status)'), self::DONE)
+            ->where('updated_at', '>=', now()->subDays(7))
+            ->count();
 
-        // Fallbacks for display if db is sparse
-        $displayLive = $liveCount > 0 ? $liveCount : 4;
-        $displayUpcoming = $upcomingCount > 0 ? $upcomingCount : 12;
-        $displayCompleted = $completedCount > 0 ? $completedCount : 16;
-        $displayTotal = $totalMatches > 0 ? $totalMatches : ($displayLive + $displayUpcoming + $displayCompleted);
+        $bySport = LiveMatch::selectRaw('lower(sport) as s, COUNT(*) as n')
+            ->groupBy('s')
+            ->pluck('n', 's')
+            ->mapWithKeys(fn ($n, $s) => [ucfirst((string) ($s ?: 'unknown')) => (int) $n])
+            ->all();
 
-        // Fetch up to 3 live matches or create realistic telemetry
-        $liveMatches = LiveMatch::whereIn('status', ['LIVE', 'live', 'IN_PROGRESS'])
-            ->latest()
-            ->limit(3)
-            ->get()
-            ->map(function ($m) {
-                return [
-                    'title' => $m->title ?? 'Premier Clash',
-                    'court' => $m->venue_court_id ? "Court {$m->venue_court_id}" : 'Turf Arena A',
-                    'score' => $m->current_score ?? ($m->home_score . ' - ' . $m->away_score) ?: '3 - 2',
-                    'clock' => $m->current_minute ? "{$m->current_minute}'" : '38\' (2nd Half)',
-                    'referee' => 'Official Assigned',
-                    'tournament' => 'Championship Cup',
-                ];
-            })->toArray();
-
-        if (empty($liveMatches)) {
-            $liveMatches = [
-                [
-                    'title' => 'Strikers FC vs Deccan Warriors',
-                    'court' => 'Main Football Turf A',
-                    'score' => '2 - 1',
-                    'clock' => '64\' (2nd Half)',
-                    'referee' => 'Vikram S. (AIFF Certified)',
-                    'tournament' => 'Hyderabad Premier Turf League',
-                ],
-                [
-                    'title' => 'Cyberabad Smashers vs Secunderabad Aces',
-                    'court' => 'Badminton Court 3',
-                    'score' => '21-18, 19-21, 14-11',
-                    'clock' => 'Game 3 (18m elapsed)',
-                    'referee' => 'Kavita R. (BAI National)',
-                    'tournament' => 'Monsoon Masters Open',
-                ],
-                [
-                    'title' => 'Jubilee Strikers vs Gachibowli Titans',
-                    'court' => 'Box Cricket Arena 1',
-                    'score' => '74/3 (8.2 ov)',
-                    'clock' => 'Target 112 (12 ov)',
-                    'referee' => 'Ramesh K. (HCA Panel)',
-                    'tournament' => 'Corporate Box Cup 2026',
-                ],
-            ];
-        }
+        $now = LiveMatch::whereIn(DB::raw('lower(status)'), self::LIVE)
+            ->latest('updated_at')
+            ->limit(4)
+            ->get();
 
         return [
-            'total_matches' => $displayTotal,
-            'live_count' => $displayLive,
-            'upcoming_count' => $displayUpcoming,
-            'completed_count' => $displayCompleted,
-            'referees_coverage' => '100% Assigned',
-            'active_officials' => 8,
-            'tournaments_active' => 3,
-            'completion_rate' => '98.6%',
-            'fair_play_rating' => '99.2%',
-            'live_feed' => $liveMatches,
+            'title' => 'Matches',
+            'stats' => [
+                ['label' => 'Live now', 'value' => number_format($live), 'tone' => $live > 0 ? 'good' : null],
+                ['label' => 'Scheduled', 'value' => number_format($scheduled)],
+                ['label' => 'Completed', 'value' => number_format($done), 'sub' => number_format($doneThisWeek) . ' in the last 7 days'],
+                ['label' => 'All matches', 'value' => number_format(LiveMatch::count())],
+            ],
+            'split' => [
+                'label' => 'Matches by sport',
+                'parts' => self::parts($bySport, money: false),
+            ],
+            'list' => [
+                'title' => 'Being scored now',
+                'rows' => $now->map(fn (LiveMatch $m): array => [
+                    'primary' => trim(($m->home_full ?: $m->home) . ' vs ' . ($m->away_full ?: $m->away)),
+                    'secondary' => collect([ucfirst((string) $m->sport), $m->competition, $m->venue])->filter()->join(' · ') ?: null,
+                    'trailing' => $m->score_text ?: ($m->home_score . ' – ' . $m->away_score),
+                ])->all(),
+                'empty' => 'Nothing is live right now.',
+            ],
         ];
     }
 }

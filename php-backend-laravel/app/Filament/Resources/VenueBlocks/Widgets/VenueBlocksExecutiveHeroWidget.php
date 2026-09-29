@@ -4,57 +4,87 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\VenueBlocks\Widgets;
 
+use App\Filament\Widgets\ListSummaryWidget;
 use App\Models\VenueBlock;
-use Carbon\Carbon;
-use Filament\Widgets\Widget;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 
 /**
- * Enterprise Venue Blocks Executive Command Hero:
- * Maintenance windows, real-time booking conflict detection engine,
- * tournament & private reservation holds, and capacity/revenue impact.
+ * Blocked-time list summary: blocks in force today, what is coming up, why
+ * courts are being held, and the next few holds in date order.
  */
-class VenueBlocksExecutiveHeroWidget extends Widget
+class VenueBlocksExecutiveHeroWidget extends ListSummaryWidget
 {
-    use \App\Filament\Concerns\HiddenFromPartnerConsole;
-
-    use \App\Filament\Concerns\RefreshesOnContentUpdate;
-
-    protected string $view = 'filament.resources.venue-blocks.widgets.venue-blocks-executive-hero';
-
-    protected int | string | array $columnSpan = 'full';
-
-    protected static bool $isLazy = false;
-
-    public function getTelemetry(): array
+    public function getSummary(): array
     {
-        $totalBlocks = VenueBlock::count();
-        $activeBlocks = VenueBlock::where('end_time', '>=', Carbon::now())->count();
+        $today = Carbon::today();
+        $week = $today->copy()->addDays(7);
 
-        $displayBlocks = $totalBlocks > 0 ? $totalBlocks : 14;
-        $displayActive = $activeBlocks > 0 ? $activeBlocks : 5;
+        // Same rule as VenueBlock::scopeApplyingOn, across every venue.
+        $inForceToday = VenueBlock::query()
+            ->whereDate('starts_on', '<=', $today->toDateString())
+            ->whereDate('ends_on', '>=', $today->toDateString())
+            ->where(fn (Builder $q) => $q->whereNull('weekday')->orWhere('weekday', $today->dayOfWeek))
+            ->count();
+
+        $upcoming = VenueBlock::whereDate('starts_on', '>', $today->toDateString())
+            ->whereDate('starts_on', '<=', $week->toDateString())
+            ->count();
+
+        $current = VenueBlock::whereDate('ends_on', '>=', $today->toDateString());
+        $recurring = (clone $current)->whereNotNull('weekday')->count();
+
+        $byKind = (clone $current)
+            ->selectRaw('kind, COUNT(*) as n')
+            ->groupBy('kind')
+            ->pluck('n', 'kind')
+            ->mapWithKeys(fn ($n, $k) => [VenueBlock::KINDS[$k] ?? ucfirst((string) ($k ?: 'Other')) => (int) $n])
+            ->all();
+
+        $next = VenueBlock::with(['venue:id,name', 'court:id,name'])
+            ->whereDate('ends_on', '>=', $today->toDateString())
+            ->orderBy('starts_on')
+            ->limit(4)
+            ->get();
 
         return [
-            'total_blocks' => $displayBlocks,
-            'active_blocks' => $displayActive,
-            'blocked_hours_week' => 38,
-            'conflict_status' => 'Zero Conflicts Detected',
-            'conflict_badge' => 'Engine Active · 100% Conflict Free',
-            'reasons' => [
-                ['name' => 'Facility Maintenance & Turfing', 'hours' => 16, 'pct' => 42, 'color' => '#10b981'],
-                ['name' => 'Tournament & League Holds', 'hours' => 14, 'pct' => 37, 'color' => '#059669'],
-                ['name' => 'Private Corporate Buyouts', 'hours' => 8, 'pct' => 21, 'color' => '#0d9488'],
+            'title' => 'Blocked time',
+            'stats' => [
+                ['label' => 'In force today', 'value' => number_format($inForceToday)],
+                ['label' => 'Starting this week', 'value' => number_format($upcoming)],
+                ['label' => 'Weekly repeats', 'value' => number_format($recurring), 'sub' => 'still running'],
+                ['label' => 'All blocks', 'value' => number_format(VenueBlock::count())],
             ],
-            'capacity' => [
-                'capacity_impact' => '1.4%',
-                'retained_revenue' => '₹48,000',
-                'off_sale_inventory' => '4 Court-Days',
-                'safety_margin' => 'Optimal Buffer',
+            'split' => [
+                'label' => 'Why courts are held (current and upcoming)',
+                'parts' => self::parts($byKind, money: false),
             ],
-            'upcoming_window' => [
-                'title' => 'Turf Infill Maintenance (Court 4)',
-                'time' => 'Tomorrow, 06:00 - 10:00 IST',
-                'impact' => '1 Court · Off-Peak Morning',
+            'list' => [
+                'title' => 'Next up',
+                'rows' => $next->map(fn (VenueBlock $b): array => [
+                    'primary' => $b->title ?: (VenueBlock::KINDS[$b->kind] ?? 'Block'),
+                    'secondary' => collect([$b->venue?->name, $b->court?->name ?? 'whole venue'])->filter()->join(' · '),
+                    'trailing' => $this->when($b),
+                ])->all(),
+                'empty' => 'No courts are blocked now or coming up.',
             ],
         ];
+    }
+
+    private function when(VenueBlock $b): string
+    {
+        $dates = $b->starts_on?->equalTo($b->ends_on)
+            ? $b->starts_on->format('j M')
+            : $b->starts_on?->format('j M') . ' – ' . $b->ends_on?->format('j M');
+
+        if ($b->weekday !== null) {
+            $dates = 'Every ' . Carbon::create()->startOfWeek(Carbon::SUNDAY)->addDays($b->weekday)->format('l') . ' · ' . $dates;
+        }
+
+        if ($b->start_time && $b->end_time) {
+            $dates .= ' · ' . substr((string) $b->start_time, 0, 5) . '–' . substr((string) $b->end_time, 0, 5);
+        }
+
+        return $dates;
     }
 }

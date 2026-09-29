@@ -4,97 +4,67 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Venues\Widgets;
 
+use App\Filament\Widgets\ListSummaryWidget;
 use App\Models\Booking;
 use App\Models\Venue;
 use App\Models\VenueCourt;
-use Carbon\Carbon;
-use Filament\Widgets\Widget;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Enterprise Venues Executive Command Hero:
- * Fleet health, court utilization matrix, maintenance tracking,
- * dynamic pricing surge engine, and 7-day availability calendar.
+ * Venues list summary: how many venues are live and taking bookings, their
+ * courts, where they are, and which ones are busiest in the coming week.
  */
-class VenuesExecutiveHeroWidget extends Widget
+class VenuesExecutiveHeroWidget extends ListSummaryWidget
 {
-    use \App\Filament\Concerns\HiddenFromPartnerConsole;
-
-    use \App\Filament\Concerns\RefreshesOnContentUpdate;
-
-    protected string $view = 'filament.resources.venues.widgets.venues-executive-hero';
-
-    protected int | string | array $columnSpan = 'full';
-
-    protected static bool $isLazy = false;
-
-    public function getTelemetry(): array
+    public function getSummary(): array
     {
-        $venuesCount = Venue::count();
-        $courtsCount = VenueCourt::count();
+        $total = Venue::count();
+        $live = Venue::where('is_active', true)->where('status', 'published')->count();
+        $bookable = Venue::where('is_active', true)->where('status', 'published')->where('is_bookable', true)->count();
+        $courts = VenueCourt::where('is_active', true)->count();
+        $peakCourts = VenueCourt::where('is_active', true)->where('peak_price', '>', 0)->count();
 
-        $activeVenues = Venue::where('status', 'active')->count();
-        if ($activeVenues === 0 && $venuesCount > 0) {
-            $activeVenues = $venuesCount;
-        }
+        $byCity = Venue::where('is_active', true)
+            ->selectRaw("coalesce(nullif(city, ''), 'No city set') as c, COUNT(*) as n")
+            ->groupBy('c')
+            ->pluck('n', 'c')
+            ->all();
 
-        // 7-day occupancy calculation
         $today = Carbon::today();
-        $weekBookings = Booking::where('booking_type', 'venue')
-            ->whereIn('status', ['CONFIRMED', 'confirmed', 'PAID', 'paid', 'COMPLETED', 'completed'])
-            ->where('created_at', '>=', $today->copy()->subDays(7))
-            ->count();
-
-        $utilizationRate = $courtsCount > 0 
-            ? min(95.4, max(55.0, round(($weekBookings / max(1, $courtsCount * 14)) * 100, 1))) 
-            : 81.6;
-
-        $healthScore = 98;
-        $healthGrade = 'Optimal Operations';
-
-        // 7-day availability projection
-        $days = [];
-        for ($i = 0; $i < 7; $i++) {
-            $dayDate = $today->copy()->addDays($i);
-            $dayName = $i === 0 ? 'Today' : ($i === 1 ? 'Tmrw' : $dayDate->format('D'));
-            $dayBookings = Booking::where('booking_type', 'venue')
-                ->whereDate('created_at', $dayDate)
-                ->whereIn('status', ['CONFIRMED', 'confirmed', 'PAID', 'paid'])
-                ->count();
-            $baseSlots = max(24, ($courtsCount ?: 6) * 12);
-            $bookedSlots = $dayBookings > 0 ? min($baseSlots, $dayBookings * 2) : ($i % 2 === 0 ? round($baseSlots * 0.78) : round($baseSlots * 0.65));
-            $pct = round(($bookedSlots / $baseSlots) * 100);
-
-            $days[] = [
-                'name' => $dayName,
-                'date' => $dayDate->format('d M'),
-                'total' => $baseSlots,
-                'booked' => (int) $bookedSlots,
-                'available' => (int) ($baseSlots - $bookedSlots),
-                'pct' => $pct,
-            ];
-        }
+        $busiest = Booking::query()
+            ->where('booking_type', 'venue')
+            ->whereNotNull('venue_id')
+            ->whereNotIn(DB::raw('lower(status)'), [...self::CANCELLED, 'expired'])
+            ->whereBetween('slot_date', [$today->toDateString(), $today->copy()->addDays(6)->toDateString()])
+            ->selectRaw('venue_id, COUNT(*) as n')
+            ->groupBy('venue_id')
+            ->orderByDesc('n')
+            ->limit(5)
+            ->pluck('n', 'venue_id');
+        $names = Venue::whereIn('id', $busiest->keys())->get(['id', 'name', 'city'])->keyBy('id');
 
         return [
-            'total_venues' => $venuesCount > 0 ? $venuesCount : 8,
-            'active_venues' => $activeVenues > 0 ? $activeVenues : 8,
-            'total_courts' => $courtsCount > 0 ? $courtsCount : 28,
-            'court_utilization' => $utilizationRate . '%',
-            'health_score' => $healthScore,
-            'health_grade' => $healthGrade,
-            'maintenance' => [
-                'operational' => max(0, ($courtsCount ?: 28) - 2),
-                'in_maintenance' => 2,
-                'off_sale' => 0,
-                'status_note' => '2 courts undergoing surface re-turfing (Court 4 & B3) — Scheduled reopening 08:00 tomorrow',
+            'title' => 'Venues',
+            'stats' => [
+                ['label' => 'Live venues', 'value' => number_format($live), 'sub' => number_format($total) . ' in all'],
+                ['label' => 'Taking bookings', 'value' => number_format($bookable), 'sub' => $live > $bookable ? number_format($live - $bookable) . ' live but not bookable' : null],
+                ['label' => 'Active courts', 'value' => number_format($courts)],
+                ['label' => 'Peak pricing', 'value' => number_format($peakCourts), 'sub' => $courts > 0 ? 'of ' . number_format($courts) . ' courts' : null],
             ],
-            'pricing' => [
-                'avg_rate' => '₹1,450',
-                'peak_multiplier' => '1.25x Peak Surge',
-                'surge_window' => '18:00 - 23:00 IST',
-                'weekend_multiplier' => '1.40x Weekend Surge',
+            'split' => [
+                'label' => 'Active venues by city',
+                'parts' => self::parts($byCity, money: false),
             ],
-            'availability_days' => $days,
+            'list' => [
+                'title' => 'Busiest in the next 7 days',
+                'rows' => $busiest->map(fn ($n, $id) => [
+                    'primary' => $names[$id]->name ?? "Venue #{$id}",
+                    'secondary' => $names[$id]->city ?? null,
+                    'trailing' => number_format((int) $n) . ' ' . str('slot')->plural((int) $n) . ' booked',
+                ])->values()->all(),
+                'empty' => 'No slots booked at any venue for the coming week.',
+            ],
         ];
     }
 }
