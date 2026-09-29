@@ -35,6 +35,14 @@ class VenueBookings extends Page
 
     protected static bool $shouldRegisterNavigation = false;
 
+    /**
+     * VenueBookingResource (same GameHub cluster) owns /game-hub/venue-bookings.
+     * Sharing that URI let the resource's route silently replace this page's, so
+     * route('…game-hub.pages.venue-bookings') stopped existing and the partner
+     * dashboard's "Day bookings" shortcut 500'd the whole dashboard.
+     */
+    protected static ?string $slug = 'day-bookings';
+
     protected string $view = 'filament.clusters.game-hub.venue-bookings';
 
     public ?int $venueId = null;
