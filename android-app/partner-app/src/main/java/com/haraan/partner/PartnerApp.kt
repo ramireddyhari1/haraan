@@ -193,6 +193,11 @@ import com.haraan.partner.ui.components.pressScale
 import com.haraan.partner.ui.components.pressShade
 import com.haraan.partner.ui.components.pressableTile
 import com.haraan.partner.ui.components.rememberMoneyMotion
+import com.haraan.partner.ui.payouts.BankArt
+import com.haraan.partner.ui.payouts.CardSheenArt
+import com.haraan.partner.ui.payouts.PayoutRoadArt
+import com.haraan.partner.ui.payouts.WalletArt
+import androidx.compose.ui.draw.drawBehind
 
 private sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
@@ -5455,9 +5460,7 @@ private fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
     var reload by remember { mutableStateOf(0) }
     var editing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val state by produceState<UiState<PayoutsPage>>(UiState.Loading, reload) {
-        value = runCatchingUi { api.payouts(token) }
-    }
+    val view = LocalView.current
 
     Scaffold(
         topBar = {
@@ -5471,33 +5474,26 @@ private fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
         },
     ) { padding ->
         LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
-            Loaded(state) { p ->
+            // Pull down to refetch; saving an account bumps [reload] to refetch in
+            // place, so the screen never drops back to a skeleton.
+            RefreshableContent(key = token, load = { api.payouts(token) }, reloadSignal = reload) { p ->
+                val months = remember(p.batches) { groupPayoutsByMonth(p.batches) }
                 LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 28.dp),
+                    contentPadding = PaddingValues(top = 14.dp, bottom = 28.dp),
                 ) {
-                    item { PayoutBalanceHero(p) }
-                    item { PayoutAccountCard(p.account) { editing = true } }
-                    item {
-                        Text(
-                            "SETTLEMENT HISTORY",
-                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            color = AuthMuted, letterSpacing = 1.4.sp,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+                    item { StaggerIn(0) { PayoutBalanceHero(p) } }
+                    item { StaggerIn(1) { PayoutAccountCard(p.account) { editing = true } } }
+                    item { StaggerIn(2) { PayoutSectionHeader() } }
                     if (p.batches.isEmpty()) {
-                        item {
-                            LayoutBox(Modifier.fillMaxWidth().premiumSurface().padding(20.dp)) {
-                                Text(
-                                    "No settlements yet. Money you collect shows as available until it's transferred.",
-                                    fontSize = 13.sp, color = AuthMuted, lineHeight = 18.sp,
-                                )
+                        item { StaggerIn(3) { PayoutEmptyHistory() } }
+                    } else {
+                        months.forEachIndexed { mi, (month, rows) ->
+                            item(key = "m-$month") {
+                                StaggerIn(3 + mi) { PayoutMonthCard(month, rows) }
                             }
                         }
-                    } else {
-                        items(p.batches) { b -> PayoutBatchCard(b) }
                     }
                 }
             }
@@ -5511,6 +5507,8 @@ private fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
                 editing = false
                 scope.launch {
                     runCatching { api.savePayoutAccount(token, method, holder, bank, acct, ifsc, vpa) }
+                        .onSuccess { Haptics.confirm(view) }
+                        .onFailure { Haptics.reject(view) }
                     reload++
                 }
             },
@@ -5518,25 +5516,72 @@ private fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
     }
 }
 
+/** Fades and lifts a list item in, a beat after the one above it. */
+@Composable
+private fun StaggerIn(index: Int, content: @Composable () -> Unit) {
+    val a = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        // Capped, so a row scrolled into view far down the list doesn't wait.
+        kotlinx.coroutines.delay(45L * index.coerceAtMost(5))
+        a.animateTo(1f, tween(340, easing = FastOutSlowInEasing))
+    }
+    LayoutBox(
+        Modifier.graphicsLayer {
+            alpha = a.value
+            translationY = (1f - a.value) * 34f
+        },
+    ) { content() }
+}
+
+/**
+ * The next settlement date. Settlements go out weekly on Monday; this mirrors
+ * the web console's display-only rule (PartnerPayouts::nextPayoutDate), so the
+ * app and the console never promise different days.
+ */
+private fun nextPayoutLabel(): String {
+    val c = java.util.Calendar.getInstance()
+    do { c.add(java.util.Calendar.DAY_OF_YEAR, 1) } while (c.get(java.util.Calendar.DAY_OF_WEEK) != java.util.Calendar.MONDAY)
+    return java.text.SimpleDateFormat("EEE, d MMM", java.util.Locale.ENGLISH).format(c.time)
+}
+
 @Composable
 private fun PayoutBalanceHero(p: PayoutsPage) {
+    val money = rememberMoneyMotion(p.available, "payouts.available")
     LayoutBox(
         Modifier.fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(22.dp), clip = false, spotColor = AuthInkTop)
-            .clip(RoundedCornerShape(22.dp))
+            .graphicsLayer {
+                val lift = 1f + 0.02f * money.pulse
+                scaleX = lift; scaleY = lift
+            }
+            .shadow(22.dp, RoundedCornerShape(24.dp), clip = false, spotColor = AuthAccent, ambientColor = AuthInkTop)
+            .clip(RoundedCornerShape(24.dp))
             .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
     ) {
         LayoutBox(
             Modifier.matchParentSize().background(
-                Brush.radialGradient(listOf(Color(0x553B82F6), Color(0x00000000)), center = Offset(120f, 40f), radius = 520f)
+                Brush.radialGradient(listOf(Color(0x553B82F6), Color(0x00000000)), center = Offset(120f, 40f), radius = 560f)
             )
+        )
+        CardSheenArt(Modifier.matchParentSize())
+        WalletArt(
+            Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 12.dp).size(104.dp),
+            tint = Color.White.copy(alpha = 0.13f),
         )
         Column(Modifier.fillMaxWidth().padding(20.dp)) {
             Text("AVAILABLE TO SETTLE", color = Color(0xB3CFE0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(8.dp))
-            Text("₹" + formatInr(p.available), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp)
+            Spacer(Modifier.height(6.dp))
+            Row {
+                Text(
+                    "₹", color = Color(0xCCFFFFFF), fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 6.dp, end = 3.dp),
+                )
+                Text(
+                    formatInr(money.shown.roundToInt().toDouble()),
+                    color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp,
+                )
+            }
             if (p.inFlight > 0) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33F59E0B)).padding(horizontal = 10.dp, vertical = 5.dp),
@@ -5547,93 +5592,319 @@ private fun PayoutBalanceHero(p: PayoutsPage) {
                 }
             }
             Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth()) {
-                PayoutStat(Modifier.weight(1f), "Collected", p.collected)
-                LayoutBox(Modifier.width(1.dp).height(34.dp).background(Color(0x33FFFFFF)))
-                PayoutStat(Modifier.weight(1f), "Settled", p.settled)
+            PayoutProgress(p)
+            Spacer(Modifier.height(16.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x1AFFFFFF))
+                    .border(1.dp, Color(0x1FFFFFFF), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Color(0xFF93C5FD), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Next payout", fontSize = 12.sp, color = Color(0x99CFE0FF))
+                Spacer(Modifier.width(6.dp))
+                Text(nextPayoutLabel(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
     }
 }
 
+/**
+ * One bar for where the collected money stands: green has reached the bank,
+ * amber is on its way, the rest is still waiting here. Grows in from empty.
+ */
 @Composable
-private fun PayoutStat(modifier: Modifier, label: String, value: Double) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("₹" + formatInr(value), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = Color(0x99CFE0FF), fontSize = 11.sp)
+private fun PayoutProgress(p: PayoutsPage) {
+    val total = p.collected.coerceAtLeast(p.settled + p.inFlight)
+    val settledFrac = if (total > 0) (p.settled / total).toFloat().coerceIn(0f, 1f) else 0f
+    val flightFrac = if (total > 0) (p.inFlight / total).toFloat().coerceIn(0f, 1f - settledFrac) else 0f
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { grow.animateTo(1f, tween(900, delayMillis = 200, easing = FastOutSlowInEasing)) }
+
+    Column(Modifier.fillMaxWidth()) {
+        Canvas(Modifier.fillMaxWidth().height(8.dp)) {
+            val r = androidx.compose.ui.geometry.CornerRadius(size.height / 2f)
+            drawRoundRect(Color(0x1FFFFFFF), cornerRadius = r)
+            val sw = size.width * settledFrac * grow.value
+            val fw = size.width * flightFrac * grow.value
+            if (sw + fw > 0f) {
+                drawRoundRect(
+                    Color(0xFFFCD34D),
+                    size = androidx.compose.ui.geometry.Size(sw + fw, size.height),
+                    cornerRadius = r,
+                )
+            }
+            if (sw > 0f) {
+                drawRoundRect(
+                    Brush.horizontalGradient(listOf(Color(0xFF22C55E), Color(0xFF4ADE80))),
+                    size = androidx.compose.ui.geometry.Size(sw, size.height),
+                    cornerRadius = r,
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFF4ADE80)))
+            Spacer(Modifier.width(6.dp))
+            Text("₹" + formatInr(p.settled), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(4.dp))
+            Text("settled", color = Color(0x99CFE0FF), fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text("of ", color = Color(0x99CFE0FF), fontSize = 12.sp)
+            Text("₹" + formatInr(p.collected), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(4.dp))
+            Text("collected", color = Color(0x99CFE0FF), fontSize = 12.sp)
+        }
     }
 }
 
 @Composable
 private fun PayoutAccountCard(account: PayoutAccount?, onEdit: () -> Unit) {
+    if (account == null) PayoutAccountPrompt(onEdit) else PayoutAccountSet(account, onEdit)
+}
+
+/** No destination yet: an inviting dashed slot, not a grey row. */
+@Composable
+private fun PayoutAccountPrompt(onAdd: () -> Unit) {
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    val dash = remember { androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(14f, 10f)) }
+    Row(
+        Modifier.fillMaxWidth()
+            .pressScale(interaction)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFFF3F7FF), Color(0xFFEAF1FF))))
+            .drawBehind {
+                // Inset by half the stroke so the clip doesn't shave the dashes.
+                val w = 1.5.dp.toPx()
+                drawRoundRect(
+                    AuthAccent.copy(alpha = 0.45f),
+                    topLeft = Offset(w / 2f, w / 2f),
+                    size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx() - w / 2f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = w, pathEffect = dash),
+                )
+            }
+            .pressShade(interaction)
+            .clickable(interactionSource = interaction, indication = null) {
+                Haptics.tick(view)
+                onAdd()
+            }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BankArt(Modifier.size(56.dp), accent = AuthAccent, soft = Color.White)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Add where to get paid", fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Spacer(Modifier.height(2.dp))
+            Text("Bank account or UPI ID", fontSize = 12.sp, color = AuthMuted)
+        }
+        Spacer(Modifier.width(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .shadow(6.dp, RoundedCornerShape(999.dp), clip = false, spotColor = AuthAccent)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Brush.linearGradient(listOf(AuthAccent, AuthAccentDeep)))
+                .padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Add", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+/** Where the money goes: bank monogram, masked destination, verification. */
+@Composable
+private fun PayoutAccountSet(account: PayoutAccount, onEdit: () -> Unit) {
     PressableSurface(onClick = onEdit) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            val initial = (account.bankName ?: account.method).trim().firstOrNull()?.uppercaseChar()?.toString() ?: "₹"
             LayoutBox(
-                Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF)))),
+                Modifier.size(46.dp).clip(RoundedCornerShape(99.dp))
+                    .background(Brush.linearGradient(listOf(AuthAccent, AuthAccentDeep))),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Payments, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(22.dp)) }
+            ) { Text(initial, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold) }
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    if (account == null) "Add settlement account" else "Money is sent to",
-                    fontSize = 12.sp, color = AuthMuted,
-                )
+                Text("Money is sent to", fontSize = 12.sp, color = AuthMuted)
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    account?.masked ?: "No account yet — tap to add",
-                    fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1,
-                )
-                if (account != null) {
-                    Spacer(Modifier.height(6.dp))
-                    val tone = if (account.verified) GREEN else Color(0xFFB45309)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 9.dp, vertical = 4.dp),
-                    ) {
+                Text(account.masked, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1)
+                Spacer(Modifier.height(6.dp))
+                val tone = if (account.verified) GREEN else Color(0xFFB45309)
+                // The verified tick pops in once, so the moment it's confirmed reads as an event.
+                val pop = remember(account.verified) { Animatable(if (account.verified) 0.6f else 1f) }
+                LaunchedEffect(account.verified) {
+                    if (account.verified) pop.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.45f, stiffness = 500f))
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                        .clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 9.dp, vertical = 4.dp),
+                ) {
+                    if (account.verified) {
+                        Icon(Icons.Filled.Check, contentDescription = null, tint = tone, modifier = Modifier.size(12.dp))
+                    } else {
                         LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(tone))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (account.verified) "Verified" else "Pending verification",
-                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tone,
-                        )
                     }
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        if (account.verified) "Verified" else "Pending verification",
+                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tone,
+                    )
                 }
             }
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.ChevronRight, contentDescription = "Change account", tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
         }
     }
 }
 
 @Composable
-private fun PayoutBatchCard(b: PayoutBatchRow) {
-    val tone = if (b.isPaid) GREEN else Color(0xFFB45309)
-    LayoutBox(Modifier.fillMaxWidth().premiumSurface()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun PayoutSectionHeader() {
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Settlements", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+        Spacer(Modifier.weight(1f))
+        Text(
+            "Weekly · Mondays",
+            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AuthAccent,
+            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(AuthAccent.copy(alpha = 0.10f))
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/** No settlements yet: show how money gets from the desk to the bank. */
+@Composable
+private fun PayoutEmptyHistory() {
+    Column(Modifier.fillMaxWidth().premiumSurface().padding(horizontal = 16.dp, vertical = 20.dp)) {
+        LayoutBox(Modifier.fillMaxWidth().height(64.dp)) {
+            PayoutRoadArt(
+                Modifier.matchParentSize().padding(bottom = 20.dp),
+                road = Color(0xFFCBD5E1),
+                coin = Color(0xFFF59E0B),
+                stops = listOf(1f / 6f, 0.5f, 5f / 6f),
+            )
+            Row(Modifier.fillMaxWidth()) {
+                PayoutStep(Modifier.weight(1f), Icons.Filled.Payments, "You collect", Color(0xFFF59E0B))
+                PayoutStep(Modifier.weight(1f), Icons.Filled.CalendarMonth, "Batched weekly", AuthAccent)
+                PayoutStep(Modifier.weight(1f), Icons.Filled.AccountBalance, "Sent to you", GREEN)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "No settlements yet",
+            fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk,
+            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Money you collect waits here as available, then goes to your account in the next weekly settlement.",
+            fontSize = 12.5.sp, color = AuthMuted, lineHeight = 18.sp,
+            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun PayoutStep(modifier: Modifier, icon: ImageVector, label: String, tone: Color) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        LayoutBox(
+            Modifier.size(44.dp)
+                .shadow(6.dp, RoundedCornerShape(99.dp), clip = false, spotColor = tone)
+                .clip(RoundedCornerShape(99.dp))
+                .background(Color.White)
+                .border(1.5.dp, tone.copy(alpha = 0.35f), RoundedCornerShape(99.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = null, tint = tone, modifier = Modifier.size(20.dp)) }
+        Spacer(Modifier.height(6.dp))
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AuthMuted, maxLines = 1)
+    }
+}
+
+/** Settlements grouped under "October 2026" headings, newest month first. */
+private fun groupPayoutsByMonth(rows: List<PayoutBatchRow>): List<Pair<String, List<PayoutBatchRow>>> {
+    val inFmt = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.ENGLISH)
+    val outFmt = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.ENGLISH)
+    return rows.groupBy { r ->
+        val ym = r.date?.take(7)
+        ym?.let { runCatching { outFmt.format(inFmt.parse(it)!!) }.getOrNull() } ?: "Earlier"
+    }.toList()
+}
+
+/** One month of settlements on a timeline rail. */
+@Composable
+private fun PayoutMonthCard(month: String, rows: List<PayoutBatchRow>) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 2.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(month.uppercase(), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = AuthMuted, letterSpacing = 1.2.sp)
+            Spacer(Modifier.width(8.dp))
+            Text("₹" + formatInr(rows.sumOf { it.amount }), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+        }
+        Column(Modifier.fillMaxWidth().premiumSurface().padding(vertical = 6.dp)) {
+            rows.forEachIndexed { i, b -> PayoutBatchRowItem(b, first = i == 0, last = i == rows.lastIndex) }
+        }
+    }
+}
+
+@Composable
+private fun PayoutBatchRowItem(b: PayoutBatchRow, first: Boolean, last: Boolean) {
+    val tone = if (b.isPaid) GREEN else Color(0xFFD97706)
+    // In-progress settlements breathe so they read as live, paid ones sit still.
+    val breathe = if (b.isPaid) 0f else {
+        val t = rememberInfiniteTransition(label = "pending")
+        t.animateFloat(0f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "halo").value
+    }
+    Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).padding(horizontal = 16.dp)) {
+        // Timeline rail: line above and below the dot, broken at the ends.
+        Canvas(Modifier.width(18.dp).fillMaxHeight()) {
+            val cx = size.width / 2f
+            val cy = 30.dp.toPx()
+            val rail = Color(0xFFE2E8F0)
+            val w = 2.dp.toPx()
+            if (!first) drawLine(rail, Offset(cx, 0f), Offset(cx, cy), strokeWidth = w)
+            if (!last) drawLine(rail, Offset(cx, cy), Offset(cx, size.height), strokeWidth = w)
+            if (breathe > 0f) drawCircle(tone.copy(alpha = 0.25f * (1f - breathe)), 6.dp.toPx() + 6.dp.toPx() * breathe, Offset(cx, cy))
+            drawCircle(Color.White, 7.dp.toPx(), Offset(cx, cy))
+            drawCircle(tone, 5.dp.toPx(), Offset(cx, cy))
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(Modifier.weight(1f).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("₹" + formatInr(b.amount), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    listOfNotNull(b.date, b.period).joinToString(" · ").ifBlank { "—" },
+                    listOfNotNull(b.date?.let(::prettyPayoutDate), b.period).joinToString(" · ").ifBlank { "—" },
                     fontSize = 12.sp, color = AuthMuted,
                 )
                 if (!b.reference.isNullOrBlank()) {
                     Spacer(Modifier.height(3.dp))
-                    Text("Ref ${b.reference}", fontSize = 11.sp, color = AuthMuted)
+                    Text("Ref ${b.reference}", fontSize = 11.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 6.dp),
             ) {
-                LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(tone))
-                Spacer(Modifier.width(6.dp))
+                if (b.isPaid) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = tone, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(b.status.replaceFirstChar { it.uppercase() }, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = tone)
             }
         }
     }
+    if (!last) HorizontalDivider(Modifier.padding(start = 46.dp, end = 16.dp), color = Hairline)
 }
+
+/** "2026-10-06" → "6 Oct". Anything unparseable is shown as sent. */
+private fun prettyPayoutDate(iso: String): String = runCatching {
+    val d = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).parse(iso)!!
+    java.text.SimpleDateFormat("d MMM", java.util.Locale.ENGLISH).format(d)
+}.getOrDefault(iso)
 
 /** Enter where settlements are sent. Never prefilled — changing the destination
  *  means re-entering it, and saving clears verification. */
