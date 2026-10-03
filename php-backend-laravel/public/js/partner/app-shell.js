@@ -381,30 +381,105 @@
 
     /* =========================================================== bottom bar === */
 
+    /**
+     * The floating bar, built once and kept for the whole visit. It hangs off <html>, not
+     * <body>, because a Livewire page swap replaces <body>; living outside it, the bar is
+     * never torn down mid-move. One white thumb slides between tabs (the app's sliding
+     * pill), and the icons glide to their new places with it (FLIP), so a tab change is a
+     * single continuous motion rather than one pill fading out while another fades in.
+     */
+    var navBar = null;
+
     function renderNav() {
-        var bar = document.getElementById('ha-nav');
+        // Livewire's Back/Forward restores a page snapshot that carries a dead copy of
+        // this bar (no listeners, stale selection). Only the live one may stay.
+        Array.prototype.forEach.call(document.querySelectorAll('#ha-nav'), function (n) { if (n !== navBar) n.remove(); });
+        var bar = navBar;
+        var keys = tabs();
+        var sig = keys.join(',');
         if (!bar) {
-            bar = h('<nav id="ha-nav" class="ha-nav" aria-label="Main"><div class="ha-nav-cap" role="tablist"></div></nav>');
-            document.body.appendChild(bar);
+            bar = navBar = h('<nav id="ha-nav" class="ha-nav" aria-label="Main"><div class="ha-nav-cap" role="tablist"></div></nav>');
         }
+        if (bar.parentNode !== document.documentElement) document.documentElement.appendChild(bar);
         var cap = bar.firstElementChild;
-        var sel = currentTab();
-        cap.innerHTML = tabs().map(function (k) {
-            var icon = NAV[k];
-            var on = k === sel;
-            return '<a href="' + esc(urlOf(k)) + '" role="tab" aria-selected="' + on + '" data-tab="' + k + '" class="ha-nav-slot' + (on ? ' is-on' : '') + '"'
-                + (on ? '' : ' aria-label="' + esc(labelFor(k)) + '"') + '>'
-                + '<span class="ha-nav-pill"></span>'
-                + '<span class="ha-nav-in"><span class="ha-nav-glyph">' + glyph(icon.out, 'g-out') + glyph(icon.on, 'g-on') + '</span>'
-                + '<span class="ha-nav-word">' + esc(labelFor(k)) + '</span></span></a>';
-        }).join('');
-        cap.querySelectorAll('.ha-nav-slot').forEach(function (a) {
-            a.addEventListener('click', function (e) {
-                if (a.classList.contains('is-on')) { e.preventDefault(); return; }
-                // The pill glides first, then the page follows.
-                cap.querySelectorAll('.ha-nav-slot').forEach(function (s) { s.classList.toggle('is-on', s === a); });
+        if (cap.getAttribute('data-sig') !== sig) {
+            cap.setAttribute('data-sig', sig);
+            cap.innerHTML = '<span class="ha-nav-thumb" aria-hidden="true"></span>' + keys.map(function (k) {
+                var icon = NAV[k];
+                return '<a href="' + esc(urlOf(k)) + '" role="tab" aria-selected="false" data-tab="' + k + '" class="ha-nav-slot" aria-label="' + esc(labelFor(k)) + '">'
+                    + '<span class="ha-nav-in"><span class="ha-nav-glyph">' + glyph(icon.out, 'g-out') + glyph(icon.on, 'g-on') + '</span>'
+                    + '<span class="ha-nav-word">' + esc(labelFor(k)) + '</span></span></a>';
+            }).join('');
+            if (!cap.__wired) cap.addEventListener('click', function (e) {
+                var a = e.target.closest('.ha-nav-slot');
+                if (!a) return;
+                e.preventDefault();
+                if (a.classList.contains('is-on')) return;
                 if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) { /* none */ } }
+                // The thumb starts moving on the tap; the page follows underneath it.
+                // Until that page has arrived, the bar keeps pointing at the tab that was
+                // tapped; a redraw from the page being left must not drag the thumb back.
+                cap.__pending = { key: a.getAttribute('data-tab'), until: Date.now() + 10000 };
+                selectTab(cap, cap.__pending.key, true);
+                go(a.getAttribute('href'));
             });
+            cap.__wired = true;
+            cap.removeAttribute('data-on');
+        }
+        var want = currentTab();
+        var p = cap.__pending;
+        if (p) {
+            if (want === p.key || Date.now() > p.until) cap.__pending = null;
+            else return;
+        }
+        selectTab(cap, want, !!cap.getAttribute('data-on'));
+    }
+
+    function slotLeft(slot, cap) { return slot.querySelector('.ha-nav-in').getBoundingClientRect().left - cap.getBoundingClientRect().left; }
+
+    function selectTab(cap, key, animate) {
+        var slots = Array.prototype.slice.call(cap.querySelectorAll('.ha-nav-slot'));
+        var thumb = cap.querySelector('.ha-nav-thumb');
+        if (cap.getAttribute('data-on') === key && thumb.style.width) return;
+        var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        animate = animate && !reduce && cap.offsetWidth > 0;
+
+        // First: where every icon sits now.
+        var first = animate ? slots.map(function (s) { return slotLeft(s, cap); }) : null;
+
+        // The layout jumps straight to the new shape...
+        slots.forEach(function (s) {
+            var on = s.getAttribute('data-tab') === key;
+            s.classList.toggle('is-on', on);
+            s.setAttribute('aria-selected', on);
+            if (on) s.removeAttribute('aria-label'); else s.setAttribute('aria-label', s.textContent.trim());
+        });
+        cap.setAttribute('data-on', key);
+        var target = slots.filter(function (s) { return s.getAttribute('data-tab') === key; })[0];
+
+        // ...the thumb travels there...
+        cap.classList.toggle('is-still', !animate);
+        if (target) {
+            thumb.style.width = target.offsetWidth + 'px';
+            thumb.style.transform = 'translateX(' + target.offsetLeft + 'px)';
+            thumb.style.opacity = '1';
+        } else {
+            thumb.style.opacity = '0';
+        }
+        if (!animate) { void cap.offsetWidth; cap.classList.remove('is-still'); return; }
+
+        // ...and each icon is played back from where it was (FLIP), on the thumb's curve.
+        slots.forEach(function (s, i) {
+            var inner = s.querySelector('.ha-nav-in');
+            var dx = first[i] - slotLeft(s, cap);
+            inner.style.transition = 'none';
+            inner.style.transform = dx ? 'translateX(' + dx + 'px)' : '';
+        });
+        void cap.offsetWidth;
+        slots.forEach(function (s) {
+            var inner = s.querySelector('.ha-nav-in');
+            inner.style.transition = '';
+            inner.style.transform = '';
         });
     }
 
@@ -1811,6 +1886,10 @@
             });
         }
         if (PHONE.addEventListener) PHONE.addEventListener('change', mount);
+        window.addEventListener('resize', function () {
+            var cap = document.querySelector('#ha-nav .ha-nav-cap');
+            if (cap) { cap.removeAttribute('data-on'); selectTab(cap, currentTab(), false); }
+        });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

@@ -98,37 +98,40 @@ html.ha-collapsed .ha-compact { opacity: 1; transform: none; pointer-events: aut
     background: linear-gradient(to top, var(--ha-page) 70%, rgba(247, 248, 251, 0));
 }
 .ha-nav-cap {
-    display: flex; gap: 2px; height: 64px; padding: 6px; border-radius: 32px;
+    position: relative; display: flex; gap: 2px; height: 64px; padding: 6px; border-radius: 32px; box-sizing: border-box;
     background:
         linear-gradient(to bottom, rgba(255, 255, 255, .14), rgba(255, 255, 255, 0) 45px),
         linear-gradient(105deg, #4D8BFF, #2563EB 55%, #1D4ED8);
     box-shadow: 0 10px 20px -6px rgba(30, 64, 175, .55), inset 0 1px 0 rgba(255, 255, 255, .32), inset 0 -1px 0 rgba(255, 255, 255, .06);
 }
+/* One white thumb for the whole bar. It moves on a critically damped curve (no
+   overshoot), so it settles instead of wobbling; the icons ride the same curve. */
+.ha-nav-thumb {
+    position: absolute; top: 6px; bottom: 6px; left: 0; width: 0; border-radius: 26px; background: #fff; opacity: 0;
+    box-shadow: 0 6px 12px -4px rgba(30, 64, 175, .45), inset 0 -1px 0 rgba(30, 64, 175, .06);
+    transition: transform .44s cubic-bezier(.22, .9, .24, 1), width .44s cubic-bezier(.22, .9, .24, 1), opacity .2s;
+    will-change: transform, width;
+}
 .ha-nav-slot {
-    position: relative; flex: 1 1 0; min-width: 0; display: grid; place-items: center;
+    position: relative; z-index: 1; flex: 1 1 0; min-width: 0; display: grid; place-items: center;
     color: rgba(255, 255, 255, .85); text-decoration: none; -webkit-tap-highlight-color: transparent;
-    transition: flex-grow .42s cubic-bezier(.34, 1.25, .5, 1), transform .12s;
 }
 .ha-nav-slot.is-on { flex-grow: 2.6; }
-.ha-nav-slot:active { transform: scale(.9); }
-.ha-nav-pill {
-    position: absolute; inset: 0; border-radius: 26px; background: #fff;
-    box-shadow: 0 6px 12px -4px rgba(30, 64, 175, .45);
-    opacity: 0; transform: scale(.82); transition: opacity .3s, transform .38s cubic-bezier(.34, 1.3, .5, 1);
-}
-.ha-nav-slot.is-on .ha-nav-pill { opacity: 1; transform: none; }
-.ha-nav-in { position: relative; display: flex; align-items: center; padding: 0 10px; min-width: 0; }
-.ha-nav-glyph { position: relative; width: 24px; height: 24px; flex: none; }
+.ha-nav-slot:active .ha-nav-glyph { transform: scale(.86); }
+.ha-nav-cap.is-still .ha-nav-thumb, .ha-nav-cap.is-still .ha-nav-in, .ha-nav-cap.is-still .ha-nav-word, .ha-nav-cap.is-still svg { transition: none !important; }
+.ha-nav-in { position: relative; display: flex; align-items: center; padding: 0 10px; min-width: 0; transition: transform .44s cubic-bezier(.22, .9, .24, 1); }
+.ha-nav-glyph { position: relative; width: 24px; height: 24px; flex: none; transition: transform .12s; }
 .ha-nav-glyph svg { position: absolute; inset: .5px; width: 23px; height: 23px; transition: opacity .25s, transform .3s; }
 .ha-nav-glyph .g-on { opacity: 0; transform: scale(.9); color: #1D4ED8; }
 .ha-nav-slot.is-on .g-out { opacity: 0; }
 .ha-nav-slot.is-on .g-on { opacity: 1; transform: none; }
 .ha-nav-word {
-    max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; transform: translateX(-6px);
+    display: none; white-space: nowrap; margin-left: 7px;
     font: 700 13.5px/1 Inter, system-ui, sans-serif; letter-spacing: -.1px; color: #1D4ED8;
-    transition: max-width .4s cubic-bezier(.34, 1.2, .5, 1), opacity .2s .12s, transform .3s, margin .4s;
 }
-.ha-nav-slot.is-on .ha-nav-word { max-width: 110px; opacity: 1; transform: none; margin-left: 7px; }
+/* The label arrives just behind the thumb, so the eye reads "moved, then named". */
+.ha-nav-slot.is-on .ha-nav-word { display: block; animation: ha-word-in .3s .16s cubic-bezier(.22, .9, .24, 1) both; }
+@keyframes ha-word-in { from { opacity: 0; transform: translateX(-5px); } }
 
 /* ── drawer (HaraanNavigationDrawer) ─────────────────────────────────────── */
 
