@@ -342,6 +342,16 @@ Route::post('/partner/branch', function (Request $request) {
     return back();
 })->middleware(['web', 'auth'])->name('partner.branch.switch');
 
+// A fresh app token for the phone shell (PartnerAppShell): the console session vouches
+// for the partner, and the shell's screens then read /api/partner/* like the Android app.
+Route::post('/partner/app/token', function () {
+    $user = \App\Support\PartnerAppShell::user();
+
+    abort_if($user === null, 403);
+
+    return response()->json(['token' => \App\Support\PartnerAppShell::token($user)]);
+})->middleware(['web', 'auth', 'throttle:30,1'])->name(\App\Support\PartnerAppShell::TOKEN_ROUTE);
+
 // Booking alerts for the partner console installed as a web app (iPhone Home Screen,
 // desktop browser). public/js/partner/pwa.js posts the browser's FCM token here once
 // the partner allows notifications; BookingNotifier then reaches it like any Android

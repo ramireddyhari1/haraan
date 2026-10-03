@@ -140,6 +140,27 @@ class PartnerPanelProvider extends PanelProvider
             },
         );
 
+        // The Android app's shell on a phone: header, floating blue bottom bar, drawer,
+        // and the app's Home in place of the dashboard (PartnerAppShell). Signed-in
+        // partner pages only; the CSS keeps desktop exactly as it was.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            function (): string {
+                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
+                    return '';
+                }
+                $config = \App\Support\PartnerAppShell::config();
+                if ($config === null) {
+                    return '';
+                }
+                $v = fn (string $path): int => @filemtime(public_path($path)) ?: 1;
+
+                return '<link rel="stylesheet" href="' . e(asset('css/partner/app-shell.css')) . '?v=' . $v('css/partner/app-shell.css') . '">'
+                    . '<script>window.HaraanPartnerApp=' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES) . ';</script>'
+                    . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>';
+            },
+        );
+
         // Premium visual theme for the Event create/edit wizard — same overrides the
         // control panel uses, scoped to those two pages so the partner's event-creation
         // experience is just as polished without restyling the rest of the console.
