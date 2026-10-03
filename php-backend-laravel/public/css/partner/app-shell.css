@@ -81,14 +81,13 @@ html.ha-app.ha-home-on #ha-compact { display: flex; }
 .ha-grow { flex: 1; min-width: 0; }
 
 .ha-compact {
-    position: fixed; z-index: 40; top: 0; left: 0; right: 0; height: 56px;
-    align-items: center; padding: 0 6px 0 4px; background: #fff;
-    box-shadow: 0 6px 16px -8px rgba(15, 23, 42, .18);
-    opacity: 0; transform: translateY(-24px); pointer-events: none;
-    transition: opacity .22s, transform .22s;
+    position: fixed; z-index: 40; top: 0; left: 0; right: 0; height: 56px; box-sizing: content-box;
+    align-items: center; gap: 2px; padding: env(safe-area-inset-top, 0px) 6px 0 4px; background: #fff;
+    box-shadow: 0 1px 0 var(--ha-hair); transition: box-shadow .22s;
 }
 .ha-compact b { flex: 1; min-width: 0; font-size: 17px; font-weight: 800; color: var(--ha-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-html.ha-collapsed .ha-compact { opacity: 1; transform: none; pointer-events: auto; }
+/* Home's only header: always there; it lifts off the page with a soft shadow once scrolled. */
+html.ha-collapsed .ha-compact { box-shadow: 0 6px 16px -8px rgba(15, 23, 42, .18); }
 
 /* ── the floating bottom bar (HaraanBottomBar) ───────────────────────────── */
 
@@ -217,18 +216,8 @@ html.ha-collapsed .ha-compact { opacity: 1; transform: none; pointer-events: aut
 .ha-home a { text-decoration: none; color: inherit; }
 .ha-home p, .ha-home h2, .ha-home h3 { margin: 0; }
 
-.ha-top { background: #fff; padding: env(safe-area-inset-top, 0px) 0 18px; }
-.ha-toprow { display: flex; align-items: center; padding: 4px 12px 0 4px; }
-.ha-topname { flex: 1; min-width: 0; }
-.ha-topname b { display: block; font-size: 18px; font-weight: 800; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ha-topname span { display: flex; align-items: center; font-size: 12.5px; color: var(--ha-muted); white-space: nowrap; overflow: hidden; }
-.ha-topname small { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
-.ha-topname em { font-style: normal; font-weight: 600; }
-.ha-topname em.is-open { color: var(--ha-green); }
-.ha-dot { width: 7px; height: 7px; border-radius: 99px; background: var(--ha-faint); margin-right: 6px; flex: none; }
-.ha-dot.is-open { background: #16A34A; }
-.ha-toprow .ha-avatar { margin-left: 4px; }
-.ha-topbody { padding: 18px 20px 0; }
+.ha-top { background: #fff; padding: calc(56px + env(safe-area-inset-top, 0px)) 0 18px; }
+.ha-topbody { padding: 10px 20px 0; }
 
 .ha-today { display: flex; align-items: center; gap: 12px; }
 .ha-today > div { flex: 1; min-width: 0; }

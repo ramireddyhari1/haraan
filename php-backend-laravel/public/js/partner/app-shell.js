@@ -669,19 +669,6 @@
         return gaps.length ? Math.min(60, Math.max(30, Math.min.apply(null, gaps))) : 60;
     }
 
-    function openStatus(today, tomorrow, len) {
-        var now = minutesNow();
-        var starts = (today || []).map(function (x) { return x.start; }).filter(isFinite);
-        if (starts.length) {
-            var first = Math.min.apply(null, starts);
-            var end = Math.max.apply(null, starts) + len;
-            if (now < first) return ['Opens at ' + clock(first), false];
-            if (now < end) return ['Open now · till ' + clock(end), true];
-        }
-        var nx = (tomorrow || []).map(function (x) { return x.start; }).filter(isFinite);
-        return [nx.length ? 'Closed · opens ' + clock(Math.min.apply(null, nx)) + ' tomorrow' : 'Closed today', false];
-    }
-
     /** Court-hours still ahead / already played today, off the clock (courtHoursByClock). */
     function hoursByClock(hours) {
         var len = slotLength(hours);
@@ -758,28 +745,18 @@
         riseOrder = 0;
         var day = d.day;
         var o = d.overview;
-        var focus = d.focus;
         var cl = courtsLane();
         var settingUp = cl && !(day.setup ? day.setup.has_slots : (day.capacity && day.capacity.total > 0));
         var todayHours = d.grid ? courtHours(d.grid) : [];
         var tomorrowHours = d.tomorrowGrid ? courtHours(d.tomorrowGrid) : [];
         var len = slotLength(todayHours.length ? todayHours : tomorrowHours);
-        var name = focus ? focus.name : cfg.name;
-        var place = focus ? (focus.location || null) : null;
-        var status = settingUp ? null : openStatus(todayHours, tomorrowHours, len);
         var ins = home.insights && home.insights.enabled && !settingUp ? home.insights : null;
 
         var out = '';
         // ---- HomeTop
-        out += '<section class="ha-top" style="--rise:0">'
-            + '<div class="ha-toprow">'
-            + '<button type="button" class="ha-ibtn" data-drawer aria-label="Menu">' + mat('menu') + '</button>'
-            + '<div class="ha-topname"><b>' + esc(name) + '</b><span>'
-            + (status ? '<i class="ha-dot' + (status[1] ? ' is-open' : '') + '"></i><em class="' + (status[1] ? 'is-open' : '') + '">' + esc(status[0]) + '</em>' : '')
-            + (place ? '<small>' + (status ? '&nbsp;&nbsp;·&nbsp;&nbsp;' : '') + esc(place) + '</small>' : '')
-            + '</span></div>'
-            + bellHtml() + avatarHtml((name || 'H').trim().charAt(0).toUpperCase())
-            + '</div><div class="ha-topbody">'
+        // Home's header is the plain bar (menu · venue · bell), the one the user preferred;
+        // the old two-line top with the avatar is gone.
+        out += '<section class="ha-top" style="--rise:0"><div class="ha-topbody">'
             + (settingUp ? setupCard(d) : todayStatus(d, todayHours, tomorrowHours, len))
             + '</div></section>';
 
@@ -1015,10 +992,23 @@
             });
             grid += '</span></div>';
         }
-        var marks = '<div class="ha-dg-hours">' + hours.map(function (x, i) {
+        // Hour labels: first, last, "Now" and every third hour — but never two so close
+        // their text collides (a 6 AM–10 PM day used to print "9 PM" on top of "10 PM").
+        // Labels are placed by priority and anything within `gap` columns of one is dropped.
+        var gap = Math.max(2, Math.ceil(hours.length * 34 / 250));
+        var want = [];
+        hours.forEach(function (x, i) {
             var hr = isFinite(x.start) ? Math.floor(x.start / 60) : -1;
-            var show = isNow(x) || i === 0 || i === hours.length - 1 || (hr >= 0 && hr % 3 === 0 && x.start % 60 === 0);
-            return '<span class="' + (isNow(x) ? 'is-now' : '') + '">' + (isNow(x) ? 'Now' : show ? esc(shortTime(x.time)) : '') + '</span>';
+            var pr = isNow(x) ? 0 : i === 0 ? 1 : i === hours.length - 1 ? 2 : (hr >= 0 && hr % 3 === 0 && x.start % 60 === 0) ? 3 : -1;
+            if (pr >= 0) want.push([pr, i]);
+        });
+        var kept = {};
+        want.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; }).forEach(function (w) {
+            for (var k in kept) { if (Math.abs(k - w[1]) < gap) return; }
+            kept[w[1]] = true;
+        });
+        var marks = '<div class="ha-dg-hours">' + hours.map(function (x, i) {
+            return '<span class="' + (isNow(x) ? 'is-now' : '') + '">' + (!kept[i] ? '' : isNow(x) ? 'Now' : esc(shortTime(x.time))) + '</span>';
         }).join('') + '</div>';
 
         home.state.gridHours = hours;
@@ -1895,7 +1885,7 @@
 
     window.addEventListener('scroll', function () {
         if (!root.classList.contains('ha-home-on')) return;
-        root.classList.toggle('ha-collapsed', window.scrollY > 190);
+        root.classList.toggle('ha-collapsed', window.scrollY > 8);
     }, { passive: true });
 
     /* ============================================================== screens === */
@@ -2039,6 +2029,7 @@
                 if (!r) return;
                 venuesCache = r.data || r;
                 renderAppBar();
+                if (root.classList.contains('ha-home-on')) renderCompact();
             });
         }
         if (onHome) {
