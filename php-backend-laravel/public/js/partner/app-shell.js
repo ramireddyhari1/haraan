@@ -810,6 +810,7 @@
         host.innerHTML = out;
         wireHome(host);
         countUps(host);
+        placeSegs(host);
         // A payment that arrived since the last draw lands with the app's money buzz.
         if (home.payFresh && document.visibilityState === 'visible' && navigator.vibrate) {
             try { navigator.vibrate([12, 60, 22]); } catch (err) { /* none */ }
@@ -1267,7 +1268,7 @@
     /* ---- Insights ---------------------------------------------------------- */
 
     function seg(name, options, on) {
-        return '<span class="ha-seg" data-seg="' + name + '">' + options.map(function (o) {
+        return '<span class="ha-seg" data-seg="' + name + '"><i class="ha-seg-thumb" aria-hidden="true"></i>' + options.map(function (o) {
             return '<button type="button" data-v="' + o[0] + '" class="' + (String(o[0]) === String(on) ? 'is-on' : '') + '">' + esc(o[1]) + '</button>';
         }).join('') + '</span>';
     }
@@ -1300,25 +1301,6 @@
         return out;
     }
 
-    function haraanCard(hb) {
-        var all = hb.all_time || { count: 0, amount: 0 };
-        var html = '<div class="ha-card ha-haraan"><small class="ha-eyebrow">Through Haraan</small>';
-        if (!all.count) {
-            return html + '<h3>Your first online booking is next</h3><p class="ha-muted">Players near you can find and book your courts on Haraan. Share your venue link to bring them in.</p></div>';
-        }
-        html += '<b class="ha-big" data-count="' + all.amount + '">' + rupees(all.amount) + '</b>'
-            + '<p class="ha-muted">from ' + all.count + ' online ' + (all.count === 1 ? 'booking' : 'bookings') + ' so far</p><div class="ha-facts">'
-            + (hb.players > 0 ? '<span>' + (hb.players === 1 ? '1 player found you' : hb.players + ' players found you') + '</span>' : '')
-            + (hb.share > 0 ? '<span>' + Math.round(hb.share * 100) + '% of your bookings</span>' : '') + '</div>';
-        var tm = hb.this_month || { count: 0, amount: 0 }, lm = hb.last_month || { count: 0 };
-        if (tm.count > 0 || lm.count > 0) {
-            var up = lm.count > 0 && tm.count > lm.count;
-            html += '<hr><p class="ha-month' + (up ? ' is-up' : '') + '">This month: ' + tm.count + ' online · ' + rupees(tm.amount)
-                + (up ? '&nbsp;&nbsp;▲ up from ' + lm.count : lm.count > 0 ? '&nbsp;&nbsp;· last month ' + lm.count : '') + '</p>';
-        }
-        return html + '</div>';
-    }
-
     function milestonesCard(m) {
         var newest = (m.reached || []).reduce(function (x, r) { return Math.max(x, r.count); }, 0);
         var key = 'ha-milestone:' + (cfg.branch || 'all');
@@ -1337,36 +1319,6 @@
             html += '<div class="ha-miles-list">' + chips.map(function (c) {
                 return '<div class="ha-reached' + (c[2] ? ' is-new' : '') + '">' + mat('check') + '<span>' + esc(c[0]) + '</span>' + (c[2] ? '<em>NEW</em>' : '') + '<small>' + esc(c[1]) + '</small></div>';
             }).join('') + '</div>';
-        }
-        return html + '</div>';
-    }
-
-    function customersCard(c, monthly) {
-        var p = monthly ? c.month : c.week;
-        var total = (p.new || 0) + (p.returning || 0);
-        var lastLbl = monthly ? 'last month' : 'last week';
-        function compare(now, before) {
-            if (before === 0 && now === 0) return 'none ' + lastLbl + ' either';
-            if (now > before) return '▲ up from ' + before + ' ' + lastLbl;
-            if (now < before) return before + ' ' + lastLbl;
-            return 'same as ' + lastLbl;
-        }
-        var last = p.last || { new: 0, returning: 0 };
-        var href = u.customers || '#';
-        function half(count, label, tone, note) {
-            return '<a class="ha-half is-' + tone + '" href="' + esc(href) + '"><span class="ha-half-h"><i></i>' + label + mat('chevron') + '</span>'
-                + '<b>' + count + '</b><small class="' + (note.indexOf('▲') === 0 ? 'is-up' : '') + '">' + esc(note) + '</small></a>';
-        }
-        var html = '<div class="ha-card ha-cust"><div class="ha-row"><b class="ha-ctitle">'
-            + (total === 0 ? 'No customers ' + String(p.label || '').toLowerCase() + ' yet' : total + ' ' + (total === 1 ? 'customer' : 'customers') + ' ' + String(p.label || '').toLowerCase())
-            + '</b>' + seg('cust', [['week', 'Week'], ['month', 'Month']], monthly ? 'month' : 'week') + '</div>'
-            + '<div class="ha-halves">' + half(p.new || 0, 'New', 'new', compare(p.new || 0, last.new || 0)) + half(p.returning || 0, 'Returning', 'back', compare(p.returning || 0, last.returning || 0)) + '</div>';
-        if (total > 0) {
-            var share = (p.new || 0) / total;
-            html += '<div class="ha-split">' + (share > 0.001 ? '<i class="is-new" style="flex:' + share + '"></i>' : '') + (share < 0.999 ? '<i class="is-back" style="flex:' + (1 - share) + '"></i>' : '') + '</div>';
-        }
-        if (c.came_back > 0) {
-            html += '<p class="ha-muted ha-small">' + c.came_back + ' of your ' + c.total + ' ' + (c.total === 1 ? 'customer has' : 'customers have') + ' come back more than once</p>';
         }
         return html + '</div>';
     }
@@ -1409,20 +1361,195 @@
             + '<div class="ha-row ha-wk-foot"><span class="ha-grow">' + esc(line) + '</span>' + seg('mode', [['money', '₹'], ['hours', 'Hrs']], hoursMode ? 'hours' : 'money') + '</div></div>';
     }
 
+    /* ---- Through Haraan ----------------------------------------------------- */
+
+    /** A drawn ring of how much of the venue's business came through Haraan. */
+    function shareRing(share) {
+        var pct = Math.max(0, Math.min(100, Math.round(share * 100)));
+        return '<span class="ha-ring" style="--p:' + pct + '"><svg viewBox="0 0 80 80" aria-hidden="true">'
+            + '<circle cx="40" cy="40" r="32" fill="none" stroke="#E3ECFF" stroke-width="8"/>'
+            + '<circle class="ha-ring-arc" cx="40" cy="40" r="32" fill="none" stroke="#1D4ED8" stroke-width="8" stroke-linecap="round" pathLength="100" stroke-dasharray="100" transform="rotate(-90 40 40)"/>'
+            + '<circle cx="40" cy="40" r="23" fill="#fff"/></svg>'
+            + '<b>' + pct + '<small>%</small></b></span>';
+    }
+
+    /** Small drawn mark: a map pin with a player in it — someone found the venue. */
+    function foundMark() {
+        return '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 18.6s5.8-5 5.8-9.6A5.8 5.8 0 0 0 4.2 9c0 4.6 5.8 9.6 5.8 9.6z" fill="#E3ECFF" stroke="#1D4ED8" stroke-width="1.5" stroke-linejoin="round"/>'
+            + '<circle cx="10" cy="7.4" r="1.7" fill="#1D4ED8"/><path d="M7.2 12.2c.4-1.6 1.5-2.4 2.8-2.4s2.4.8 2.8 2.4" fill="none" stroke="#1D4ED8" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    }
+
+    function haraanCard(hb) {
+        var all = hb.all_time || { count: 0, amount: 0 };
+        var html = '<div class="ha-card ha-haraan">';
+        if (!all.count) {
+            return html + '<small class="ha-eyebrow">Through Haraan</small><h3>Your first online booking is next</h3><p class="ha-muted">Players near you can find and book your courts on Haraan. Share your venue link to bring them in.</p></div>';
+        }
+        html += '<div class="ha-hb-top"><span class="ha-grow"><small class="ha-eyebrow">Through Haraan</small>'
+            + '<b class="ha-big" data-count="' + all.amount + '">' + rupees(all.amount) + '</b>'
+            + '<p class="ha-muted">from ' + all.count + ' online ' + (all.count === 1 ? 'booking' : 'bookings') + ' so far</p></span>'
+            + (hb.share > 0 ? '<span class="ha-ring-wrap">' + shareRing(hb.share) + '<small>of all bookings</small></span>' : '') + '</div>';
+
+        var tm = hb.this_month || { count: 0, amount: 0 }, lm = hb.last_month || { count: 0 };
+        var now = new Date();
+        var thisName = MONTHS[now.getMonth()], lastName = MONTHS[(now.getMonth() + 11) % 12];
+        var foot = '';
+        if (tm.count > 0 || lm.count > 0) {
+            var top = Math.max(tm.count, lm.count, 1);
+            var bar = function (name, n, cls, note) {
+                return '<span class="ha-mbar ' + cls + '"><small>' + name + '</small><span class="ha-mbar-track"><i style="--w:' + (n > 0 ? Math.max(0.04, n / top) : 0) + '"></i></span><b>' + n + (note ? '<em>' + note + '</em>' : '') + '</b></span>';
+            };
+            var ahead = lm.count > 0 && tm.count > lm.count;
+            foot += '<div class="ha-mbars"><small class="ha-label">Online bookings</small>'
+                + bar(lastName, lm.count, 'is-last', '')
+                + bar(thisName, tm.count, 'is-this', tm.count > 0 ? rupees(tm.amount) : 'so far')
+                + (ahead ? '<p class="ha-mbar-up">▲ Already past ' + lastName + '</p>' : '') + '</div>';
+        }
+        if (hb.players > 0) {
+            foot += '<p class="ha-found">' + foundMark() + '<span><b>' + (hb.players === 1 ? '1 player' : hb.players + ' players') + '</b> found you on Haraan</span></p>';
+        }
+        return html + (foot ? '<div class="ha-hb-foot">' + foot + '</div>' : '') + '</div>';
+    }
+
+    /* ---- Your customers ----------------------------------------------------- */
+
+    /** One drawn customer: head and shoulders. Returning ones carry a small loop. */
+    function personGlyph(kind, i) {
+        var fill = kind === 'back' ? '#0F766E' : kind === 'new' ? '#1E50E6' : 'none';
+        var stroke = kind === 'none' ? ' stroke="#C3CCDA" stroke-width="1.3" stroke-dasharray="2.4 2"' : '';
+        var g = '<span class="ha-person is-' + kind + '" style="--i:' + i + '"><svg viewBox="0 0 24 26" aria-hidden="true">'
+            + '<circle cx="11" cy="8" r="4.6" fill="' + fill + '"' + stroke + '/>'
+            + '<path d="M2.6 25c0-5.6 3.8-9 8.4-9s8.4 3.4 8.4 9z" fill="' + fill + '"' + stroke + '/>';
+        if (kind === 'back') {
+            g += '<circle cx="19" cy="6" r="4.6" fill="#fff"/><path d="M21.2 5.1a2.5 2.5 0 1 0-.2 2.6" fill="none" stroke="#0F766E" stroke-width="1.4" stroke-linecap="round"/>'
+                + '<path d="M21.6 3.3v2.1h-2.1" fill="none" stroke="#0F766E" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>';
+        }
+        return g + '</svg></span>';
+    }
+
+    function crowd(fresh, back) {
+        var total = fresh + back, MAX = 12;
+        if (total === 0) {
+            var ghosts = '';
+            for (var g = 0; g < 6; g++) ghosts += personGlyph('none', g);
+            return '<div class="ha-crowd is-empty">' + ghosts + '</div>';
+        }
+        var shown = Math.min(total, total > MAX ? MAX - 1 : MAX);
+        var showBack = Math.min(back, Math.round(shown * back / total));
+        if (back > 0 && showBack === 0) showBack = 1;
+        var showNew = Math.min(fresh, shown - showBack);
+        if (fresh > 0 && showNew === 0) { showNew = 1; showBack = shown - 1; }
+        var out = '', i = 0;
+        for (var b = 0; b < showBack; b++) out += personGlyph('back', i++);
+        for (var n = 0; n < showNew; n++) out += personGlyph('new', i++);
+        if (total > shown) out += '<span class="ha-person-more" style="--i:' + i + '">+' + (total - shown) + '</span>';
+        return '<div class="ha-crowd">' + out + '</div>';
+    }
+
+    function customersCard(c, monthly) {
+        var p = monthly ? c.month : c.week;
+        var fresh = p.new || 0, back = p.returning || 0;
+        var total = fresh + back;
+        var lastLbl = monthly ? 'last month' : 'last week';
+        function compare(now, before) {
+            if (before === 0 && now === 0) return 'none ' + lastLbl + ' either';
+            if (now > before) return '▲ up from ' + before + ' ' + lastLbl;
+            if (now < before) return before + ' ' + lastLbl;
+            return 'same as ' + lastLbl;
+        }
+        var last = p.last || { new: 0, returning: 0 };
+        var href = u.customers || '#';
+        function half(count, label, tone, note) {
+            return '<a class="ha-half is-' + tone + '" href="' + esc(href) + '"><span class="ha-half-h">' + label + mat('chevron') + '</span>'
+                + '<b>' + count + '</b><small class="' + (note.indexOf('▲') === 0 ? 'is-up' : '') + '">' + esc(note) + '</small></a>';
+        }
+        var period = String(p.label || '').toLowerCase();
+        var html = '<div class="ha-card ha-cust"><div class="ha-row"><b class="ha-ctitle">'
+            + (total === 0 ? 'Nobody ' + period + ' yet' : total + ' ' + (total === 1 ? 'customer' : 'customers') + ' ' + period)
+            + '</b>' + seg('cust', [['week', 'Week'], ['month', 'Month']], monthly ? 'month' : 'week') + '</div>'
+            + crowd(fresh, back)
+            + (total > 0 ? '<p class="ha-crowd-key"><span class="is-back">' + back + ' came back</span><span class="is-new">' + fresh + ' first time</span></p>' : '<p class="ha-crowd-key">Each customer shows up here as they book.</p>')
+            + '<div class="ha-halves">' + half(fresh, 'New', 'new', compare(fresh, last.new || 0)) + half(back, 'Returning', 'back', compare(back, last.returning || 0)) + '</div>';
+        if (c.came_back > 0) {
+            html += '<p class="ha-loyal"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.6 7.4A6 6 0 1 0 16 12" fill="none" stroke="#0F766E" stroke-width="1.7" stroke-linecap="round"/><path d="M16.4 3.8v3.9h-3.9" fill="none" stroke="#0F766E" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                + '<span><b>' + c.came_back + ' of ' + c.total + '</b> ' + (c.total === 1 ? 'customer has' : 'customers have') + ' come back more than once</span></p>';
+        }
+        return html + '</div>';
+    }
+
+    /* ---- Where bookings come from ------------------------------------------- */
+
+    /** Drawn source marks: someone walking in, the app on a phone, a WhatsApp chat. */
+    function sourceMark(k) {
+        var o = '<svg viewBox="0 0 24 24" aria-hidden="true">';
+        if (k === 'walk') {
+            return o + '<circle cx="13" cy="4.6" r="2.2" fill="currentColor"/>'
+                + '<path d="M11.4 8.6 9 14.2l3.4 2.4-1 5.4M11.4 8.6l2.9.4 1.6 3.4 2.6 1M9 14.2l-2.6 6.6M11.4 8.6 8.6 9.8 7 12.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        }
+        if (k === 'app') {
+            return o + '<rect x="6.5" y="2.5" width="11" height="19" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/>'
+                + '<path d="M9.8 8.4v6.2M14.2 8.4v6.2M9.8 11.5h4.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10.8 18.6h2.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".55"/></svg>';
+        }
+        return o + '<path d="M12 3.2a8.6 8.6 0 0 1 0 17.2c-1.5 0-2.9-.4-4.2-1.1L3.6 20.6l1.3-4A8.6 8.6 0 0 1 12 3.2z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>'
+            + '<path d="M9.2 8.8c.3-.5.8-.5 1-.1l.7 1.5c.1.3 0 .6-.2.8l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.8-.2l1.5.7c.4.2.4.7-.1 1-1 .8-2.4.7-3.8-.2a8.3 8.3 0 0 1-2.6-2.6c-.9-1.4-1-2.8.2-3.4z" fill="currentColor"/></svg>';
+    }
+
+    /**
+     * Where the money came from, drawn as a flow: each source sends a stream into the
+     * venue, as thick as what it brought. Empty, the streams are dashed outlines — the
+     * shape of the chart is still there, waiting for its first booking.
+     */
+    function flowChart(parts, total) {
+        var W = 320, H = 132, SLOTS = [22, 66, 110], NX = 52, VX = 304, MAXH = 40;
+        var top = parts.reduce(function (m, p) { return Math.max(m, p.amount); }, 0);
+        var hs = parts.map(function (p) { return total > 0 && p.amount > 0 ? Math.max(4, p.amount / top * MAXH) : 0; });
+        var sum = hs.reduce(function (a, b) { return a + b; }, 0) + (total > 0 ? (hs.filter(Boolean).length - 1) * 2 : 0);
+        var vy = (H - Math.max(sum, 36)) / 2, vh = Math.max(sum, 36);
+        var svg = '<svg class="ha-flow-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true"><defs>';
+        parts.forEach(function (p, i) {
+            svg += '<linearGradient id="haflow' + i + '" x1="0" x2="1"><stop offset="0" stop-color="' + p.color + '" stop-opacity=".32"/><stop offset="1" stop-color="' + p.color + '" stop-opacity=".12"/></linearGradient>';
+        });
+        svg += '</defs>';
+        var cursor = vy + (vh - sum) / 2;
+        parts.forEach(function (p, i) {
+            var cy = SLOTS[i], h = hs[i];
+            if (!h) {
+                svg += '<path d="M' + NX + ' ' + cy + ' C' + ((NX + VX) / 2) + ' ' + cy + ' ' + ((NX + VX) / 2) + ' ' + (H / 2) + ' ' + VX + ' ' + (H / 2) + '" fill="none" stroke="#D5DCE7" stroke-width="1.4" stroke-dasharray="3 4"/>';
+                return;
+            }
+            var y0 = cy - h / 2, y1 = cy + h / 2, r0 = cursor, r1 = cursor + h, mx = (NX + VX) / 2;
+            cursor = r1 + 2;
+            svg += '<path class="ha-flow-band" style="--i:' + i + '" d="M' + NX + ' ' + y0 + ' C' + mx + ' ' + y0 + ' ' + mx + ' ' + r0 + ' ' + VX + ' ' + r0 + ' L' + VX + ' ' + r1 + ' C' + mx + ' ' + r1 + ' ' + mx + ' ' + y1 + ' ' + NX + ' ' + y1 + 'Z" fill="url(#haflow' + i + ')"/>'
+                + '<rect x="' + (NX - 4) + '" y="' + y0 + '" width="4" height="' + h + '" rx="2" fill="' + p.color + '"/>';
+        });
+        svg += '<rect x="' + VX + '" y="' + vy + '" width="9" height="' + vh + '" rx="4.5" fill="' + (total > 0 ? '#0B1C46' : '#D5DCE7') + '"/></svg>';
+        var marks = parts.map(function (p, i) {
+            return '<span class="ha-flow-src' + (p.amount > 0 ? '' : ' is-off') + '" style="top:' + (SLOTS[i] / H * 100).toFixed(2) + '%;--c:' + p.color + '">' + sourceMark(p.mark) + '</span>';
+        }).join('');
+        return '<div class="ha-flow">' + svg + marks + '<span class="ha-flow-dest"><small>Your venue</small><b>' + (total > 0 ? rupees(total) : '₹0') + '</b></span></div>';
+    }
+
     function channelCard(ins) {
         var s = home.state;
         var current = !ins.week.next;
         var todayMode = current && !!s.chToday;
         var ch = ins.channels || {};
         var split = (todayMode ? ch.today : ch.week) || {};
-        var parts = [['Walk-in', split.walk_in || {}, '#0B1C46'], ['App', split.app || {}, '#2F6BFF'], ['WhatsApp', split.whatsapp || {}, '#1FAF5B']];
-        var total = parts.reduce(function (t, p) { return t + (p[1].amount || 0); }, 0);
-        var count = parts.reduce(function (t, p) { return t + (p[1].count || 0); }, 0);
-        var html = '<div class="ha-card ha-ch"><div class="ha-row"><b class="ha-ctitle">' + (total > 0 ? plural(count, 'booking') + ' · ' + rupees(total) : 'No bookings yet') + '</b>'
+        var parts = [
+            { name: 'Walk-in', d: split.walk_in || {}, color: '#0B1C46', mark: 'walk' },
+            { name: 'App', d: split.app || {}, color: '#2F6BFF', mark: 'app' },
+            { name: 'WhatsApp', d: split.whatsapp || {}, color: '#1FAF5B', mark: 'wa' },
+        ];
+        parts.forEach(function (p) { p.amount = p.d.amount || 0; });
+        var total = parts.reduce(function (t, p) { return t + p.amount; }, 0);
+        var count = parts.reduce(function (t, p) { return t + (p.d.count || 0); }, 0);
+        var html = '<div class="ha-card ha-ch"><div class="ha-row"><b class="ha-ctitle">' + (total > 0 ? plural(count, 'booking') + ' · ' + rupees(total) : (todayMode ? 'No bookings today yet' : 'No bookings this week yet')) + '</b>'
             + (current ? seg('ch', [['today', 'Today'], ['week', 'Week']], todayMode ? 'today' : 'week') : '') + '</div>'
-            + '<div class="ha-ch-bar">' + (total > 0 ? parts.map(function (p) { var w = (p[1].amount || 0) / total; return w > 0.001 ? '<i style="flex:' + w + ';background:' + p[2] + '"></i>' : ''; }).join('') : '') + '</div>'
+            + flowChart(parts, total)
             + parts.map(function (p) {
-                return '<div class="ha-ch-row"><i style="background:' + p[2] + '"></i><span>' + p[0] + '</span><small>' + (p[1].count ? hoursLabel(p[1].hours) : '—') + '</small><b>' + (p[1].count ? rupees(p[1].amount) : '') + '</b></div>';
+                var pc = total > 0 ? Math.round(p.amount / total * 100) : 0;
+                return '<div class="ha-ch-row' + (p.d.count ? '' : ' is-off') + '"><i style="background:' + p.color + '"></i><span>' + p.name + '</span><small>' + (p.d.count ? hoursLabel(p.d.hours) : '—') + '</small>'
+                    + '<em>' + (p.d.count ? pc + '%' : '') + '</em><b>' + (p.d.count ? rupees(p.amount) : '') + '</b></div>';
             }).join('');
         function share(x) { var t = (x.walk_in || {}).amount + (x.app || {}).amount + (x.whatsapp || {}).amount; return t > 0 ? ((x.app || {}).amount + (x.whatsapp || {}).amount) / t : null; }
         var nowShare = share({ walk_in: split.walk_in || { amount: 0 }, app: split.app || { amount: 0 }, whatsapp: split.whatsapp || { amount: 0 } });
@@ -1431,9 +1558,52 @@
             var period = todayMode ? 'today’s' : 'this week’s';
             var lw = !todayMode && ch.last_week ? share({ walk_in: ch.last_week.walk_in || { amount: 0 }, app: ch.last_week.app || { amount: 0 }, whatsapp: ch.last_week.whatsapp || { amount: 0 } }) : null;
             var prev = lw == null ? null : Math.round(lw * 100);
-            html += '<p class="ha-ch-line">Haraan brought ' + pct + '% of ' + period + ' money' + (prev == null || prev === pct ? '' : pct > prev ? ', up from ' + prev + '%' : ', down from ' + prev + '%') + '</p>';
+            var dir = prev == null || prev === pct ? '' : pct > prev ? 'ha-dir-up' : 'ha-dir-down';
+            html += '<p class="ha-ch-line ' + dir + '"><span>Haraan brought <b>' + pct + '%</b> of ' + period + ' money</span>'
+                + (dir ? '<em>' + (dir === 'ha-dir-up' ? '▲' : '▼') + ' from ' + prev + '%</em>' : '') + '</p>';
         }
         return html + '</div>';
+    }
+
+    /* ---- in-place card swaps (a toggle redraws its own card, not the page) ---- */
+
+    /** Each segmented control's dark thumb sits under its selected option. */
+    function placeSegs(root) {
+        root.querySelectorAll('.ha-seg').forEach(function (sg) {
+            var on = sg.querySelector('button.is-on'), t = sg.querySelector('.ha-seg-thumb');
+            if (!on || !t) return;
+            t.style.left = on.offsetLeft + 'px';
+            t.style.width = on.offsetWidth + 'px';
+        });
+    }
+
+    function swapCard(sel, html) {
+        var host = homeHost();
+        var old = host && host.querySelector(sel);
+        if (!old || !html) { renderHome(); return; }
+        var thumbs = Array.prototype.map.call(old.querySelectorAll('.ha-seg'), function (sg) {
+            var t = sg.querySelector('.ha-seg-thumb');
+            return t ? { name: sg.getAttribute('data-seg'), left: t.offsetLeft, width: t.offsetWidth } : null;
+        }).filter(Boolean);
+        var el = h(html);
+        if (old.getAttribute('style')) el.setAttribute('style', old.getAttribute('style'));
+        el.classList.add('is-swapped');
+        old.parentNode.replaceChild(el, old);
+        placeSegs(el);
+        // The thumb is played back from where it stood, so it slides rather than jumps.
+        thumbs.forEach(function (o) {
+            var t = el.querySelector('.ha-seg[data-seg="' + o.name + '"] .ha-seg-thumb');
+            if (!t) return;
+            var left = t.style.left, width = t.style.width;
+            t.style.transition = 'none';
+            t.style.left = o.left + 'px';
+            t.style.width = o.width + 'px';
+            void t.offsetWidth;
+            t.style.transition = '';
+            t.style.left = left;
+            t.style.width = width;
+        });
+        countUps(el);
     }
 
     function growthCard(g) {
@@ -1579,14 +1749,22 @@
             if ((b = t.closest('.ha-seg button'))) {
                 var name = b.parentNode.getAttribute('data-seg');
                 var v = b.getAttribute('data-v');
-                if (name === 'cust') home.state.custMonthly = v === 'month';
-                if (name === 'mode') home.state.hoursMode = v === 'hours';
-                if (name === 'ch') home.state.chToday = v === 'today';
-                if (name === 'growth') home.state.growthBookings = v === 'bookings';
-                renderHome();
+                if (b.classList.contains('is-on')) return;
+                if (navigator.vibrate) { try { navigator.vibrate(5); } catch (err) { /* none */ } }
+                var ins = home.insights;
+                // Only the toggled card redraws: the page stays put and its thumb slides.
+                if (name === 'cust') { home.state.custMonthly = v === 'month'; swapCard('.ha-cust', ins && ins.customers ? customersCard(ins.customers, home.state.custMonthly) : null); }
+                if (name === 'mode') { home.state.hoursMode = v === 'hours'; swapCard('.ha-week', ins ? weekCard(ins) : null); }
+                if (name === 'ch') { home.state.chToday = v === 'today'; swapCard('.ha-ch', ins ? channelCard(ins) : null); }
+                if (name === 'growth') { home.state.growthBookings = v === 'bookings'; swapCard('.ha-growth', ins && ins.growth ? growthCard(ins.growth) : null); }
                 return;
             }
-            if ((b = t.closest('[data-day]'))) { home.state.selDay = +b.getAttribute('data-day'); renderHome(); return; }
+            if ((b = t.closest('[data-day]'))) {
+                home.state.selDay = +b.getAttribute('data-day');
+                if (navigator.vibrate) { try { navigator.vibrate(4); } catch (err) { /* none */ } }
+                swapCard('.ha-week', home.insights ? weekCard(home.insights) : null);
+                return;
+            }
             if ((b = t.closest('[data-week]'))) {
                 var week = b.getAttribute('data-week');
                 if (!week || home.state.weekLoading) return;
