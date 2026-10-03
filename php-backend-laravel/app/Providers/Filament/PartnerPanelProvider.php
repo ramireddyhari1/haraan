@@ -160,8 +160,10 @@ class PartnerPanelProvider extends PanelProvider
                     . '<link rel="stylesheet" href="' . e(asset('css/partner/app-screens.css')) . '?v=' . $v('css/partner/app-screens.css') . '">'
                     . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>'
                     . '<link rel="stylesheet" href="' . e(asset('css/partner/app-tools.css')) . '?v=' . $v('css/partner/app-tools.css') . '">'
+                    . '<link rel="stylesheet" href="' . e(asset('css/partner/app-venue-tools.css')) . '?v=' . $v('css/partner/app-venue-tools.css') . '">'
                     . '<script src="' . e(asset('js/partner/app-screens.js')) . '?v=' . $v('js/partner/app-screens.js') . '" defer></script>'
-                    . '<script src="' . e(asset('js/partner/app-tools.js')) . '?v=' . $v('js/partner/app-tools.js') . '" defer></script>';
+                    . '<script src="' . e(asset('js/partner/app-tools.js')) . '?v=' . $v('js/partner/app-tools.js') . '" defer></script>'
+                    . '<script src="' . e(asset('js/partner/app-venue-tools.js')) . '?v=' . $v('js/partner/app-venue-tools.js') . '" defer></script>';
             },
         );
 
@@ -400,6 +402,10 @@ class PartnerPanelProvider extends PanelProvider
                 \App\Filament\Pages\Partner\PartnerDesk::class,
                 // The phone Scan tab (app-shell.js); not in the desktop menu.
                 \App\Filament\Pages\Partner\PartnerScanPage::class,
+                // App-only drawer tools on a phone (app-tools.js); not in the desktop menu.
+                \App\Filament\Pages\Partner\PartnerStandingSlotsPage::class,
+                \App\Filament\Pages\Partner\PartnerPackagesPage::class,
+                \App\Filament\Pages\Partner\PartnerAcademyPage::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
                 \App\Filament\Pages\Partner\PartnerPayouts::class,
                 \App\Filament\Pages\Partner\PartnerReviews::class,
