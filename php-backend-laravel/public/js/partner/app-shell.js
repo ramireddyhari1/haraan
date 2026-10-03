@@ -143,6 +143,35 @@
         });
     }
 
+    /**
+     * POST/DELETE to /api/partner/<path> with a JSON body. Resolves to the parsed body;
+     * a refusal rejects with an Error whose .status and .body carry the server's answer
+     * (409 on check-in is an answer about the ticket, not a failure).
+     */
+    function apiSend(method, path, body, retried) {
+        return fetch('/api/partner/' + path, {
+            method: method,
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            credentials: 'omit',
+            body: body == null ? undefined : JSON.stringify(body),
+        }).then(function (r) {
+            if (r.status === 401 && !retried) {
+                return refreshToken().then(function () { return apiSend(method, path, body, true); });
+            }
+            return r.text().then(function (t) {
+                var j = null;
+                try { j = t ? JSON.parse(t) : null; } catch (e) { /* not JSON */ }
+                if (!r.ok) {
+                    var err = new Error((j && (j.message || j.error)) || ('Something went wrong (' + r.status + ')'));
+                    err.status = r.status;
+                    err.body = j;
+                    throw err;
+                }
+                return j;
+            });
+        });
+    }
+
     function soft(p) { return p.then(function (v) { return v; }, function () { return null; }); }
 
     /* ================================================================ icons === */
@@ -1484,10 +1513,105 @@
         root.classList.toggle('ha-collapsed', window.scrollY > 190);
     }, { passive: true });
 
+    /* ============================================================== screens === */
+
+    /**
+     * The other tabs (Venues, Payments, Matches, Scan) live in app-screens.js and register
+     * here. A tab's screen draws over its console page on a phone, the way Home does.
+     */
+    var screens = {};
+    var active = null; // { key, path, screen }
+
+    function sheet(html, cls) {
+        var s = h('<div class="ha-bsheet ' + (cls || '') + '"><div class="ha-scrim" data-x></div><div class="ha-bsheet-in" role="dialog"><i class="ha-grab"></i>' + html + '</div></div>');
+        document.body.appendChild(s);
+        requestAnimationFrame(function () { s.classList.add('is-open'); });
+        s.close = function () {
+            s.classList.remove('is-open');
+            setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); if (s.onclose) s.onclose(); }, 220);
+        };
+        s.addEventListener('click', function (e) { if (e.target.closest('[data-x]')) s.close(); });
+        return s;
+    }
+
+    function toast(text) {
+        var t = h('<div class="ha-toast" role="status"></div>');
+        t.textContent = text;
+        document.body.appendChild(t);
+        requestAnimationFrame(function () { t.classList.add('is-in'); });
+        setTimeout(function () { t.classList.remove('is-in'); setTimeout(function () { t.remove(); }, 250); }, 2400);
+    }
+
+    function loadScript(src) {
+        return new Promise(function (resolve, reject) {
+            var s = document.querySelector('script[src="' + src + '"]');
+            if (s && s.dataset.ready) return resolve();
+            if (!s) { s = document.createElement('script'); s.src = src; s.async = true; document.head.appendChild(s); }
+            s.addEventListener('load', function () { s.dataset.ready = '1'; resolve(); });
+            s.addEventListener('error', reject);
+        });
+    }
+
+    window.HaApp = {
+        cfg: cfg, u: u, api: api, apiSend: apiSend, soft: soft, esc: esc, inr: inr, rupees: rupees, hrs: hrs,
+        plural: plural, initials: initials, slotStart: slotStart, clock: clock, shortTime: shortTime,
+        minutesNow: minutesNow, ymd: ymd, store: store, h: h, glyph: glyph, mat: mat, MAT: MAT, DRAWER: DRAWER,
+        can: can, isDesk: isDesk, lane: lane, courtsLane: courtsLane, urlOf: urlOf, go: go, share: share,
+        sheet: sheet, toast: toast, loadScript: loadScript, months: MONTHS,
+        register: function (key, screen) { screens[key] = screen; },
+    };
+
+    function leaveScreen() {
+        if (!active) return;
+        try { if (active.screen.leave) active.screen.leave(); } catch (e) { /* screen gone */ }
+        active = null;
+        root.classList.remove('ha-screen-on', 'ha-full');
+    }
+
+    function screenHost() {
+        var host = document.getElementById('ha-screen');
+        if (!host) {
+            var main = document.querySelector('.fi-main') || document.querySelector('main');
+            if (!main) return null;
+            host = h('<div id="ha-screen" class="ha-screen"></div>');
+            main.insertBefore(host, main.firstChild);
+        }
+        return host;
+    }
+
+    /** The tab whose own page this is — exactly, so a venue's edit page keeps the console. */
+    function screenKey() {
+        var here = location.pathname.replace(/\/+$/, '');
+        var keys = Object.keys(screens);
+        for (var i = 0; i < keys.length; i++) {
+            var url = urlOf(keys[i]);
+            if (url && path(url) === here) return keys[i];
+        }
+        return null;
+    }
+
+    function mountScreen() {
+        var key = screenKey();
+        var here = location.pathname;
+        if (active && (active.key !== key || active.path !== here || !document.getElementById('ha-screen'))) leaveScreen();
+        if (!key) return false;
+        var screen = screens[key];
+        root.classList.add('ha-screen-on');
+        root.classList.toggle('ha-full', !!screen.full);
+        var host = screenHost();
+        if (!host) return false;
+        if (!active) {
+            active = { key: key, path: here, screen: screen };
+            screen.enter(host);
+        }
+        return true;
+    }
+
     /* ================================================================ mount === */
 
     function mount() {
         if (!PHONE.matches) {
+            leaveScreen();
             root.classList.remove('ha-app', 'ha-home-on');
             var wide = document.querySelector('.fi-main');
             if (wide) { wide.style.removeProperty('padding'); wide.style.removeProperty('max-width'); }
@@ -1496,11 +1620,14 @@
         root.classList.add('ha-app');
         var onHome = isHome();
         root.classList.toggle('ha-home-on', onHome);
-        // Home runs edge to edge like the app. The theme pads .fi-main with a layered
-        // !important rule, which no stylesheet can outrank — only the element's own style.
+        var onScreen = !onHome && mountScreen();
+        if (!onScreen) leaveScreen();
+        // Home and the tab screens run edge to edge like the app. The theme pads .fi-main
+        // with a layered !important rule, which no stylesheet can outrank — only the
+        // element's own style.
         var main = document.querySelector('.fi-main');
         if (main) {
-            if (onHome) { main.style.setProperty('padding', '0', 'important'); main.style.setProperty('max-width', 'none', 'important'); }
+            if (onHome || onScreen) { main.style.setProperty('padding', '0', 'important'); main.style.setProperty('max-width', 'none', 'important'); }
             else { main.style.removeProperty('padding'); main.style.removeProperty('max-width'); }
         }
         renderNav();
@@ -1543,4 +1670,7 @@
 
     // Filament's SPA navigation swaps <body>: put the shell back on every page.
     document.addEventListener('livewire:navigated', function () { closeDrawer(); mount(); });
+    // Leaving the page (or SPA-navigating away) stops whatever the screen holds open — the camera.
+    document.addEventListener('livewire:navigate', leaveScreen);
+    window.addEventListener('pagehide', leaveScreen);
 })();

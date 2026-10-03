@@ -2610,12 +2610,17 @@ class PartnerController extends Controller
             return response()->json(['error' => 'Keep at least one day open. To stop bookings for a day, mark that date closed on the desk.'], 422);
         }
 
-        $venue->forceFill([
-            'hours_json'   => $map,
-            'slot_minutes' => (int) ($data['slot_minutes'] ?? $venue->slotLength()),
-        ])->save();
-        $venue->forceFill(['hours' => $venue->displayHours()])->save();
-        $venue->regenerateSlotsFromHours();
+        // One unit: the rebuild deletes the old slot rows before writing the new ones, so
+        // a failure part-way must put everything back rather than leave the venue with no
+        // slots at all (and nothing on sale).
+        \Illuminate\Support\Facades\DB::transaction(function () use ($venue, $map, $data): void {
+            $venue->forceFill([
+                'hours_json'   => $map,
+                'slot_minutes' => (int) ($data['slot_minutes'] ?? $venue->slotLength()),
+            ])->save();
+            $venue->forceFill(['hours' => $venue->displayHours()])->save();
+            $venue->regenerateSlotsFromHours();
+        });
 
         return response()->json(['status' => 'ok'] + $this->hoursPayload($venue->fresh()));
     }

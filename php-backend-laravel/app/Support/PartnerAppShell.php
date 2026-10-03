@@ -43,7 +43,7 @@ final class PartnerAppShell
         'sales' => 'filament.partner.events.resources.bookings.index',
         'events' => 'filament.partner.events.resources.events.index',
         'payments' => 'filament.partner.pages.partner-earnings',
-        'scan' => 'filament.partner.events.pages.ticket-check-in',
+        'scan' => 'filament.partner.pages.scan',
         'operations' => 'filament.partner.game-hub.pages.game-hub-overview',
         'settlement' => 'filament.partner.game-hub.resources.shifts.shift-sessions.index',
         'pricing' => 'filament.partner.game-hub.pages.game-hub-pricing-rules',

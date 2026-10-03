@@ -157,7 +157,9 @@ class PartnerPanelProvider extends PanelProvider
 
                 return '<link rel="stylesheet" href="' . e(asset('css/partner/app-shell.css')) . '?v=' . $v('css/partner/app-shell.css') . '">'
                     . '<script>window.HaraanPartnerApp=' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES) . ';</script>'
-                    . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>';
+                    . '<link rel="stylesheet" href="' . e(asset('css/partner/app-screens.css')) . '?v=' . $v('css/partner/app-screens.css') . '">'
+                    . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>'
+                    . '<script src="' . e(asset('js/partner/app-screens.js')) . '?v=' . $v('js/partner/app-screens.js') . '" defer></script>';
             },
         );
 
@@ -394,6 +396,8 @@ class PartnerPanelProvider extends PanelProvider
                 // The floor. Self-gates to branch lanes with the bookings
                 // capability, so event hosts and read-only staff never see it.
                 \App\Filament\Pages\Partner\PartnerDesk::class,
+                // The phone Scan tab (app-shell.js); not in the desktop menu.
+                \App\Filament\Pages\Partner\PartnerScanPage::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
                 \App\Filament\Pages\Partner\PartnerPayouts::class,
                 \App\Filament\Pages\Partner\PartnerReviews::class,
