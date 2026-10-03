@@ -1,6 +1,7 @@
 /**
  * Haraan Partner: the app's drawer tools on a phone, batch one — Customers, Staff,
- * Payouts, Reports, Notifications and Support.
+ * Payouts, Reports, Notifications and Support; batch two — Cash Settlement (the shift
+ * register) and the Operations Center.
  *
  * Like the app, each opens full screen over everything with its own back header (no
  * bottom bar), and reads the same endpoints the app reads. Registered with the shell
@@ -600,5 +601,406 @@
             sup.timer = setInterval(function () { if (document.visibilityState === 'visible') loadThread(false); }, 15000);
         },
         leave: function () { clearInterval(sup.timer); sup.host = null; },
+    });
+    /* ======================================================= VENUE FOR A TOOL === */
+
+    /** The venue a per-venue tool works on: the chosen outlet, else the first one. */
+    function toolVenue() {
+        return A.api('venues', { branch: false }).then(function (r) {
+            var vs = list(r);
+            return vs.filter(function (v) { return v.id === A.cfg.branch; })[0] || vs[0] || null;
+        });
+    }
+
+    function noVenue(host, title) {
+        host.innerHTML = page(title, '', empty('This needs a venue. Ask Haraan to add your venue first.'));
+    }
+
+    function money2(n) { return '₹' + (Math.round((parseFloat(n) || 0) * 100) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+    /** "6:42 PM" / "4 Oct" in the phone's own time for an ISO timestamp. */
+    function localTime(iso) { var d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase(); }
+    function localDay(iso) { var d = new Date(iso); return isNaN(d) ? '' : d.getDate() + ' ' + A.months[d.getMonth()] + ' ' + d.getFullYear(); }
+    function whole(n) { return rupees(Math.round(parseFloat(n) || 0)); }
+    function refreshBtn() { return '<button type="button" class="ha-ibtn" data-refresh aria-label="Refresh"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button>'; }
+
+    /* ========================================================= CASH SETTLEMENT === */
+
+    var DROP_CATS = [['diesel', 'Diesel / Fuel'], ['cleaning', 'Cleaning & Housekeeping'], ['maintenance', 'Turf Maintenance / Repairs'], ['supplies', 'Balls / Bibs / Gear'], ['owner_draw', 'Owner Cash Withdrawal'], ['bank_deposit', 'Bank Cash Deposit'], ['other', 'Other Expense']];
+    function catLabel(k) { var x = DROP_CATS.filter(function (c) { return c[0] === k; })[0]; return x ? x[1] : k; }
+    var NOTES = [500, 200, 100, 50, 20, 10];
+
+    var reg = { host: null, venue: null, data: null, tab: 'in', history: false };
+
+    function regPath(p) { return 'venues/' + reg.venue.id + '/' + p; }
+
+    function loadRegister() {
+        if (!reg.host) return;
+        (reg.venue ? Promise.resolve(reg.venue) : toolVenue()).then(function (v) {
+            if (!reg.host) return;
+            if (!v) return noVenue(reg.host, 'Cash Register');
+            reg.venue = v;
+            return A.api(regPath('shift/current'), { branch: false }).then(function (d) {
+                if (!reg.host) return;
+                reg.data = d;
+                renderRegister();
+            });
+        }).catch(function () { if (reg.host) failed(reg.host, 'Cash Register', loadRegister); });
+    }
+
+    function regHeader(sub) {
+        var acts = '<button type="button" class="ha-ibtn" data-history aria-label="History"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg></button>' + refreshBtn();
+        return '<header class="ha-toolbar"><button type="button" class="ha-ibtn" data-back aria-label="Back"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>'
+            + '<span class="ha-grow"><b>Cash Register</b><small>' + esc(sub) + '</small></span>' + acts + '</header>';
+    }
+
+    function renderRegister() {
+        var host = reg.host, d = reg.data || {};
+        if (!host) return;
+        if (!d.has_open_shift) {
+            host.innerHTML = regHeader('Drawer Closed') + '<div class="ha-toolbody ha-regbody"><div class="ha-regclosed">'
+                + '<span class="ha-reglock"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9V6zm3 11a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg></span>'
+                + '<b>Register Is Closed</b><p>Open a shift to set your starting cash float, track walk-in payments, and reconcile drawer variance at end of day.</p>'
+                + (d.unattributed_cash > 0 ? '<em class="ha-regwarn">' + whole(d.unattributed_cash) + ' cash taken today outside a shift</em>' : '')
+                + '<button type="button" class="ha-regbtn is-ink" data-open>Open Shift &amp; Set Float</button>'
+                + '<button type="button" class="ha-regbtn is-line" data-history>View Shift Audit History</button></div></div>';
+            return;
+        }
+        var s = d.shift, pays = s.payments || [], drops = s.drops || [];
+        var rows = reg.tab === 'in'
+            ? (pays.length ? pays.map(function (p) {
+                return '<div class="ha-regrow"><span class="ha-regdot is-in">₹</span><span class="ha-grow"><b>' + esc(p.customer_name || 'Walk-in') + '</b><small>Booking #' + p.id + ' · ' + esc(p.time || '') + '</small></span><strong class="is-green">+' + whole(p.amount) + '</strong></div>';
+            }).join('') : '<div class="ha-regempty">No cash payments in this shift yet.</div>')
+            : (drops.length ? drops.map(function (x) {
+                return '<div class="ha-regrow"><span class="ha-regdot is-out">−</span><span class="ha-grow"><b>' + esc(catLabel(x.category)) + '</b><small>' + esc([x.reason, x.staff_name, x.time].filter(Boolean).join(' · ')) + '</small></span><strong class="is-red">-' + whole(x.amount) + '</strong></div>';
+            }).join('') : '<div class="ha-regempty">No cash drops in this shift.</div>');
+
+        host.innerHTML = regHeader('Active Shift · ' + (s.staff_name || '')) + '<div class="ha-toolbody ha-regbody">'
+            + '<section class="ha-reghero"><div class="ha-row"><small class="ha-live"><i></i>DRAWER CASH (LIVE)</small><span class="ha-grow"></span><small>Shift #' + s.id + '</small></div>'
+            + '<b>' + money2(s.expected_cash) + '</b><p>Expected physical cash in register right now</p>'
+            + '<div class="ha-regstats"><span><small>OPEN FLOAT</small><b>' + whole(s.opening_float) + '</b></span><span><small>CASH COLLECTED</small><b class="is-green">+' + whole(s.cash_collected) + '</b></span><span><small>CASH DROPS</small><b class="is-red">-' + whole(s.total_drops) + '</b></span></div>'
+            + '<div class="ha-row ha-gap8"><button type="button" class="ha-regbtn is-line" data-drop>Cash Drop</button><button type="button" class="ha-regbtn is-ink" data-close-shift>Close Shift</button></div></section>'
+            + '<section class="ha-regdigital"><small>DIGITAL COLLECTIONS (COUNTER)</small><p>Reconciled against bank statements · Not in drawer</p>'
+            + '<div class="ha-row"><span class="ha-grow"><small>UPI</small><b class="is-blue">' + whole(s.upi_collected) + '</b></span><span class="ha-grow"><small>CARD</small><b>' + whole(s.card_collected) + '</b></span></div></section>'
+            + '<small class="ha-caps">SHIFT TRANSACTIONS</small>'
+            + '<div class="ha-regtabs"><button type="button" data-tab="in" class="' + (reg.tab === 'in' ? 'is-on' : '') + '">Cash In (' + pays.length + ')</button><button type="button" data-tab="drops" class="' + (reg.tab === 'drops' ? 'is-on' : '') + '">Drops (' + drops.length + ')</button></div>'
+            + '<div class="ha-reglist">' + rows + '</div></div>';
+    }
+
+    function regError(d, err) {
+        var e = d.querySelector('.ha-err');
+        e.textContent = (err && err.message) || 'Couldn’t save. Try again.';
+        e.hidden = false;
+    }
+
+    function openShiftDialog() {
+        var d = dialog('<b class="ha-dlg-title">Open Desk Shift</b><p class="ha-dlg-text">Set starting cash drawer float</p>'
+            + '<label class="ha-field"><span>Opening Cash Float (₹)</span><input data-f="float" inputmode="decimal" placeholder="0"></label>'
+            + '<b class="ha-dlg-sub">Quick Presets</b><div class="ha-presets">' + [0, 500, 1000, 2000, 5000].map(function (n) { return '<button type="button" data-p="' + n + '">₹' + n + '</button>'; }).join('') + '</div>'
+            + '<label class="ha-field"><span>Shift Note (Optional)</span><input data-f="note" placeholder="e.g. Morning Shift - Terminal 1" autocomplete="off"></label>'
+            + '<p class="ha-err" hidden></p><div class="ha-row ha-gap8 ha-dlg-acts"><button type="button" class="ha-regbtn is-line" data-close>Cancel</button><button type="button" class="ha-regbtn is-ink" data-save>Open Shift</button></div>');
+        var f = d.querySelector('[data-f="float"]');
+        d.querySelector('.ha-presets').addEventListener('click', function (e) {
+            var b = e.target.closest('[data-p]');
+            if (b) f.value = b.dataset.p;
+        });
+        d.querySelector('[data-save]').addEventListener('click', function () {
+            var btn = this;
+            btn.disabled = true;
+            A.apiSend('POST', regPath('shift/open'), { opening_float: parseFloat(f.value) || 0, note: d.querySelector('[data-f="note"]').value.trim() || null })
+                .then(function () { d.close(); A.toast('Shift opened'); loadRegister(); }, function (err) { regError(d, err); btn.disabled = false; });
+        });
+    }
+
+    function dropDialog() {
+        var cat = 'diesel';
+        var d = dialog('<b class="ha-dlg-title">Record Cash Drop / Expense</b><p class="ha-dlg-text">Logs cash taken out of drawer during active shift</p>'
+            + '<label class="ha-field"><span>Amount Withdrawn (₹)</span><input data-f="amount" inputmode="decimal" placeholder="500"></label>'
+            + '<b class="ha-dlg-sub">Expense Category</b><div class="ha-catchips">' + DROP_CATS.map(function (c) { return '<button type="button" data-c="' + c[0] + '"' + (c[0] === cat ? ' class="is-on"' : '') + '>' + c[1] + '</button>'; }).join('') + '</div>'
+            + '<label class="ha-field"><span>Reason / Notes</span><input data-f="reason" placeholder="e.g. 50L diesel for generator" autocomplete="off"></label>'
+            + '<p class="ha-err" hidden></p><div class="ha-row ha-gap8 ha-dlg-acts"><button type="button" class="ha-regbtn is-line" data-close>Cancel</button><button type="button" class="ha-regbtn is-red" data-save disabled>Record Drop</button></div>');
+        var amt = d.querySelector('[data-f="amount"]'), reason = d.querySelector('[data-f="reason"]'), save = d.querySelector('[data-save]');
+        function check() { save.disabled = !((parseFloat(amt.value) || 0) > 0 && reason.value.trim()); }
+        d.addEventListener('input', check);
+        d.querySelector('.ha-catchips').addEventListener('click', function (e) {
+            var b = e.target.closest('[data-c]');
+            if (!b) return;
+            cat = b.dataset.c;
+            this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('is-on', x === b); });
+        });
+        save.addEventListener('click', function () {
+            save.disabled = true;
+            A.apiSend('POST', regPath('shift/drop'), { amount: parseFloat(amt.value), category: cat, reason: reason.value.trim() })
+                .then(function () { d.close(); A.toast('Cash drop recorded'); reg.tab = 'drops'; loadRegister(); }, function (err) { regError(d, err); check(); });
+        });
+    }
+
+    function closeoutDialog() {
+        var s = reg.data.shift;
+        var expected = parseFloat(s.expected_cash) || 0;
+        var counts = { coins: 0 };
+        NOTES.forEach(function (n) { counts[n] = 0; });
+        var mode = 'count'; // denomination grid, or one typed total
+        var d = dialog('<div class="ha-closeout"></div>');
+        var box = d.querySelector('.ha-closeout');
+        var direct = '', noteText = '';
+
+        function counted() {
+            if (mode === 'total') return parseFloat(direct) || 0;
+            return NOTES.reduce(function (t, n) { return t + n * counts[n]; }, 0) + (counts.coins || 0);
+        }
+
+        function varianceHtml() {
+            var v = Math.round((counted() - expected) * 100) / 100;
+            var cls = Math.abs(v) < 0.01 ? 'is-square' : v < 0 ? 'is-short' : 'is-over';
+            var label = Math.abs(v) < 0.01 ? 'Drawer Square · No variance' : v < 0 ? 'Drawer Short' : 'Drawer Over';
+            return '<div class="ha-variance ' + cls + '"><b>' + label + '</b><strong>' + (Math.abs(v) < 0.01 ? '₹0.00' : (v < 0 ? '-' : '+') + money2(Math.abs(v))) + '</strong></div>';
+        }
+
+        function render() {
+            var v = counted() - expected, square = Math.abs(v) < 0.01;
+            box.innerHTML = '<b class="ha-dlg-title">End of Shift Close-Out</b><p class="ha-dlg-text">Staff: ' + esc(s.staff_name || '') + ' · Started: ' + esc(localTime(s.opened_at)) + '</p>'
+                + '<div class="ha-expected"><span class="ha-grow"><small>SYSTEM EXPECTED CASH</small><small>Float (' + whole(s.opening_float) + ') + Cash In (' + whole(s.cash_collected) + ') - Drops (' + whole(s.total_drops) + ')</small></span><b>' + money2(expected) + '</b></div>'
+                + '<div class="ha-row ha-catrow"><b class="ha-dlg-sub">COUNT PHYSICAL CASH</b><span class="ha-grow"></span><div class="ha-basis' + (mode === 'total' ? ' is-played' : '') + '"><i></i><button type="button" data-mode="count">Count</button><button type="button" data-mode="total">Total</button></div></div>'
+                + (mode === 'total'
+                    ? '<label class="ha-field"><span>Total counted cash (₹)</span><input data-direct inputmode="decimal" placeholder="Enter total cash counted" value="' + esc(direct) + '"></label>'
+                    : '<div class="ha-denoms">' + NOTES.map(function (n) {
+                        return '<div class="ha-denom"><b>₹' + n + '</b><span class="ha-stepper"><button type="button" data-dec="' + n + '">−</button><i>' + counts[n] + '</i><button type="button" data-inc="' + n + '">+</button></span><small>' + whole(n * counts[n]) + '</small></div>';
+                    }).join('') + '<div class="ha-denom"><b>Loose Coins (₹)</b><input class="ha-coins" data-coins inputmode="numeric" value="' + (counts.coins || '') + '" placeholder="0"><small>' + whole(counts.coins) + '</small></div></div>'
+                    + '<div class="ha-row ha-countsum"><span class="ha-grow">Total Counted Cash</span><b>' + money2(counted()) + '</b></div>')
+                + '<div data-var>' + varianceHtml() + '</div>'
+                + '<label class="ha-field"><span class="' + (square ? '' : 'is-red') + '" data-notelabel>' + (square ? 'Close-Out Notes (Optional)' : 'Variance Reason (Required) *') + '</span><input data-note autocomplete="off" placeholder="' + (square ? 'Any remarks for shift handover' : 'Explain why drawer is short/over') + '"></label>'
+                + '<p class="ha-err" hidden></p><button type="button" class="ha-regbtn ' + (v < -0.009 ? 'is-red' : 'is-blue') + ' ha-wide" data-confirm>Confirm &amp; Close Shift</button><button type="button" class="ha-textbtn" data-close>Cancel</button>';
+        }
+
+        function refreshLive() {
+            var v = counted() - expected, square = Math.abs(v) < 0.01;
+            box.querySelector('[data-var]').innerHTML = varianceHtml();
+            var lab = box.querySelector('[data-notelabel]');
+            lab.textContent = square ? 'Close-Out Notes (Optional)' : 'Variance Reason (Required) *';
+            lab.className = square ? '' : 'is-red';
+            var c = box.querySelector('[data-confirm]');
+            c.className = 'ha-regbtn ha-wide ' + (v < -0.009 ? 'is-red' : 'is-blue');
+            var sum = box.querySelector('.ha-countsum b');
+            if (sum) sum.textContent = money2(counted());
+        }
+
+        box.addEventListener('click', function (e) {
+            var b;
+            if ((b = e.target.closest('[data-mode]'))) { mode = b.dataset.mode; render(); return; }
+            if ((b = e.target.closest('[data-inc]'))) { counts[b.dataset.inc]++; vibrate(4); render(); return; }
+            if ((b = e.target.closest('[data-dec]'))) { counts[b.dataset.dec] = Math.max(0, counts[b.dataset.dec] - 1); vibrate(4); render(); return; }
+            if (e.target.closest('[data-confirm]')) {
+                var note = box.querySelector('[data-note]').value.trim();
+                var v = counted() - expected;
+                if (Math.abs(v) >= 0.01 && !note) return regError(box, { message: 'Mandatory explanation required for non-zero variance.' });
+                var body = { counted_cash: counted(), note: note || null };
+                if (mode === 'count') {
+                    body.denominations = { coins: counts.coins || 0 };
+                    NOTES.forEach(function (n) { body.denominations[String(n)] = counts[n]; });
+                }
+                var btn = e.target.closest('[data-confirm]');
+                btn.disabled = true;
+                A.apiSend('POST', regPath('shift/close'), body).then(function (r) {
+                    d.close();
+                    A.toast('Shift closed · ' + ((r && r.variance_label) || 'Done'));
+                    reg.tab = 'in';
+                    loadRegister();
+                }, function (err) { regError(box, err); btn.disabled = false; });
+            }
+        });
+        box.addEventListener('input', function (e) {
+            if (e.target.matches('[data-note]')) noteText = e.target.value;
+            if (e.target.matches('[data-direct]')) { direct = e.target.value; refreshLive(); }
+            if (e.target.matches('[data-coins]')) {
+                counts.coins = parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0;
+                e.target.closest('.ha-denom').querySelector('small').textContent = whole(counts.coins);
+                refreshLive();
+            }
+        });
+        render();
+    }
+
+    function showHistory() {
+        reg.history = true;
+        var host = reg.host;
+        host.innerHTML = '<header class="ha-toolbar"><button type="button" class="ha-ibtn" data-histback aria-label="Back"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>'
+            + '<span class="ha-grow"><b>Shift Audit History</b><small>Past shift settlements &amp; variances</small></span></header><div class="ha-toolbody">' + loading() + '</div>';
+        A.api(regPath('shifts'), { branch: false }).then(function (r) {
+            if (!reg.host || !reg.history) return;
+            var rows = list(r);
+            host.querySelector('.ha-toolbody').innerHTML = rows.length ? rows.map(function (x) {
+                var v = parseFloat(x.variance) || 0;
+                var cls = Math.abs(v) < 0.01 ? 'is-square' : v < 0 ? 'is-short' : 'is-over';
+                return '<div class="ha-histcard"><div class="ha-row"><span class="ha-grow"><b>' + esc(x.staff_name || '') + '</b><small>Shift #' + x.id + ' · ' + esc(localDay(x.opened_at) + (x.opened_at ? ' · ' + localTime(x.opened_at) : '')) + '</small></span>'
+                    + '<em class="ha-varpill ' + cls + '">' + esc(x.variance_label || '') + (Math.abs(v) >= 0.01 ? ' ' + (v < 0 ? '-' : '+') + whole(Math.abs(v)) : '') + '</em></div><i class="ha-hr"></i>'
+                    + '<div class="ha-histfigs"><span><small>Float</small><b>' + whole(x.opening_float) + '</b></span><span><small>Cash in</small><b>' + whole(x.cash_collected) + '</b></span><span><small>Drops</small><b>' + whole(x.total_drops) + '</b></span><span><small>Expected</small><b>' + whole(x.expected_cash) + '</b></span><span><small>Counted</small><b>' + (x.counted_cash == null ? '—' : whole(x.counted_cash)) + '</b></span></div>'
+                    + (x.note ? '<p class="ha-histnote">Note: ' + esc(x.note) + '</p>' : '') + '</div>';
+            }).join('') : '<div class="ha-emptyline"><b>No closed shifts recorded yet</b><br>Closed shifts will appear here for audit</div>';
+        }, function () { if (reg.host && reg.history) host.querySelector('.ha-toolbody').innerHTML = empty('Couldn’t load history. Try again.'); });
+    }
+
+    A.register('settlement', {
+        tool: true,
+        enter: function (host) {
+            reg.host = host;
+            reg.history = false;
+            host.innerHTML = page('Cash Register', '', loading());
+            host.onclick = function (e) {
+                if (e.target.closest('[data-histback]')) { reg.history = false; renderRegister(); return; }
+                if (e.target.closest('[data-history]')) { if (reg.venue) showHistory(); return; }
+                if (e.target.closest('[data-refresh]')) { loadRegister(); return; }
+                if (e.target.closest('[data-open]')) { openShiftDialog(); return; }
+                if (e.target.closest('[data-drop]')) { dropDialog(); return; }
+                if (e.target.closest('[data-close-shift]')) { closeoutDialog(); return; }
+                var t = e.target.closest('[data-tab]');
+                if (t) { reg.tab = t.dataset.tab; renderRegister(); }
+            };
+            loadRegister();
+        },
+        leave: function () { reg.host = null; reg.venue = null; reg.data = null; },
+    });
+
+    /* ====================================================== OPERATIONS CENTER === */
+
+    var OPS_TABS = ['Revenue', 'Heatmap', 'Staff', 'Funnel', 'AI Tips'];
+    var ops = { host: null, venue: null, data: null, tab: 0 };
+
+    function loadOps() {
+        if (!ops.host) return;
+        (ops.venue ? Promise.resolve(ops.venue) : toolVenue()).then(function (v) {
+            if (!ops.host) return;
+            if (!v) return noVenue(ops.host, 'Operations Center');
+            ops.venue = v;
+            return A.api('venues/' + v.id + '/operations/overview', { branch: false }).then(function (r) {
+                if (!ops.host) return;
+                ops.data = r.data || r;
+                renderOps();
+            });
+        }).catch(function (err) {
+            if (!ops.host) return;
+            if (err && err.status === 403) { ops.host.innerHTML = page('Operations Center', '', empty('You don’t have access to reports for this venue.')); return; }
+            failed(ops.host, 'Operations Center', loadOps);
+        });
+    }
+
+    function kpi(title, value, sub, trend) {
+        var t = '';
+        if (trend != null && !isNaN(trend)) {
+            var up = trend >= 0;
+            t = '<em class="ha-trend ' + (up ? 'is-up' : 'is-down') + '">' + (up ? '▲' : '▼') + ' ' + Math.abs(Math.round(trend * 10) / 10) + '% DoD</em>';
+        }
+        return '<div class="ha-kpi"><small>' + esc(title.toUpperCase()) + '</small><b>' + value + '</b>' + t + '<p>' + esc(sub) + '</p></div>';
+    }
+
+    function channelName(k) {
+        return ({ online: 'Online App', offline: 'Walk-in Desk', walk_in: 'Walk-in Desk', whatsapp: 'WhatsApp Bot', standing: 'Standing Slots', web: 'Website', app: 'Haraan App' })[k]
+            || String(k).replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+
+    function revenueTab(r) {
+        var ch = r.channel_breakdown || {};
+        var keys = Object.keys(ch);
+        var total = keys.reduce(function (t, k) { return t + (parseFloat(ch[k].amount) || 0); }, 0);
+        return '<div class="ha-kpigrid">'
+            + kpi('Today\'s Revenue', whole(r.today_revenue), 'Active Cash & Digital', parseFloat(r.day_over_day_growth_pct))
+            + kpi('Yesterday', whole(r.yesterday_revenue), 'Closed Bookings')
+            + kpi('Month-to-Date', whole(r.month_to_date_revenue), 'Active Month Total')
+            + kpi('Projected Month-End', whole(r.projected_month_revenue), 'AI Run-rate Forecast') + '</div>'
+            + '<section class="ha-mrr"><small>CONTRACTED RECURRING MRR</small><b>' + whole(r.standing_contracts_mrr) + '<span>/mo</span></b><p>Locked in by standing slots · billed every month</p></section>'
+            + '<section class="ha-opscard"><b class="ha-opstitle">Revenue by Channel</b>'
+            + (keys.length ? keys.map(function (k) {
+                var amt = parseFloat(ch[k].amount) || 0, pct = total > 0 ? Math.round(amt / total * 100) : 0;
+                return '<div class="ha-chanrow"><div class="ha-row"><span class="ha-grow">' + esc(channelName(k)) + ' <small>· ' + (ch[k].count || 0) + ' booking' + (ch[k].count === 1 ? '' : 's') + '</small></span><b>' + whole(amt) + '</b></div><span class="ha-chanbar"><i style="width:' + pct + '%"></i></span></div>';
+            }).join('') : '<p class="ha-opssub">No bookings this month yet.</p>') + '</section>';
+    }
+
+    function heatColor(i) { return ({ peak: '#EF4444', high: '#FBBF24', medium: '#34D399', low: '#A7F3D0' })[i] || '#F1F5F9'; }
+
+    function heatmapTab(o) {
+        var rows = o.heatmap || [];
+        var hours = rows[0] ? rows[0].hours.map(function (c) { return c.hour; }) : [];
+        return '<section class="ha-opscard"><b class="ha-opstitle">Court Occupancy Heatmap (Past 4 Weeks)</b><p class="ha-opssub">Aggregated across all courts by day &amp; hour (06:00 - 24:00)</p>'
+            + '<div class="ha-legend">' + [['Empty', '#E2E8F0'], ['1-20%', '#A7F3D0'], ['21-50%', '#34D399'], ['51-80%', '#FBBF24'], ['Peak >80%', '#EF4444']].map(function (l) { return '<span><i style="background:' + l[1] + '"></i>' + l[0] + '</span>'; }).join('') + '</div>'
+            + '<div class="ha-heatsum"><span><b>' + Math.round(parseFloat(o.average_occupancy_pct) || 0) + '%</b><small>Avg occupancy</small></span><span><b>' + (o.peak_slots_count || 0) + '</b><small>Peak slots</small></span></div>'
+            + (rows.length ? '<div class="ha-heatscroll"><table class="ha-heat"><tr><th></th>' + hours.map(function (h) { return '<th>' + (h < 10 ? '0' : '') + h + '</th>'; }).join('') + '</tr>'
+                + rows.map(function (r, ri) {
+                    return '<tr><th>' + esc(r.day_name) + '</th>' + r.hours.map(function (c, ci) {
+                        return '<td><button type="button" data-cell="' + ri + ':' + ci + '" style="background:' + heatColor(c.intensity) + ';color:' + (c.intensity === 'peak' ? '#fff' : '#0F172A') + '">' + Math.round(c.occupancy_pct) + '%</button></td>';
+                    }).join('') + '</tr>';
+                }).join('') + '</table></div>' : '<p class="ha-opssub">No bookings in the past 4 weeks.</p>') + '</section>';
+    }
+
+    function staffTab(list_) {
+        return '<section class="ha-opscard"><b class="ha-opstitle">Staff Desk &amp; Cash Drawer Efficiency</b><p class="ha-opssub">Tracks shift reconciliation accuracy, cash collected &amp; bookings converted</p></section>'
+            + (list_.length ? list_.map(function (s) {
+                var zero = Math.abs(parseFloat(s.cash_variance) || 0) < 0.01;
+                return '<div class="ha-opsstaff"><span class="ha-opsbadge"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 7h-5V4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v3H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM9 12a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm4 6H5v-.57c0-.81.48-1.53 1.22-1.85a6.95 6.95 0 0 1 5.56 0A2.01 2.01 0 0 1 13 17.43V18zm-2-11V4h2v3h-2zm8 9.5h-4V15h4v1.5zm0-3h-4V12h4v1.5z"/></svg></span>'
+                    + '<span class="ha-grow"><b>' + esc(s.name) + '</b><small>' + (s.shifts_completed || 0) + ' shifts completed • ' + (s.bookings_converted || 0) + ' converted</small></span>'
+                    + '<span class="ha-opsnums"><b>Cash: ' + whole(s.total_cash_handled) + '</b><small class="' + (zero ? 'is-green' : 'is-red') + '">Variance: ' + whole(s.cash_variance) + '</small></span></div>';
+            }).join('') : empty('No shift sessions recorded yet'));
+    }
+
+    function funnelTab(f, alerts) {
+        var open = alerts.filter(function (a) { return !a.is_resolved; });
+        return '<section class="ha-opscard"><b class="ha-opstitle">WhatsApp Conversion Funnel</b>'
+            + '<div class="ha-row ha-convrow"><span class="ha-grow">Overall Conversion</span><b class="is-green">' + (f.conversion_rate_pct || 0) + '%</b></div>'
+            + (f.stages || []).map(function (s, i, all) {
+                var top = all[0] && all[0].count ? all[0].count : 0;
+                var pct = top > 0 ? Math.round(s.count / top * 100) : 0;
+                return '<div class="ha-stage"><div class="ha-row"><span class="ha-grow">' + esc(s.stage) + '</span><b>' + s.count + '</b></div><span class="ha-stagebar"><i style="width:' + pct + '%"></i></span>'
+                    + (s.drop_off_pct > 0 ? '<small>' + s.drop_off_pct + '% drop-off</small>' : '') + '</div>';
+            }).join('') + '</section>'
+            + '<b class="ha-opstitle ha-pad4">Revenue Leakage Alerts (' + open.length + ')</b><p class="ha-opssub ha-pad4">Detects abandoned holds, cash mismatches &amp; unutilized peak hours</p>'
+            + (open.length ? open.map(function (a) {
+                return '<div class="ha-alert"><div class="ha-row"><b class="ha-grow">' + esc(a.title) + '</b><button type="button" data-resolve="' + a.id + '">Resolve</button></div><p>' + esc(a.description) + '</p></div>';
+            }).join('') : '<div class="ha-allgood"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>No revenue leakage detected. Venue running at peak efficiency!</div>');
+    }
+
+    function aiTab(list_) {
+        var live = list_.filter(function (s) { return s.status !== 'dismissed'; });
+        return '<section class="ha-opscard"><b class="ha-opstitle">AI-Driven Business Suggestions</b><p class="ha-opssub">Revenue optimization algorithms scanning booking trends &amp; pricing matrix</p></section>'
+            + (live.length ? live.map(function (s) {
+                return '<div class="ha-sugg"><div class="ha-row"><em>' + esc(String(s.category || '').toUpperCase()) + '</em><span class="ha-grow"></span><b class="is-green">+' + whole(s.projected_revenue_impact) + '/mo</b></div>'
+                    + '<strong>' + esc(s.title) + '</strong><p>' + esc(s.rationale) + '</p>'
+                    + (s.status === 'applied'
+                        ? '<span class="ha-applied"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Applied to Pricing Matrix</span>'
+                        : '<div class="ha-row ha-gap8"><button type="button" class="ha-regbtn is-ink" data-apply="' + s.id + '">✨ 1-Tap Apply</button><button type="button" class="ha-regbtn is-line" data-dismiss="' + s.id + '">Dismiss</button></div>') + '</div>';
+            }).join('') : empty('All suggestions up to date!'));
+    }
+
+    function renderOps() {
+        var host = ops.host, o = ops.data || {};
+        if (!host) return;
+        var body = [revenueTab(o.revenue || {}), heatmapTab(o.occupancy || {}), staffTab(o.staff || []), funnelTab(o.funnel || {}, o.leakage_alerts || []), aiTab(o.ai_suggestions || [])][ops.tab];
+        host.innerHTML = '<header class="ha-toolbar"><button type="button" class="ha-ibtn" data-back aria-label="Back"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>'
+            + '<span class="ha-grow"><b>Operations Center</b><small>Real-Time Revenue, Occupancy &amp; AI Suggestions</small></span>' + refreshBtn() + '</header>'
+            + '<div class="ha-toolbody ha-opsbody"><div class="ha-opstabs">' + OPS_TABS.map(function (t, i) { return '<button type="button" data-otab="' + i + '"' + (i === ops.tab ? ' class="is-on"' : '') + '>' + t + '</button>'; }).join('') + '</div>' + body + '</div>';
+    }
+
+    function opsAction(path, okText) {
+        A.apiSend('POST', 'venues/' + ops.venue.id + '/operations/' + path).then(function () { A.toast(okText); loadOps(); }, function (err) { A.toast(err.message || 'Couldn’t do that. Try again.'); });
+    }
+
+    A.register('operations', {
+        tool: true,
+        enter: function (host) {
+            ops.host = host;
+            host.innerHTML = page('Operations Center', '', loading());
+            host.onclick = function (e) {
+                var b;
+                if (e.target.closest('[data-refresh]')) { loadOps(); return; }
+                if ((b = e.target.closest('[data-otab]'))) { ops.tab = +b.dataset.otab; renderOps(); host.scrollIntoView(); return; }
+                if ((b = e.target.closest('[data-resolve]'))) { b.disabled = true; opsAction('alerts/' + b.dataset.resolve + '/resolve', 'Alert resolved'); return; }
+                if ((b = e.target.closest('[data-apply]'))) { b.disabled = true; opsAction('suggestions/' + b.dataset.apply + '/apply', 'Applied to pricing'); return; }
+                if ((b = e.target.closest('[data-dismiss]'))) { b.disabled = true; opsAction('suggestions/' + b.dataset.dismiss + '/dismiss', 'Suggestion dismissed'); return; }
+                if ((b = e.target.closest('[data-cell]'))) {
+                    var p = b.dataset.cell.split(':'), row = ops.data.occupancy.heatmap[+p[0]], c = row.hours[+p[1]];
+                    dialog('<b class="ha-dlg-title">' + esc(row.day_name + ' ' + c.hour_label) + '</b><p class="ha-dlg-text"><b>Occupancy: ' + c.occupancy_pct + '%</b><br>Booked slots: ' + c.booked_count + ' / ' + c.capacity + '<br>Intensity level: ' + esc(String(c.intensity).toUpperCase()) + '</p>'
+                        + '<div class="ha-row ha-dlg-acts"><span class="ha-grow"></span><button type="button" class="ha-dlg-btn is-main" data-close>Close</button></div>');
+                }
+            };
+            loadOps();
+        },
+        leave: function () { ops.host = null; ops.venue = null; ops.data = null; },
     });
 })();

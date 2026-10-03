@@ -1,6 +1,6 @@
 /*
  * The app's drawer tools on a phone (app-tools.js): Customers, Staff, Payouts, Reports,
- * Notifications, Support. Full screen with their own back header, like the app.
+ * Notifications, Support, Cash Settlement, Operations Center. Full screen with their own back header, like the app.
  */
 
 @media (max-width: 767px) {
@@ -178,6 +178,165 @@ html.ha-app.ha-tool body { padding-bottom: 0; }
 .ha-composer textarea:focus { border-color: #2F6BFF; }
 .ha-composer button { width: 46px; height: 46px; flex: none; border: 0; border-radius: 99px; background: #2F6BFF; color: #fff; font-size: 20px; font-weight: 700; cursor: pointer; }
 .ha-composer button:disabled { background: #CBD5E1; }
+
+/* Cash Settlement (register/ui/ShiftRegisterScreen.kt) */
+.ha-regbody { gap: 12px; background: #F6F7FB; }
+.ha-regclosed { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 12px 0; }
+.ha-reglock { width: 72px; height: 72px; border-radius: 99px; background: #fff; border: 1px solid #E5E7EB; display: grid; place-items: center; color: #6B7688; }
+.ha-reglock svg { width: 32px; height: 32px; }
+.ha-regclosed > b { margin-top: 18px; font-size: 20px; font-weight: 800; color: #0B1220; }
+.ha-regclosed > p { margin: 8px 0 22px !important; font-size: 13.5px; line-height: 20px; color: #6B7688; }
+.ha-regclosed .ha-regbtn { width: 100%; margin-top: 10px; flex: none; }
+.ha-regwarn { margin: -8px 0 16px; padding: 7px 12px; border-radius: 99px; background: rgba(180, 83, 9, .1); color: #B45309; font-style: normal; font-size: 12px; font-weight: 600; }
+.ha-regbtn { flex: 1; height: 48px; border: 0; border-radius: 10px; font: 700 14px/1 Inter, system-ui, sans-serif; cursor: pointer; transition: transform .12s, opacity .12s; }
+.ha-regbtn:active:not(:disabled) { transform: scale(.97); }
+.ha-regbtn:disabled { opacity: .45; }
+.ha-regbtn.is-ink { background: #0B1220; color: #fff; }
+.ha-regbtn.is-blue { background: #1D4ED8; color: #fff; }
+.ha-regbtn.is-red { background: #DC2626; color: #fff; }
+.ha-regbtn.is-line { background: #fff; border: 1px solid #E5E7EB; color: #0B1220; font-weight: 600; }
+.ha-regbtn.ha-wide { display: block; width: 100%; margin-top: 16px; }
+.ha-reghero { padding: 18px; border-radius: 16px; background: #fff; border: 1px solid #E5E7EB; }
+.ha-reghero small { font-size: 11px; font-weight: 600; color: #6B7688; }
+.ha-live { display: inline-flex; align-items: center; gap: 7px; letter-spacing: 1px; font-weight: 700 !important; }
+.ha-live i { width: 8px; height: 8px; border-radius: 99px; background: #16A34A; animation: ha-breathe .9s ease-in-out infinite alternate; }
+.ha-reghero > b { display: block; margin-top: 10px; font-size: 32px; font-weight: 800; letter-spacing: -.5px; color: #0B1220; font-variant-numeric: tabular-nums; }
+.ha-reghero > p { margin: 2px 0 0 !important; font-size: 12px; color: #6B7688; }
+.ha-regstats { display: flex; margin: 16px 0; padding: 12px 0; border-top: 1px solid #E5E7EB; border-bottom: 1px solid #E5E7EB; }
+.ha-regstats span { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.ha-regstats small { font-size: 10px; }
+.ha-regstats b { font-size: 14px; font-weight: 700; color: #0B1220; }
+.ha-gap8 { gap: 8px; }
+.ha-regdigital { padding: 16px; border-radius: 12px; background: #fff; border: 1px solid #E5E7EB; }
+.ha-regdigital > small, .ha-regdigital .ha-grow small { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .6px; color: #6B7688; }
+.ha-regdigital > p { margin: 2px 0 12px !important; font-size: 11.5px; color: #6B7688; }
+.ha-regdigital b { display: block; margin-top: 2px; font-size: 15px; font-weight: 700; color: #0B1220; }
+.ha-regdigital b.is-blue { color: #1D4ED8; }
+.ha-regtabs { display: flex; padding: 4px; border-radius: 12px; background: #EEF0F5; }
+.ha-regtabs button { flex: 1; height: 36px; border: 0; border-radius: 9px; background: none; font: 600 13px/1 Inter, system-ui, sans-serif; color: #6B7688; cursor: pointer; }
+.ha-regtabs button.is-on { background: #fff; color: #0B1220; box-shadow: 0 1px 3px rgba(15, 23, 42, .1); }
+.ha-reglist { border-radius: 12px; background: #fff; border: 1px solid #E5E7EB; overflow: hidden; }
+.ha-regrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid #F1F2F6; }
+.ha-regrow:first-child { border-top: 0; }
+.ha-regrow b { display: block; font-size: 14px; font-weight: 600; color: #0B1220; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-regrow small { display: block; font-size: 11px; color: #6B7688; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-regrow strong { font-size: 14px; font-weight: 700; }
+.ha-regdot { width: 34px; height: 34px; flex: none; border-radius: 99px; display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+.ha-regdot.is-in { background: rgba(22, 163, 74, .1); color: #16A34A; }
+.ha-regdot.is-out { background: rgba(220, 38, 38, .1); color: #DC2626; }
+.ha-regempty { padding: 28px 16px; text-align: center; font-size: 13px; color: #6B7688; }
+.ha-presets, .ha-catchips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ha-presets button, .ha-catchips button { padding: 9px 13px; border: 1px solid #E5E7EB; border-radius: 99px; background: #fff; font: 600 12.5px/1 Inter, system-ui, sans-serif; color: #0B1220; cursor: pointer; }
+.ha-catchips button.is-on { background: #0B1220; border-color: #0B1220; color: #fff; }
+.ha-expected { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: #F6F7FB; }
+.ha-expected small { display: block; font-size: 10.5px; color: #6B7688; }
+.ha-expected small:first-child { font-weight: 700; letter-spacing: .5px; }
+.ha-expected b { font-size: 17px; font-weight: 800; color: #0B1220; }
+.ha-catrow { align-items: center; margin-top: 14px; }
+.ha-catrow .ha-dlg-sub { margin: 0; color: #0B1220; font-size: 12px; letter-spacing: .6px; }
+.ha-catrow .ha-basis { width: 132px; }
+.ha-catrow .ha-basis > i { width: 62px; }
+.ha-catrow .ha-basis.is-played > i { transform: translateX(64px); }
+.ha-denoms { display: flex; flex-direction: column; margin-top: 8px; }
+.ha-denom { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #F1F2F6; }
+.ha-denom > b { flex: 1; font-size: 14px; font-weight: 700; color: #0B1220; }
+.ha-denom > small { width: 64px; text-align: right; font-size: 13px; font-weight: 600; color: #6B7688; }
+.ha-stepper { display: flex; align-items: center; border: 1px solid #E5E7EB; border-radius: 10px; overflow: hidden; }
+.ha-stepper button { width: 34px; height: 34px; border: 0; background: #F6F7FB; font-size: 17px; font-weight: 700; color: #0B1220; cursor: pointer; }
+.ha-stepper i { width: 34px; text-align: center; font-style: normal; font-size: 14px; font-weight: 700; }
+.ha-coins { width: 102px; height: 36px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 10px; font: 600 16px/1 Inter, system-ui, sans-serif; box-sizing: border-box; outline: 0; }
+.ha-countsum { margin-top: 10px; font-size: 13px; color: #0B1220; }
+.ha-countsum b { font-size: 16px; font-weight: 800; }
+.ha-variance { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding: 12px 14px; border-radius: 12px; font-size: 13px; }
+.ha-variance strong { font-size: 17px; font-weight: 800; }
+.ha-variance.is-square { background: rgba(22, 163, 74, .1); color: #16A34A; }
+.ha-variance.is-short { background: rgba(220, 38, 38, .1); color: #DC2626; }
+.ha-variance.is-over { background: rgba(180, 83, 9, .1); color: #B45309; }
+.ha-field span.is-red { color: #DC2626; }
+.ha-histcard { padding: 16px; border-radius: 14px; background: #fff; border: 1px solid #E5E7EB; }
+.ha-histcard .ha-grow b { display: block; font-size: 15px; font-weight: 700; color: #0B1220; }
+.ha-histcard .ha-grow small { display: block; font-size: 11.5px; color: #6B7688; }
+.ha-histcard .ha-hr { display: block; height: 1px; margin: 10px 0; background: #E5E7EB; }
+.ha-varpill { padding: 5px 10px; border-radius: 99px; font-style: normal; font-size: 11.5px; font-weight: 700; color: #fff; }
+.ha-varpill.is-square { background: #16A34A; } .ha-varpill.is-short { background: #DC2626; } .ha-varpill.is-over { background: #B45309; }
+.ha-histfigs { display: flex; }
+.ha-histfigs span { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.ha-histfigs small { font-size: 10px; color: #6B7688; }
+.ha-histfigs b { font-size: 12.5px; font-weight: 700; color: #0B1220; }
+.ha-histnote { margin: 10px 0 0 !important; padding: 9px 11px; border-radius: 9px; background: #F6F7FB; font-size: 12px; color: #0B1220; }
+
+/* Operations Center (operations/ui/OwnerOperationsDashboard.kt) */
+.ha-opsbody { gap: 12px; background: #F8FAFC; }
+.ha-opstabs { display: flex; gap: 6px; margin: 0 -16px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; }
+.ha-opstabs::-webkit-scrollbar { display: none; }
+.ha-opstabs button { flex: none; height: 36px; padding: 0 15px; border: 1px solid #E2E8F0; border-radius: 99px; background: #fff; font: 600 13px/1 Inter, system-ui, sans-serif; color: #475569; cursor: pointer; }
+.ha-opstabs button.is-on { background: #0F172A; border-color: #0F172A; color: #fff; }
+.ha-kpigrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ha-kpi { padding: 14px; border-radius: 16px; background: #fff; border: 1px solid #E2E8F0; min-width: 0; }
+.ha-kpi small { display: block; font-size: 10px; font-weight: 700; letter-spacing: .6px; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-kpi b { display: block; margin-top: 8px; font-size: 21px; font-weight: 800; color: #0F172A; font-variant-numeric: tabular-nums; }
+.ha-kpi p { margin: 4px 0 0 !important; font-size: 11px; color: #64748B; }
+.ha-trend { display: inline-block; margin-top: 6px; padding: 3px 7px; border-radius: 99px; font-style: normal; font-size: 10.5px; font-weight: 700; }
+.ha-trend.is-up { background: #ECFDF5; color: #059669; }
+.ha-trend.is-down { background: #FEF2F2; color: #DC2626; }
+.ha-mrr { padding: 18px; border-radius: 16px; color: #fff; background: linear-gradient(135deg, #6366F1, #4F46E5); box-shadow: 0 14px 24px -14px #4F46E5; }
+.ha-mrr small { font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px; color: rgba(255, 255, 255, .8); }
+.ha-mrr b { display: block; margin-top: 6px; font-size: 28px; font-weight: 800; }
+.ha-mrr b span { font-size: 14px; font-weight: 600; opacity: .8; }
+.ha-mrr p { margin: 4px 0 0 !important; font-size: 12px; color: rgba(255, 255, 255, .8); }
+.ha-opscard { padding: 16px; border-radius: 16px; background: #fff; border: 1px solid #E2E8F0; }
+.ha-opstitle { display: block; font-size: 15px; font-weight: 700; color: #0F172A; }
+.ha-opssub { margin: 3px 0 0 !important; font-size: 12px; line-height: 17px; color: #64748B; }
+.ha-pad4 { padding: 0 4px; }
+.ha-chanrow { margin-top: 14px; }
+.ha-chanrow .ha-grow { font-size: 13px; font-weight: 600; color: #1E293B; }
+.ha-chanrow small { font-weight: 500; color: #64748B; }
+.ha-chanrow b { font-size: 13.5px; font-weight: 700; color: #0F172A; }
+.ha-chanbar, .ha-stagebar { display: block; height: 7px; margin-top: 7px; border-radius: 99px; background: #E2E8F0; overflow: hidden; }
+.ha-chanbar i { display: block; height: 100%; border-radius: 99px; background: #6366F1; }
+.ha-stagebar i { display: block; height: 100%; border-radius: 99px; background: #128C7E; }
+.ha-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; font-size: 11px; color: #475569; }
+.ha-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.ha-legend i { width: 11px; height: 11px; border-radius: 3px; }
+.ha-heatsum { display: flex; gap: 10px; margin-top: 12px; }
+.ha-heatsum span { flex: 1; padding: 10px 12px; border-radius: 12px; background: #F8FAFC; }
+.ha-heatsum b { display: block; font-size: 18px; font-weight: 800; color: #0F172A; }
+.ha-heatsum small { font-size: 11px; color: #64748B; }
+.ha-heatscroll { margin: 14px -16px 0; padding: 0 16px; overflow-x: auto; }
+.ha-heat { border-collapse: separate; border-spacing: 3px; }
+.ha-heat th { padding: 0 2px; font-size: 9px; font-weight: 500; color: #64748B; }
+.ha-heat tr th:first-child { position: sticky; left: -16px; z-index: 1; padding-right: 6px; background: #fff; text-align: left; font-size: 11px; font-weight: 700; color: #1E293B; }
+.ha-heat td button { width: 34px; height: 30px; padding: 0; border: .5px solid #CBD5E1; border-radius: 4px; font: 600 8.5px/1 Inter, system-ui, sans-serif; cursor: pointer; }
+.ha-opsstaff { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 16px; background: #fff; border: 1px solid #E2E8F0; }
+.ha-opsbadge { width: 42px; height: 42px; flex: none; border-radius: 99px; background: #E2E8F0; color: #0F172A; display: grid; place-items: center; }
+.ha-opsbadge svg { width: 22px; height: 22px; }
+.ha-opsstaff .ha-grow { min-width: 0; }
+.ha-opsstaff .ha-grow b { display: block; font-size: 14px; font-weight: 700; color: #0F172A; }
+.ha-opsstaff .ha-grow small { display: block; font-size: 12px; color: #64748B; }
+.ha-opsnums { display: flex; flex-direction: column; align-items: flex-end; }
+.ha-opsnums b { font-size: 12px; font-weight: 700; color: #0F172A; }
+.ha-opsnums small { font-size: 12px; font-weight: 600; }
+.ha-convrow { margin: 12px 0 2px; font-size: 13px; color: #64748B; }
+.ha-convrow b { font-size: 15px; font-weight: 800; }
+.ha-stage { margin-top: 12px; }
+.ha-stage .ha-grow { font-size: 12px; font-weight: 600; color: #1E293B; }
+.ha-stage b { font-size: 12px; font-weight: 700; color: #0F172A; }
+.ha-stage small { display: block; margin-top: 4px; font-size: 11px; color: #DC2626; }
+.ha-alert { padding: 14px; border-radius: 14px; background: #FFFBEB; border: 1px solid #FDE68A; }
+.ha-alert .ha-row { align-items: flex-start; gap: 8px; }
+.ha-alert b { font-size: 13px; font-weight: 700; color: #92400E; }
+.ha-alert button { flex: none; padding: 2px 4px; border: 0; background: none; font: 700 12px/1.2 Inter, system-ui, sans-serif; color: #D97706; cursor: pointer; }
+.ha-alert p { margin: 4px 0 0 !important; font-size: 12px; line-height: 17px; color: #78350F; }
+.ha-allgood { display: flex; align-items: center; gap: 10px; padding: 14px; border-radius: 14px; background: #ECFDF5; font-size: 13px; color: #065F46; }
+.ha-allgood svg { width: 22px; height: 22px; flex: none; color: #059669; }
+.ha-sugg { padding: 16px; border-radius: 16px; background: #fff; border: 1px solid #E2E8F0; }
+.ha-sugg em { padding: 4px 8px; border-radius: 6px; background: #F1F5F9; font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .6px; color: #0F172A; }
+.ha-sugg .ha-row b { font-size: 13px; font-weight: 800; }
+.ha-sugg strong { display: block; margin-top: 10px; font-size: 14px; font-weight: 700; color: #0F172A; }
+.ha-sugg p { margin: 4px 0 12px !important; font-size: 12px; line-height: 17px; color: #64748B; }
+.ha-sugg .ha-regbtn { height: 40px; font-size: 12.5px; }
+.ha-applied { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; border-radius: 10px; background: #ECFDF5; font-size: 12px; font-weight: 700; color: #059669; }
+.ha-applied svg { width: 16px; height: 16px; }
 
 } /* end phone */
 
