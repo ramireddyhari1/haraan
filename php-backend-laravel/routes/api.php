@@ -573,6 +573,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/venues/{id}/day', 'venueDay')->whereNumber('id');
         Route::get('/venues/{id}/slots', 'venueSlots')->whereNumber('id');
         Route::get('/venues/{id}/courts', 'venueCourts')->whereNumber('id');
+        Route::get('/venues/{id}/hours', 'venueHours')->whereNumber('id');
         Route::get('/bookings', 'bookings');
         // Games on this partner's courts: booking-linked, plus public matches
         // whose GPS lands on the venue. Read-only.
@@ -581,6 +582,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         // --- Write actions gated by staff capability (owners hold all) ---
         Route::middleware('partner.can:pricing')->group(function (): void {
             Route::post('/venues/{id}/slots/generate', 'generateSlots')->whereNumber('id');
+            Route::post('/venues/{id}/hours', 'saveVenueHours')->whereNumber('id');
             Route::post('/venues/{id}/slots', 'saveSlot')->whereNumber('id');
             Route::post('/venues/{id}/slots/{slotId}', 'saveSlot')->whereNumber('id')->whereNumber('slotId');
             Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');

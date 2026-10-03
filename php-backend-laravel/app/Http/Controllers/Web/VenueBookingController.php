@@ -70,13 +70,21 @@ final class VenueBookingController extends Controller
         }
 
         $baseRate = (int) ($court->price ?? $venue->price ?? 0);
+        // A slot's own price for this court wins over the court rate — same rule as the desk and reserve().
+        $slotPrices = [];
+        foreach ($venue->slotsOn($date) as $slot) {
+            $m = BookingService::timeToMinutes($slot->time);
+            if ($m !== null) {
+                $slotPrices[$m] = $slot->priceForCourt($court);
+            }
+        }
         $lines = [];
         foreach ($validated['slots'] as $range) {
             $startStr = trim(explode('-', $range)[0] ?? '');
             if (BookingService::timeToMinutes($startStr) === null) {
                 return response()->json(['error' => "Invalid slot time: {$range}"], 422);
             }
-            $rate = (float) $court->rateFor($date, $startStr, $baseRate);
+            $rate = (float) $court->rateFor($date, $startStr, $baseRate, $slotPrices[BookingService::timeToMinutes($startStr)] ?? null);
             if ($rate <= 0) {
                 return response()->json(['error' => "Pricing for '{$range}' is not configured."], 422);
             }
@@ -179,10 +187,9 @@ final class VenueBookingController extends Controller
             return response()->json(['error' => 'A valid court must be selected for booking.'], 422);
         }
 
+        // No early "not configured" here: a court without a rate can still sell slots that
+        // carry their own price. Each line is refused below if it ends up at ₹0.
         $baseRate = (int) ($court->price ?? $venue->price ?? 0);
-        if ($baseRate <= 0) {
-            return response()->json(['error' => 'Pricing for this court is not configured.'], 422);
-        }
 
         // Only the venue's own slots can be sold: the start times on its template for this
         // day (/control → venue → slots), each for one slot length, and only while open for
@@ -193,12 +200,14 @@ final class VenueBookingController extends Controller
         $states = collect($this->availability->forDate($venue, $bookingDate, 1, (int) $court->id))->keyBy('id');
         $sport = trim((string) ($validated['sport'] ?? ''));
         $sellable = [];
+        $slotPrices = [];
         foreach ($venue->slotsOn($bookingDate) as $slot) {
             $m = BookingService::timeToMinutes($slot->time);
             if ($m === null || ! $slot->allowsCourt($court) || ($sport !== '' && ! $slot->supportsSport($sport))) {
                 continue;
             }
             $sellable[$m] = $states[$slot->id]['state'] ?? VenueSlotAvailability::CLOSED;
+            $slotPrices[$m] = $slot->priceForCourt($court);
         }
 
         // Parse and validate each slot
@@ -255,7 +264,7 @@ final class VenueBookingController extends Controller
             // Determine slot price (court rate, peak rate, or venue base rate)
             $rate = $baseRate;
             if ($court !== null) {
-                $rate = $court->rateFor($bookingDate, $startStr, $baseRate);
+                $rate = $court->rateFor($bookingDate, $startStr, $baseRate, $slotPrices[$startMin] ?? null);
             }
             // Never fall back to a price the browser sent — that would let the buyer name it.
             if ($rate <= 0) {

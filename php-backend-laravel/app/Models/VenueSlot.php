@@ -27,7 +27,7 @@ final class VenueSlot extends Model
      * price NULL and capacity 1 — which is why every desk cell read "0/1".
      */
     protected $fillable = [
-        'venue_id', 'day', 'time', 'price', 'capacity', 'sports', 'is_available', 'filling_fast', 'sort_order',
+        'venue_id', 'day', 'time', 'price', 'capacity', 'sports', 'court_prices', 'is_available', 'filling_fast', 'sort_order',
     ];
 
     protected $casts = [
@@ -35,7 +35,43 @@ final class VenueSlot extends Model
         'filling_fast' => 'boolean',
         'capacity'     => 'integer',
         'sports'       => 'array',
+        'court_prices' => 'array',
     ];
+
+    /**
+     * The price this slot sets for one court, or null to leave it to the court.
+     *
+     * That court's own price here first, then the slot's price for all courts. Null means
+     * the slot says nothing and the court's rate (peak included) is charged — see
+     * {@see VenueCourt::rateFor()}, which every desk, app, web and checkout path goes through.
+     */
+    public function priceForCourt(VenueCourt|int|null $court): ?float
+    {
+        $id = $court instanceof VenueCourt ? $court->id : $court;
+        $own = $id !== null ? ($this->courtPriceList()[(int) $id] ?? null) : null;
+        if ($own !== null && $own > 0) {
+            return $own;
+        }
+
+        return (float) $this->price > 0 ? (float) $this->price : null;
+    }
+
+    /**
+     * Per-court prices, cleaned: court id => price, positive prices only.
+     *
+     * @return array<int, float>
+     */
+    public function courtPriceList(): array
+    {
+        $out = [];
+        foreach ((is_array($this->court_prices) ? $this->court_prices : []) as $courtId => $price) {
+            if (is_numeric($price) && (float) $price > 0 && (int) $courtId > 0) {
+                $out[(int) $courtId] = (float) $price;
+            }
+        }
+
+        return $out;
+    }
 
     /** The label for a slot that runs every day — what the app and web fall back to. */
     public const EVERY_DAY = 'Every day';
@@ -57,7 +93,46 @@ final class VenueSlot extends Model
         // label exactly, both find it.
         static::saving(function (VenueSlot $slot): void {
             $slot->day = self::normaliseDay($slot->day);
+            $slot->time = self::normaliseTime($slot->time) ?? $slot->time;
         });
+    }
+
+    /**
+     * A slot's start time in the one spelling everything else uses: "6:00 AM".
+     *
+     * The partner app's own hint asked for "06:00 AM - 07:00 AM", which strtotime() can't
+     * read — so that row sold nowhere online, sorted last on the desk, and sat beside the
+     * generator's "6:00 AM" row as a second 6 AM. Only the first time in the text counts
+     * (a slot is a start time; its length is the venue's slot length). Null when there is
+     * no readable time at all.
+     */
+    public static function normaliseTime(?string $time): ?string
+    {
+        $m = self::startMinutes($time);
+
+        return $m === null ? null : sprintf('%d:%02d %s', intdiv($m, 60) % 12 ?: 12, $m % 60, $m < 720 ? 'AM' : 'PM');
+    }
+
+    /** Minutes after midnight of the first time in the text, or null. "18:00", "6 pm", "06:00 AM - 07:00 AM". */
+    public static function startMinutes(?string $time): ?int
+    {
+        if (! preg_match('/(\d{1,2})(?::(\d{2}))?\s*([AaPp]\.?[Mm]\.?)?/', (string) $time, $g)) {
+            return null;
+        }
+        $h = (int) $g[1];
+        $min = isset($g[2]) && $g[2] !== '' ? (int) $g[2] : 0;
+        $ampm = strtolower(str_replace('.', '', $g[3] ?? ''));
+        if ($ampm !== '') {
+            if ($h < 1 || $h > 12) {
+                return null;
+            }
+            $h = $h % 12 + ($ampm === 'pm' ? 12 : 0);
+        } elseif (($g[2] ?? '') === '') {
+            // A bare number ("6") isn't a time anyone can be held to.
+            return null;
+        }
+
+        return ($h <= 23 && $min <= 59) ? $h * 60 + $min : null;
     }
 
     public static function normaliseDay(?string $day): string

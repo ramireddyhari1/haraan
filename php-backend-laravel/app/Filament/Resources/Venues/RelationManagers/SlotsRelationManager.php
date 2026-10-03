@@ -58,10 +58,46 @@ class SlotsRelationManager extends RelationManager
                     ->required()
                     ->native(false)
                     ->helperText('Every-day slots run on every date. A weekday slot at the same time replaces the every-day one on that day.'),
+                // Same rules as the partner app: a start time the booking engine can read,
+                // and one row per day and time. Saved as "6:00 AM" whatever the spelling.
                 TextInput::make('time')
+                    ->label('Start time')
                     ->required()
-                    ->maxLength(255)
-                    ->placeholder('6:00 AM'),
+                    ->maxLength(40)
+                    ->placeholder('6:00 AM')
+                    ->rules([
+                        fn (?VenueSlot $record, $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($record, $get): void {
+                            $start = VenueSlot::startMinutes((string) $value);
+                            if ($start === null) {
+                                $fail('Enter a start time, like 6:00 AM.');
+
+                                return;
+                            }
+                            $day = VenueSlot::normaliseDay((string) $get('day'));
+                            $clash = $this->getOwnerRecord()->slots()
+                                ->when($record !== null, fn ($q) => $q->whereKeyNot($record->getKey()))
+                                ->get()
+                                ->contains(fn (VenueSlot $s): bool => VenueSlot::normaliseDay($s->day) === $day
+                                    && VenueSlot::startMinutes($s->time) === $start);
+                            if ($clash) {
+                                $fail('This venue already has a '.VenueSlot::normaliseTime((string) $value).' slot on '.($day === VenueSlot::EVERY_DAY ? 'every day' : $day).'.');
+                            }
+                        },
+                    ]),
+                TextInput::make('price')
+                    ->label('Price for all courts (₹)')
+                    ->numeric()
+                    ->minValue(0)
+                    ->helperText('Leave empty to charge each court\'s own rate. A price here replaces the court rate and its peak price at this time.'),
+                // Courts cost different amounts, so each can have its own price at this time.
+                // It beats the all-courts price above. Same field the partner app edits.
+                ...$this->getOwnerRecord()->courts()->where('is_active', true)->orderBy('sort_order')->get()
+                    ->map(fn (\App\Models\VenueCourt $c) => TextInput::make('court_prices.'.$c->id)
+                        ->label($c->name.' (₹)')
+                        ->numeric()
+                        ->minValue(0)
+                        ->placeholder('₹'.number_format((float) ($c->price ?? $this->getOwnerRecord()->price ?? 0)).' court rate'))
+                    ->all(),
                 Toggle::make('is_available')
                     ->label('Open for booking')
                     ->default(true),
@@ -72,12 +108,42 @@ class SlotsRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('time')
+            // Every day first, then Monday → Sunday, each in clock order — how the partner
+            // app lists them — instead of insertion order.
+            ->modifyQueryUsing(fn ($query) => $query
+                ->orderByRaw("CASE day WHEN 'Every day' THEN 0 WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 WHEN 'Saturday' THEN 6 WHEN 'Sunday' THEN 7 ELSE 8 END")
+                // Times are stored "6:00 AM" (VenueSlot::normaliseTime): AM before PM, then
+                // the hour with 12 as 0, then the minutes.
+                ->orderByRaw("CASE WHEN time LIKE '%PM' THEN 1 ELSE 0 END")
+                ->orderByRaw("CAST(time AS INTEGER) % 12")
+                ->orderByRaw("substr(time, instr(time, ':') + 1, 2)"))
             ->columns([
                 TextColumn::make('day')
                     ->badge()
                     ->sortable(),
                 TextColumn::make('time')
                     ->searchable(),
+                // The same number the desk and checkout charge; blank = the court's rate.
+                TextColumn::make('price')
+                    ->label('Price')
+                    ->formatStateUsing(fn ($state): string => (float) $state > 0 ? '₹'.number_format((float) $state) : 'Court rate')
+                    ->placeholder('Court rate'),
+                TextColumn::make('court_prices')
+                    ->label('Per court')
+                    ->state(function (VenueSlot $record): string {
+                        $names = $this->getOwnerRecord()->courts()->pluck('name', 'id');
+                        $parts = [];
+                        foreach ($record->courtPriceList() as $id => $p) {
+                            $parts[] = ($names[$id] ?? 'Court '.$id).' ₹'.number_format($p);
+                        }
+
+                        return implode(' · ', $parts);
+                    })
+                    ->placeholder('—'),
+                TextColumn::make('sports')
+                    ->label('Runs for')
+                    ->badge()
+                    ->placeholder('All sports'),
                 IconColumn::make('is_available')
                     ->label('Open')
                     ->boolean(),

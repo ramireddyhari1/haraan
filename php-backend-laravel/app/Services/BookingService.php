@@ -1330,7 +1330,7 @@ final class BookingService
 
             // Per-court peak pricing wins when it applies (weekday/time window on the court).
             if ($court !== null) {
-                $perHour = $court->rateFor(Carbon::parse($date), $timeLabel, (int) ($venue->price ?? 0));
+                $perHour = $court->rateFor(Carbon::parse($date), $timeLabel, (int) ($venue->price ?? 0), $slot?->priceForCourt($court));
             }
 
             // Length in minutes: whole hours for slot bookings, or exactly what the desk

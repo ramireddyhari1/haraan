@@ -358,7 +358,7 @@ class PartnerController extends Controller
                     $q->orWhereHas('event', fn ($e) => $e->where('partner_id', $partnerId));
                 }
             }))
-            ->with(['event:id,title', 'venue:id,name,branch_label', 'user:id,name', 'payments'])
+            ->with(['event:id,title', 'venue:id,name,branch_label', 'user:id,name,phone,email', 'payments'])
             ->latest()
             ->limit($date !== null ? 1000 : 100)
             ->get()
@@ -1034,6 +1034,9 @@ class PartnerController extends Controller
             'paymentMethod' => ['required', 'string', 'in:cash,upi,upi_qr,card,link,package'],
             // Which of the customer's passes to spend a session from.
             'customerPackageId' => ['nullable', 'integer'],
+            // The app can open Razorpay's own checkout (prefilled with the customer's
+            // number). Older builds can't, and still get the hosted payment page.
+            'nativeCheckout' => ['nullable', 'boolean'],
         ]);
 
         // Resolve the branch before booking — a caller must not be able to create a
@@ -1112,7 +1115,7 @@ class PartnerController extends Controller
         } elseif (in_array($method, ['link', 'upi_qr'], true) && $amount > 0) {
             // Best-effort: a QR or link that can't be minted must not lose the booking
             // the partner just took — the desk sheet says so and offers cash or cancel.
-            $payment = $this->mintDeskPayment($booking, $venue, $method);
+            $payment = $this->mintDeskPayment($booking, $venue, $method, (bool) ($data['nativeCheckout'] ?? false));
             if ($payment['kind'] === 'link') {
                 $payLink = $payment['url'];
                 $payLinkId = $payment['id'];
@@ -1162,7 +1165,7 @@ class PartnerController extends Controller
      *
      * @return array{kind: string, present: string, id: string|null, qr: string|null, url: string|null, image_url: string|null, amount: float, expires_in: int, error: string|null}
      */
-    private function mintDeskPayment(Booking $booking, Venue $venue, string $want): array
+    private function mintDeskPayment(Booking $booking, Venue $venue, string $want, bool $native = false): array
     {
         $amount = round(max((float) $booking->total_amount - (float) $booking->amount_paid, 0.0), 2);
         $minutes = \App\Support\PlatformRules::int('bookings.desk_qr_minutes');
@@ -1185,6 +1188,36 @@ class PartnerController extends Controller
             }
         }
 
+        // The customer pays on the desk phone. A build that has Razorpay's own checkout
+        // gets an ORDER: the checkout opens natively with the customer's number already
+        // in, where Razorpay's hosted link page hides the number it was given and asks
+        // for it again.
+        if ($want === 'upi_qr' && $native) {
+            try {
+                $order = $this->razorpay->createOrder($paise, 'desk-'.$booking->id.'-'.time(), 'INR', $notes);
+                $orderId = (string) ($order['id'] ?? '');
+                if ($orderId !== '') {
+                    // On the hold too, so the lapsed-hold sweep asks Razorpay before it
+                    // writes the booking off, and the order webhook can confirm it.
+                    $booking->forceFill(['razorpay_order_id' => $orderId])->save();
+
+                    return array_merge($result, [
+                        'kind' => 'order', 'present' => 'checkout', 'id' => $orderId,
+                        'checkout' => [
+                            'key'         => $this->razorpay->publicKey(),
+                            'order_id'    => $orderId,
+                            'name'        => $venue->name,
+                            'description' => 'Booking #'.$booking->id,
+                            'contact'     => $this->checkoutPhone($booking->guest_phone),
+                            'customer'    => $booking->guest_name ?: null,
+                        ],
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Booking {$booking->id}: desk checkout order failed, opening the payment page instead: ".$e->getMessage());
+            }
+        }
+
         // The page the customer pays on at the desk needs no SMS; a link the desk chose
         // to send does.
         $onPage = $want === 'upi_qr';
@@ -1194,7 +1227,7 @@ class PartnerController extends Controller
                 $paise,
                 'Booking at '.$venue->name,
                 $booking->guest_name ?: null,
-                $booking->guest_phone ?: null,
+                $this->checkoutPhone($booking->guest_phone),
                 $notes,
                 notifySms: ! $onPage,
             );
@@ -1212,6 +1245,23 @@ class PartnerController extends Controller
                     : 'Could not start an online payment right now. Take cash or try again.',
             ]);
         }
+    }
+
+    /**
+     * The customer's number the way Razorpay takes it: +91 and ten digits. The desk
+     * types it with spaces ("97013 77681").
+     */
+    private function checkoutPhone(?string $phone): ?string
+    {
+        $digits = preg_replace('/\D+/', '', (string) $phone) ?? '';
+        if (strlen($digits) === 12 && str_starts_with($digits, '91')) {
+            $digits = substr($digits, 2);
+        }
+        if (strlen($digits) === 11 && str_starts_with($digits, '0')) {
+            $digits = substr($digits, 1);
+        }
+
+        return strlen($digits) === 10 ? '+91'.$digits : ($digits !== '' ? '+'.$digits : null);
     }
 
     /** A booking on a branch this caller may act on, or 404. */
@@ -1232,9 +1282,11 @@ class PartnerController extends Controller
      */
     private function settleDeskPayment(Booking $booking, string $kind, string $gatewayId): array
     {
-        $state = $kind === 'upi_qr'
-            ? $this->razorpay->upiQrStatus($gatewayId)
-            : $this->razorpay->paymentLinkStatus($gatewayId);
+        $state = match ($kind) {
+            'upi_qr' => $this->razorpay->upiQrStatus($gatewayId),
+            'order'  => $this->razorpay->orderStatus($gatewayId),
+            default  => $this->razorpay->paymentLinkStatus($gatewayId),
+        };
 
         // Every desk QR/link is minted with its booking id in the notes, so a missing
         // or different one is never ours to settle.
@@ -1268,7 +1320,11 @@ class PartnerController extends Controller
 
         if (! $already) {
             $amount = $state['amount_paid'] > 0 ? $state['amount_paid'] : (float) $booking->total_amount;
-            $this->ledger->collect($booking, $amount, 'online', null, $paymentId, $kind === 'upi_qr' ? 'Razorpay UPI QR' : 'Razorpay payment link');
+            $this->ledger->collect($booking, $amount, 'online', null, $paymentId, match ($kind) {
+                'upi_qr' => 'Razorpay UPI QR',
+                'order'  => 'Razorpay checkout',
+                default  => 'Razorpay payment link',
+            });
             $booking->refresh();
             // The money is real now, so the ticket may go out.
             BookingNotifier::dispatch($booking);
@@ -1280,9 +1336,13 @@ class PartnerController extends Controller
     /** Stop a desk QR or link taking money (replaced, abandoned, or paid another way). */
     private function closeDeskPayment(string $kind, string $gatewayId): void
     {
-        $kind === 'upi_qr'
-            ? $this->razorpay->closeUpiQr($gatewayId)
-            : $this->razorpay->cancelPaymentLink($gatewayId);
+        // An order can't be closed. Its checkout only lives on the desk's screen, and a
+        // payment that lands late is still settled (or refunded) by its order id.
+        match ($kind) {
+            'upi_qr' => $this->razorpay->closeUpiQr($gatewayId),
+            'order'  => null,
+            default  => $this->razorpay->cancelPaymentLink($gatewayId),
+        };
     }
 
     /**
@@ -1294,8 +1354,9 @@ class PartnerController extends Controller
     {
         $data = $request->validate([
             'kind'        => ['required', 'string', 'in:upi_qr,link'],
-            'replaceKind' => ['nullable', 'string', 'in:upi_qr,link'],
+            'replaceKind' => ['nullable', 'string', 'in:upi_qr,link,order'],
             'replaceId'   => ['nullable', 'string', 'max:64'],
+            'nativeCheckout' => ['nullable', 'boolean'],
         ]);
 
         $booking = $this->deskBooking($request, $id);
@@ -1328,7 +1389,7 @@ class PartnerController extends Controller
         return response()->json([
             'paid'    => false,
             'booking' => $this->slotBooking($booking),
-            'payment' => $this->mintDeskPayment($booking, $venue, $data['kind']),
+            'payment' => $this->mintDeskPayment($booking, $venue, $data['kind'], (bool) ($data['nativeCheckout'] ?? false)),
         ]);
     }
 
@@ -1343,7 +1404,7 @@ class PartnerController extends Controller
     {
         $data = $request->validate([
             'method'    => ['required', 'string', 'in:cash,upi,card'],
-            'closeKind' => ['nullable', 'string', 'in:upi_qr,link'],
+            'closeKind' => ['nullable', 'string', 'in:upi_qr,link,order'],
             'closeId'   => ['nullable', 'string', 'max:64'],
         ]);
 
@@ -1401,8 +1462,10 @@ class PartnerController extends Controller
     {
         $data = $request->validate([
             // A payment link (older builds send only this), or a desk UPI QR.
-            'linkId' => ['required_without:qrId', 'nullable', 'string', 'max:64'],
-            'qrId'   => ['required_without:linkId', 'nullable', 'string', 'max:64'],
+            'linkId'  => ['required_without_all:qrId,orderId', 'nullable', 'string', 'max:64'],
+            'qrId'    => ['required_without_all:linkId,orderId', 'nullable', 'string', 'max:64'],
+            // Razorpay's own checkout, opened on the desk phone.
+            'orderId' => ['required_without_all:linkId,qrId', 'nullable', 'string', 'max:64'],
             // The desk's timer ran out: stop the QR/link taking money, then check once
             // more so a payment that landed in the last second still counts.
             'close'  => ['nullable', 'boolean'],
@@ -1411,8 +1474,8 @@ class PartnerController extends Controller
         // Scope to the branches this caller may act on: a booking id alone must not
         // expose another tenant's — or another branch's — payment state.
         $booking = $this->deskBooking($request, $id);
-        $kind = ! empty($data['qrId']) ? 'upi_qr' : 'link';
-        $gatewayId = (string) ($data['qrId'] ?? $data['linkId']);
+        $kind = ! empty($data['qrId']) ? 'upi_qr' : (! empty($data['orderId']) ? 'order' : 'link');
+        $gatewayId = (string) ($data['qrId'] ?? $data['orderId'] ?? $data['linkId']);
 
         if (! empty($data['close'])) {
             $this->closeDeskPayment($kind, $gatewayId);
@@ -2341,10 +2404,7 @@ class PartnerController extends Controller
     {
         $venue = $this->branch($request, $id);
 
-        $slots = VenueSlot::query()->where('venue_id', $venue->id)->orderBy('sort_order')->get()
-            ->map(fn (VenueSlot $s): array => $this->slotRow($s));
-
-        return response()->json(['data' => $slots]);
+        return response()->json(['data' => $this->orderedSlots($venue)]);
     }
 
     /**
@@ -2368,10 +2428,41 @@ class PartnerController extends Controller
             // into null: a stray empty entry should be dropped by the normalisation
             // below, not 422 the whole save.
             'sports.*'  => ['nullable', 'string', 'max:40'],
+            // A price per court: {"<courtId>": 500}. Absent = unchanged; a court left out
+            // or set to 0/null charges its own rate (or the all-courts price above).
+            'courtPrices'   => ['nullable', 'array'],
+            'courtPrices.*' => ['nullable', 'numeric', 'min:0'],
         ]);
 
+        // Say no to what the rest of the system can't read, instead of storing it. A day
+        // like "Mon-Fri" used to be saved as "Every day" (so it ran on weekends too), and a
+        // time like "06:00 AM - 07:00 AM" was stored as typed and then sold nowhere online.
+        $time = VenueSlot::normaliseTime($data['time']);
+        if ($time === null) {
+            return response()->json(['error' => 'Enter the start time, like 6:00 AM.'], 422);
+        }
+        $dayIn = trim((string) ($data['day'] ?? ''));
+        if ($dayIn !== '' && VenueSlot::normaliseDay($dayIn) === VenueSlot::EVERY_DAY
+            && ! in_array(strtolower(str_replace([' ', '-'], '', $dayIn)), ['everyday', 'daily', 'all'], true)) {
+            return response()->json(['error' => 'Pick one day, or Every day. For Mon–Fri, add the slot to each day or use Generate slots.'], 422);
+        }
+
+        // One row per day and start time. A second 6 AM Monday row drew twice on the desk
+        // and split bookings between two rows that look identical.
+        $day = $dayIn !== '' ? VenueSlot::normaliseDay($dayIn) : null;
+        $current = $slotId !== null ? VenueSlot::query()->where('venue_id', $venue->id)->find($slotId) : null;
+        $checkDay = $day ?? ($current !== null ? VenueSlot::normaliseDay($current->day) : VenueSlot::EVERY_DAY);
+        $clash = VenueSlot::query()->where('venue_id', $venue->id)
+            ->when($slotId !== null, fn ($q) => $q->where('id', '!=', $slotId))
+            ->get()
+            ->first(fn (VenueSlot $s): bool => VenueSlot::normaliseDay($s->day) === $checkDay
+                && VenueSlot::startMinutes($s->time) === VenueSlot::startMinutes($time));
+        if ($clash !== null) {
+            return response()->json(['error' => "There's already a {$time} slot on ".($checkDay === VenueSlot::EVERY_DAY ? 'every day' : $checkDay).'. Edit that one instead.'], 422);
+        }
+
         $attrs = [
-            'time'         => $data['time'],
+            'time'         => $time,
             'is_available' => $data['isOpen'] ?? true,
         ];
 
@@ -2393,10 +2484,24 @@ class PartnerController extends Controller
             )));
         }
 
+        if (array_key_exists('courtPrices', $data) && $data['courtPrices'] !== null) {
+            $mine = VenueCourt::query()->where('venue_id', $venue->id)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $prices = [];
+            foreach ($data['courtPrices'] as $courtId => $price) {
+                if (! in_array((int) $courtId, $mine, true)) {
+                    return response()->json(['error' => 'That court is not at this venue.'], 422);
+                }
+                if ($price !== null && (float) $price > 0) {
+                    $prices[(string) (int) $courtId] = (float) $price;
+                }
+            }
+            $attrs['court_prices'] = $prices === [] ? null : $prices;
+        }
+
         // `day` is NOT NULL — only overwrite it when supplied, so an update that
         // omits it keeps the existing value.
-        if (array_key_exists('day', $data) && $data['day'] !== null && $data['day'] !== '') {
-            $attrs['day'] = $data['day'];
+        if ($day !== null) {
+            $attrs['day'] = $day;
         }
 
         if ($slotId !== null) {
@@ -2455,8 +2560,7 @@ class PartnerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        $slots = VenueSlot::query()->where('venue_id', $venue->id)->orderBy('sort_order')->get()
-            ->map(fn (VenueSlot $s): array => $this->slotRow($s));
+        $slots = $this->orderedSlots($venue);
 
         return response()->json([
             'status'  => 'ok',
@@ -2468,6 +2572,71 @@ class PartnerController extends Controller
         ]);
     }
 
+    /** GET /api/partner/venues/{id}/hours — the venue's opening hours, day by day. */
+    public function venueHours(Request $request, string $id): JsonResponse
+    {
+        return response()->json($this->hoursPayload($this->branch($request, $id)));
+    }
+
+    /**
+     * POST /api/partner/venues/{id}/hours — set when the venue is open, day by day.
+     *
+     * Body: `days` keyed Mon…Sun, each {open, close} in 24-hour "HH:MM" or null for closed;
+     * `slot_minutes` 30|60. Open and close the same ("00:00"–"00:00") means open 24 hours; a
+     * close earlier than the open runs past midnight. Saving rebuilds the slot template from
+     * the hours the same way /control does — times still inside the hours keep their prices.
+     */
+    public function saveVenueHours(Request $request, string $id): JsonResponse
+    {
+        $venue = $this->branch($request, $id);
+
+        $time = ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'];
+        $data = $request->validate([
+            'days'         => ['required', 'array'],
+            'days.*'       => ['nullable', 'array'],
+            'days.*.open'  => $time,
+            'days.*.close' => $time,
+            'slot_minutes' => ['nullable', 'integer', 'in:30,60'],
+        ]);
+
+        $map = [];
+        foreach (['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $key) {
+            $day = $data['days'][$key] ?? null;
+            if (is_array($day) && ! empty($day['open']) && ! empty($day['close'])) {
+                $map[$key] = ['open' => $day['open'], 'close' => $day['close']];
+            }
+        }
+        if ($map === []) {
+            return response()->json(['error' => 'Keep at least one day open. To stop bookings for a day, mark that date closed on the desk.'], 422);
+        }
+
+        $venue->forceFill([
+            'hours_json'   => $map,
+            'slot_minutes' => (int) ($data['slot_minutes'] ?? $venue->slotLength()),
+        ])->save();
+        $venue->forceFill(['hours' => $venue->displayHours()])->save();
+        $venue->regenerateSlotsFromHours();
+
+        return response()->json(['status' => 'ok'] + $this->hoursPayload($venue->fresh()));
+    }
+
+    /** @return array<string, mixed> */
+    private function hoursPayload(Venue $venue): array
+    {
+        $days = [];
+        foreach (['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $key) {
+            $days[$key] = $venue->hoursForWeekday($key);
+        }
+
+        return [
+            'set'          => is_array($venue->hours_json) && $venue->hours_json !== [],
+            'days'         => $days,
+            'slot_minutes' => $venue->slotLength(),
+            'display'      => $venue->displayHours(),
+            'slots'        => $venue->slots()->count(),
+        ];
+    }
+
     public function deleteSlot(Request $request, string $id, string $slotId): JsonResponse
     {
         $venue = $this->branch($request, $id);
@@ -2475,6 +2644,25 @@ class PartnerController extends Controller
         VenueSlot::query()->where('venue_id', $venue->id)->where('id', $slotId)->delete();
 
         return response()->json(['status' => 'deleted']);
+    }
+
+    /**
+     * The venue's slot rows as the week reads: Every day first, then Monday → Sunday, each
+     * in clock order. sort_order put a 5 AM added today after Sunday 10 PM.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function orderedSlots(Venue $venue): array
+    {
+        $dayRank = array_flip([VenueSlot::EVERY_DAY, ...VenueSlot::WEEKDAYS]);
+
+        return VenueSlot::query()->where('venue_id', $venue->id)->get()
+            ->sortBy(fn (VenueSlot $s): array => [
+                $dayRank[VenueSlot::normaliseDay($s->day)] ?? 99,
+                VenueSlot::startMinutes($s->time) ?? PHP_INT_MAX,
+            ])
+            ->map(fn (VenueSlot $s): array => $this->slotRow($s))
+            ->values()->all();
     }
 
     /** @return array<string, mixed> */
@@ -2488,6 +2676,9 @@ class PartnerController extends Controller
             'capacity' => (int) $s->capacity,
             // Empty list = runs for every sport the venue offers.
             'sports'   => $s->sportsList(),
+            // court id => price this slot charges on that court; courts not listed use
+            // `price` above, else their own rate.
+            'court_prices' => (object) $s->courtPriceList(),
             'is_open'  => (bool) $s->is_available,
         ];
     }
@@ -2720,6 +2911,15 @@ class PartnerController extends Controller
                 ? ($b->guest_name ?: 'Walk-in')
                 : ($b->attendee_name ?: $b->user?->name ?: 'Guest'),
             'channel'      => $b->channel ?? 'online',
+            // How to reach them, for the desk's Call / WhatsApp. A desk booking's user is
+            // the PARTNER, so its contact is the guest's alone — never the account's,
+            // which would put the venue's own number on the customer's line.
+            'phone'        => $b->isDeskBooking()
+                ? ($b->guest_phone ?: null)
+                : ($b->attendee_phone ?: $b->user?->phone ?: null),
+            'email'        => $b->isDeskBooking()
+                ? null
+                : ($b->attendee_email ?: $b->user?->email ?: null),
             'amount_paid'  => round((float) $b->amount_paid, 2),
             'payment_status' => $b->payment_status,
             // HOW it was taken, not just whether. Reads the last collected row on

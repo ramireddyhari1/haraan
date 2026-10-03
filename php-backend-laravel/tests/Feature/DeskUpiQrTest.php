@@ -44,6 +44,11 @@ final class DeskUpiQrTest extends TestCase
     /** @var list<string> */
     private array $closed = [];
 
+    /** Razorpay's own checkout on the desk phone: is its order paid, and for which booking. */
+    private bool $orderPaid = false;
+
+    private string $orderBooking = '';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -85,6 +90,26 @@ final class DeskUpiQrTest extends TestCase
                 ], 200);
             }
 
+            if (str_ends_with($url, '/v1/orders') && $request->method() === 'POST') {
+                $this->orderBooking = (string) ($request->data()['notes']['booking_id'] ?? '');
+
+                return Http::response(['id' => 'order_Desk1', 'status' => 'created', 'amount' => $request->data()['amount']], 200);
+            }
+
+            if (str_contains($url, '/v1/orders/order_Desk1/payments')) {
+                return Http::response(['items' => $this->orderPaid
+                    ? [['id' => 'pay_Ord9', 'status' => 'captured', 'amount' => 50000]]
+                    : []], 200);
+            }
+
+            if (str_contains($url, '/v1/orders/order_Desk1')) {
+                return Http::response([
+                    'id' => 'order_Desk1', 'status' => $this->orderPaid ? 'paid' : 'attempted',
+                    'amount_paid' => $this->orderPaid ? 50000 : 0,
+                    'notes' => ['booking_id' => $this->orderBooking],
+                ], 200);
+            }
+
             if (str_ends_with($url, '/v1/payment_links') && $request->method() === 'POST') {
                 return Http::response(['id' => 'plink_Fallback', 'short_url' => 'https://rzp.io/i/fallback'], 200);
             }
@@ -108,14 +133,66 @@ final class DeskUpiQrTest extends TestCase
         return $this->withHeader('Authorization', 'Bearer '.$this->token)->postJson('/api/partner'.$path, $body);
     }
 
-    private function walkIn(string $method = 'upi_qr')
+    private function walkIn(string $method = 'upi_qr', array $extra = [])
     {
         return $this->api("/venues/{$this->venue->id}/bookings", [
             'slotId' => $this->slot->id,
             'date' => BusinessClock::todayDate()->addDay()->toDateString(),
             'guestName' => 'Ravi', 'guestPhone' => '9876543210',
             'paymentMethod' => $method,
-        ]);
+        ] + $extra);
+    }
+
+    public function test_a_new_app_gets_razorpays_checkout_with_the_customers_number_already_in(): void
+    {
+        $this->qrEnabled = false;
+
+        $res = $this->walkIn('upi_qr', ['guestPhone' => '98765 43210', 'nativeCheckout' => true])->assertCreated()
+            ->assertJsonPath('payment.kind', 'order')
+            ->assertJsonPath('payment.present', 'checkout')
+            ->assertJsonPath('payment.id', 'order_Desk1')
+            ->assertJsonPath('payment.checkout.order_id', 'order_Desk1')
+            ->assertJsonPath('payment.checkout.key', 'rzp_test_key')
+            ->assertJsonPath('payment.checkout.contact', '+919876543210')
+            ->assertJsonPath('payment.checkout.customer', 'Ravi')
+            ->assertJsonPath('booking.payment_status', 'unpaid');
+
+        $id = $res->json('booking.id');
+        $this->assertSame((string) $id, $this->orderBooking);
+        // The lapsed-hold sweep asks Razorpay about this order before writing the hold off.
+        $this->assertSame('order_Desk1', Booking::query()->find($id)->razorpay_order_id);
+        Http::assertNotSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/v1/payment_links'));
+    }
+
+    public function test_a_paid_checkout_order_settles_the_hold_once(): void
+    {
+        $this->qrEnabled = false;
+        $id = $this->walkIn('upi_qr', ['nativeCheckout' => true])->json('booking.id');
+
+        $this->api("/bookings/{$id}/payment-status", ['orderId' => 'order_Desk1'])
+            ->assertOk()->assertJsonPath('paid', false);
+
+        $this->orderPaid = true;
+        $this->api("/bookings/{$id}/payment-status", ['orderId' => 'order_Desk1'])
+            ->assertOk()->assertJsonPath('paid', true);
+        $this->api("/bookings/{$id}/payment-status", ['orderId' => 'order_Desk1'])
+            ->assertOk()->assertJsonPath('paid', true);
+
+        $booking = Booking::query()->find($id);
+        $this->assertSame('CONFIRMED', strtoupper((string) $booking->status));
+        $this->assertSame('paid', strtolower((string) $booking->payment_status));
+        $this->assertSame(1, BookingPayment::query()->where('booking_id', $id)->count());
+    }
+
+    public function test_a_checkout_order_for_another_booking_cannot_settle_this_one(): void
+    {
+        $this->qrEnabled = false;
+        $this->walkIn('upi_qr', ['nativeCheckout' => true]);
+        $this->orderBooking = '999999';
+        $this->orderPaid = true;
+
+        $other = Booking::query()->latest('id')->first();
+        $this->api("/bookings/{$other->id}/payment-status", ['orderId' => 'order_Desk1'])->assertStatus(422);
     }
 
     public function test_upi_qr_returns_a_scannable_qr_and_leaves_the_booking_unpaid(): void

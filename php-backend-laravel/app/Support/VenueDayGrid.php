@@ -95,7 +95,8 @@ final class VenueDayGrid
                 // The rate this cell would actually CHARGE — peak included. Showing the
                 // base rate here while reserveVenue() bills the peak one would have the
                 // desk quoting a price the customer is never charged.
-                $rate = $c->rateFor($day->copy(), $s->time, (int) ($venue->price ?? 0));
+                $slotPrice = (float) ($s->priceForCourt($c) ?? 0);
+                $rate = $c->rateFor($day->copy(), $s->time, (int) ($venue->price ?? 0), $slotPrice);
 
                 return [
                     'court_id'  => $c->id,
@@ -105,7 +106,8 @@ final class VenueDayGrid
                     'held'      => $ch->count(),
                     'is_held'   => $cb->isEmpty() && $ch->isNotEmpty(),
                     'price'     => (float) $rate,
-                    'is_peak'   => $c->isPeak($day->copy(), $s->time),
+                    // A slot's own price replaces peak, so the ▲ would be a lie there.
+                    'is_peak'   => $slotPrice <= 0 && $c->isPeak($day->copy(), $s->time),
                     // Whether this court may be sold at all at this time — decided here
                     // so it matches what reserveVenue() will accept. False cells are
                     // unsellable, not merely busy.

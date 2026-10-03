@@ -261,7 +261,8 @@ final class Venue extends Model
         $prev = $this->hoursForWeekday($keys[($i + 6) % 7]);
         if ($prev !== null) {
             [$po, $pc] = [self::toMinutes($prev['open']), self::toMinutes($prev['close'])];
-            if ($po !== null && $pc !== null && $pc > 0 && $pc <= $po) {
+            // Strictly earlier: open == close is a 24-hour day, which never carries over.
+            if ($po !== null && $pc !== null && $pc > 0 && $pc < $po) {
                 $windows[] = [0, $pc];
             }
         }
@@ -269,7 +270,11 @@ final class Venue extends Model
         $own = $this->hoursForWeekday($key);
         if ($own !== null) {
             [$o, $c] = [self::toMinutes($own['open']), self::toMinutes($own['close'])];
-            if ($o !== null && $c !== null && $c !== $o) {
+            if ($o !== null && $c !== null && $c === $o) {
+                // Open and close the same ("00:00"–"00:00") is open round the clock.
+                return [[0, 24 * 60]];
+            }
+            if ($o !== null && $c !== null) {
                 $windows[] = [$o, ($c === 0 || $c < $o) ? 24 * 60 : $c];
             }
         }
@@ -353,6 +358,17 @@ final class Venue extends Model
         // only times the hours no longer cover are removed, and only new ones are created.
         $existing = $this->slots()->get()->keyBy(fn (VenueSlot $s): string => $s->day . '|' . $s->time);
 
+        // What a new row starts from: the same time's every-day row if there was one, else
+        // that time on any other day. Turning "every day" rows into per-day rows (or opening
+        // a new day) then keeps the prices set for that hour instead of falling back to ₹0.
+        $template = [];
+        foreach ($existing as $slot) {
+            $t = (string) $slot->time;
+            if (! isset($template[$t]) || $slot->day === VenueSlot::EVERY_DAY) {
+                $template[$t] = $slot;
+            }
+        }
+
         foreach ($existing as $k => $slot) {
             if (! isset($wanted[$k])) {
                 $slot->delete();
@@ -367,12 +383,16 @@ final class Venue extends Model
                     $slot->update(['sort_order' => $order]);
                 }
             } else {
+                $from = $template[$label] ?? null;
                 VenueSlot::query()->create([
                     'venue_id' => $this->id,
                     'day' => $full,
                     'time' => $label,
                     'is_available' => true,
-                    'price' => 0,
+                    'price' => $from?->price ?? 0,
+                    'court_prices' => $from?->court_prices,
+                    'sports' => $from?->sports,
+                    'capacity' => $from?->capacity ?? 1,
                     'sort_order' => $order,
                 ]);
             }
@@ -458,7 +478,11 @@ final class Venue extends Model
 
         foreach ($keys as $key) {
             $day = $this->hoursForWeekday($key);
-            $sig = $day === null ? 'closed' : self::toLabel(self::toMinutes($day['open'])).'–'.self::toLabel(self::toMinutes($day['close']));
+            $sig = match (true) {
+                $day === null => 'closed',
+                self::toMinutes($day['open']) === self::toMinutes($day['close']) => 'Open 24 hours',
+                default => self::toLabel(self::toMinutes($day['open'])).'–'.self::toLabel(self::toMinutes($day['close'])),
+            };
             if ($sig !== $runSig) {
                 $flush();
                 $runSig = $sig;

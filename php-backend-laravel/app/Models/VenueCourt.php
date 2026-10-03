@@ -207,10 +207,16 @@ final class VenueCourt extends Model
     /**
      * The effective hourly rate for a booking: dynamic pricing rules take top precedence,
      * falling back to peak price when applicable, else this court's base price or venue default.
+     *
+     * A price set on the slot itself (Pricing & slots in the app, the Slots tab in /control)
+     * is the most specific answer there is — "7 PM costs ₹800" — so it replaces the court's
+     * base rate and its peak price. Before, only a venue WITHOUT courts ever charged it: the
+     * partner saved ₹800 on a slot and the desk went on showing and billing the court's ₹5.
      */
-    public function rateFor(Carbon $date, ?string $time, int $venuePrice): int
+    public function rateFor(Carbon $date, ?string $time, int $venuePrice, ?float $slotPrice = null): int
     {
-        $baseRate = (float) ($this->price ?? $venuePrice);
+        $slotRate = $slotPrice !== null && $slotPrice > 0 ? $slotPrice : null;
+        $baseRate = (float) ($slotRate ?? $this->price ?? $venuePrice);
 
         // Check active pricing rules for this court or venue-wide
         $rules = PricingRule::where('venue_id', $this->venue_id)
@@ -230,7 +236,7 @@ final class VenueCourt extends Model
             }
         }
 
-        if ($this->isPeak($date, $time)) {
+        if ($slotRate === null && $this->isPeak($date, $time)) {
             return (int) $this->peak_price;
         }
 

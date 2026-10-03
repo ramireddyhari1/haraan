@@ -43,7 +43,7 @@ final class RazorpayGateway
      *
      * @throws RuntimeException  On misconfiguration, auth failure, or an unreachable/again-failing API.
      */
-    public function createOrder(int $amountPaise, string $receipt, string $currency = 'INR'): array
+    public function createOrder(int $amountPaise, string $receipt, string $currency = 'INR', array $notes = []): array
     {
         // /control → Operations → Stop taking payments.
         PaymentsPaused::guard();
@@ -65,7 +65,7 @@ final class RazorpayGateway
                     'currency'        => strtoupper($currency),
                     'receipt'         => $receipt,
                     'payment_capture' => 1,
-                ]);
+                ] + ($notes !== [] ? ['notes' => $notes] : []));
         } catch (ConnectionException $e) {
             throw new RuntimeException('Could not reach the payment provider.', 502);
         }
@@ -217,6 +217,52 @@ final class RazorpayGateway
             // The booking this link was minted for. Callers must match it against the
             // booking they are settling, or one paid link could settle any booking.
             'booking_id'  => isset($link['notes']['booking_id']) ? (string) $link['notes']['booking_id'] : null,
+        ];
+    }
+
+    /**
+     * Has this order been paid? For a desk walk-in paying in Razorpay's own checkout on
+     * the desk phone: the same shape as {@see paymentLinkStatus()}, so the desk settles
+     * it the same way. Only a captured payment counts.
+     *
+     * @return array{status: string, paid: bool, payment_id: string|null, amount_paid: float, booking_id: string|null}
+     *
+     * @throws RuntimeException  When Razorpay can't be reached — "don't know", never "unpaid".
+     */
+    public function orderStatus(string $orderId): array
+    {
+        if (! $this->isConfigured()) {
+            throw new RuntimeException('Payments are not configured.', 500);
+        }
+
+        $orderId = trim($orderId);
+
+        if ($orderId === '') {
+            throw new RuntimeException('Missing order id.', 422);
+        }
+
+        try {
+            $response = Http::withBasicAuth($this->keyId(), $this->keySecret())
+                ->acceptJson()
+                ->timeout(15)
+                ->get(self::ORDERS_ENDPOINT.'/'.$orderId);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('Could not reach the payment provider.', 502);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Could not read the payment order.', 500);
+        }
+
+        $order = $response->json();
+        $paymentId = $this->capturedPaymentFor($orderId);
+
+        return [
+            'status'      => $paymentId !== null ? 'paid' : (string) ($order['status'] ?? 'created'),
+            'paid'        => $paymentId !== null,
+            'payment_id'  => $paymentId,
+            'amount_paid' => ((int) ($order['amount_paid'] ?? 0)) / 100,
+            'booking_id'  => isset($order['notes']['booking_id']) ? (string) $order['notes']['booking_id'] : null,
         ];
     }
 
