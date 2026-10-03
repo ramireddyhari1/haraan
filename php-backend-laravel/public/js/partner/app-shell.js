@@ -712,7 +712,7 @@
         out += rise(doorsCard(d, todayHours));
 
         // ---- Payments
-        if (d.recent) out += rise(paymentsCard(d));
+        if (d.recent) out += rise(paymentsCard(d, todayHours));
 
         if (day.chase && day.chase.count > 0) {
             out += rise('<a class="ha-chase" href="' + esc(urlOf('sales')) + '"><i></i><span>' + day.chase.count + ' unpaid · ' + rupees(day.chase.amount) + ' to collect</span>' + mat('chevron') + '</a>');
@@ -735,6 +735,11 @@
         host.innerHTML = out;
         wireHome(host);
         countUps(host);
+        // A payment that arrived since the last draw lands with the app's money buzz.
+        if (home.payFresh && document.visibilityState === 'visible' && navigator.vibrate) {
+            try { navigator.vibrate([12, 60, 22]); } catch (err) { /* none */ }
+        }
+        home.payFresh = 0;
     }
 
     function sectionHead(icon, title, action, href) {
@@ -1012,8 +1017,102 @@
         return '<svg viewBox="0 0 18 18"><g stroke="' + c + '" stroke-width="2.4" stroke-linecap="round"><line x1="4.5" y1="2.7" x2="4.5" y2="15.3"/><line x1="13.5" y1="2.7" x2="13.5" y2="15.3"/><line x1="4.5" y1="9.9" x2="13.5" y2="8.1"/></g></svg>';
     }
 
-    function paymentsCard(d) {
+    /**
+     * The drawn object a payment row carries: how the money actually came in. A note for
+     * cash, the UPI mark on a phone, a card, a Haraan ticket — or an empty coin when
+     * nothing has been paid yet. 40-unit art, 1.6 strokes, the method's own colour.
+     */
+    function payToken(way) {
+        var c = way ? WAYS[way][1] : '#D97706';
+        var o = '<svg viewBox="0 0 40 40" aria-hidden="true">';
+        if (way === 'cash') {
+            return o + '<rect x="9" y="9.5" width="24" height="14" rx="2" transform="rotate(-9 21 16.5)" fill="#FEF3C7" stroke="#D97706" stroke-width="1.4" stroke-opacity=".55"/>'
+                + '<rect x="6.5" y="14.5" width="27" height="15.5" rx="2.2" fill="#FFFBEB" stroke="#D97706" stroke-width="1.6"/>'
+                + '<circle cx="20" cy="22.2" r="4.1" fill="none" stroke="#D97706" stroke-width="1.5"/>'
+                + '<path d="M18.4 20.4h3.3M18.4 22h3.3M19.2 20.4c1.9 0 1.9 3.1 0 3.1l2.3 2" fill="none" stroke="#B45309" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>'
+                + '<path d="M9.6 17.6v1.6M30.4 25.4v1.6" stroke="#D97706" stroke-width="1.5" stroke-linecap="round"/></svg>';
+        }
+        if (way === 'upi') {
+            return o + '<rect x="12" y="5.5" width="16" height="29" rx="3.4" fill="#fff" stroke="' + c + '" stroke-width="1.6"/>'
+                + '<path d="M17.6 8.6h4.8" stroke="' + c + '" stroke-width="1.4" stroke-linecap="round" stroke-opacity=".5"/>'
+                + '<path d="M15.6 15.4 20 20l-4.4 4.6z" fill="' + c + '" fill-opacity=".45"/><path d="M19.2 15.4 23.6 20l-4.4 4.6z" fill="' + c + '"/>'
+                + '<path d="M16.5 29.6h7" stroke="' + c + '" stroke-width="1.4" stroke-linecap="round" stroke-opacity=".5"/></svg>';
+        }
+        if (way === 'card') {
+            return o + '<rect x="5.5" y="10" width="29" height="20" rx="3" fill="#EEF2FF" stroke="' + c + '" stroke-width="1.6"/>'
+                + '<path d="M5.5 15.4h29" stroke="' + c + '" stroke-width="2.4"/>'
+                + '<rect x="9" y="19.4" width="6" height="4.4" rx="1" fill="none" stroke="' + c + '" stroke-width="1.3"/>'
+                + '<path d="M19 25.6h6.5M27.5 25.6h3" stroke="' + c + '" stroke-width="1.5" stroke-linecap="round"/></svg>';
+        }
+        if (way === 'online') {
+            return o + '<path d="M7 12.5h26v4.2a3.3 3.3 0 0 0 0 6.6v4.2H7v-4.2a3.3 3.3 0 0 0 0-6.6z" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.6" stroke-linejoin="round"/>'
+                + '<path d="M25.5 13.2v13.6" stroke="#2563EB" stroke-width="1.3" stroke-dasharray="1.6 2" stroke-opacity=".6"/>'
+                + '<path d="M12.2 17v6M17.4 17v6M12.2 20h5.2" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round"/></svg>';
+        }
+        return o + '<circle cx="20" cy="20" r="11" fill="none" stroke="' + c + '" stroke-width="1.6" stroke-dasharray="3 2.6"/>'
+            + '<path d="M20 15v5.4l3.4 2" fill="none" stroke="' + c + '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+
+    function clockLabel(mins) {
+        var hh = Math.floor(mins / 60) % 24;
+        return (hh % 12 || 12) + (hh < 12 ? 'a' : 'p');
+    }
+
+    /**
+     * Today as one drawn line: a coin lands where each payment came in, sized by what it
+     * was worth and coloured by how it was paid. The stretch already behind "now" is inked.
+     * Nothing here is decoration; empty, it is still the day passing.
+     */
+    function dayRibbon(todays, hours, fresh) {
+        var W = 300, H = 50, L = 10, R = 290, Y = 30;
+        var first = hours.length ? hours[0].start : null;
+        var last = hours.length ? hours[hours.length - 1].start : null;
+        var from = first != null && first >= 0 ? Math.floor(first / 60) * 60 : 6 * 60;
+        var to = last != null && last > from ? Math.min(24 * 60, Math.ceil((last + 60) / 60) * 60) : 23 * 60;
+        todays.forEach(function (e) {
+            var d = new Date(e.at), m = d.getHours() * 60 + d.getMinutes();
+            if (m < from) from = Math.floor(m / 60) * 60;
+            if (m > to) to = Math.min(24 * 60, Math.ceil(m / 60) * 60 + 60);
+        });
+        var span = Math.max(60, to - from);
+        function x(m) { return L + (Math.max(from, Math.min(to, m)) - from) / span * (R - L); }
+        var now = new Date(), nm = now.getHours() * 60 + now.getMinutes(), nx = x(nm);
+        var step = span > 12 * 60 ? 180 : span > 6 * 60 ? 120 : 60;
+        var labels = '';
+
+        var svg = '<svg class="ha-ribbon" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
+            + '<line x1="' + L + '" y1="' + Y + '" x2="' + R + '" y2="' + Y + '" stroke="#D5DCE7" stroke-width="1.6" stroke-dasharray="2 3.4" stroke-linecap="round"/>'
+            + (nm > from ? '<line class="ha-ribbon-ink" x1="' + L + '" y1="' + Y + '" x2="' + nx.toFixed(1) + '" y2="' + Y + '" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/>' : '');
+        for (var m = Math.ceil(from / step) * step; m <= to; m += step) {
+            svg += '<line x1="' + x(m).toFixed(1) + '" y1="' + (Y + 4) + '" x2="' + x(m).toFixed(1) + '" y2="' + (Y + 7.5) + '" stroke="#B6C0D0" stroke-width="1.2"/>';
+            // Labels are HTML, not SVG text: the drawing stretches to the phone's width, type must not.
+            labels += '<span class="ha-ribbon-l" style="left:' + (x(m) / W * 100).toFixed(2) + '%">' + clockLabel(m) + '</span>';
+        }
+        if (nm > from && nm < to) {
+            svg += '<line x1="' + nx.toFixed(1) + '" y1="9" x2="' + nx.toFixed(1) + '" y2="' + (Y + 7.5) + '" stroke="#0B1220" stroke-width="1.2" stroke-dasharray="2 2"/>';
+            labels += '<span class="ha-ribbon-l is-now' + (nx > R - 14 ? ' is-end' : nx < L + 14 ? ' is-start' : '') + '" style="left:' + (nx / W * 100).toFixed(2) + '%">now</span>';
+        }
+        svg += '</svg>';
+
+        // Coins sit in an HTML layer over the line so a finger can hit them.
+        var top = todays.reduce(function (mx, e) { return Math.max(mx, e.paid); }, 0) || 1;
+        var placed = [];
+        var coins = todays.slice().sort(function (a, b) { return a.at - b.at; }).map(function (e) {
+            var d = new Date(e.at), px = (x(d.getHours() * 60 + d.getMinutes()) / W) * 100;
+            var r = 6 + Math.round(Math.sqrt(e.paid / top) * 5);
+            var lift = 0;
+            placed.forEach(function (p) { if (Math.abs(p.px - px) < 4.2 && p.lift === lift) lift += 1; });
+            placed.push({ px: px, lift: lift });
+            return '<button type="button" class="ha-coin' + (fresh[e.key] ? ' is-new' : '') + '" data-pay="' + e.key + '" style="left:' + px.toFixed(2) + '%;--r:' + r + 'px;--lift:' + lift + ';--c:' + WAYS[e.way][1] + '" aria-label="' + esc(rupees(e.paid) + ' from ' + e.name + ' at ' + e.when) + '"><i></i></button>';
+        }).join('');
+        return '<div class="ha-ribbon-wrap">' + svg + labels + coins + '</div>';
+    }
+
+    function payKey(e) { return String(e.at) + ':' + e.paid + ':' + e.name.length; }
+
+    function paymentsCard(d, hours) {
         var entries = paymentEntries(d.recent);
+        entries.forEach(function (e) { e.key = payKey(e); });
         var todays = entries.filter(function (e) { return e.today && e.paid > 0; });
         var received = todays.reduce(function (s, e) { return s + e.paid; }, 0);
         var byWay = {};
@@ -1021,38 +1120,62 @@
         var ways = Object.keys(WAYS).filter(function (w) { return byWay[w] > 0; });
         var toBank = d.payouts && d.payouts.balance ? (d.payouts.balance.in_flight || 0) + (d.payouts.balance.available || 0) : 0;
 
+        // What's new since the last time this card was drawn: those land with a drop.
+        var seen = home.paySeen;
+        var fresh = {};
+        if (seen) todays.forEach(function (e) { if (!seen[e.key]) fresh[e.key] = true; });
+        home.paySeen = {};
+        todays.forEach(function (e) { home.paySeen[e.key] = true; });
+        home.payFresh = Object.keys(fresh).length;
+
+        var latest = todays[0];
+        var sub = todays.length === 0 ? 'nothing in yet today'
+            : (todays.length === 1 ? '1 payment' : todays.length + ' payments') + ' · last at ' + latest.when;
+
         var html = '<div class="ha-card ha-pay"><div class="ha-pay-head"><span>Received today</span>'
             + (urlOf('sales') ? '<a href="' + esc(urlOf('sales')) + '">View all' + mat('chevron') + '</a>' : '') + '</div>'
-            + '<div class="ha-pay-big"><b data-count="' + received + '">' + rupees(received) + '</b><span>'
-            + (todays.length === 0 ? 'no payments yet' : todays.length === 1 ? '1 payment' : todays.length + ' payments') + '</span></div>';
+            + '<div class="ha-pay-big"><b data-count="' + received + '">' + rupees(received) + '</b><span>' + esc(sub) + '</span></div>'
+            + dayRibbon(todays, hours || [], fresh);
         if (ways.length) {
-            html += '<div class="ha-pay-bar">' + ways.map(function (w) { return '<i style="flex:' + byWay[w] + ';background:' + WAYS[w][1] + '"></i>'; }).join('') + '</div>'
-                + '<div class="ha-pay-ways">' + ways.map(function (w) {
-                    return '<span>' + wayGlyph(w) + '<span><small>' + WAYS[w][0] + '</small><b>' + rupees(byWay[w]) + '</b></span></span>';
-                }).join('') + '</div>';
-        }
-        html += '<hr>';
-        var recent = entries.slice(0, 5);
-        if (!recent.length) {
-            html += '<div class="ha-pay-empty"><svg viewBox="0 0 52 40" aria-hidden="true"><g stroke="#94A3B8" stroke-width="1.6" fill="none" stroke-linecap="round"><line x1="0" y1="36.8" x2="52" y2="36.8"/><rect x="14.6" y="3.2" width="22.9" height="28" rx="3"/><line x1="26" y1="31.2" x2="26" y2="36.8"/></g>'
-                + '<g stroke="#2563EB" stroke-width="1.4" fill="none"><rect x="17.7" y="6.4" width="5.7" height="5.7"/><rect x="27.6" y="6.4" width="5.7" height="5.7"/><rect x="17.7" y="16.8" width="5.7" height="5.7"/></g><rect x="28.6" y="18" width="3.4" height="3.4" fill="#2563EB"/></svg>'
-                + '<span>Payments show up here the moment a booking is paid.</span></div>';
+            html += '<div class="ha-pay-ways">' + ways.map(function (w) {
+                return '<span>' + wayGlyph(w) + '<span><small>' + WAYS[w][0] + '</small><b>' + rupees(byWay[w]) + '</b></span></span>';
+            }).join('') + '</div>';
         } else {
-            html += recent.map(function (e, i) {
+            html += '<p class="ha-pay-hint">Each payment drops onto this line at the time it comes in.</p>';
+        }
+
+        var recent = entries.slice(0, 5);
+        if (recent.length) {
+            html += '<div class="ha-slip">' + recent.map(function (e, i) {
                 var owed = Math.max(0, e.amount - e.paid);
-                var tint = e.way ? WAYS[e.way][1] : '#CBD5E1';
-                var bits = [e.way ? (e.way === 'online' ? 'Paid on Haraan' : WAYS[e.way][0]) : (e.paid <= 0 ? 'Not paid' : null), e.walkIn ? 'Walk-in' : null, e.when].filter(Boolean);
-                return '<div class="ha-pay-row" style="--i:' + i + '"><span class="ha-pay-av" style="background:' + tint + '24;color:' + (e.way === 'cash' ? '#B45309' : '#1D4ED8') + '">' + esc(initials(e.name)) + '</span>'
+                var how = e.way ? (e.way === 'online' ? 'Paid on Haraan' : WAYS[e.way][0]) : 'Not paid yet';
+                var bits = [how, e.walkIn ? 'Walk-in' : null, e.when].filter(Boolean);
+                var part = e.paid > 0 && owed > 0 ? Math.round(e.paid / e.amount * 100) : null;
+                return '<div class="ha-slip-row' + (fresh[e.key] ? ' is-new' : '') + '" data-pay="' + e.key + '" style="--i:' + i + '">'
+                    + '<span class="ha-token is-' + (e.way || 'due') + '">' + payToken(e.way) + '</span>'
                     + '<span class="ha-pay-who"><b>' + esc(e.name) + '</b><small>' + esc(bits.join(' · ')) + '</small></span>'
-                    + '<span class="ha-pay-amt">' + (e.paid > 0 ? '<b>+' + rupees(e.paid) + '</b>' : '')
-                    + (owed > 0 ? '<small class="is-due">' + rupees(owed) + ' due</small>' : e.paid > 0 ? '<small class="is-in">Received</small>' : '') + '</span></div>';
-            }).join('');
+                    + '<span class="ha-pay-amt">' + (e.paid > 0 ? '<b>+' + rupees(e.paid) + '</b>' : '<b class="is-due">' + rupees(e.amount) + '</b>')
+                    + (part != null ? '<span class="ha-part"><i style="width:' + part + '%"></i></span><small class="is-due">' + rupees(owed) + ' due</small>'
+                        : owed > 0 ? '<small class="is-due">due</small>' : '<small class="is-in">' + (e.today ? 'Received' : e.when) + '</small>') + '</span></div>';
+            }).join('') + '</div>';
         }
         if (toBank > 0 && can('reports') && u.payouts) {
             html += '<a class="ha-pay-bank" href="' + esc(u.payouts) + '"><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M1.8 8.4 11 2.2 20.2 8.4Z" fill="#1D4ED8" fill-opacity=".15" stroke="#1D4ED8" stroke-width="1.6" stroke-linejoin="round"/><g stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round"><line x1="5.5" y1="10.6" x2="5.5" y2="17.2"/><line x1="11" y1="10.6" x2="11" y2="17.2"/><line x1="16.5" y1="10.6" x2="16.5" y2="17.2"/><line x1="1.8" y1="19.8" x2="20.2" y2="19.8" stroke-width="1.9"/></g></svg>'
                 + '<span>' + rupees(toBank) + ' on its way to your bank</span>' + mat('chevron') + '</a>';
         }
         return html + '</div>';
+    }
+
+    /** A coin and its slip row light up together, so either one finds the other. */
+    function lightPayment(host, key) {
+        host.querySelectorAll('.ha-pay [data-pay]').forEach(function (el) {
+            var on = el.getAttribute('data-pay') === key;
+            el.classList.remove('is-lit');
+            if (on) { void el.offsetWidth; el.classList.add('is-lit'); }
+        });
+        if (navigator.vibrate) { try { navigator.vibrate(6); } catch (err) { /* none */ } }
+        clearTimeout(home.litTimer);
+        home.litTimer = setTimeout(function () { host.querySelectorAll('.ha-pay .is-lit').forEach(function (el) { el.classList.remove('is-lit'); }); }, 1600);
     }
 
     /* ---- Later today ------------------------------------------------------- */
@@ -1376,6 +1499,7 @@
                 home.noteTimer = setTimeout(function () { note.hidden = true; }, 2600);
                 return;
             }
+            if ((b = t.closest('.ha-pay [data-pay]'))) { lightPayment(host, b.getAttribute('data-pay')); return; }
             if ((b = t.closest('[data-cell]'))) { cellTap(b.getAttribute('data-cell')); return; }
             if ((b = t.closest('.ha-seg button'))) {
                 var name = b.parentNode.getAttribute('data-seg');
@@ -1579,7 +1703,7 @@
         plural: plural, initials: initials, slotStart: slotStart, clock: clock, shortTime: shortTime,
         minutesNow: minutesNow, ymd: ymd, store: store, h: h, glyph: glyph, mat: mat, MAT: MAT, DRAWER: DRAWER,
         can: can, isDesk: isDesk, lane: lane, courtsLane: courtsLane, urlOf: urlOf, go: go, share: share,
-        sheet: sheet, toast: toast, loadScript: loadScript, months: MONTHS, toolHeader: toolHeader,
+        sheet: sheet, toast: toast, loadScript: loadScript, months: MONTHS, toolHeader: toolHeader, payToken: payToken,
         token: function () { return token; }, refresh: refreshToken,
         register: function (key, screen) { screens[key] = screen; },
     };

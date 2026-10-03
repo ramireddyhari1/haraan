@@ -646,10 +646,9 @@
     }
 
     function payRow(p, i) {
-        var tint = p.way ? WAYS[p.way][1] : '#CBD5E1';
         var bits = [p.way ? (p.way === 'online' ? 'Paid on Haraan' : WAYS[p.way][0]) : (p.paid <= 0 ? 'Not paid' : null), p.walkIn ? 'Walk-in' : null, p.slot, timeOf(p.at)].filter(Boolean);
         return '<button type="button" class="ha-payrow" data-pay="' + p.id + '" style="--i:' + Math.min(i, 10) + '">'
-            + '<span class="ha-pay-av" style="background:' + tint + '24;color:' + (p.way === 'cash' ? '#B45309' : '#1D4ED8') + '">' + esc(A.initials(p.name)) + '</span>'
+            + '<span class="ha-token is-' + (p.way || 'due') + '">' + A.payToken(p.way) + '</span>'
             + '<span class="ha-pay-who"><b>' + esc(p.name) + '</b><small>' + esc(bits.join(' · ')) + '</small></span>'
             + '<span class="ha-pay-amt">' + (p.paid > 0 ? '<b>+' + rupees(p.paid) + '</b>' : '')
             + (p.owed > 0 ? '<small class="is-due">' + rupees(p.owed) + ' due</small>' : p.paid > 0 ? '<small class="is-in">Received</small>' : '') + '</span></button>';
